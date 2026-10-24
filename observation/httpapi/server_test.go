@@ -1488,6 +1488,21 @@ func TestGetObservationEventByID(t *testing.T) {
 	if res, _ := doJSON(t, handler, "GET", "/v1/observations/events/evt-a?project=nowhere", nil); res.StatusCode != http.StatusNotFound {
 		t.Fatalf("status with invisible project = %d, want 404", res.StatusCode)
 	}
+
+	// Real journal event ids contain slashes (source/event/NNNNNN): the
+	// dossier's evidence refs always look like this, so the route must match
+	// them — a single-segment {id} silently 404'd every lookup.
+	full := proposedEvent("lighthouse", "9dedaf8973c16928090597b80324315c/event/000342", "K1", "first knowledge item")
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": []observation.Event{full}}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest full-id status = %d, body = %v", res.StatusCode, body)
+	}
+	res, body = doJSON(t, handler, "GET", "/v1/observations/events/9dedaf8973c16928090597b80324315c/event/000342?project=lighthouse", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("full-id get status = %d, body = %v", res.StatusCode, body)
+	}
+	if event, ok := body["event"].(map[string]any); !ok || event["event_id"] != "9dedaf8973c16928090597b80324315c/event/000342" {
+		t.Fatalf("full-id event payload = %v", body)
+	}
 }
 
 // A manual challenge marks knowledge as doubtful without retiring it: hints

@@ -104,6 +104,8 @@ export const EVENT_CATALOG: EventMeta[] = [
   E('knowledge', 'knowledge.invalidated', 'Знание инвалидировано', 'Знание выведено из оборота.', 'Knowledge invalidated', 'The knowledge was retired from use.'),
   E('knowledge', 'knowledge.superseded', 'Знание заменено', 'Знание заменено более актуальным.', 'Knowledge superseded', 'The knowledge was replaced by a fresher one.'),
   E('knowledge', 'knowledge.linked', 'Знание связано', 'Знание привязано к скиллу или артефакту.', 'Knowledge linked', 'The knowledge was linked to a skill or artifact.'),
+  E('knowledge', 'knowledge.relation_confirmed', 'Связь подтверждена', 'Куратор подтвердил связь между знаниями (по полезности или через судью).', 'Relation confirmed', 'The curator confirmed a relation between two knowledge items (by usefulness or via the judge).'),
+  E('knowledge', 'knowledge.relation_dismissed', 'Связь отклонена', 'Куратор отклонил связь-кандидат — пара больше не предлагается.', 'Relation dismissed', 'The curator dismissed a candidate relation — the pair will not be suggested again.'),
   E('knowledge', 'knowledge.promoted', 'Знание повышено до навыка', 'Подтверждённое знание стало черновиком навыка.', 'Knowledge promoted to skill', 'Confirmed knowledge became a skill draft.'),
   E('knowledge', 'knowledge.recalled', 'Знание отозвано', 'Знание попало в контекст рана как подсказка.', 'Knowledge recalled', 'The knowledge entered a run context as a hint.'),
   E('knowledge', 'knowledge.used', 'Знание использовано', 'Агент применил знание в работе.', 'Knowledge used', 'The agent applied the knowledge.'),

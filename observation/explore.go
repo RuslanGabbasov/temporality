@@ -748,6 +748,25 @@ func (e exploreEngine) expand(result *ExploreResult, query ExploreQuery) {
 				if !shared {
 					continue
 				}
+				// A pair already confirmed (an explicit edge would duplicate)
+				// or reviewed-and-dismissed never re-enters the candidate pool:
+				// curator verdicts must be sticky, or every explore recomputes
+				// the very suggestion the judge rejected an hour ago. Either
+				// endpoint's verdict suppresses the pair.
+				confirmed := false
+				for _, owner := range owners {
+					ownerItem, ok := e.byID[owner]
+					if !ok {
+						continue
+					}
+					if pairHasRelation(ownerItem, other.ID) || pairDismissed(ownerItem, other.ID) || pairHasRelation(other, owner) || pairDismissed(other, owner) {
+						confirmed = true
+						break
+					}
+				}
+				if confirmed {
+					continue
+				}
 				if budgetReached() {
 					break
 				}
@@ -952,6 +971,11 @@ func (e exploreEngine) collectConflicts(targets []Knowledge) []ExploreConflict {
 			for j := i + 1; j < len(items); j++ {
 				left, right := items[i], items[j]
 				if !inSet(left.ID) || !inSet(right.ID) {
+					continue
+				}
+				// Already-resolved pairs (an explicit contradict edge, or a
+				// curator verdict) are not heuristic candidates anymore.
+				if pairHasRelation(left, right.ID) || pairDismissed(left, right.ID) {
 					continue
 				}
 				if stateWeight(left.State) == stateWeight(right.State) {

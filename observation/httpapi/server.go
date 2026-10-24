@@ -161,7 +161,7 @@ func NewServer(store observation.Store, log *slog.Logger, gate *controlplane.Gat
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /v1/observations/events", s.appendObservations)
 	mux.HandleFunc("GET /v1/observations/events", s.listObservations)
-	mux.HandleFunc("GET /v1/observations/events/{id}", s.getObservationEvent)
+	mux.HandleFunc("GET /v1/observations/events/{id...}", s.getObservationEvent)
 	mux.HandleFunc("GET /v1/observations/stats/health", s.observationHealthStats)
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)

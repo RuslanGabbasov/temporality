@@ -43,7 +43,7 @@ type Skill struct {
 	// VersionStatus is the lifecycle status of the current version row:
 	// "draft" awaits human apply and is never served to agents; "active" is
 	// the normal state. Empty when no version row matches the pointer.
-	VersionStatus string    `json:"version_status,omitempty"`
+	VersionStatus string `json:"version_status,omitempty"`
 	// PendingDrafts counts versions awaiting human apply that are NOT the
 	// current revision — agent evolution proposals a human has yet to read.
 	// Surfaced in the skills list so proposals are discoverable without

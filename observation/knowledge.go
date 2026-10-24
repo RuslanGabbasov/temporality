@@ -38,24 +38,28 @@ type Knowledge struct {
 	ScopeKind string `json:"scope_kind,omitempty"`
 	ScopeID   string `json:"scope_id,omitempty"`
 	// PromotedBy/PromotedAt record the latest scope widening provenance.
-	PromotedBy      Actor                 `json:"promoted_by,omitempty"`
-	PromotedAt      *time.Time            `json:"promoted_at,omitempty"`
-	CreatedAt       time.Time             `json:"created_at"`
-	UpdatedAt       time.Time             `json:"updated_at"`
-	CreatedBy       Actor                 `json:"created_by,omitempty"`
-	ReuseCount      int                   `json:"reuse_count"`
-	HintOffers      int                   `json:"hint_offers"`
-	HintUses        int                   `json:"hint_uses"`
-	HintIgnores     int                   `json:"hint_ignores"`
-	HelpfulOutcomes int                   `json:"helpful_outcomes"`
-	HarmfulOutcomes int                   `json:"harmful_outcomes"`
-	Relationships   []KnowledgeRelation   `json:"relationships,omitempty"`
-	AtRisk          bool                  `json:"at_risk,omitempty"`
-	RiskSources     []string              `json:"risk_sources,omitempty"`
-	LastUsedAt      *time.Time            `json:"last_used_at,omitempty"`
-	Replacement     string                `json:"replacement_id,omitempty"`
-	Evidence        []Evidence            `json:"evidence,omitempty"`
-	History         []KnowledgeTransition `json:"history"`
+	PromotedBy      Actor               `json:"promoted_by,omitempty"`
+	PromotedAt      *time.Time          `json:"promoted_at,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
+	CreatedBy       Actor               `json:"created_by,omitempty"`
+	ReuseCount      int                 `json:"reuse_count"`
+	HintOffers      int                 `json:"hint_offers"`
+	HintUses        int                 `json:"hint_uses"`
+	HintIgnores     int                 `json:"hint_ignores"`
+	HelpfulOutcomes int                 `json:"helpful_outcomes"`
+	HarmfulOutcomes int                 `json:"harmful_outcomes"`
+	Relationships   []KnowledgeRelation `json:"relationships,omitempty"`
+	// RelationDismissed holds negative curator reviews: candidate pairs a
+	// human or the judge rejected must stop being suggested. Not an edge —
+	// the absence of one.
+	DismissedRelations []KnowledgeRelation   `json:"dismissed_relations,omitempty"`
+	AtRisk             bool                  `json:"at_risk,omitempty"`
+	RiskSources        []string              `json:"risk_sources,omitempty"`
+	LastUsedAt         *time.Time            `json:"last_used_at,omitempty"`
+	Replacement        string                `json:"replacement_id,omitempty"`
+	Evidence           []Evidence            `json:"evidence,omitempty"`
+	History            []KnowledgeTransition `json:"history"`
 }
 
 type KnowledgeRelation struct {
@@ -131,11 +135,11 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			applyPromoted(item, event)
 			return nil
 		}
-		if event.Type == "knowledge.linked" {
+		if event.Type == "knowledge.linked" || event.Type == "knowledge.relation_confirmed" {
 			targetID := stringValue(event.Data, "target_id")
 			target := byID[targetID]
 			if target == nil {
-				return fmt.Errorf("knowledge.linked event %s refers to unknown target %q", event.EventID, targetID)
+				return fmt.Errorf("%s event %s refers to unknown target %q", event.Type, event.EventID, targetID)
 			}
 			if target.Project != "" && item.Project != "" && target.Project != item.Project {
 				return fmt.Errorf("knowledge relation %q crosses project boundary", event.EventID)
@@ -144,6 +148,21 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			item.Relationships = appendUniqueRelation(item.Relationships, relation)
 			item.UpdatedAt = event.OccurredAt
 			appendKnowledgeTransition(item, event)
+			return nil
+		}
+		if event.Type == "knowledge.relation_dismissed" {
+			// The negative review lives on both endpoints so a candidate pair is
+			// suppressed whichever side an expand/compare starts from.
+			targetID := stringValue(event.Data, "target_id")
+			if byID[targetID] == nil {
+				return fmt.Errorf("knowledge.relation_dismissed event %s refers to unknown target %q", event.EventID, targetID)
+			}
+			relation := KnowledgeRelation{Type: stringValue(event.Data, "relation"), TargetID: targetID, EventID: event.EventID}
+			item.DismissedRelations = appendUniqueRelation(item.DismissedRelations, relation)
+			if other := byID[targetID]; other != nil {
+				other.DismissedRelations = appendUniqueRelation(other.DismissedRelations, KnowledgeRelation{Type: relation.Type, TargetID: item.ID, EventID: event.EventID})
+			}
+			item.UpdatedAt = event.OccurredAt
 			return nil
 		}
 		if event.Context.Project != "" && item.Project != "" && event.Context.Project != item.Project && item.ScopeKind != "org_unit" && item.ScopeKind != "organization" {
@@ -296,6 +315,28 @@ func appendUniqueRelation(existing []KnowledgeRelation, relation KnowledgeRelati
 		}
 	}
 	return append(existing, relation)
+}
+
+// pairHasRelation reports an explicit edge in either direction — a candidate
+// suggestion would duplicate a recorded fact.
+func pairHasRelation(item Knowledge, otherID string) bool {
+	for _, relation := range item.Relationships {
+		if relation.TargetID == otherID {
+			return true
+		}
+	}
+	return false
+}
+
+// pairDismissed reports a curator/„human verdict that the pair is unrelated —
+// dismissed pairs never return to the candidate pool.
+func pairDismissed(item Knowledge, otherID string) bool {
+	for _, relation := range item.DismissedRelations {
+		if relation.TargetID == otherID {
+			return true
+		}
+	}
+	return false
 }
 
 func markAtRisk(knowledge []Knowledge) {

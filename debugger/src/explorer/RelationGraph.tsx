@@ -133,6 +133,10 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
   const [relationTypes, setRelationTypes] = useState<string[]>([])
   const [nodeFilter, setNodeFilter] = useState('')
   const [selected, setSelected] = useState('')
+  // List-first (§7 rework): the graph is for shapes, the list is for reading.
+  // A dense ring of unreadable dots answered nothing; the grouped list with
+  // proposition snippets answers "what is related and why" at a glance.
+  const [view, setView] = useState<'list' | 'graph'>('list')
 
   const [cards, setCards] = useState<ExploreKnowledgeCard[]>([])
   const [relations, setRelations] = useState<ExploreRelation[]>([])
@@ -193,6 +197,10 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+        <span style={{ display: 'inline-flex', border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
+          <button style={{ ...chip(view === 'list'), border: 'none' }} onClick={() => setView('list')}>{t('explorer.relations_view_list') ?? 'List'}</button>
+          <button style={{ ...chip(view === 'graph'), border: 'none' }} onClick={() => setView('graph')}>{t('explorer.relations_view_graph') ?? 'Graph'}</button>
+        </span>
         <span style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{t('explorer.relations_depth') ?? 'Depth'}:</span>
         {[1, 2, 3].map((d) => (
           <button key={d} style={chip(depth === d)} onClick={() => setDepth(d)}>{d}</button>
@@ -234,79 +242,11 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
         </div>
       )}
 
-      {graph.nodes.length > 0 && (
-        <svg role="group" aria-label={t('explorer.relations_title') ?? 'Relation graph'} width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)' }}>
-          {graph.edges.map((edge, index) => {
-            const from = byID.get(edge.from_id)
-            const to = byID.get(edge.to_id)
-            if (!from || !to) return null
-            const candidate = edge.basis === 'candidate'
-            const highlight = selected === edge.from_id || selected === edge.to_id
-            return (
-              <line
-                key={`${edge.from_id}-${edge.to_id}-${edge.type}-${index}`}
-                x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-                stroke={relationColor(edge.type)}
-                strokeWidth={highlight ? 2.2 : 1.2}
-                strokeOpacity={highlight ? 0.95 : 0.5}
-                strokeDasharray={candidate ? '5 4' : undefined}
-              >
-                <title>{candidate
-                  ? `${relationLabel(edge.type, t)} · ${t('explorer.relations_candidate_note') ?? 'candidate'}${edge.note ? ` · ${edge.note}` : ''}`
-                  : `${relationLabel(edge.type, t)}${edge.note ? ` · ${edge.note}` : ''}${edge.event_id ? ` · ${edge.event_id}` : ''}`}</title>
-              </line>
-            )
-          })}
-          {positioned.map(({ node, x, y, r }) => {
-            const isRoot = node.depth === 0
-            const active = node.id === selected
-            return (
-              <g
-                key={node.id}
-                role="button" tabIndex={0}
-                aria-label={truncate(node.label, 80)}
-                onClick={() => setSelected(active ? '' : node.id)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(active ? '' : node.id) } }}
-                style={{ cursor: 'pointer' }}
-              >
-                <title>{`${node.label} [${stateLabel(node.state, t)}]${node.via ? ` · via ${node.via}` : ''}${node.basis === 'candidate' ? ' · candidate' : ''}`}</title>
-                <circle
-                  cx={x} cy={y} r={r}
-                  fill={STATE_FILL[node.state] ?? 'var(--tm-info)'}
-                  fillOpacity={active ? 0.6 : isRoot ? 0.45 : 0.3}
-                  stroke={active ? 'var(--tm-teal)' : isRoot ? 'var(--tm-text)' : 'var(--tm-border)'}
-                  strokeWidth={active ? 2.5 : isRoot ? 1.6 : 1}
-                />
-                {node.basis === 'candidate' && (
-                  <circle cx={x} cy={y} r={r + 3.5} fill="none" stroke="var(--tm-text-3)" strokeWidth={0.8} strokeDasharray="3 3" />
-                )}
-                <text x={x} y={y + r + 11} textAnchor="middle" fill={active ? 'var(--tm-text)' : 'var(--tm-text-3)'} fontSize={10} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                  {truncate(node.label, isRoot ? 34 : 22)}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
-      )}
-
-      {/* Legend: two independent channels — edge style/color for relation
-          type, node fill for lifecycle state (ТЗ §7.3). */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.4rem', fontSize: '0.68rem', color: 'var(--tm-muted)' }}>
-        <span><span style={{ display: 'inline-block', width: '1.1rem', borderTop: '2px solid var(--tm-text-2)', verticalAlign: 'middle', marginRight: '0.3rem' }} />{t('explorer.relations_legend_explicit') ?? 'explicit'}</span>
-        <span><span style={{ display: 'inline-block', width: '1.1rem', borderTop: '2px dashed var(--tm-text-2)', verticalAlign: 'middle', marginRight: '0.3rem' }} />{t('explorer.relations_legend_candidate') ?? 'candidate (heuristic)'}</span>
-      </div>
-      {graph.hiddenByFilter > 0 && (
-        <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.3rem' }}>
-          {t('explorer.relations_hidden', { count: String(graph.hiddenByFilter) }) ?? `${graph.hiddenByFilter} edges hidden by the node filter`}
-        </div>
-      )}
-      {notes.length > 0 && (
-        <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.3rem' }}>{notes.join(' · ')}</div>
-      )}
-
-      {/* Selected node detail: explanation of its edges + navigation (ТЗ §7.4). */}
+      {/* Selected node detail: explanation of its edges + navigation (ТЗ §7.4).
+          Rendered ABOVE the graph/list: a panel below the fold was invisible —
+          the reader clicked a dot and nothing seemed to happen. */}
       {selected && selectedCard && (
-        <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.6rem 0.75rem', marginTop: '0.6rem' }}>
+        <div style={{ border: '1px solid var(--tm-teal)', borderRadius: 'var(--tm-radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.6rem' }}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
             <div style={{ flex: 1, fontSize: '0.8rem', lineHeight: 1.45 }}>{selectedCard.proposition}</div>
             <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
@@ -315,7 +255,7 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
             </div>
           </div>
           <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
-            {selectedCard.state}{selectedCard.via ? ` · via ${selectedCard.via}` : ''}{selectedCard.basis ? ` · ${selectedCard.basis}` : ''} · {selectedEdges.length} {t('explorer.relations_edges') ?? 'edges'}
+            {stateLabel(selectedCard.state, t)}{selectedCard.via ? ` · via ${selectedCard.via}` : ''}{selectedCard.basis ? ` · ${selectedCard.basis}` : ''} · {selectedEdges.length} {t('explorer.relations_edges') ?? 'edges'}
           </div>
           {selectedEdges.length > 0 && (
             <div style={{ marginTop: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -334,6 +274,194 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
           )}
         </div>
       )}
+
+      {view === 'graph' && graph.nodes.length > 0 && (
+        <>
+          <svg role="group" aria-label={t('explorer.relations_title') ?? 'Relation graph'} width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)' }}>
+            {graph.edges.map((edge, index) => {
+              const from = byID.get(edge.from_id)
+              const to = byID.get(edge.to_id)
+              if (!from || !to) return null
+              const candidate = edge.basis === 'candidate'
+              const highlight = selected === edge.from_id || selected === edge.to_id
+              return (
+                <line
+                  key={`${edge.from_id}-${edge.to_id}-${edge.type}-${index}`}
+                  x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+                  stroke={relationColor(edge.type)}
+                  strokeWidth={highlight ? 2.2 : 1.2}
+                  strokeOpacity={highlight ? 0.95 : 0.5}
+                  strokeDasharray={candidate ? '5 4' : undefined}
+                >
+                  <title>{candidate
+                    ? `${relationLabel(edge.type, t)} · ${t('explorer.relations_candidate_note') ?? 'candidate'}${edge.note ? ` · ${edge.note}` : ''}`
+                    : `${relationLabel(edge.type, t)}${edge.note ? ` · ${edge.note}` : ''}${edge.event_id ? ` · ${edge.event_id}` : ''}`}</title>
+                </line>
+              )
+            })}
+            {positioned.map(({ node, x, y, r }) => {
+              const isRoot = node.depth === 0
+              const active = node.id === selected
+              return (
+                <g
+                  key={node.id}
+                  role="button" tabIndex={0}
+                  aria-label={truncate(node.label, 80)}
+                  onClick={() => setSelected(active ? '' : node.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(active ? '' : node.id) } }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <title>{`${node.label} [${stateLabel(node.state, t)}]${node.via ? ` · via ${node.via}` : ''}${node.basis === 'candidate' ? ' · candidate' : ''}`}</title>
+                  <circle
+                    cx={x} cy={y} r={r}
+                    fill={STATE_FILL[node.state] ?? 'var(--tm-info)'}
+                    fillOpacity={active ? 0.6 : isRoot ? 0.45 : 0.3}
+                    stroke={active ? 'var(--tm-teal)' : isRoot ? 'var(--tm-text)' : 'var(--tm-border)'}
+                    strokeWidth={active ? 2.5 : isRoot ? 1.6 : 1}
+                  />
+                  {node.basis === 'candidate' && (
+                    <circle cx={x} cy={y} r={r + 3.5} fill="none" stroke="var(--tm-text-3)" strokeWidth={0.8} strokeDasharray="3 3" />
+                  )}
+                  <text x={x} y={y + r + 11} textAnchor="middle" fill={active ? 'var(--tm-text)' : 'var(--tm-text-3)'} fontSize={10} style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                    {truncate(node.label, isRoot ? 34 : 22)}
+                  </text>
+                </g>
+              )
+            })}
+          </svg>
+          {/* Legend: two independent channels — edge style/color for relation
+              type, node fill for lifecycle state (ТЗ §7.3). */}
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.4rem', fontSize: '0.68rem', color: 'var(--tm-muted)' }}>
+            <span><span style={{ display: 'inline-block', width: '1.1rem', borderTop: '2px solid var(--tm-text-2)', verticalAlign: 'middle', marginRight: '0.3rem' }} />{t('explorer.relations_legend_explicit') ?? 'explicit'}</span>
+            <span><span style={{ display: 'inline-block', width: '1.1rem', borderTop: '2px dashed var(--tm-text-2)', verticalAlign: 'middle', marginRight: '0.3rem' }} />{t('explorer.relations_legend_candidate') ?? 'candidate (heuristic)'}</span>
+          </div>
+        </>
+      )}
+
+      {view === 'list' && graph.nodes.length > 0 && (
+        <RelationList
+          project={project}
+          center={center}
+          cards={cards}
+          edges={graph.edges}
+          selected={selected}
+          onSelect={setSelected}
+          onCenter={(id) => { setCenter(id); setSelected('') }}
+          onOpenDossier={onOpenDossier}
+        />
+      )}
+
+      {graph.hiddenByFilter > 0 && view === 'graph' && (
+        <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.3rem' }}>
+          {t('explorer.relations_hidden', { count: String(graph.hiddenByFilter) }) ?? `${graph.hiddenByFilter} edges hidden by the node filter`}
+        </div>
+      )}
+      {notes.length > 0 && (
+        <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.3rem' }}>{notes.join(' · ')}</div>
+      )}
+    </div>
+  )
+}
+
+/** The readable view of the neighborhood: every edge as one row — relation
+ *  chip, the other statement's text, candidate marker, actions. Grouped by
+ *  relation type, explicit edges before candidates, so a reader can triage
+ *  without decoding a hairball of lines. */
+function RelationList({ project, center, cards, edges, selected, onSelect, onCenter, onOpenDossier }: {
+  project: string
+  center: string
+  cards: ExploreKnowledgeCard[]
+  edges: ExploreRelation[]
+  selected: string
+  onSelect: (id: string) => void
+  onCenter: (id: string) => void
+  onOpenDossier: (id: string) => void
+}) {
+  const t = useT()
+  const cardOf = useMemo(() => new Map(cards.map((c) => [c.knowledge_id, c])), [cards])
+  const groups = useMemo(() => {
+    const byType = new Map<string, ExploreRelation[]>()
+    for (const edge of edges) {
+      const list = byType.get(edge.type) ?? []
+      list.push(edge)
+      byType.set(edge.type, list)
+    }
+    // Explicit edges first inside each group; candidates after, both sorted
+    // by the neighbor id so the order is stable across reloads.
+    for (const [type, list] of byType) {
+      list.sort((a, b) => {
+        const ea = a.basis === 'candidate' ? 1 : 0
+        const eb = b.basis === 'candidate' ? 1 : 0
+        if (ea !== eb) return ea - eb
+        const oa = a.from_id === center ? a.to_id : a.from_id
+        const ob = b.from_id === center ? b.to_id : b.from_id
+        return oa.localeCompare(ob)
+      })
+      byType.set(type, list)
+    }
+    return [...byType.entries()].sort((a, b) => b[1].length - a[1].length)
+  }, [edges, center])
+
+  if (edges.length === 0) {
+    return (
+      <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
+        {t('explorer.relations_empty') ?? 'No relations recorded for this knowledge yet.'}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+      {groups.map(([type, list]) => (
+        <div key={type}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', marginBottom: '0.25rem' }}>
+            <span style={{ display: 'inline-block', width: '0.9rem', borderTop: `2px solid ${relationColor(type)}` }} />
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: relationColor(type) }}>{relationLabel(type, t)}</span>
+            <span style={{ fontSize: '0.68rem', color: 'var(--tm-muted)' }}>{list.length}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {list.map((edge, index) => {
+              const other = edge.from_id === center ? edge.to_id : edge.from_id
+              const card = cardOf.get(other)
+              const candidate = edge.basis === 'candidate'
+              const active = selected === other
+              return (
+                <div
+                  key={`${edge.from_id}-${edge.to_id}-${index}`}
+                  style={{
+                    display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap',
+                    padding: '0.3rem 0.45rem', borderTop: '1px solid var(--tm-border)',
+                    background: active ? 'var(--tm-elevated)' : 'transparent', cursor: 'pointer',
+                  }}
+                  onClick={() => onSelect(active ? '' : other)}
+                >
+                  <span style={{ fontSize: '0.76rem', flex: 1, minWidth: '14rem' }}>
+                    {card ? card.proposition : other}
+                    {card?.state && card.state !== 'proposed' && card.state !== 'confirmed' && (
+                      <span style={{ color: 'var(--tm-muted)', fontSize: '0.68rem' }}> · {stateLabel(card.state, t)}</span>
+                    )}
+                  </span>
+                  {candidate
+                    ? <span style={{ fontSize: '0.66rem', color: 'var(--tm-muted)', flexShrink: 0 }} title={edge.note || undefined}>◇ {edge.note || (t('explorer.relations_legend_candidate') ?? 'candidate')}</span>
+                    : <span style={{ fontSize: '0.66rem', color: 'var(--tm-success)', flexShrink: 0 }}>◆ {t('explorer.relations_legend_explicit') ?? 'explicit'}</span>}
+                  <span style={{ display: 'inline-flex', gap: '0.3rem', flexShrink: 0 }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onCenter(other) }}
+                      title={t('explorer.relations_center') ?? 'Center here'}
+                      style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.66rem', color: 'var(--tm-text-2)', padding: '0.05rem 0.35rem' }}
+                    >◎</button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onOpenDossier(other) }}
+                      title={t('explorer.dossier_open') ?? 'Open dossier'}
+                      style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.66rem', color: 'var(--tm-text-2)', padding: '0.05rem 0.35rem' }}
+                    >→</button>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

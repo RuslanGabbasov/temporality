@@ -51,7 +51,7 @@ func TestPutKnowledgeEmbeddingsLargeBatch(t *testing.T) {
 		for j := range vector {
 			// Full-precision mantissas: a float32 marshals with up to ~17
 			// significant digits, which is exactly how real embeddings travel.
-			vector[j] = float32(i*7+j%53) / 53.0 + float32(j%11)*0.1234567890123
+			vector[j] = float32(i*7+j%53)/53.0 + float32(j%11)*0.1234567890123
 		}
 		items[strconv.Itoa(i)] = vector
 	}

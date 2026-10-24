@@ -352,6 +352,8 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
   'knowledge.superseded': (d, { t }) => ({ title: t('runs.event.knowledge_superseded'), fact: squash(d.reason).slice(0, 90) }),
   'knowledge.promoted': (d, { t }) => ({ title: t('runs.event.knowledge_promoted'), fact: squash(d.proposition).slice(0, 90) }),
   'knowledge.linked': (d, { t }) => ({ title: t('runs.event.knowledge_linked'), fact: squash(d.relation) }),
+  'knowledge.relation_confirmed': (d, { t }) => ({ title: t('runs.event.relation_confirmed'), fact: [squash(d.reason), squash(d.method)].filter(Boolean).join(' · '), status: 'ok' }),
+  'knowledge.relation_dismissed': (d, { t }) => ({ title: t('runs.event.relation_dismissed'), fact: squash(d.reason) }),
   'knowledge.extraction.started': (d, { t }) => ({ title: t('runs.event.extraction_started') }),
   'knowledge.extraction.completed': (d, { t }) => ({ title: t('runs.event.extraction_completed'), fact: t('runs.extraction_candidates', { count: squash(d.candidates_count ?? 0) }), status: 'ok' }),
   'knowledge.extraction.failed': (d, { t }) => ({ title: t('runs.event.extraction_failed'), fact: causeOf(d), status: 'error' }),

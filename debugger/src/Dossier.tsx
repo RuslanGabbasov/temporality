@@ -261,16 +261,21 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
                         const row = event ? timelineRow(event, locale, t) : undefined
                         return (
                           <div key={ref} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.4rem 0.5rem', fontSize: '0.72rem' }}>
-                            <div role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' }} onClick={() => setExpandedSource(expandedSource === ref ? '' : ref)}>
-                              <span style={{ fontWeight: 600 }}>{row?.title ?? event?.type ?? 'event'}</span>
-                              {row?.fact && <span style={{ color: 'var(--tm-text-2)' }}>{row.fact}</span>}
-                              <span style={{ color: 'var(--tm-muted)' }}>{event ? new Date(event.occurred_at).toLocaleString() : ref}</span>
-                              {event?.context?.run && <span style={{ color: 'var(--tm-text-3)', fontFamily: 'var(--tm-font-mono)', fontSize: '0.66rem' }}>{event.context.run}</span>}
-                            </div>
-                            {expandedSource === ref && (
-                              <pre style={{ margin: '0.4rem 0 0', fontSize: '0.65rem', fontFamily: 'var(--tm-font-mono)', color: 'var(--tm-text-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                                {JSON.stringify(event?.data ?? { ref }, null, 2)}
-                              </pre>
+                            {event ? (
+                              <div role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' }} onClick={() => setExpandedSource(expandedSource === ref ? '' : ref)}>
+                                <span style={{ fontWeight: 600 }}>{row?.title ?? event.type}</span>
+                                {row?.fact && <span style={{ color: 'var(--tm-text-2)' }}>{row.fact}</span>}
+                                <span style={{ color: 'var(--tm-muted)' }}>{new Date(event.occurred_at).toLocaleString()}</span>
+                                {event.context?.run && <span style={{ color: 'var(--tm-text-3)', fontFamily: 'var(--tm-font-mono)', fontSize: '0.66rem' }}>{event.context.run}</span>}
+                                {expandedSource === ref && (
+                                  <pre style={{ margin: '0.4rem 0 0', width: '100%', fontSize: '0.65rem', fontFamily: 'var(--tm-font-mono)', color: 'var(--tm-text-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                                    {JSON.stringify(event.data, null, 2)}
+                                  </pre>
+                                )}
+                              </div>
+                            ) : (
+                              // Unresolvable ref: a quiet mono line, not a JSON dump.
+                              <code style={{ fontSize: '0.66rem', color: 'var(--tm-muted)', fontFamily: 'var(--tm-font-mono)', wordBreak: 'break-all' }}>{ref}</code>
                             )}
                           </div>
                         )
@@ -333,6 +338,7 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
 
           {tab === 'history' && (
             <HistoryTimeline
+              project={project}
               trace={trace}
               asOf={asOf}
               knownAt={knownAt}
@@ -340,6 +346,7 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
                 if (cut.asOf !== undefined) setAsOf(cut.asOf)
                 if (cut.knownAt !== undefined) setKnownAt(cut.knownAt)
               }}
+              revision={revision}
             />
           )}
 

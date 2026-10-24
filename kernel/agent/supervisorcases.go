@@ -65,6 +65,40 @@ func (a *Activities) PublishSupervisorCase(ctx context.Context, model, caseID, s
 	return a.Events.Enqueue(ctx, event)
 }
 
+// EmitRelationVerdict journals the relation curator's decision about one
+// candidate pair (docs/knowledge-evolution.md): confirmed promotes the pair
+// to an explicit related_to edge, dismissed suppresses it from every future
+// candidate pool. Deterministic provenance in method+stats; best-effort.
+func (a *Activities) EmitRelationVerdict(ctx context.Context, project, knowledgeID, targetID string, dismissed bool, method, explanation string, stats map[string]any) error {
+	if a.Events == nil {
+		return nil
+	}
+	eventType := "knowledge.relation_confirmed"
+	if dismissed {
+		eventType = "knowledge.relation_dismissed"
+	}
+	data := map[string]any{
+		"knowledge_id": knowledgeID, "target_id": targetID,
+		"relation": "related_to", "method": method, "reason": explanation,
+	}
+	for k, v := range stats {
+		data[k] = v
+	}
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("relation-review/%s/%s/%d", knowledgeID, targetID, time.Now().UnixNano()),
+		OccurredAt: time.Now().UTC(),
+		Source:     observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "1"},
+		Context:    observation.Context{Project: project, Actor: observation.Actor{ID: "relation-curator", Type: "system"}},
+		Type:       eventType,
+		Data:       data,
+	}
+	if err := event.Validate(); err != nil {
+		return err
+	}
+	return a.Events.Enqueue(ctx, event)
+}
+
 // EmitBehaviorReviewed journals the oversight marker: this run has been
 // reviewed by the behavior monitor (stage 3) — the marker keeps the pass
 // from re-judging the same run. Best-effort by the caller.
@@ -195,6 +229,52 @@ func ConflictPredictionCase(ctx context.Context, model *llm.Client, newProp, old
 		{Role: "user", Content: ConflictPredictionPrompt(newProp, oldProp)},
 	}, func(content string) (ConflictPredictionVerdict, error) {
 		var v ConflictPredictionVerdict
+		if err := parseCaseReply(content, &v); err != nil {
+			return v, err
+		}
+		if strings.TrimSpace(v.Explanation) == "" {
+			return v, fmt.Errorf("model returned an empty explanation")
+		}
+		return v, nil
+	})
+}
+
+// ── Relation curator (docs/knowledge-evolution.md: candidate relations must
+// resolve themselves, a human cannot triage thousands of shared-topic pairs) ─
+
+// RelationRelatedVerdict is the judge's answer to „would knowing one of these
+// statements help an agent apply the other?“ — the bar for promoting a
+// heuristic same-topic pair to an explicit related_to relation.
+type RelationRelatedVerdict struct {
+	Related     bool   `json:"related"`
+	Explanation string `json:"explanation"`
+}
+
+// RelationRelatedPrompt asks the judge about a candidate relation. Shared
+// topics over-nominate: two statements about the same service are not
+// automatically related — one must actually help use the other.
+func RelationRelatedPrompt(propA, propB string) string {
+	return fmt.Sprintf(`Two knowledge statements share a topic, so a heuristic marked them as a candidate relation. Decide whether the relation is real and useful: knowing one statement should help an agent correctly apply or contextualize the other. Statements that merely mention the same system, file or topic from unrelated angles are NOT related.
+
+A: %s
+
+B: %s
+
+Respond with one JSON object:
+{"related": <true|false>, "explanation": "<1-2 sentences: how one statement helps use the other, or why they are unrelated>"}`, propA, propB)
+}
+
+// RelationRelatedCase runs the judge over one candidate relation pair.
+func RelationRelatedCase(ctx context.Context, model *llm.Client, propA, propB string) (RelationRelatedVerdict, error) {
+	var verdict RelationRelatedVerdict
+	if model == nil {
+		return verdict, fmt.Errorf("model client is not configured")
+	}
+	return completeParsed(ctx, model, []llm.Message{
+		{Role: "system", Content: "You triage candidate knowledge relations for a platform administrator. You answer with JSON only."},
+		{Role: "user", Content: RelationRelatedPrompt(propA, propB)},
+	}, func(content string) (RelationRelatedVerdict, error) {
+		var v RelationRelatedVerdict
 		if err := parseCaseReply(content, &v); err != nil {
 			return v, err
 		}

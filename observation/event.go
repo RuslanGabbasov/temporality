@@ -117,14 +117,28 @@ func (e Event) Validate() error {
 		if strings.TrimSpace(e.Context.Project) == "" {
 			return errors.New("knowledge extraction events require context.project")
 		}
-	case "knowledge.linked":
+	case "knowledge.linked", "knowledge.relation_confirmed":
 		if strings.TrimSpace(e.Context.Project) == "" || stringValue(e.Data, "knowledge_id") == "" || stringValue(e.Data, "target_id") == "" {
-			return errors.New("knowledge.linked requires context.project, data.knowledge_id, and data.target_id")
+			return errors.New("relation events require context.project, data.knowledge_id, and data.target_id")
 		}
 		switch stringValue(e.Data, "relation") {
 		case "supports", "contradicts", "derived_from", "depends_on", "supersedes", "related_to":
 		default:
-			return errors.New("knowledge.linked requires a supported data.relation")
+			return errors.New("relation events require a supported data.relation")
+		}
+		if e.Type == "knowledge.relation_confirmed" {
+			// Provenance: how the confirmation happened (hint_usage counts,
+			// the supervisor judge, a human). Auto-confirmations without a
+			// method would be indistinguishable from noise.
+			if stringValue(e.Data, "method") == "" {
+				return errors.New("knowledge.relation_confirmed requires data.method")
+			}
+		}
+	case "knowledge.relation_dismissed":
+		// A negative review: the pair stops being suggested as a candidate.
+		// No relation vocabulary needed — "not related" is the verdict.
+		if strings.TrimSpace(e.Context.Project) == "" || stringValue(e.Data, "knowledge_id") == "" || stringValue(e.Data, "target_id") == "" {
+			return errors.New("knowledge.relation_dismissed requires context.project, data.knowledge_id, and data.target_id")
 		}
 	case "hint.offered":
 		if strings.TrimSpace(e.Context.Project) == "" {

@@ -31,7 +31,7 @@ type Secret struct {
 	// caught — any appearance of it anywhere in tool arguments, output or
 	// artifact payloads is a confirmed exfiltration signal, zero false
 	// positives by construction.
-	Canary    bool      `json:"canary,omitempty"`
+	Canary bool `json:"canary,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`

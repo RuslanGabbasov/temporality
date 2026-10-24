@@ -683,30 +683,30 @@ type CreateOrgUnitRequest struct {
 
 // CreateAgentRequest is the payload for creating an agent.
 type CreateAgentRequest struct {
-	ID             string            `json:"id"`
-	ProjectID      string            `json:"project_id,omitempty"`
-	Name           string            `json:"name"`
-	Description    string            `json:"description,omitempty"`
-	Model          string            `json:"model"`
-	Provider       string            `json:"provider,omitempty"`
-	SystemPrompt   string            `json:"system_prompt"`
-	Temperature    *float64          `json:"temperature,omitempty"`
-	MaxTokens      *int              `json:"max_tokens,omitempty"`
-	Skills         []string          `json:"skills,omitempty"`
-	MCPServers     []string          `json:"mcp_servers,omitempty"`
-	Secrets        []string          `json:"secrets,omitempty"`
-	Tools          []string          `json:"tools,omitempty"`
-	SandboxProfile string            `json:"sandbox_profile,omitempty"`
-	NetworkAccess  *bool             `json:"network_access,omitempty"`
-	ReadOnly       *bool             `json:"read_only,omitempty"`
-	MaxTurns       *int              `json:"max_turns,omitempty"`
-	ApprovalMode   *string           `json:"approval_mode,omitempty"`
+	ID             string   `json:"id"`
+	ProjectID      string   `json:"project_id,omitempty"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description,omitempty"`
+	Model          string   `json:"model"`
+	Provider       string   `json:"provider,omitempty"`
+	SystemPrompt   string   `json:"system_prompt"`
+	Temperature    *float64 `json:"temperature,omitempty"`
+	MaxTokens      *int     `json:"max_tokens,omitempty"`
+	Skills         []string `json:"skills,omitempty"`
+	MCPServers     []string `json:"mcp_servers,omitempty"`
+	Secrets        []string `json:"secrets,omitempty"`
+	Tools          []string `json:"tools,omitempty"`
+	SandboxProfile string   `json:"sandbox_profile,omitempty"`
+	NetworkAccess  *bool    `json:"network_access,omitempty"`
+	ReadOnly       *bool    `json:"read_only,omitempty"`
+	MaxTurns       *int     `json:"max_turns,omitempty"`
+	ApprovalMode   *string  `json:"approval_mode,omitempty"`
 	// EgressAllowlist (docs/agent-behavior-monitoring.md §7): destinations the
 	// agent may reach beyond the public internet. Entries: domain, *.glob,
 	// CIDR, host:port.
-	EgressAllowlist []string `json:"egress_allowlist,omitempty"`
-	Labels         map[string]string `json:"labels,omitempty"`
-	OrgUnitID      string            `json:"org_unit_id,omitempty"`
+	EgressAllowlist []string          `json:"egress_allowlist,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	OrgUnitID       string            `json:"org_unit_id,omitempty"`
 	// Structured definition (docs/evaluable-agent.md). PromptSource marks the
 	// origin of the definition for version history: manual | ai | builtin;
 	// GeneratorModel records the model behind AI drafts.

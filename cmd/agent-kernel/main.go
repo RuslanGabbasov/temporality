@@ -7222,6 +7222,17 @@ func main() {
 	// reminder past ARTIFACT_REVIEW_TIMEOUT, one escalation to the org head
 	// (else admins) after another silent timeout. Disabled by "0".
 	go runArtifactReviewSweep(ctx, ws, reviewNotifier, events, log)
+	// Relation curator (docs/knowledge-evolution.md): candidate relations
+	// resolve themselves — usefulness thresholds confirm, the supervisor
+	// judge resolves strong pairs, dismissals are sticky. Human triage of
+	// thousands of topic pairs was never a plan.
+	go runRelationCurator(ctx, relationCuratorDeps{
+		activities: activities, log: log,
+		fetchMeta:      relationMetaFetcher(ctx, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), ws),
+		fetchTelemetry: relationTelemetryFetcher(observationURL, os.Getenv("TEMPORALITY_API_TOKEN")),
+		fetchVerdicts:  relationVerdictFetcher(observationURL, os.Getenv("TEMPORALITY_API_TOKEN")),
+		judge:          relationJudgeAdapter(ctx, func(ctx context.Context) (*llm.Client, error) { return judgeModelClient(ctx, ws, secretMasterKey) }),
+	})
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	// Golden eval-case candidates (specs/quality-loop.md §4): review
 	// endpoints, candidate events and the harvesting/reaping background job.
