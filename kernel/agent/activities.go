@@ -878,11 +878,12 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 	// and nothing else. Without the egress stack, the legacy bridge behavior
 	// stays.
 	proxyEnv, hasPort := a.EgressProxyEnv(request.AgentID)
-	if net != "" || hasPort {
-		net = sandbox.SandboxInternalNetworkName
+	if hasPort {
+		// req.Network was already captured in the literal above — override the
+		// FIELD, not the local: the sandbox must land on the internal network
+		// where the egress-proxy name resolves.
+		req.Network = sandbox.SandboxInternalNetworkName
 		req.Env = append(req.Env, proxyEnv...)
-	} else if net != "" {
-		net = "bridge" // network on, egress stack absent — legacy
 	}
 	if spec := request.Sandbox; spec != nil {
 		if spec.Image == "" {
