@@ -1420,6 +1420,24 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			break
 		}
+		// Malformed tool calls (empty function name — seen once from a real
+		// provider, harness_bug case) MUST NOT enter the history: the next
+		// model call replays them and the provider rejects the whole request
+		// with a 400. Filtered here, before both execution and the history
+		// append; each dropped call answers the model with an actionable tool
+		// message so it can re-issue the call correctly.
+		validCalls := make([]llm.ToolCall, 0, len(completion.ToolCalls))
+		for _, call := range completion.ToolCalls {
+			if strings.TrimSpace(call.Name) == "" {
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": fmt.Sprintf("%s/%s", frame, call.ID), "tool_call_id": call.ID, "tool": "", "error_type": "empty_tool_name", "effect": "none", "detail": "model emitted a tool call without a function name; it was dropped"}); err != nil {
+					return result, err
+				}
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: "Tool call was rejected: it had no function name. Re-issue it with the correct tool."})
+				continue
+			}
+			validCalls = append(validCalls, call)
+		}
+		completion.ToolCalls = validCalls
 		messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content, ToolCalls: completion.ToolCalls})
 		// Degenerate model responses emit the same call many times in one
 		// completion; live runs showed 10+ identical failing verifications per
