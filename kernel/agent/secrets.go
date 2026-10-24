@@ -36,6 +36,7 @@ type SecretBroker struct {
 
 type secretCacheEntry struct {
 	value     string
+	canary    bool
 	expiresAt time.Time
 }
 
@@ -84,8 +85,9 @@ func (b *SecretBroker) Resolve(ctx context.Context, name string) (value string, 
 		return "", false, fmt.Errorf("resolve secret %q: HTTP %d: %s", name, resp.StatusCode, truncate(string(body), 200))
 	}
 	var payload struct {
-		Name  string `json:"name"`
-		Value string `json:"value"`
+		Name   string `json:"name"`
+		Value  string `json:"value"`
+		Canary bool   `json:"canary"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", false, fmt.Errorf("resolve secret %q: %w", name, err)
@@ -93,27 +95,38 @@ func (b *SecretBroker) Resolve(ctx context.Context, name string) (value string, 
 	if payload.Value == "" {
 		return "", true, nil
 	}
-	b.store(name, payload.Value)
+	b.store(name, payload.Value, payload.Canary)
 	return payload.Value, false, nil
 }
 
-func (b *SecretBroker) cached(name string) (string, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	entry, ok := b.values[name]
-	if !ok || time.Now().After(entry.expiresAt) {
-		return "", false
-	}
-	return entry.value, true
+// Canary reports whether the named secret is a honeypot credential. Unknown
+// names are not canaries.
+func (b *SecretBroker) Canary(name string) bool {
+if b == nil {
+	return false
+}
+b.mu.Lock()
+defer b.mu.Unlock()
+return b.values[name].canary
 }
 
-func (b *SecretBroker) store(name, value string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.values == nil {
-		b.values = make(map[string]secretCacheEntry)
-	}
-	b.values[name] = secretCacheEntry{value: value, expiresAt: time.Now().Add(b.ttl())}
+func (b *SecretBroker) cached(name string) (string, bool) {
+b.mu.Lock()
+defer b.mu.Unlock()
+entry, ok := b.values[name]
+if !ok || time.Now().After(entry.expiresAt) {
+	return "", false
+}
+return entry.value, true
+}
+
+func (b *SecretBroker) store(name, value string, canary bool) {
+b.mu.Lock()
+defer b.mu.Unlock()
+if b.values == nil {
+	b.values = make(map[string]secretCacheEntry)
+}
+b.values[name] = secretCacheEntry{value: value, canary: canary, expiresAt: time.Now().Add(b.ttl())}
 }
 
 // SecretEnvVarName converts a secret name into the environment variable the
@@ -132,12 +145,15 @@ func SecretEnvVarName(name string) string {
 // sandboxSecretEnv resolves the agent's granted secrets into KEY=VALUE env
 // entries. It returns the entries and the names that were denied so the caller
 // can record secret.denied events; transport failures are hard errors.
-func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) ([]string, []string, error) {
+// secretsForScan carries the same values as behaviorSecret descriptors for the
+// behavior guard (docs/agent-behavior-monitoring.md): the scan needs the
+// values it must recognize in arguments and output.
+func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) (env []string, denied []string, err error, secretsForScan []behaviorSecret) {
 	if len(request.Secrets) == 0 || a.Secrets == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	env := make([]string, 0, len(request.Secrets))
-	denied := make([]string, 0)
+	env = make([]string, 0, len(request.Secrets))
+	denied = make([]string, 0)
 	resolved := make([]string, 0, len(request.Secrets))
 	for _, name := range request.Secrets {
 		name = strings.TrimSpace(name)
@@ -146,7 +162,7 @@ func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) 
 		}
 		value, deniedFlag, err := a.Secrets.Resolve(ctx, name)
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolve secret %q: %w", name, err)
+			return nil, nil, fmt.Errorf("resolve secret %q: %w", name, err), nil
 		}
 		if deniedFlag {
 			denied = append(denied, name)
@@ -154,9 +170,32 @@ func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) 
 		}
 		env = append(env, SecretEnvVarName(name)+"="+value)
 		resolved = append(resolved, name)
+		secretsForScan = append(secretsForScan, newBehaviorSecret(name, value, a.Secrets.Canary(name)))
 	}
 	a.emitSecretIssued(ctx, request, resolved, denied)
-	return env, denied, nil
+	return env, denied, nil, secretsForScan
+}
+
+// resolveRunSecrets resolves granted secrets for scanning only — no env, no
+// secret.issued emission (the file tools do not consume secrets; the scan
+// just needs to recognize their values inside payloads).
+func (a *Activities) resolveRunSecrets(ctx context.Context, request ToolRequest) []behaviorSecret {
+	if len(request.Secrets) == 0 || a.Secrets == nil {
+		return nil
+	}
+	out := make([]behaviorSecret, 0, len(request.Secrets))
+	for _, name := range request.Secrets {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		value, denied, err := a.Secrets.Resolve(ctx, name)
+		if err != nil || denied || value == "" {
+			continue
+		}
+		out = append(out, newBehaviorSecret(name, value, a.Secrets.Canary(name)))
+	}
+	return out
 }
 
 // emitSecretIssued records secret.issued for granted resolutions and

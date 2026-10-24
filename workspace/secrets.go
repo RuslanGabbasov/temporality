@@ -26,6 +26,12 @@ type Secret struct {
 	// HasValue reports whether an encrypted value row exists (builtin
 	// provider). It never exposes the value itself.
 	HasValue bool `json:"has_value"`
+	// Canary marks a honeypot credential (docs/agent-behavior-monitoring.md):
+	// handed to agents like any other secret, but its value exists only to be
+	// caught — any appearance of it anywhere in tool arguments, output or
+	// artifact payloads is a confirmed exfiltration signal, zero false
+	// positives by construction.
+	Canary    bool      `json:"canary,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -107,10 +113,10 @@ func (s *Store) CreateSecret(ctx context.Context, secret *Secret) error {
 	secret.CreatedAt = now
 	secret.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_secret (id, name, provider, external_ref, description, org_unit_id, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		`INSERT INTO workspace_secret (id, name, provider, external_ref, description, canary, org_unit_id, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		secret.ID, secret.Name, secret.Provider, secret.ExternalRef, secret.Description,
-		nullString(secret.OrgUnitID), secret.CreatedAt, secret.UpdatedAt)
+		secret.Canary, nullString(secret.OrgUnitID), secret.CreatedAt, secret.UpdatedAt)
 	return err
 }
 
@@ -138,11 +144,11 @@ func (s *Store) GetSecretByName(ctx context.Context, name string) (Secret, error
 	var secret Secret
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, provider, external_ref, description, org_unit_id, created_at, updated_at,
+		`SELECT id, name, provider, external_ref, description, canary, org_unit_id, created_at, updated_at,
 		        EXISTS (SELECT 1 FROM workspace_secret_value v WHERE v.secret_id = workspace_secret.id)
 		 FROM workspace_secret WHERE name = $1`, name).
 		Scan(&secret.ID, &secret.Name, &secret.Provider, &secret.ExternalRef, &secret.Description,
-			&orgUnitID, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue)
+			&secret.Canary, &orgUnitID, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return secret, ErrNotFound
 	}
@@ -189,9 +195,9 @@ func (s *Store) UpdateSecret(ctx context.Context, secret Secret) error {
 	secret.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_secret
-		 SET name=$2, provider=$3, external_ref=$4, description=$5, updated_at=$6
+		 SET name=$2, provider=$3, external_ref=$4, description=$5, canary=$6, updated_at=$7
 		 WHERE id=$1`,
-		secret.ID, secret.Name, secret.Provider, secret.ExternalRef, secret.Description, secret.UpdatedAt)
+		secret.ID, secret.Name, secret.Provider, secret.ExternalRef, secret.Description, secret.Canary, secret.UpdatedAt)
 	if err != nil {
 		return err
 	}

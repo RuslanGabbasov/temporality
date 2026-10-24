@@ -103,7 +103,7 @@ func TestSandboxSecretEnvEmitsIssuedOncePerRun(t *testing.T) {
 		RunID: "run-secret", OperationID: "run-secret/turn/01/call_1", Project: "demo",
 		Secrets: []string{"github-token", "missing-secret"},
 	}
-	env, denied, err := activities.sandboxSecretEnv(context.Background(), request)
+	env, denied, err, _ := activities.sandboxSecretEnv(context.Background(), request)
 	if err != nil {
 		t.Fatalf("sandboxSecretEnv: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestSandboxSecretEnvEmitsIssuedOncePerRun(t *testing.T) {
 	// A second command in the same run re-injects the value at its own
 	// execution boundary but must not journal another issuance.
 	request.OperationID = "run-secret/turn/02/call_2"
-	env2, denied2, err := activities.sandboxSecretEnv(context.Background(), request)
+	env2, denied2, err, _ := activities.sandboxSecretEnv(context.Background(), request)
 	if err != nil {
 		t.Fatalf("second sandboxSecretEnv: %v", err)
 	}

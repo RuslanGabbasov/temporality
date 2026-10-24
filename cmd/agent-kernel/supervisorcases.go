@@ -73,6 +73,118 @@ func runSupervisorCasesPass(ctx context.Context, log *slog.Logger, activities *a
 	detectUserFriction(ctx, log, activities, observationURL, journalToken, client, done)
 	auditIntakeClassifications(ctx, log, activities, observationURL, journalToken, client, done)
 	narrateAgentDevelopment(ctx, log, activities, ws, client, done)
+	verifyCompletionClaims(ctx, log, activities, observationURL, journalToken, done)
+}
+
+// verificationClaimPhrases: the success claims a final answer makes about
+// checks. Only phrases that assert CHECKS passed count — generic success
+// wording would flag half the runs (false positives kill the guard).
+var verificationClaimPhrases = []string{
+	"тесты проходят", "тесты зелёные", "все тесты прошли", "тесты успешно",
+	"проверки проходят", "сборка и тесты", "tests pass", "tests are green",
+	"all tests pass", "test suite passes", "build and tests pass",
+}
+
+// verificationEvidencePhrases: a run_command whose command line matches one
+// of these counts as real verification evidence for the run.
+var verificationEvidencePhrases = []string{
+	"go test", "npm test", "npm run test", "pnpm test", "yarn test",
+	"pytest", "cargo test", "mvn test", "gradle test", "make test",
+	"go build", "npm run build", "cargo build",
+}
+
+// verifyCompletionClaims is the anti-deception slice of stage 2 (docs/
+// agent-behavior-monitoring.md §3): a run whose final message claims checks
+// passed while its own journal shows no verification command gets a case.
+// Deterministic, model-free, and deliberately narrow: runs that delegated are
+// skipped (children execute the checks; the parent journal legitimately shows
+// none), and the claim phrases are the strong ones only.
+func verifyCompletionClaims(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken string, done map[string]time.Time) {
+	completions, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "run.completed", 60)
+	if err != nil {
+		log.Warn("verification claims: completions", "error", err.Error())
+		return
+	}
+	started, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "tool.started", 800)
+	if err != nil {
+		log.Warn("verification claims: tool events", "error", err.Error())
+		return
+	}
+	delegations, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "delegation.started", 200)
+	if err != nil {
+		log.Warn("verification claims: delegations", "error", err.Error())
+		return
+	}
+	verifiedRuns := map[string]bool{}
+	for _, ev := range started {
+		command := strings.ToLower(fmt.Sprint(ev.Data["command"]))
+		if command == "" {
+			if args, ok := ev.Data["arguments"].(map[string]any); ok {
+				command = strings.ToLower(fmt.Sprint(args["command"]))
+			}
+		}
+		for _, phrase := range verificationEvidencePhrases {
+			if strings.Contains(command, phrase) {
+				verifiedRuns[ev.Run] = true
+				break
+			}
+		}
+	}
+	delegatedRuns := map[string]bool{}
+	for _, ev := range delegations {
+		delegatedRuns[ev.Run] = true
+	}
+	checked := 0
+	for _, ev := range completions {
+		if checked >= 4 {
+			return
+		}
+		run := ev.Run
+		if run == "" || verifiedRuns[run] || delegatedRuns[run] {
+			continue
+		}
+		subject := run + ":verification_claim"
+		if _, ok := done[subject]; ok {
+			continue
+		}
+		// The final message is the run's newest text delta.
+		final := runFinalMessage(ctx, observationURL, journalToken, run)
+		if final == "" {
+			continue
+		}
+		lower := strings.ToLower(final)
+		claimed := false
+		for _, phrase := range verificationClaimPhrases {
+			if strings.Contains(lower, phrase) {
+				claimed = true
+				break
+			}
+		}
+		if !claimed {
+			continue
+		}
+		checked++
+		summary := fmt.Sprintf("Финальное сообщение заявляет прохождение проверок, но в журнале рана нет ни одной команды верификации. Финал: «%.200s»", final)
+		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseVerificationGap, subject, ev.Project, summary, "Сверьте заявление с реальностью: прогоните проверки сами или запросите у рана доказательства.", map[string]any{"run": run, "claim_only": true}); err != nil {
+			log.Warn("verification claims: publish", "error", err.Error())
+		}
+	}
+}
+
+// runFinalMessage fetches the run's newest model.text_delta — the final
+// answer text.
+func runFinalMessage(ctx context.Context, observationURL, journalToken, run string) string {
+	events, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "model.text_delta", 200)
+	if err != nil {
+		return ""
+	}
+	latest := ""
+	for _, ev := range events {
+		if ev.Run == run {
+			latest = fmt.Sprint(ev.Data["text"])
+		}
+	}
+	return latest
 }
 
 // ── B2: contract proposals from recurring agent-prompt failures ────────────

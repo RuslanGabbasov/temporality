@@ -404,6 +404,21 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '🎯', label: t('runs.event.skill_proposed'), detail: [d.version ? `${d.skill_name ?? d.skill_id ?? ''} v${d.version}` : String(d.skill_name ?? d.skill_id ?? ''), String(d.change_summary ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: '#7aa2f7' }
     case 'skill.applied':
       return { icon: '🎯', label: t('runs.event.skill_applied'), detail: [d.version ? `${d.skill_name ?? d.skill_id ?? ''} v${d.version}` : String(d.skill_name ?? d.skill_id ?? ''), String(d.change_summary ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: '#9ece6a' }
+    case 'agent.behavior': {
+      // Behavior guard findings (docs/agent-behavior-monitoring.md): one row
+      // per hit, severity by kind — canary and secret_leak are red, the rest
+      // are informational.
+      const kind = String(d.kind ?? '')
+      const labels: Record<string, { icon: string; key: string }> = {
+        canary: { icon: '🚨', key: 'runs.event.behavior_canary' },
+        secret_leak: { icon: '🔑', key: 'runs.event.behavior_secret_leak' },
+        danger_content: { icon: '☢️', key: 'runs.event.behavior_danger' },
+        suspicious_arg: { icon: '🧭', key: 'runs.event.behavior_suspicious' },
+        test_edit: { icon: '🧪', key: 'runs.event.behavior_test_edit' },
+      }
+      const entry = labels[kind] ?? { icon: '🛡️', key: 'runs.event.behavior_generic' }
+      return { icon: entry.icon, label: t(entry.key), detail: String(d.detail ?? ''), color: kind === 'canary' || kind === 'secret_leak' ? '#f7768e' : 'var(--tm-text-3)' }
+    }
     case 'hint.query':
       return { icon: '🔍', label: t('runs.event.memory_lookup'), detail: t('runs.candidates', { count: String(d.candidate_count ?? 0) }), color: 'var(--tm-text-3)' }
     case 'memory.read':

@@ -29,6 +29,8 @@ const (
 	CaseAmendmentTarget        = "amendment_target"        // C3
 	CaseSkillCandidate         = "skill_candidate"         // C4
 	CaseKnowledgeConflict      = "knowledge_conflict"      // C5
+	CaseBehaviorSuspicion      = "behavior_suspicion"      // behavior guard (docs/agent-behavior-monitoring.md)
+	CaseVerificationGap        = "verification_gap"        // claimed checks without evidence
 )
 
 // PublishSupervisorCase journals one wave-B/C verdict. subject identifies the

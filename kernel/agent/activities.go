@@ -79,6 +79,15 @@ type Activities struct {
 	// Secrets resolves agent-granted secret names into values at the execution
 	// boundary; nil disables secret injection (tests, env-only setups).
 	Secrets *SecretBroker
+	// Behavior guard state (docs/agent-behavior-monitoring.md): per-run dedupe
+	// and the case cap, so one run cannot flood the supervisor queue.
+	guardMu    sync.Mutex
+	guardState map[string]*behaviorGuardState
+	// Layer-2 danger corpus vectors (lazy, embedded once) and the embed
+	// function the guard uses; nil embedder disables the layer.
+	corpusOnce    sync.Once
+	corpusVectors [][]float32
+	Embedder       func(context.Context, []string) ([][]float32, error)
 	// NetworkAccess mirrors the run's network capability: web tools register
 	// only when the agent is allowed to reach the internet (PrepareRun).
 	NetworkAccess bool
@@ -406,6 +415,102 @@ func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentReque
 		child.DenyTools = append(child.DenyTools, "delegate", "plan", "agents")
 	}
 	return child, nil
+}
+
+// Behavior guard (docs/agent-behavior-monitoring.md, stages 1–2): scanner
+// findings become `agent.behavior` journal events; the serious kinds become
+// supervisor cases with per-run dedupe and a hard cap so a runaway run can
+// never flood the queue. test_edit is visibility-only: it journals but never
+// opens a case (editing tests is sometimes the task).
+type behaviorGuardState struct {
+	published map[string]bool
+	caseCount int
+}
+
+const (
+	behaviorMaxCasesPerRun = 3
+	behaviorDetailCap      = 300
+)
+
+// guardSuspicionThreshold is the layer-2 cosine gate. The default sits high:
+// this layer ranks, a human decides, and every point of precision is bought
+// with fewer pointless cases. 0 disables the layer.
+func guardSuspicionThreshold() float32 {
+	raw := strings.TrimSpace(os.Getenv("KERNEL_GUARD_SUSPICION_THRESHOLD"))
+	if raw == "" {
+		return 0.86
+	}
+	var value float64
+	_, err := fmt.Sscanf(raw, "%f", &value)
+	if err != nil || value <= 0 || value >= 1 {
+		return 0.86
+	}
+	return float32(value)
+}
+
+func (a *Activities) guardScan(ctx context.Context, request ToolRequest, hits []behaviorHit, secrets []behaviorSecret) {
+	if len(hits) == 0 && len(secrets) > 0 {
+		// Nothing found by the content patterns, but the run has armed
+		// secrets: extend the scan with the secret values themselves.
+		hits = nil
+	}
+	_ = secrets // handled by callers passing secret-value hits in
+	if len(hits) == 0 || a.Events == nil {
+		return
+	}
+	a.guardMu.Lock()
+	if a.guardState == nil {
+		a.guardState = map[string]*behaviorGuardState{}
+	}
+	state := a.guardState[request.RunID]
+	if state == nil {
+		state = &behaviorGuardState{published: map[string]bool{}}
+		a.guardState[request.RunID] = state
+	}
+	a.guardMu.Unlock()
+
+	for _, hit := range hits {
+		a.emitBehaviorHit(ctx, request, hit)
+		if hit.Kind == behaviorKindTestEdit {
+			continue // visibility only, never a case
+		}
+		key := request.RunID + ":" + hit.Kind + ":" + hit.Pattern
+		if state.published[key] || state.caseCount >= behaviorMaxCasesPerRun {
+			continue
+		}
+		state.published[key] = true
+		state.caseCount++
+		summary := fmt.Sprintf("Поведенческий сигнал (%s) в %s: %s", hit.Kind, request.Name, hit.Detail)
+		_ = a.PublishSupervisorCase(ctx, "supervisor", CaseBehaviorSuspicion, request.RunID+":"+hit.Kind+":"+hit.Pattern, request.Project, summary, "Проверьте эпизод в трейсе рана (события agent.behavior) и закройте кейс.", map[string]any{
+			"guard_kind": hit.Kind, "pattern": hit.Pattern, "tool": request.Name,
+		})
+	}
+}
+
+// emitBehaviorHit journals one scanner finding as agent.behavior.
+func (a *Activities) emitBehaviorHit(ctx context.Context, request ToolRequest, hit behaviorHit) {
+	now := time.Now().UTC()
+	detail := hit.Detail
+	if len(detail) > behaviorDetailCap {
+		detail = detail[:behaviorDetailCap]
+	}
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("%s/behavior/%s/%s/%d", request.RunID, hit.Kind, hit.Pattern, now.UnixNano()),
+		OccurredAt: now,
+		Source:     observation.Source{ID: a.SourceID, Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{
+			Project: request.Project, Run: request.RunID,
+			Actor: observation.Actor{ID: a.SourceID, Type: "agent"},
+		},
+		Type: "agent.behavior",
+		Data: map[string]any{
+			"kind": hit.Kind, "detail": detail, "tool": request.Name,
+			"pattern": hit.Pattern, "canary": hit.Canary,
+			"operation_id": request.OperationID,
+		},
+	}
+	_ = a.Events.Enqueue(ctx, event)
 }
 
 // MCPServerName identifies the MCP server behind mcp__* tools in the event
@@ -847,12 +952,22 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		}
 		// Secrets resolve here — at the execution boundary: values go straight
 		// into the container environment and never enter the model context.
-		secretEnv, deniedSecrets, sErr := a.sandboxSecretEnv(ctx, request)
+		// The same values arm the behavior guard: after the command, the
+		// output is scanned for leaked values (docs/agent-behavior-monitoring.md).
+		secretEnv, deniedSecrets, sErr, scanSecrets := a.sandboxSecretEnv(ctx, request)
 		if sErr != nil {
 			return ToolResult{}, sErr
 		}
 		if len(deniedSecrets) > 0 {
 			return ToolResult{Content: fmt.Sprintf("error: secrets not available for this agent: %s", strings.Join(deniedSecrets, ", "))}, nil
+		}
+		a.guardScan(ctx, request, scanCommandArgs(strings.Join(command, " ")), scanSecrets)
+		// Layer 2: semantic similarity of the command against the danger
+		// corpus (docs/agent-behavior-monitoring.md §5). Silently absent
+		// without the embedding model; the threshold defaults high — a score
+		// here routes a case to the supervisor, it never blocks the call.
+		if a.Embedder != nil && guardSuspicionThreshold() > 0 {
+			a.guardScan(ctx, request, a.matchDangerCorpus(ctx, strings.Join(command, " "), guardSuspicionThreshold()), nil)
 		}
 		if faultAfterEffect(request.RunID, "run_command", request.OperationID) {
 			// Fault injection for live reconciliation drills: run the command for
@@ -885,6 +1000,9 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			a.Console.Done(request.Project, request.OperationID, result.ExitCode)
 		}
 		exitCode := result.ExitCode
+		if len(scanSecrets) > 0 {
+			a.guardScan(ctx, request, scanSecretValues(result.Output, scanSecrets), nil)
+		}
 		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil
 	case "read_file":
 		return a.handleReadFile(request)

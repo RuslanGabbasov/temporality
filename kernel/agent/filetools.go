@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -277,6 +278,14 @@ func (a *Activities) handleWriteFile(request ToolRequest) (ToolResult, error) {
 	if info, err := os.Stat(abs); err == nil && info.IsDir() {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q is a directory", cleanPath(pathArg)))
 	}
+	// Behavior guard (docs/agent-behavior-monitoring.md): the payload is the
+	// artifact — scan it for leaked secret values and destructive constructs,
+	// and flag edits to test/CI files as a visibility category.
+	a.guardScan(context.Background(), request, scanSecretValues(content, a.resolveRunSecrets(context.Background(), request)), nil)
+	a.guardScan(context.Background(), request, scanFilePayload(content), nil)
+	if isTestPath(pathArg) {
+		a.guardScan(context.Background(), request, []behaviorHit{{Kind: behaviorKindTestEdit, Detail: fmt.Sprintf("правка теста/CI: %s", cleanPath(pathArg))}}, nil)
+	}
 	if err := writeFileAtomic(abs, []byte(content)); err != nil {
 		return ToolResult{}, fileToolFailure(fmt.Errorf("write %q: %w", cleanPath(pathArg), err))
 	}
@@ -318,6 +327,13 @@ func (a *Activities) handleEditFile(request ToolRequest) (ToolResult, error) {
 	updated := strings.Replace(string(data), oldText, newText, 1)
 	if len(updated) > maxFileWriteBytes {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("edited content would be %d bytes, the write cap is %d", len(updated), maxFileWriteBytes))
+	}
+	// Behavior guard: the replacement text lands in the artifact — same scan
+	// as write_file, plus the test/CI visibility flag on the target path.
+	a.guardScan(context.Background(), request, scanSecretValues(newText, a.resolveRunSecrets(context.Background(), request)), nil)
+	a.guardScan(context.Background(), request, scanFilePayload(newText), nil)
+	if isTestPath(pathArg) {
+		a.guardScan(context.Background(), request, []behaviorHit{{Kind: behaviorKindTestEdit, Detail: fmt.Sprintf("правка теста/CI: %s", cleanPath(pathArg))}}, nil)
 	}
 	if err := writeFileAtomic(abs, []byte(updated)); err != nil {
 		return ToolResult{}, fileToolFailure(fmt.Errorf("write %q: %w", cleanPath(pathArg), err))

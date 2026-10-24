@@ -419,6 +419,12 @@ func main() {
 		HTTP: &http.Client{Timeout: 10 * time.Second},
 		TTL:  secretCacheTTL(),
 	}
+	// Behavior guard layer 2 (docs/agent-behavior-monitoring.md §5): the
+	// corpus matcher reuses the knowledge-embedding model — one extra
+	// in-process embed per run_command, no network, no LLM.
+	activities.Embedder = func(ctx context.Context, texts []string) ([][]float32, error) {
+		return activities.EmbedTexts(ctx, "", agent.EmbedQuery, texts)
+	}
 	loadMCPServers(ctx, log, ws, activities.MCP, secretMasterKey)
 	temporalClient, err := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", client.DefaultHostPort)})
 	if err != nil {
@@ -5761,7 +5767,7 @@ func main() {
 			}
 			value = string(plaintext)
 		}
-		writeJSON(w, 200, map[string]string{"name": secret.Name, "value": value})
+		writeJSON(w, 200, map[string]any{"name": secret.Name, "value": value, "canary": secret.Canary})
 	})
 
 	// Reference artifact registry (docs/artifact-registry.md). Artifacts are
