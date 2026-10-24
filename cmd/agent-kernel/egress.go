@@ -100,6 +100,14 @@ func generateEgressConfig(agents []workspace.Agent) (string, EgressPorts) {
 				cidrs = append(cidrs, entry)
 				continue
 			}
+			// Squid dstdomain has no wildcards: `*.directum.ru` is the human
+			// spelling, `.directum.ru` is squid's (domain + all subdomains).
+			entry = strings.TrimPrefix(entry, "*.")
+			if !strings.HasPrefix(entry, ".") {
+				// A bare domain matches itself and its subdomains — the
+				// intuitive reading of an allowlist entry.
+				entry = "." + entry
+			}
 			domains = append(domains, entry)
 		}
 		if len(domains) > 0 {
