@@ -273,6 +273,9 @@ services:
   egress-proxy:
     image: ubuntu/squid:latest
     container_name: temporality-egress-proxy
+    # The kernel writes the config a moment after boot; wait for it instead
+    # of crash-looping on a missing file, then run squid in the foreground.
+    entrypoint: ["/bin/sh", "-c", "until [ -f /etc/squid/squid.conf ]; do sleep 2; done; exec squid -N -d 1"]
     volumes:
       # The kernel writes squid.conf into the sandbox root's egress/ dir.
       - ${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}/egress:/etc/squid:ro
