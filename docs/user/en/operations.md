@@ -66,10 +66,16 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" -F file=@transfer.json \
   verbatim: on the target stand make sure a provider with that id and secrets
   with those names exist.
 
-Upgrading the stack:
+Upgrading the stack to the latest release:
 
 ```bash
-TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+docker compose pull && docker compose up -d
+```
+
+For a controlled upgrade (or a rollback) pin the version explicitly:
+
+```bash
+TEMPORALITY_VERSION=2026.2.113 docker compose up -d
 ```
 
 The upgrade procedure:

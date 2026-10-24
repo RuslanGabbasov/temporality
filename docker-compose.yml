@@ -1,8 +1,10 @@
 # Temporality stack. The primary deployment path is the prebuilt GHCR images:
-#   TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+#   docker compose up -d
+# which deploys the latest published release; pin one with
+#   TEMPORALITY_VERSION=2026.2.113 docker compose up -d
 # (see the releases page; the kernel applies its migrations on start).
-# This file never builds: compose pulls exactly the pinned version and fails
-# loudly if it is missing. Local source builds live in docker-compose.dev.yml
+# This file never builds: compose pulls the images and fails loudly if a tag
+# is missing. Local source builds live in docker-compose.dev.yml
 # (see docs/user/quickstart.md).
 services:
   postgres:
@@ -31,7 +33,7 @@ services:
 
   journal:
     # Prebuilt image from GHCR; TEMPORALITY_VERSION pins it.
-    image: ghcr.io/ruslangabbasov/temporality/journal:${TEMPORALITY_VERSION:-2026.2.66}
+    image: ghcr.io/ruslangabbasov/temporality/journal:${TEMPORALITY_VERSION:-latest}
     environment:
       DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
       HTTP_ADDR: :8080
@@ -56,7 +58,7 @@ services:
     restart: unless-stopped
 
   debugger:
-    image: ghcr.io/ruslangabbasov/temporality/debugger:${TEMPORALITY_VERSION:-2026.2.66}
+    image: ghcr.io/ruslangabbasov/temporality/debugger:${TEMPORALITY_VERSION:-latest}
     ports:
       - "3000:80"
     extra_hosts:
@@ -110,7 +112,7 @@ services:
     restart: unless-stopped
 
   agent-kernel:
-    image: ghcr.io/ruslangabbasov/temporality/agent-kernel:${TEMPORALITY_VERSION:-2026.2.66}
+    image: ghcr.io/ruslangabbasov/temporality/agent-kernel:${TEMPORALITY_VERSION:-latest}
     # The container starts as root only so docker-entrypoint.sh can pick up
     # the Docker socket's group at runtime (root:docker on Linux, root:root on
     # Docker Desktop/OrbStack) and drop to the unprivileged user below with

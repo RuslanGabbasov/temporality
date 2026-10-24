@@ -119,8 +119,11 @@ curl -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; -F file=@transfer.json \
 сохраняется как есть: на целевом стенде проверьте, что провайдер и секреты
 с теми же именами существуют.</li>
 </ul>
-<p>Обновление стенда:</p>
-<pre><code class="language-bash">TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+<p>Обновление стенда до последнего релиза:</p>
+<pre><code class="language-bash">docker compose pull &amp;&amp; docker compose up -d
+</code></pre>
+<p>Для контролируемого обновления (или отката) версия закрепляется явно:</p>
+<pre><code class="language-bash">TEMPORALITY_VERSION=2026.2.113 docker compose up -d
 </code></pre>
 <p>Порядок обновления стенда:</p>
 <ol>
@@ -130,7 +133,7 @@ curl -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; -F file=@transfer.json \
 (<code>migrations/workspace</code>, миграции квот); журнал миграций — идемпотентный.</li>
 <li>Проверь здоровье: <code>docker compose ps</code> (все healthy), дашборд <code>/dashboard</code>, один тестовый ран.</li>
 </ol>
-<p>Откат — подними предыдущий <code>TEMPORALITY_VERSION</code>. Миграции схемы <strong>не откатываются</strong>:
+<p>Откат — подними предыдущий закреплённый <code>TEMPORALITY_VERSION</code>. Миграции схемы <strong>не откатываются</strong>:
 перед крупными обновлениями делай дамп (§11). Локальная сборка из исходников вместо GHCR:</p>
 <pre><code class="language-bash">docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build agent-kernel debugger
 </code></pre>

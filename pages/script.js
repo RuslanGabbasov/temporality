@@ -59,4 +59,20 @@
   const menuToggle = document.getElementById('menuToggle');
   menuToggle.addEventListener('click', () => document.querySelector('.nav').classList.toggle('nav-open'));
   document.querySelectorAll('.nav a').forEach((a) => a.addEventListener('click', () => document.querySelector('.nav').classList.remove('nav-open')));
+
+  // Latest release chip: every [data-release-slot] carries a build-time
+  // fallback; on load the GitHub API tells the real newest release and the
+  // slots get rewritten. Fails quietly — the static value stays on timeouts
+  // and rate limits.
+  const releaseSlots = document.querySelectorAll('[data-release-slot]');
+  if (releaseSlots.length) {
+    fetch('https://api.github.com/repos/RuslanGabbasov/temporality/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        const version = String(data?.tag_name || '').replace(/^v/, '');
+        if (!version) return;
+        releaseSlots.forEach((el) => { el.textContent = version; });
+      })
+      .catch(() => { /* keep the static fallback */ });
+  }
 })();

@@ -121,8 +121,11 @@ Stand-specific references — org unit binding, provider id — are preserved
 verbatim: on the target stand make sure a provider with that id and secrets
 with those names exist.</li>
 </ul>
-<p>Upgrading the stack:</p>
-<pre><code class="language-bash">TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+<p>Upgrading the stack to the latest release:</p>
+<pre><code class="language-bash">docker compose pull &amp;&amp; docker compose up -d
+</code></pre>
+<p>For a controlled upgrade (or a rollback) pin the version explicitly:</p>
+<pre><code class="language-bash">TEMPORALITY_VERSION=2026.2.113 docker compose up -d
 </code></pre>
 <p>The upgrade procedure:</p>
 <ol>

@@ -64,10 +64,16 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" -F file=@transfer.json \
   сохраняется как есть: на целевом стенде проверьте, что провайдер и секреты
   с теми же именами существуют.
 
-Обновление стенда:
+Обновление стенда до последнего релиза:
 
 ```bash
-TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+docker compose pull && docker compose up -d
+```
+
+Для контролируемого обновления (или отката) версия закрепляется явно:
+
+```bash
+TEMPORALITY_VERSION=2026.2.113 docker compose up -d
 ```
 
 Порядок обновления стенда:
@@ -78,7 +84,7 @@ TEMPORALITY_VERSION=2026.2.66 docker compose up -d
    (`migrations/workspace`, миграции квот); журнал миграций — идемпотентный.
 4. Проверь здоровье: `docker compose ps` (все healthy), дашборд `/dashboard`, один тестовый ран.
 
-Откат — подними предыдущий `TEMPORALITY_VERSION`. Миграции схемы **не откатываются**:
+Откат — подними предыдущий закреплённый `TEMPORALITY_VERSION`. Миграции схемы **не откатываются**:
 перед крупными обновлениями делай дамп (§11). Локальная сборка из исходников вместо GHCR:
 
 ```bash

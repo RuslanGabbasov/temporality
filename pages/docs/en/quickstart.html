@@ -50,12 +50,14 @@ curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temp
 curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env
 # edit .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
-TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+docker compose up -d
 </code></pre>
-<p><code>TEMPORALITY_VERSION</code> is the image version from the
-<a href="https://github.com/RuslanGabbasov/temporality/releases" target="_blank" rel="noreferrer">releases page&nbsp;<span class="ext">↗</span></a>; pin
-it explicitly, <code>latest</code> is for kicking the tires. Upgrading: set the new
-version and rerun <code>docker compose up -d</code> — the kernel migrates on start.</p>
+<p>The latest published release comes up by default (images from the
+<a href="https://github.com/RuslanGabbasov/temporality/releases" target="_blank" rel="noreferrer">releases page&nbsp;<span class="ext">↗</span></a>). For
+controlled upgrades pin a version:
+<code>TEMPORALITY_VERSION=2026.2.113 docker compose up -d</code>. Upgrading to a newer
+release: <code>docker compose pull &amp;&amp; docker compose up -d</code> (or set the new pinned
+version) — the kernel migrates on start.</p>
 <p>Building from source (for developing Temporality itself):</p>
 <pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
 cp .env.example .env

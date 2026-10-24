@@ -76,18 +76,21 @@ sandbox tar into ./backups, keeping 14 of each:</p>
 </code></pre>
 <p>For production campaigns layer restic/borg on the backups directory with
 off-site upload (S3/ssh): a local backup does not survive host loss.</p>
-<h2 id="upgrading"><a class="anchor" href="#upgrading" aria-label="Section link">#</a>Upgrading</h2><p>The stack runs prebuilt images from GHCR. Upgrading is pinning a new version
-and recreating the containers:</p>
-<pre><code class="language-sh">TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+<h2 id="upgrading"><a class="anchor" href="#upgrading" aria-label="Section link">#</a>Upgrading</h2><p>The stack runs prebuilt images from GHCR. Upgrading to the latest release:</p>
+<pre><code class="language-sh">docker compose pull &amp;&amp; docker compose up -d
+</code></pre>
+<p>For a controlled upgrade (or a rollback) pin the version explicitly:</p>
+<pre><code class="language-sh">TEMPORALITY_VERSION=2026.2.113 docker compose up -d
 </code></pre>
 <p>Database migrations apply automatically when the kernel starts. Data lives in
 compose named volumes and survives container recreation. Rolling back is the
-same move to the previous version (down-migrations do not exist for every
-schema; take a <code>postgres</code> dump before rolling back a major step).</p>
+same move to the previously pinned version (down-migrations do not exist for
+every schema; take a <code>postgres</code> dump before rolling back a major step).</p>
 <p>Building from source (<code>docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build</code>) is the development path: it overwrites
 the local images and silently turns <code>TEMPORALITY_VERSION</code> into <code>latest</code> — do
-not do this on a real deployment. The base compose file cannot build at all:
-deployment is pull-only of the pinned version.</p>
+not do this on a real deployment, or &quot;latest release&quot; stops pointing at a
+published one. The base compose file cannot build at all: deployment is
+pull-only.</p>
 <h2 id="users-and-rbac"><a class="anchor" href="#users-and-rbac" aria-label="Section link">#</a>Users and RBAC</h2><p>The <strong>Users</strong> page (<code>/users</code>): creation, roles, bearer tokens, notification
 channels. Roles are ordered: <code>reader &lt; writer &lt; operator &lt; admin</code>.</p>
 <table>

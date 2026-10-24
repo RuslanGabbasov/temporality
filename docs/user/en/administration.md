@@ -39,23 +39,29 @@ off-site upload (S3/ssh): a local backup does not survive host loss.
 
 ## Upgrading
 
-The stack runs prebuilt images from GHCR. Upgrading is pinning a new version
-and recreating the containers:
+The stack runs prebuilt images from GHCR. Upgrading to the latest release:
 
 ```sh
-TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+docker compose pull && docker compose up -d
+```
+
+For a controlled upgrade (or a rollback) pin the version explicitly:
+
+```sh
+TEMPORALITY_VERSION=2026.2.113 docker compose up -d
 ```
 
 Database migrations apply automatically when the kernel starts. Data lives in
 compose named volumes and survives container recreation. Rolling back is the
-same move to the previous version (down-migrations do not exist for every
-schema; take a `postgres` dump before rolling back a major step).
+same move to the previously pinned version (down-migrations do not exist for
+every schema; take a `postgres` dump before rolling back a major step).
 
 Building from source (`docker compose -f docker-compose.yml -f
 docker-compose.dev.yml up --build`) is the development path: it overwrites
 the local images and silently turns `TEMPORALITY_VERSION` into `latest` — do
-not do this on a real deployment. The base compose file cannot build at all:
-deployment is pull-only of the pinned version.
+not do this on a real deployment, or "latest release" stops pointing at a
+published one. The base compose file cannot build at all: deployment is
+pull-only.
 
 ## Users and RBAC
 
