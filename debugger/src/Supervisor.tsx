@@ -80,6 +80,14 @@ function causeTag(cause: string): 'red' | 'warm-gray' | 'blue' {
   return 'blue'
 }
 
+/** causeLabel localizes a triage cause class for display; raw id stays as
+ *  fallback for classes the locale does not know yet. */
+function causeLabel(cause: string, t: (key: string) => string): string {
+  const key = 'supervisor.cause_' + cause
+  const label = t(key)
+  return label === key ? cause : label
+}
+
 function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
   const byKey = new Map<string, ClusterRow>()
   const loose: ClusterRow[] = []
@@ -763,7 +771,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                             aria-label={t('supervisor.bulk_select_row') ?? 'Select row'}
                           />
                         )}
-                        <Tag type={causeTag(row.cause)} size="sm">{row.cause}</Tag>
+                        <Tag type={causeTag(row.cause)} size="sm">{causeLabel(row.cause, t)}</Tag>
                         {row.pattern && <span style={{ fontSize: '0.74rem', color: 'var(--tm-text-2)' }}>{row.pattern}</span>}
                         {row.caseID && <Tag type="purple" size="sm">{t(`supervisor.case_${row.caseID}`) ?? row.caseID}</Tag>}
                         {row.project && <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{row.project}</span>}
