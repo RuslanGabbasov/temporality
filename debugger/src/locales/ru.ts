@@ -190,6 +190,7 @@ export const ru: Record<string, string> = {
     'runs.event.behavior_suspicious': 'Похоже на опасный паттерн',
     'runs.event.behavior_test_edit': 'Правка теста/CI',
     'runs.event.behavior_generic': 'Сигнал поведенческого фильтра',
+    'runs.event.pending_tool_hint': 'формируется — выполнится сразу после ответа модели',
     'supervisor.case_other': 'Прочее',
     'supervisor.case_knowledge_conflict': 'Конфликт знаний',
     'supervisor.action_invalidate': 'Инвалидировать',

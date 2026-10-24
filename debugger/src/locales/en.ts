@@ -190,6 +190,7 @@ export const en: Record<string, string> = {
     'runs.event.behavior_suspicious': 'Resembles a danger pattern',
     'runs.event.behavior_test_edit': 'Test/CI edit',
     'runs.event.behavior_generic': 'Behavior guard signal',
+    'runs.event.pending_tool_hint': 'being formed — runs right after the model answers',
     'supervisor.case_other': 'Other',
     'supervisor.case_knowledge_conflict': 'Knowledge conflict',
     'supervisor.action_invalidate': 'Invalidate',

@@ -241,7 +241,7 @@ function TraceChips({ chip, onChip, items, t }: { chip: TraceChip; onChip: (chip
 /** Grouped trace: the §5 folded timeline with the three-layer rows, the §8
  *  filter panel (category/type/status/participant/duration, quick chips,
  *  text search — all URL-backed) above it. */
-export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts, completedOps, newestFirst, liveModelTurn, onNudgeTurn }: {
+export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts, completedOps, pendingTool, newestFirst, liveModelTurn, onNudgeTurn }: {
   events: ObservationEvent[]
   locale: Locale
   t: TFn
@@ -280,6 +280,11 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
    *  timeline. The render window may not reach an old tool.completed, so the
    *  window-local fallback below is only for bare renders (tests). */
   completedOps?: ReadonlySet<string>
+  /** The tool call the model is currently STREAMING (parsed from the token
+   *  stream): renders as a pending step inside the running turn — visible
+   *  while the command has not started yet, with the args fragment the
+   *  human can actually read. */
+  pendingTool?: { tool: string; argsTail?: string }
 }) {
   // Turn tree expansion (§5.1 reworked): a turn node is expanded while it is
   // the running one and collapses when it completes; the reader's manual
@@ -404,7 +409,23 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
           </button>
           {expanded && (
             <div style={{ padding: '0.25rem 0.4rem 0.35rem 0.6rem' }}>
-              {innerItems.length === 0 && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', padding: '0.15rem 0' }}>{t('runs.layers.turn_empty')}</div>}
+              {innerItems.length === 0 && !pendingTool && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', padding: '0.15rem 0' }}>{t('runs.layers.turn_empty')}</div>}
+              {/* The model is streaming a tool call RIGHT NOW: show the step
+                  before it exists as an event — this is exactly the gap where
+                  the human used to stare at «стрим идёт» seeing no step.
+                  Newest position (top) — it is the most recent activity. */}
+              {pendingTool && (
+                <div style={{ padding: '0.4rem 0.5rem', borderLeft: '3px dashed var(--tm-teal)', marginBottom: '0.15rem', background: 'var(--tm-raised)', borderRadius: '0 4px 4px 0', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                    <span style={{ color: 'var(--tm-teal)', width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>⚙</span>
+                    <strong style={{ flexShrink: 0 }}>{pendingTool.tool}</strong>
+                    <span style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem' }}>{t('runs.event.pending_tool_hint') ?? 'формируется — выполнится сразу после ответа модели'}</span>
+                  </div>
+                  {pendingTool.argsTail && (
+                    <pre style={{ margin: '0.25rem 0 0', fontSize: '0.68rem', color: 'var(--tm-text-3)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '4.5rem', overflowY: 'auto' }}>{pendingTool.argsTail}</pre>
+                  )}
+                </div>
+              )}
               {/* Newest-first: the turn's answer (the newest content) leads
                   the node and the rows read newest→oldest, matching the
                   spine; chronological mode keeps the log reading. */}

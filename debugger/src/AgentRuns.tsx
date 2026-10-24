@@ -1269,6 +1269,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     onConsoleState={collectConsoleState}
                     liveModelParts={liveModelParts}
                     liveModelTurn={liveModelTurn}
+                    pendingTool={liveModelParts.length > 0 && tokenMetrics?.tool ? { tool: tokenMetrics.tool, argsTail: tokenMetrics.argsTail } : undefined}
                     completedOps={completedOps}
                     newestFirst
                     onNudgeTurn={(turn) => void nudge(turn)}

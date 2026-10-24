@@ -15,6 +15,9 @@ export interface RunTokenMetrics {
   /** Tool name when the model is currently streaming a tool call (no answer
    * text this turn — the args are the output). Feeds the live “⚙ tool” hint. */
   tool?: string
+  /** Tail (last ~200 chars) of the streamed tool arguments — the pending-tool
+   * preview in the running turn shows what command is being formed. */
+  argsTail?: string
   /** False while the EventSource has not opened (or died): without it the UI
    * cannot tell a thinking model from a dead token channel, and a broken
    * transport reads as "waiting for the first token" forever. */
@@ -52,6 +55,9 @@ export class TokenMeter {
   private lastAt = 0
   private live = false
   private tool = ''
+  /** Tail of the streamed tool arguments — feeds the pending-tool preview in
+   *  the running turn (the human sees what command is being formed). */
+  private argsTail = ''
 
   apply(frame: TokenStreamFrame, now: number = Date.now()) {
     if (frame.type === 'done') {
@@ -67,15 +73,22 @@ export class TokenMeter {
       this.window = []
       this.firstAt = 0
       this.tool = ''
+      this.argsTail = ''
     }
     // Tool args count toward liveness/rate: on a tool-only turn they ARE the
     // streamed output (the answer text stays empty until the next turn).
     const chunk = (frame.text?.length ?? 0) + (frame.reasoning?.length ?? 0) + (frame.args?.length ?? 0)
+    if (frame.args) {
+      // Keep only the tail: the preview shows what is being typed right now,
+      // not the whole payload.
+      this.argsTail = (this.argsTail + frame.args).slice(-200)
+    }
     if (frame.type === 'snapshot') {
       // The snapshot replaces the accumulated state (reconnect mid-turn).
       this.chars = chunk
       this.lastAt = now
       if (frame.tool) this.tool = frame.tool
+      if (frame.args) this.argsTail = frame.args.slice(-200)
       if (chunk > 0) {
         this.live = true
         this.firstAt = now
@@ -107,6 +120,7 @@ export class TokenMeter {
       lastChunkAgoMs: this.lastAt ? now - this.lastAt : Number.POSITIVE_INFINITY,
       streaming: this.live,
       tool: this.tool || undefined,
+      argsTail: this.tool ? this.argsTail : undefined,
     }
   }
 }
