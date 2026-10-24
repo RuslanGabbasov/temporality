@@ -176,7 +176,16 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
     return out
   }, [state?.stdout.text, state?.stderr.text])
 
+  // Auto-follow: scroll to the newest line on every content change while
+  // the reader has not scrolled away (followPaused).
   const shown = savedOutput !== null ? stripAnsi(savedOutput) : merged.map((line) => line.text).join('\n')
+
+  useEffect(() => {
+    if (followPaused) return
+    const node = scrollRef.current
+    if (!node) return
+    node.scrollTop = node.scrollHeight
+  }, [shown, followPaused])
   const streamLive = live && !state?.done && !savedOutput
   const hasContent = shown.length > 0
   const copyAll = useCallback(() => {

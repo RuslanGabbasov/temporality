@@ -429,6 +429,25 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
               {/* Newest-first: the turn's answer (the newest content) leads
                   the node and the rows read newest→oldest, matching the
                   spine; chronological mode keeps the log reading. */}
+              {/* The in-flight model call lives INSIDE its turn: the human
+                  reads the streaming progress where the turn is, not in a
+                  floating top-level row. */}
+              {liveModelParts && liveModelParts.length > 0 && liveModelTurn === turn.number && (
+                <div style={{ padding: '0.4rem 0.5rem', marginBottom: '0.15rem', background: 'var(--tm-surface)', borderRadius: '0 4px 4px 0', borderLeft: '3px solid var(--tm-teal)', minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--tm-teal)', width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>⏳</span>
+                  <strong style={{ minWidth: '100px', color: 'var(--tm-text)' }}>{t('runs.event.model_call')}</strong>
+                  <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{liveModelParts.join(' · ')}</span>
+                  {liveModelTurn !== undefined && onNudgeTurn && (
+                    <button
+                      type="button"
+                      onClick={() => onNudgeTurn(liveModelTurn)}
+                      title={t('runs.nudge_hint') ?? 'Cancel the stuck model call and retry immediately'}
+                      aria-label={t('runs.nudge') ?? 'Nudge model call'}
+                      style={{ background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.1rem 0.35rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}
+                    >↻</button>
+                  )}
+                </div>
+              )}
               {newestFirst && responseBlock}
               {(newestFirst ? [...innerItems].reverse() : innerItems).map((item) => renderFolded(item, `turn${turn.number}:`))}
               {!newestFirst && responseBlock}
@@ -441,6 +460,12 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
     return <Fragment key={`plain:${index}`}>{(newestFirst ? [...plainItems].reverse() : plainItems).map((item, itemIndex) => renderFolded(item, `plain${index}:${itemIndex}:`))}</Fragment>
   }
   const renderFolded = (item: TraceItem, keyPrefix: string): React.ReactNode => {
+    // A finished run_command leaves TWO rows (started + completed) with the
+    // same payload — the completed one carries duration/exit/output, so the
+    // started row folds away once its operation is done (flat and in-turn).
+    if (item.kind === 'event' && item.event.type === 'tool.started' && finishedOps.has(operationKey(item.event))) {
+      return null
+    }
     const key = keyPrefix + keyOf(item)
     if (item.kind === 'group') {
       const open = openGroups.has(key)
@@ -578,7 +603,10 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
       )}
       {/* Newest-first: the in-flight call is the newest event, so its live
           row opens the timeline. */}
-      {liveModelParts && liveModelParts.length > 0 && (
+      {/* Newest-first: the in-flight model call renders INSIDE its running
+          turn (the turn is where the human reads the progress). The
+          top-level fallback below covers the rare pre-first-turn call. */}
+      {liveModelParts && liveModelParts.length > 0 && turnNodes.length === 0 && (
         <div style={{ padding: '0.4rem 0.5rem', marginBottom: '0.15rem', background: 'var(--tm-surface)', borderRadius: '0 4px 4px 0', borderLeft: '3px solid var(--tm-teal)', minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
           <span style={{ color: 'var(--tm-teal)', width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>⏳</span>
           <strong style={{ minWidth: '100px' }}>{t('runs.event.model_call')}</strong>
