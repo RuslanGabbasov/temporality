@@ -2398,6 +2398,8 @@ export const en: Record<string, string> = {
     'runs.layers.artifact.review_requested': 'Artifact review requested',
     'runs.layers.artifact.review_approved': 'Artifact approved',
     'runs.layers.artifact.review_rejected': 'Artifact rejected',
+    'runs.layers.artifact.review_reminded': 'Review reminder ({hours}h without a decision)',
+    'runs.layers.artifact.review_escalated': 'Review escalated ({hours}h without a decision)',
     'runs.layers.quality.proposed': 'Agent evolution proposed',
     'runs.layers.quality.applied': 'Agent evolution applied',
     'runs.layers.quality.rejected': 'Agent evolution rejected',

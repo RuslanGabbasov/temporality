@@ -33,6 +33,13 @@ type fakeArtifactLifecycleStore struct {
 	submitErr   error
 	countErr    error
 	audits      []storedAudit
+
+	// channel-row persistence (docs/artifact-lifecycle.md §6 Phase 2)
+	createdRows   []*workspace.HumanRequest
+	threadRefs    map[string]string
+	deliveries    map[string][]workspace.HumanRequestDelivery
+	answeredRows  map[string]string
+	cancelledRows []string
 }
 
 func (f *fakeArtifactLifecycleStore) GetArtifactRange(_ context.Context, id string, _, _ int) (workspace.Artifact, error) {
@@ -132,6 +139,50 @@ func (f *fakeArtifactLifecycleStore) RecordAccessAudit(_ context.Context, actor,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.audits = append(f.audits, storedAudit{actor: actor, action: action, entityKind: entityKind, entityID: entityID, details: details})
+	return nil
+}
+
+func (f *fakeArtifactLifecycleStore) CreateHumanRequest(_ context.Context, r *workspace.HumanRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createdRows = append(f.createdRows, r)
+	return nil
+}
+
+func (f *fakeArtifactLifecycleStore) SetHumanRequestThreadRef(_ context.Context, id, threadRef string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.threadRefs == nil {
+		f.threadRefs = map[string]string{}
+	}
+	f.threadRefs[id] = threadRef
+	return nil
+}
+
+func (f *fakeArtifactLifecycleStore) AddHumanRequestDeliveries(_ context.Context, requestID string, deliveries []workspace.HumanRequestDelivery) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deliveries == nil {
+		f.deliveries = map[string][]workspace.HumanRequestDelivery{}
+	}
+	f.deliveries[requestID] = append(f.deliveries[requestID], deliveries...)
+	return nil
+}
+
+func (f *fakeArtifactLifecycleStore) AnswerHumanRequest(_ context.Context, id, response, answeredBy string) (workspace.HumanRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.answeredRows == nil {
+		f.answeredRows = map[string]string{}
+	}
+	f.answeredRows[id] = answeredBy + ": " + response
+	return workspace.HumanRequest{ID: id, Status: workspace.HumanStatusAnswered, Response: response, AnsweredBy: answeredBy}, nil
+}
+
+func (f *fakeArtifactLifecycleStore) CancelHumanRequest(_ context.Context, id, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelledRows = append(f.cancelledRows, id)
 	return nil
 }
 

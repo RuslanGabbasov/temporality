@@ -43,9 +43,12 @@ func scanHumanRequest(scanner interface{ Scan(dest ...any) error }) (HumanReques
 
 // CreateHumanRequest inserts a new pending request. Id collisions (activity
 // retry after a partial failure) update nothing — the row already exists.
+// project_id is optional: ask_human rows always carry one, while out-of-run
+// requests (artifact review rounds, docs/artifact-lifecycle.md §6 Phase 2)
+// are installation-scoped and carry only the orphan run marker.
 func (s *Store) CreateHumanRequest(ctx context.Context, r *HumanRequest) error {
-	if r.ID == "" || r.RunID == "" || r.ProjectID == "" || r.Question == "" {
-		return errors.New("id, run_id, project_id and question are required")
+	if r.ID == "" || r.RunID == "" || r.Question == "" {
+		return errors.New("id, run_id and question are required")
 	}
 	if r.Status == "" {
 		r.Status = HumanStatusPending

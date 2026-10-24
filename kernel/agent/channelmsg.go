@@ -58,6 +58,16 @@ var channelMessages = map[string][2]string{
 	"ask_project_run": {"Project %s · run %s", "Проект %s · ран %s"},
 	"ask_waiting":     {"waiting %ds", "ждёт %dс"},
 	"ask_answer_here": {"Answer here:", "Ответьте здесь:"},
+
+	// Artifact review decisions from the channel (docs/artifact-lifecycle.md
+	// §6 Phase 2): the reply router confirms or refuses in the dialog language.
+	"review_decided":    {"✅ %q (v%d) — approved%s", "✅ «%s» (v%d) — утверждено%s"},
+	"review_decided_re": {"❌ %q (v%d) — rejected%s", "❌ «%s» (v%d) — отклонено%s"},
+	"review_by":         {" by %s", " — %s"},
+	"review_already":    {"This review round is already resolved — see the Temporality artifacts page.", "Этот круг согласования уже закрыт — смотрите страницу артефактов Temporality."},
+	"review_not_yours":  {"You are not a reviewer of this review round.", "Вы не согласующий этого круга ревью."},
+	"review_how_to":     {"Reply “approve [comment]” or “reject [comment]” to decide, or use the Temporality artifacts page.", "Ответьте «одобрить [комментарий]» или «отклонить [комментарий]», либо решите на странице артефактов Temporality."},
+	"review_left_open":  {"Noted — the review round stays open; decide in the Temporality artifacts page.", "Принято — круг согласования остаётся открытым; решение — на странице артефактов Temporality."},
 }
 
 // ChannelText renders one canned line in the dialog language, English as the

@@ -368,6 +368,8 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
   'artifact.review.requested': (d, { t }) => ({ title: t('runs.layers.artifact.review_requested'), fact: [squash(d.artifact_id), versionOf(d)].filter(Boolean).join(' · ') }),
   'artifact.review.approved': (d, { t }) => ({ title: t('runs.layers.artifact.review_approved'), fact: [squash(d.artifact_id), versionOf(d)].filter(Boolean).join(' · '), status: 'ok' }),
   'artifact.review.rejected': (d, { t }) => ({ title: t('runs.layers.artifact.review_rejected'), fact: squash(d.artifact_id), status: 'error' }),
+  'artifact.review.reminded': (d, { t }) => ({ title: t('runs.layers.artifact.review_reminded', { hours: String(d.age_hours ?? 0) }), fact: [squash(d.artifact_id), versionOf(d)].filter(Boolean).join(' · ') }),
+  'artifact.review.escalated': (d, { t }) => ({ title: t('runs.layers.artifact.review_escalated', { hours: String(d.age_hours ?? 0) }), fact: [squash(d.artifact_id), versionOf(d)].filter(Boolean).join(' · '), status: 'error' }),
   // ── §5.7 secrets — P-2: name/status/reason only, values never. The payload
   // never leaks into fact/title; the details layer stays closed for them. ──
   'secret.created': (d, { t }) => ({ title: t('runs.layers.secret.created', { name: secretName(d) }), fact: '', hasDetails: false }),

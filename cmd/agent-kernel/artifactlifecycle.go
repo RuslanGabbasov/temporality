@@ -42,6 +42,13 @@ type artifactLifecycleStore interface {
 	CountArtifactSubmits(ctx context.Context, runID string, since time.Time) (int, error)
 	ListUsers(ctx context.Context) ([]workspace.User, error)
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
+	// Channel-row persistence (docs/artifact-lifecycle.md §6 Phase 2): the
+	// orphan-run human request that makes a reviewer's chat replies match
+	// the round. *workspace.Store satisfies all of them.
+	CreateHumanRequest(ctx context.Context, r *workspace.HumanRequest) error
+	SetHumanRequestThreadRef(ctx context.Context, id, threadRef string) error
+	AddHumanRequestDeliveries(ctx context.Context, requestID string, deliveries []workspace.HumanRequestDelivery) error
+	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, error)
 }
 
 // artifactLifecycleOutbox is the durable-outbox surface for lifecycle events.
@@ -254,6 +261,13 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 				"artifact_id": review.ArtifactID, "title": artifact.Title, "version": review.ArtifactVersion,
 				"review_id": review.ID, "decision": decision, "resolved_by": principal, "comment": req.Comment,
 			})
+			// The round's channel row (docs/artifact-lifecycle.md §6 Phase 2)
+			// closes with the round: a later chat reply finds it answered and
+			// the inbox stops counting the round as waiting. ErrNotFound is the
+			// normal case for web-only rounds — they never got a row.
+			if _, cerr := ws.AnswerHumanRequest(r.Context(), artifactReviewRequestID(review.ID), decisionResponse(approve, strings.TrimSpace(req.Comment))+" (ui)", principal); cerr != nil && !errors.Is(cerr, workspace.ErrNotFound) {
+				slog.Warn("close review channel row", "review", review.ID, "error", cerr)
+			}
 			writeJSON(w, 200, map[string]any{"review": review, "artifact": artifact})
 		}
 	}

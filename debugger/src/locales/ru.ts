@@ -2398,6 +2398,8 @@ export const ru: Record<string, string> = {
     'runs.layers.artifact.review_requested': 'Запрошено ревью артефакта',
     'runs.layers.artifact.review_approved': 'Артефакт утверждён',
     'runs.layers.artifact.review_rejected': 'Артефакт отклонён',
+    'runs.layers.artifact.review_reminded': 'Напоминание о ревью ({hours} ч без решения)',
+    'runs.layers.artifact.review_escalated': 'Эскалация ревью ({hours} ч без решения)',
     'runs.layers.quality.proposed': 'Предложена эволюция агента',
     'runs.layers.quality.applied': 'Эволюция агента применена',
     'runs.layers.quality.rejected': 'Эволюция агента отклонена',

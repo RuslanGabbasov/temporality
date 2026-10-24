@@ -96,6 +96,10 @@ type channelInboundStore interface {
 	ListRoutedInboundMessages(ctx context.Context, senderUserID string, limit int) ([]workspace.InboundMessage, error)
 	GetRun(ctx context.Context, id string) (workspace.Run, error)
 	CountInboundMessagesSince(ctx context.Context, senderUserID string, since time.Time) (int, error)
+	// Artifact review rounds (docs/artifact-lifecycle.md §6 Phase 2): replies
+	// matched to an orphan-run review row resolve the round instead of a run.
+	GetArtifactReview(ctx context.Context, reviewID string) (workspace.ArtifactReview, error)
+	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
 }
 
 // run cycles until the context is cancelled. A cycle error is logged and the
@@ -321,6 +325,12 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 		if err := l.store.SetHumanRequestThreadRef(ctx, reply.Ask.RequestID, reply.Message.ReplyTo); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 			l.log.Warn("channel reply pin thread", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "error", err)
 		}
+	}
+	// Orphan-run rows are artifact review rounds (docs/artifact-lifecycle.md
+	// §6 Phase 2): the round resolves through the store, not through a run.
+	if reviewID, ok := artifactReviewFromRequestRun(reply.Ask.RunID); ok {
+		l.routeArtifactReviewReply(ctx, channelSettings, reply, reviewID)
+		return
 	}
 	response := truncateForLog(reply.Message.Text, 4000)
 	if len(reply.Message.Files) > 0 {

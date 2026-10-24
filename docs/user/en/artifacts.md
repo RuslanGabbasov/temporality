@@ -36,6 +36,13 @@ forbidden at the API level). Reviewers are configured with the `all` mode
 (everyone must decide) or `any` (one is enough). A rejection returns the
 artifact to the author with a reason.
 
+Decide in the web UI (the Artifacts page) or right in your messenger: reply
+to the notification — the first word decides (`approve`/`reject`, the rest
+becomes the comment). If a round sits unresolved past
+`ARTIFACT_REVIEW_TIMEOUT` (72 hours by default), reviewers get one reminder;
+after another silent timeout the escalation reaches the artifact org unit's
+manager (or an administrator).
+
 A typical cycle: an analyst agent drafts the document → sends it for review →
 the human edits it themselves or with the agent → approves → the document
 becomes available to all executor agents as a link from a skill.

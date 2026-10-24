@@ -46,6 +46,10 @@ type ArtifactReview struct {
 	Decisions       map[string]ReviewDecision `json:"decisions,omitempty"`
 	ResolvedBy      string                    `json:"resolved_by,omitempty"`
 	ResolvedAt      *time.Time                `json:"resolved_at,omitempty"`
+	// Sweep bookkeeping (docs/artifact-lifecycle.md §6 Phase 2): when the
+	// deadline reminder and the escalation text went out. NULL = not sent.
+	RemindedAt  *time.Time `json:"reminded_at,omitempty"`
+	EscalatedAt *time.Time `json:"escalated_at,omitempty"`
 }
 
 // ReviewDecision is one reviewer's answer inside a review round. Group
@@ -58,21 +62,34 @@ type ReviewDecision struct {
 	DecidedBy string    `json:"decided_by,omitempty"` // concrete principal behind a group entry
 }
 
-const artifactReviewColumns = `id, artifact_id, artifact_version, reviewers, mode, status, note, requested_by, requested_at, decisions, resolved_by, resolved_at`
+const artifactReviewColumns = `id, artifact_id, artifact_version, reviewers, mode, status, note, requested_by, requested_at, decisions, resolved_by, resolved_at, reminded_at, escalated_at`
 
 func scanArtifactReview(row interface{ Scan(dest ...any) error }) (ArtifactReview, error) {
+	return scanArtifactReviewInto(row, nil)
+}
+
+// scanArtifactReviewInto scans the review columns plus any trailing extras
+// (joins like the sweep's title/org unit) in one pass — a pgx Rows is a
+// cursor, so a row must be read with a single Scan.
+func scanArtifactReviewInto(row interface{ Scan(dest ...any) error }, extra []any) (ArtifactReview, error) {
 	var r ArtifactReview
 	var decisions []byte
 	var resolvedBy *string
-	err := row.Scan(&r.ID, &r.ArtifactID, &r.ArtifactVersion, &r.Reviewers, &r.Mode, &r.Status,
-		&r.Note, &r.RequestedBy, &r.RequestedAt, &decisions, &resolvedBy, &r.ResolvedAt)
+	var remindedAt, escalatedAt *time.Time
+	dest := []any{&r.ID, &r.ArtifactID, &r.ArtifactVersion, &r.Reviewers, &r.Mode, &r.Status,
+		&r.Note, &r.RequestedBy, &r.RequestedAt, &decisions, &resolvedBy, &r.ResolvedAt, &remindedAt, &escalatedAt}
+	err := row.Scan(append(dest, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, ErrNotFound
 	}
 	if err != nil {
 		return r, err
 	}
-	r.ResolvedBy = derefPtr(resolvedBy)
+	if resolvedBy != nil {
+		r.ResolvedBy = *resolvedBy
+	}
+	r.RemindedAt = remindedAt
+	r.EscalatedAt = escalatedAt
 	if len(decisions) > 0 {
 		_ = json.Unmarshal(decisions, &r.Decisions)
 	}
@@ -151,7 +168,7 @@ func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, rev
 	}
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO workspace_artifact_review (`+artifactReviewColumns+`)
-		 VALUES ($1,$2,$3,$4,$5,'open',$6,$7,$8,'{}'::jsonb,NULL,NULL)`,
+		 VALUES ($1,$2,$3,$4,$5,'open',$6,$7,$8,'{}'::jsonb,NULL,NULL,NULL,NULL)`,
 		review.ID, review.ArtifactID, review.ArtifactVersion, review.Reviewers, review.Mode,
 		review.Note, review.RequestedBy, review.RequestedAt)
 	if err != nil {
@@ -338,6 +355,65 @@ func (s *Store) ListArtifactReviews(ctx context.Context, artifactID string) ([]A
 		result = append(result, review)
 	}
 	return result, rows.Err()
+}
+
+// StaleArtifactReview is one open review round with the artifact fields the
+// reminder sweep needs (docs/artifact-lifecycle.md §6 Phase 2): the title for
+// the channel texts and the org unit for escalation routing.
+type StaleArtifactReview struct {
+	Review        ArtifactReview
+	ArtifactTitle string
+	OrgUnitID     string
+}
+
+// ListOpenArtifactReviews returns every open review round with its artifact's
+// title and org unit, oldest first — the sweep's working set.
+func (s *Store) ListOpenArtifactReviews(ctx context.Context) ([]StaleArtifactReview, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+artifactReviewColumns+`, a.title, COALESCE(a.org_unit_id, '')
+		 FROM workspace_artifact_review r
+		 JOIN workspace_artifact a ON a.id = r.artifact_id
+		 WHERE r.status = 'open'
+		 ORDER BY r.requested_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []StaleArtifactReview{}
+	for rows.Next() {
+		var stale StaleArtifactReview
+		review, err := scanArtifactReviewInto(rows, []any{&stale.ArtifactTitle, &stale.OrgUnitID})
+		if err != nil {
+			return nil, err
+		}
+		stale.Review = review
+		result = append(result, stale)
+	}
+	return result, rows.Err()
+}
+
+// MarkArtifactReviewReminded stamps the deadline reminder on an open round —
+// the sweep's dedupe: one reminder per round, not one per sweep tick. Closed
+// rounds never re-enter the sweep.
+func (s *Store) MarkArtifactReviewReminded(ctx context.Context, id string) error {
+	return s.markArtifactReviewSweep(ctx, id, `reminded_at`)
+}
+
+// MarkArtifactReviewEscalated stamps the escalation on an open round.
+func (s *Store) MarkArtifactReviewEscalated(ctx context.Context, id string) error {
+	return s.markArtifactReviewSweep(ctx, id, `escalated_at`)
+}
+
+func (s *Store) markArtifactReviewSweep(ctx context.Context, id, column string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_artifact_review SET `+column+` = now() WHERE id = $1 AND status = 'open' AND `+column+` IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound // closed meanwhile or already stamped — nothing to do
+	}
+	return nil
 }
 
 // ArtifactRefsApproved is the skill-manifest invariant (docs/artifact-lifecycle.md

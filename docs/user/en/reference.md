@@ -40,6 +40,7 @@ description: Environment variables, ports, UI pages and links to the in-depth do
 | `TEMPORALITY_OPERATIONS_WINDOW` | `7d` | Window for operational rollups |
 | `KERNEL_UI_URL` | — | Base URL of the UI (emails/links) |
 | `ARTIFACT_SUBMIT_PER_DAY` | `10` | Daily quota of artifact review submissions per run |
+| `ARTIFACT_REVIEW_TIMEOUT` | `72h` | Artifact review deadline: one reviewer reminder, escalation to the unit head after a second timeout; `0` disables the sweep |
 | `KERNEL_SECRET_MASTER_KEY` | — | Secret encryption key (`openssl rand -hex 32`) |
 | `KERNEL_AUTH_TOKENS` / `JOURNAL_AUTH_TOKENS` | empty | Bearer tokens (`token:user:role:projects`; empty = auth off) |
 | `KERNEL_RUN_QUOTAS` | empty | Daily run quotas: `project:limit`, `*` — default |

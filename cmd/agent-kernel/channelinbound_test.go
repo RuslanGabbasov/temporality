@@ -34,6 +34,12 @@ type fakeInboundStore struct {
 	inbound    []workspace.InboundMessage
 	updates    []inboundUpdateRecord
 	runs       map[string]workspace.Run
+
+	// artifact review rounds (docs/artifact-lifecycle.md §6 Phase 2)
+	reviews     []workspace.ArtifactReview
+	artifacts   map[string]workspace.Artifact
+	resolvedIDs []string
+	resolveErr  error
 }
 
 // inboundUpdateRecord is one observed UpdateInboundMessage call.
@@ -102,6 +108,69 @@ func (s *fakeInboundStore) RecordAccessAudit(_ context.Context, _, action, _, _ 
 	defer s.mu.Unlock()
 	s.audits = append(s.audits, action)
 	return nil
+}
+
+func (s *fakeInboundStore) GetArtifactReview(_ context.Context, reviewID string) (workspace.ArtifactReview, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.reviews {
+		if r.ID == reviewID {
+			return r, nil
+		}
+	}
+	return workspace.ArtifactReview{}, workspace.ErrNotFound
+}
+
+func (s *fakeInboundStore) ResolveArtifactReview(_ context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resolveErr != nil {
+		return workspace.ArtifactReview{}, workspace.Artifact{}, s.resolveErr
+	}
+	s.resolvedIDs = append(s.resolvedIDs, reviewID)
+	for i := range s.reviews {
+		if s.reviews[i].ID != reviewID {
+			continue
+		}
+		decision := "reject"
+		if approve {
+			decision = "approve"
+		}
+		if s.reviews[i].Decisions == nil {
+			s.reviews[i].Decisions = map[string]workspace.ReviewDecision{}
+		}
+		for _, entry := range entries {
+			s.reviews[i].Decisions[entry] = workspace.ReviewDecision{Decision: decision, Comment: comment, DecidedBy: decidedBy}
+		}
+		// Same closure rule as the store: reject closes immediately, mode any
+		// closes on the first approval, mode all when every entry approved.
+		closes, status := false, workspace.ArtifactRejected
+		if !approve {
+			closes = true
+		} else if s.reviews[i].Mode == "any" {
+			closes, status = true, workspace.ArtifactApproved
+		} else {
+			all := true
+			for _, who := range s.reviews[i].Reviewers {
+				d, ok := s.reviews[i].Decisions[who]
+				if !ok || d.Decision != "approve" {
+					all = false
+					break
+				}
+			}
+			closes, status = all, workspace.ArtifactApproved
+		}
+		if closes {
+			s.reviews[i].Status = status
+			s.reviews[i].ResolvedBy = decidedBy
+		}
+		artifact := s.artifacts[s.reviews[i].ArtifactID]
+		if closes {
+			artifact.Status = status
+		}
+		return s.reviews[i], artifact, nil
+	}
+	return workspace.ArtifactReview{}, workspace.Artifact{}, workspace.ErrNotFound
 }
 
 func (s *fakeInboundStore) ChannelCursor(context.Context, string) (workspace.ChannelCursor, error) {

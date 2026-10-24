@@ -2922,11 +2922,14 @@ func main() {
 		},
 		visibleUnits, time.Now, log)
 	// Artifact lifecycle routes (docs/artifact-lifecycle.md §6): submit a
-	// draft to review, list review rounds, resolve them by human decision.
-	// Reviewer notices ride the channel registry (§6 Phase 1), best-effort.
-	RegisterArtifactLifecycleRoutes(mux, gate, ws, events, &channelReviewNotifier{
+	// draft to review, list review rounds, resolve them by human decision —
+	// in the UI or by channel reply (Phase 2). Reviewer notices ride the
+	// channel registry (§6), best-effort; the same notifier serves the
+	// reminder/escalation sweep below.
+	reviewNotifier := &channelReviewNotifier{
 		ws: ws, settings: activities.ChannelSettings, client: activities.HTTP, log: log,
-	})
+	}
+	RegisterArtifactLifecycleRoutes(mux, gate, ws, events, reviewNotifier)
 	// Manual saga management (docs/sagas.md §8): rename, merge and task
 	// re-binding from the UI. Event-sourced like the agent tools — the routes
 	// only validate against the journal and emit through the same outbox.
@@ -7215,6 +7218,10 @@ func main() {
 	// without a restart. Anchored on the newest scheduled run row.
 	registerQualityScheduleRoutes(mux, gate, ws, events)
 	go runQualityScheduleJob(ctx, ws, activities, log)
+	// Review deadline sweep (docs/artifact-lifecycle.md §6 Phase 2): one
+	// reminder past ARTIFACT_REVIEW_TIMEOUT, one escalation to the org head
+	// (else admins) after another silent timeout. Disabled by "0".
+	go runArtifactReviewSweep(ctx, ws, reviewNotifier, events, log)
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	// Golden eval-case candidates (specs/quality-loop.md §4): review
 	// endpoints, candidate events and the harvesting/reaping background job.

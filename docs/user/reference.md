@@ -40,6 +40,7 @@ description: Переменные окружения, порты, страниц
 | `TEMPORALITY_OPERATIONS_WINDOW` | `7d` | Окно для эксплуатационных свёрток |
 | `KERNEL_UI_URL` | — | Базовый URL UI (письма/ссылки) |
 | `ARTIFACT_SUBMIT_PER_DAY` | `10` | Квота отправок артефактов на ревью в сутки на ран |
+| `ARTIFACT_REVIEW_TIMEOUT` | `72h` | Дедлайн ревью артефакта: напоминание согласующим, эскалация главе отдела — через два таймаута; `0` выключает свип |
 | `KERNEL_SECRET_MASTER_KEY` | — | Ключ шифрования секретов (`openssl rand -hex 32`) |
 | `KERNEL_AUTH_TOKENS` / `JOURNAL_AUTH_TOKENS` | пусто | Bearer-токены (`token:user:role:projects`; пусто = auth off) |
 | `KERNEL_RUN_QUOTAS` | пусто | Суточные квоты запусков: `project:limit`, `*` — дефолт |
