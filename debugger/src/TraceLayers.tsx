@@ -394,10 +394,10 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
             aria-expanded={expanded}
             aria-label={t('runs.layers.group.turns') + ' ' + turn.number}
             onClick={() => pinTurn(turn.number, !expanded)}
-            style={{ background: 'var(--tm-raised)', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', padding: '0.35rem 0.5rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.78rem', minWidth: 0 }}
+            style={{ background: 'var(--tm-raised)', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', padding: '0.35rem 0.5rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.78rem', minWidth: 0, color: 'var(--tm-text)' }}
           >
             {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            <strong style={{ flexShrink: 0 }}>{t('runs.layers.turn_n', { n: String(turn.number) })}</strong>
+            <strong style={{ flexShrink: 0, color: 'var(--tm-text)' }}>{t('runs.layers.turn_n', { n: String(turn.number) })}</strong>
             {tools > 0 && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', flexShrink: 0 }}>⚙ {tools}</span>}
             {tokens > 0 && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', flexShrink: 0 }}>{tokens.toLocaleString()} tok</span>}
             {preview

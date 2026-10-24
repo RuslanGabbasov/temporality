@@ -573,7 +573,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   }
 
   return (
-    <Theme theme="g100">
+    <Theme theme={resolved === 'light' ? 'g10' : 'g100'}>
       <Header aria-label="Temporality">
         <HeaderName href="/workspace" prefix="" onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate('/workspace') }}>
           <img src="/temporality.svg" alt="" style={{ height: '20px', width: 'auto', marginRight: '0.5rem', verticalAlign: 'middle' }} />
