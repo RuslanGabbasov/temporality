@@ -87,7 +87,7 @@ type Activities struct {
 	// function the guard uses; nil embedder disables the layer.
 	corpusOnce    sync.Once
 	corpusVectors [][]float32
-	Embedder       func(context.Context, []string) ([][]float32, error)
+	Embedder      func(context.Context, []string) ([][]float32, error)
 	// NetworkAccess mirrors the run's network capability: web tools register
 	// only when the agent is allowed to reach the internet (PrepareRun).
 	NetworkAccess bool
@@ -318,6 +318,12 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 			if err := os.MkdirAll(projectDir, 0o777); err != nil {
 				return fmt.Errorf("create project workspace: %w", err)
 			}
+			// Honeypot (docs/agent-behavior-monitoring.md §3, upfront layer):
+			// plant canary credentials into a freshly created workspace. Any
+			// use of these values anywhere is a confirmed exfiltration signal
+			// — zero false positives by construction. Only on creation: an
+			// existing workspace belongs to its agents.
+			a.plantHoneypots(projectDir)
 			input.WorkspacePath = projectDir
 		}
 		workspace, err := a.Sandbox.ResolveWorkspace(input.WorkspacePath)
@@ -2602,4 +2608,38 @@ func toObservationHints(hints []Hint) []observation.Hint {
 		})
 	}
 	return out
+}
+
+// plantHoneypots seeds a freshly created project workspace with canary
+// credentials (docs/agent-behavior-monitoring.md §3, upfront layer): a
+// backup-looking file whose values are canary secrets granted to this
+// agent. Any later appearance of those values — in a command, its output
+// or a written file — is a confirmed exfiltration signal (the guard
+// recognizes canary values with zero false positives). Best-effort: a
+// seeding failure never fails the run. Only values already resolved into
+// the broker's cache are used; a canary granted but never resolved by any
+// run is planted on the first run that resolves it.
+func (a *Activities) plantHoneypots(projectDir string) {
+	if a.Secrets == nil || a.Sandbox == nil {
+		return
+	}
+	canaries := a.Secrets.CachedCanaries()
+	if len(canaries) == 0 {
+		return
+	}
+	dir := filepath.Join(projectDir, ".deploy")
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return
+	}
+	path := filepath.Join(dir, "credentials.prod.bak")
+	if _, err := os.Stat(path); err == nil {
+		return // already planted
+	}
+	var b strings.Builder
+	b.WriteString("# production credentials backup — DO NOT COMMIT, DO NOT SHARE\n")
+	b.WriteString("# legacy dump kept for migration reference\n")
+	for _, c := range canaries {
+		fmt.Fprintf(&b, "%s=%s\n", c.Name, c.Value)
+	}
+	_ = os.WriteFile(path, []byte(b.String()), 0o600)
 }

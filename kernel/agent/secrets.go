@@ -99,34 +99,57 @@ func (b *SecretBroker) Resolve(ctx context.Context, name string) (value string, 
 	return payload.Value, false, nil
 }
 
+// CachedCanary is one cached canary secret: name and value.
+type CachedCanary struct {
+	Name  string
+	Value string
+}
+
+// CachedCanaries returns the canary secrets currently cached (i.e. resolved
+// at least once). Planting uses them to seed honeypot files.
+func (b *SecretBroker) CachedCanaries() []CachedCanary {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []CachedCanary
+	for name, entry := range b.values {
+		if entry.canary && time.Now().Before(entry.expiresAt) {
+			out = append(out, CachedCanary{Name: name, Value: entry.value})
+		}
+	}
+	return out
+}
+
 // Canary reports whether the named secret is a honeypot credential. Unknown
 // names are not canaries.
 func (b *SecretBroker) Canary(name string) bool {
-if b == nil {
-	return false
-}
-b.mu.Lock()
-defer b.mu.Unlock()
-return b.values[name].canary
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.values[name].canary
 }
 
 func (b *SecretBroker) cached(name string) (string, bool) {
-b.mu.Lock()
-defer b.mu.Unlock()
-entry, ok := b.values[name]
-if !ok || time.Now().After(entry.expiresAt) {
-	return "", false
-}
-return entry.value, true
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	entry, ok := b.values[name]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return "", false
+	}
+	return entry.value, true
 }
 
 func (b *SecretBroker) store(name, value string, canary bool) {
-b.mu.Lock()
-defer b.mu.Unlock()
-if b.values == nil {
-	b.values = make(map[string]secretCacheEntry)
-}
-b.values[name] = secretCacheEntry{value: value, canary: canary, expiresAt: time.Now().Add(b.ttl())}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.values == nil {
+		b.values = make(map[string]secretCacheEntry)
+	}
+	b.values[name] = secretCacheEntry{value: value, canary: canary, expiresAt: time.Now().Add(b.ttl())}
 }
 
 // SecretEnvVarName converts a secret name into the environment variable the
