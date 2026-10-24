@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"io"
 	"fmt"
 	"maps"
 	"os"
@@ -735,6 +736,15 @@ type limitedBuffer struct {
 	// Result.Output stays bounded as before.
 	stream  string
 	onChunk func(stream string, chunk []byte)
+}
+
+// ReadFrom shadows the bytes.Buffer.ReadFrom promoted by embedding:
+// os/exec copies process output with io.Copy, which prefers io.ReaderFrom.
+// The promoted method would fill the buffer directly, bypassing Write —
+// and with it both onChunk streaming and the maxOutputBytes truncation.
+func (b *limitedBuffer) ReadFrom(r io.Reader) (int64, error) {
+	// struct{io.Writer} strips ReaderFrom, forcing io.Copy's chunked Write loop.
+	return io.Copy(struct{ io.Writer }{b}, r)
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
