@@ -5,7 +5,6 @@ import { ThemePrefProvider } from './theme'
 import Dashboard from './Dashboard'
 import Supervisor from './Supervisor'
 import KnowledgeExplorer from './KnowledgeExplorer'
-import KnowledgeMap from './KnowledgeMap'
 import AgentRuns from './AgentRuns'
 import ExperienceTimeline from './ExperienceTimeline'
 import Workspace from './Workspace'
@@ -31,6 +30,8 @@ const Routes = {
   agents: /^\/agents(\/|$)/,
   teams: /^\/teams(\/|$)/,
   knowledge: /^\/knowledge(\/|$)/,
+  // The map lives as a tab of the knowledge explorer now; the standalone
+  // route from its brief standalone era redirects into that tab.
   'knowledge-map': /^\/knowledge-map(\/|$)/,
   workspace: /^\/workspace(\/|$)/,
   'agent-config': /^\/agent-config(\/|$)/,
@@ -48,7 +49,7 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
 } as const
 
-type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'knowledge-map' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
   if (Routes.dashboard.test(pathname)) return 'dashboard'
@@ -56,7 +57,6 @@ function pageFor(pathname: string): Page {
   if (Routes.agents.test(pathname)) return 'agents'
   if (Routes.teams.test(pathname)) return 'teams'
   if (Routes.knowledge.test(pathname)) return 'knowledge'
-  if (Routes['knowledge-map'].test(pathname)) return 'knowledge-map'
   if (Routes.workspace.test(pathname)) return 'workspace'
   if (Routes.experience.test(pathname)) return 'experience'
   if (Routes['agent-config'].test(pathname)) return 'agent-config'
@@ -79,7 +79,13 @@ export default function App() {
   const [page, setPage] = useState<Page>(() => pageFor(window.location.pathname))
 
   useEffect(() => {
-    const navigate = () => setPage(pageFor(window.location.pathname))
+    const navigate = () => {
+      // The standalone map route folds into the explorer's map tab.
+      if (window.location.pathname === '/knowledge-map') {
+        window.history.replaceState(null, '', '/knowledge?view=map' + window.location.search.replace(/^\?/, '&'))
+      }
+      setPage(pageFor(window.location.pathname))
+    }
     navigate()
     window.addEventListener('popstate', navigate)
     return () => window.removeEventListener('popstate', navigate)
@@ -101,8 +107,6 @@ export default function App() {
             return <Teams project={project} />
           case 'knowledge':
             return <KnowledgeExplorer project={project} />
-          case 'knowledge-map':
-            return <KnowledgeMap project={project} onOpenDossier={(id) => { window.history.pushState(null, '', `/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(id)}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />
           case 'workspace':
             // @ts-ignore
             return <Workspace project={project} setProject={setProject} defaultAgentId={projectDefaultAgent} defaultModel={projectDefaultModel} />

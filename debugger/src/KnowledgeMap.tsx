@@ -33,7 +33,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [stateFilter, setStateFilter] = useState('')
-  const [hover, setHover] = useState<MapPoint | null>(null)
+  const [hover, setHover] = useState<{ point: MapPoint; clientX: number; clientY: number } | null>(null)
   const transformRef = useRef({ x: 0, y: 0, k: 1 })
   const frameRef = useRef(0)
 
@@ -175,7 +175,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         frameRef.current = requestAnimationFrame(draw)
         return
       }
-      // Hover pick: nearest point within radius in world coordinates.
+      // Hover pick: nearest point within radius in world coordinates. The
+      // tooltip rides the cursor (clamped to the container) — a fixed panel
+      // across the top kept disconnecting the hint from the dot.
       const rect = wrap.getBoundingClientRect()
       const transform = transformRef.current
       const mx = (event.clientX - rect.left - transform.x) / transform.k
@@ -187,7 +189,8 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         const dist = Math.sqrt(dx * dx + dy * dy)
         if (dist < Math.max(point.r + 3 / transform.k, bestDist)) { best = point; bestDist = dist }
       }
-      setHover(best)
+      if (best) setHover({ point: best, clientX: event.clientX - rect.left, clientY: event.clientY - rect.top })
+      else setHover(null)
     }
     const onUp = () => { dragging = false }
     const onClick = (event: MouseEvent) => {
@@ -242,23 +245,29 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast />}
 
-      <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: '480px', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)', overflow: 'hidden', cursor: hover ? 'pointer' : 'grab' }}>
+      <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: '320px', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)', overflow: 'hidden', cursor: hover ? 'pointer' : 'grab' }}>
         <canvas ref={canvasRef} style={{ display: 'block' }} />
-        {hover && (
-          <div style={{
-            position: 'absolute', pointerEvents: 'none', maxWidth: '360px',
-            background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)', borderRadius: '8px',
-            padding: '0.5rem 0.65rem', fontSize: '0.76rem', lineHeight: 1.45,
-            left: `min(calc(50% ), 50%)`, top: '0.6rem', transform: 'translateX(-50%)',
-          }}>
-            <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
-              <Tag size="sm" type={STATE_TAG[hover.item.state] ?? 'cool-gray'}>{hover.item.state}</Tag>
-              <span style={{ color: 'var(--tm-muted)', fontFamily: 'var(--tm-font-mono)', fontSize: '0.66rem' }}>{hover.item.project}</span>
-              {(hover.item.topics ?? []).slice(0, 3).map((topic) => <Tag key={topic} size="sm" type="cool-gray">{topic}</Tag>)}
+        {hover && (() => {
+          const card = 340
+          const left = Math.min(Math.max(hover.clientX + 14, card / 2 + 8), (wrapRef.current?.clientWidth ?? card) - card / 2 - 8)
+          const above = hover.clientY > 150
+          return (
+            <div style={{
+              position: 'absolute', pointerEvents: 'none', width: `${card}px`, maxWidth: '90%',
+              background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)', borderRadius: '8px',
+              padding: '0.5rem 0.65rem', fontSize: '0.76rem', lineHeight: 1.45,
+              left, top: above ? hover.clientY - 12 : hover.clientY + 14,
+              transform: above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
+            }}>
+              <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
+                <Tag size="sm" type={STATE_TAG[hover.point.item.state] ?? 'cool-gray'}>{hover.point.item.state}</Tag>
+                <span style={{ color: 'var(--tm-muted)', fontFamily: 'var(--tm-font-mono)', fontSize: '0.66rem' }}>{hover.point.item.project}</span>
+                {(hover.point.item.topics ?? []).slice(0, 3).map((topic) => <Tag key={topic} size="sm" type="cool-gray">{topic}</Tag>)}
+              </div>
+              {hover.point.item.proposition}
             </div>
-            {hover.item.proposition}
-          </div>
-        )}
+          )
+        })()}
         {loading && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>…</div>}
         {!loading && items !== null && items.length === 0 && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--tm-muted)', fontSize: '0.8rem', textAlign: 'center', padding: '1rem' }}>

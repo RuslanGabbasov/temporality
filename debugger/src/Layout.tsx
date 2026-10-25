@@ -53,9 +53,9 @@ const NAV_ITEMS = [
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
   // Knowledge explorer is the main research surface (docs/human-knowledge-
-  // explorer.md §3.1); its operational counterpart lives inside the dashboard.
+  // explorer.md §3.1); the semantic map lives in its «Карта» tab; its
+  // operational counterpart lives inside the dashboard.
   { path: '/knowledge', label: 'nav.knowledge' },
-  { path: '/knowledge-map', label: 'nav.knowledge_map' },
   { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/storage', label: 'nav.storage' },
   { path: '/experience', label: 'nav.timeline' },

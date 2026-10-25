@@ -1867,6 +1867,7 @@ export const en: Record<string, string> = {
     'explorer.nav_history_clear': 'Clear history',
     // Knowledge explorer stage 3: dossier, relations, history, conflicts
     'explorer.tab_search': 'Search',
+    'explorer.tab_map': 'Map',
     'explorer.tab_conflicts': 'Contradictions',
     'explorer.dossier': 'Dossier',
     'explorer.dossier_open': 'Open dossier',

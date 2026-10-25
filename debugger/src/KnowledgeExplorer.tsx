@@ -17,6 +17,7 @@ import SessionsPanel from './explorer/SessionsPanel'
 import EvidenceLink from './explorer/EvidenceLink'
 import { applySessionPayload, type SessionSnapshot } from './explorer/sessions'
 import Dossier from './Dossier'
+import KnowledgeMap from './KnowledgeMap'
 import { stateLabel, kindLabel, scopeLabel } from './explorer/shared'
 import ProjectRequired from './ProjectRequired'
 import { workspaceApi } from './workspaceApi'
@@ -47,7 +48,7 @@ const STATE_TAG: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'>
 const EMPTY_FILTERS = { state: '', scope: '', topic: '', entity: '', origin: '', kind: '' }
 type Filters = typeof EMPTY_FILTERS
 
-type View = 'search' | 'conflicts' | 'agent'
+type View = 'search' | 'map' | 'conflicts' | 'agent'
 
 export default function KnowledgeExplorer({ project }: { project: string }) {
   const t = useT()
@@ -65,7 +66,10 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   })
   const [selectedAreaKey, setSelectedAreaKey] = useState(initParams.get('area') ?? '')
   const [revision, setRevision] = useState(0)
-  const [view, setView] = useState<View>(initParams.get('view') === 'conflicts' ? 'conflicts' : initParams.get('view') === 'agent' ? 'agent' : 'search')
+  const [view, setView] = useState<View>(
+    initParams.get('view') === 'conflicts' ? 'conflicts'
+      : initParams.get('view') === 'agent' ? 'agent'
+        : initParams.get('view') === 'map' ? 'map' : 'search')
   const [dossierID, setDossierID] = useState(initParams.get('dossier') ?? '')
 
   const [areas, setAreas] = useState<ExploreArea[]>([])
@@ -122,7 +126,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(params.get('q') ?? '')
     setQuestion(params.get('q') ?? '')
     setSelectedAreaKey(params.get('area') ?? '')
-    setView(params.get('view') === 'conflicts' ? 'conflicts' : params.get('view') === 'agent' ? 'agent' : 'search')
+    setView(params.get('view') === 'conflicts' ? 'conflicts' : params.get('view') === 'agent' ? 'agent' : params.get('view') === 'map' ? 'map' : 'search')
     setDossierID(params.get('dossier') ?? '')
     setFilters({
       state: params.get('state') ?? '',
@@ -276,7 +280,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(state.searchInput)
     setFilters(state.filters)
     setSelectedAreaKey(state.areaKey)
-    setView(state.view === 'conflicts' || state.view === 'agent' ? state.view : 'search')
+    setView(state.view === 'conflicts' || state.view === 'agent' || state.view === 'map' ? state.view : 'search')
     setDossierID(state.dossierID)
   }, [])
 
@@ -428,10 +432,10 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
       {exploreError && <InlineNotification kind="warning" title="Explore" subtitle={exploreError} onClose={() => setExploreError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
       {listError && <InlineNotification kind="error" title="Error" subtitle={listError} onClose={() => setListError('')} lowContrast style={{ marginBottom: '0.75rem'}} />}
 
-      {/* Research view tabs: search, contradiction discovery and the agent's
-          own research calls (ТЗ §10, §12). */}
+      {/* Research view tabs: map, search, contradiction discovery and the
+          agent's own research calls (ТЗ §10, §12). */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', borderBottom: '1px solid var(--tm-border)', marginBottom: '0.75rem' }}>
-        {(['search', 'conflicts', 'agent'] as View[]).map((key) => (
+        {(['map', 'search', 'conflicts', 'agent'] as View[]).map((key) => (
           <button
             key={key}
             onClick={() => switchView(key)}
@@ -440,11 +444,24 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
               border: 'none', borderBottom: view === key && !dossierID ? '2px solid var(--tm-teal)' : '2px solid transparent',
               color: view === key && !dossierID ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
             }}
-          >{key === 'search' ? (t('explorer.tab_search') ?? 'Search') : key === 'conflicts' ? (t('explorer.tab_conflicts') ?? 'Contradictions') : (t('explorer.tab_agent') ?? 'Agent research')}</button>
+          >{
+            key === 'map' ? (t('explorer.tab_map') ?? 'Карта')
+              : key === 'search' ? (t('explorer.tab_search') ?? 'Search')
+                : key === 'conflicts' ? (t('explorer.tab_conflicts') ?? 'Contradictions')
+                  : (t('explorer.tab_agent') ?? 'Agent research')
+          }</button>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
+      {view === 'map' && !dossierID && (
+        /* The semantic map wants the whole content area: proximity reads as
+            meaning only when clusters fit the eye in one glance. */
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <KnowledgeMap project={project} onOpenDossier={openDossier} />
+        </div>
+      )}
+
+      <div style={view === 'map' && !dossierID ? { display: 'none' } : { display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Left: the area map — one widget: header with the filter and sort
             that used to live in the list below, then the treemap. The list was
             the same data in a second shape, so it is gone (ТЗ §4). The card
