@@ -301,11 +301,16 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     }
     const near = scale >= NEAR
     const stateAlpha = Math.max(0, Math.min(1, (scale - (NEAR - 0.2)) / 0.6))
+    // Dot opacity tracks the zoom tier: topics ~50%, sub-clusters ~75%,
+    // statements 100% — the dots thicken as detail takes over, smoothly
+    // interpolated between the tier boundaries instead of stepping.
+    const dotAlpha = Math.max(0.5, Math.min(1, 0.5 + ((scale - FAR) / (NEAR - FAR)) * 0.5))
     for (const { p, sx, sy, active } of visible) {
       const clusterColor = p.cluster > 0 ? CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length] : '#7aa2f7'
       const shape = stateShape(p.item.state)
       const dead = shape === 'cross'
-      ctx.globalAlpha = active ? (dead ? 0.85 : 1) : 0.18
+      const rowAlpha = active ? dotAlpha : dotAlpha * 0.35
+      ctx.globalAlpha = dead ? rowAlpha * 0.85 : rowAlpha
       if (dead) {
         // Retired statements: a cross in the cluster color — reads at any
         // zoom without filling space.
@@ -320,7 +325,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
           // The state core joins only at the near zoom (confirmed = a light
           // center, challenged keeps the diamond) — it never replaces the
           // cluster identity.
-          ctx.globalAlpha = (active ? 1 : 0.18) * stateAlpha
+          ctx.globalAlpha = rowAlpha * stateAlpha
           ctx.beginPath()
           ctx.arc(sx, sy, dotR * 0.5, 0, Math.PI * 2)
           ctx.fillStyle = STATE_COLORS[p.item.state] ?? '#7aa2f7'
