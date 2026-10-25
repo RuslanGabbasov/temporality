@@ -150,4 +150,63 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSettingChanged, "supervisor_verdict", eventID, map[string]any{"acknowledged": true})
 		writeJSON(w, 200, map[string]any{"acknowledged": eventID})
 	})
+
+	// Durable ack state (docs/supervisor-model.md §7): GET returns the whole
+	// closed set, POST acknowledges a batch in one round-trip — the queue's
+	// bulk actions were one sequential request per row and still lost rows to
+	// the event-window replay. The journal keeps an audit event per batch
+	// (the ids ride the data); the workspace table is the source of truth.
+	mux.HandleFunc("GET /v1/workspace/supervisor/acks", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		ids, err := ws.ListSupervisorAcks(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ids": ids})
+	})
+	mux.HandleFunc("POST /v1/workspace/supervisor/acks", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var req struct {
+			VerdictEventIDs []string `json:"verdict_event_ids"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		ids := make([]string, 0, len(req.VerdictEventIDs))
+		for _, id := range req.VerdictEventIDs {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				ids = append(ids, trimmed)
+			}
+		}
+		if len(ids) == 0 {
+			writeError(w, 422, fmt.Errorf("verdict_event_ids is required"))
+			return
+		}
+		if err := ws.AckSupervisorVerdicts(r.Context(), ids, requestUserID(r)); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		// One audit event per batch (ids in data), not per id — a bulk skip of
+		// two hundred rows must not flood the journal it once came from.
+		audit := observation.Event{
+			Schema:     observation.Schema,
+			EventID:    fmt.Sprintf("supervisor-ack-batch/%d", time.Now().UnixNano()),
+			OccurredAt: time.Now().UTC(),
+			Source:     observation.Source{ID: activities.SourceID, Integration: "temporality-agent-kernel", Version: "1"},
+			Context:    observation.Context{Actor: observation.Actor{ID: requestUserID(r), Type: "human"}},
+			Type:       "supervisor.verdict.acknowledged",
+			Data:       map[string]any{"verdict_event_ids": ids, "bulk": len(ids) > 1},
+		}
+		if audit.Validate() == nil {
+			_ = activities.Events.Enqueue(r.Context(), audit)
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSettingChanged, "supervisor_verdicts", fmt.Sprintf("%d", len(ids)), map[string]any{"acknowledged": true})
+		writeJSON(w, 200, map[string]any{"acknowledged": ids})
+	})
 }

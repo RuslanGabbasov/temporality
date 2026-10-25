@@ -217,19 +217,23 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     if (!silent) setLoading(true)
     setError('')
     try {
-      const [verdictPage, insightPage, ackPage, settings, effect] = await Promise.all([
+      const [verdictPage, insightPage, ackPage, acksPage, settings, effect] = await Promise.all([
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict', limit: 500 }),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.insight', limit: 50 }),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 500 }),
+        // Legacy journal acks (pre-durable-state) still count: honour them so
+        // nothing closed before the server-side set ever resurrects.
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        workspaceApi.listSupervisorAcks().catch(() => ({ ids: [] as string[] })),
         workspaceApi.getSupervisorSettings().catch(() => null),
         observationApi.hintEffectiveness().catch(() => null),
       ])
       setVerdicts(verdictPage.events ?? [])
       setInsights(insightPage.events ?? [])
-      const ackSet = new Set<string>()
+      const ackSet = new Set<string>(acksPage.ids ?? [])
       for (const event of ackPage.events ?? []) {
-        const id = String(event.data?.verdict_event_id ?? '')
-        if (id) ackSet.add(id)
+        // Legacy single acks carry one id; batch acks carry an array.
+        if (event.data?.verdict_event_id) ackSet.add(String(event.data.verdict_event_id))
+        for (const id of (event.data?.verdict_event_ids as string[] | undefined) ?? []) ackSet.add(String(id))
       }
       // MERGE, never replace: acknowledgements ride the async outbox (the POST
       // 200s before the journal has the event), so a fresh reload can be
@@ -257,7 +261,9 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   const acknowledge = async (eventID: string) => {
     setBusyAck(eventID)
     try {
-      await workspaceApi.acknowledgeSupervisorVerdict(eventID)
+      // Durable ack: the server-side set is the truth; the endpoint also
+      // journals the audit event.
+      await workspaceApi.ackSupervisorVerdicts([eventID])
       setAcknowledged((prev) => new Set(prev).add(eventID))
     } catch (failure) {
       setError(message(failure))
@@ -514,17 +520,35 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   }
   /** Runs one row action after another across the selection. Conflicts are
    *  only touched when every selected row carries the same resolution kind —
-   *  mixed selections degrade to acknowledge-only for safety. */
+   *  mixed selections degrade to acknowledge-only for safety. Acknowledge
+   *  posts once for the whole selection: hundreds of rows are one
+   *  round-trip, not one request per row. */
   const bulkApply = async (kind: 'acknowledge' | 'invalidate_new' | 'invalidate_old' | 'invalidate_both') => {
     if (selectedRows.length === 0) return
     setBulkBusy(true)
     setError('')
     try {
+      if (kind === 'acknowledge') {
+        const ids = selectedRows.flatMap((row) => row.eventIDs)
+        await workspaceApi.ackSupervisorVerdicts(ids)
+        setAcknowledged((prev) => {
+          const next = new Set(prev)
+          for (const id of ids) next.add(id)
+          return next
+        })
+        setSelected(new Set())
+        await load(true)
+        return
+      }
       for (const row of selectedRows) {
-        if (kind === 'acknowledge' || !row.conflict) {
-          for (const id of row.eventIDs) {
-            try { await workspaceApi.acknowledgeSupervisorVerdict(id) } catch { /* best-effort */ }
-          }
+        if (!row.conflict) {
+          const ids = row.eventIDs
+          await workspaceApi.ackSupervisorVerdicts(ids)
+          setAcknowledged((prev) => {
+            const next = new Set(prev)
+            for (const id of ids) next.add(id)
+            return next
+          })
           continue
         }
         await resolveConflictQuiet(row, kind)
@@ -560,9 +584,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
         } catch { /* one failure must not sink the batch; the reload shows survivors */ }
       }
     }
-    for (const eventID of row.eventIDs) {
-      try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* best-effort */ }
-    }
+    try { await workspaceApi.ackSupervisorVerdicts(row.eventIDs) } catch { /* best-effort */ }
   }
 
   return (

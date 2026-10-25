@@ -1193,6 +1193,12 @@ export const workspaceApi = {
   // verdict proposes is applied or reverted).
   acknowledgeSupervisorVerdict: (eventID: string) =>
     request<{ acknowledged: string }>('/v1/workspace/supervisor/verdicts/acknowledge', { method: 'POST', body: JSON.stringify({ event_id: eventID }) }),
+  // Durable ack state: the full closed set for the queue, and a batch ack
+  // for the bulk actions (one round-trip instead of a request per row).
+  listSupervisorAcks: () =>
+    request<{ ids: string[] }>('/v1/workspace/supervisor/acks'),
+  ackSupervisorVerdicts: (verdictEventIDs: string[]) =>
+    request<{ acknowledged: string[] }>('/v1/workspace/supervisor/acks', { method: 'POST', body: JSON.stringify({ verdict_event_ids: verdictEventIDs }) }),
   // Hint tier effectiveness (docs/supervisor-model.md §6.6): helpful/harmful
   // rates per matcher tier — the semantic-vs-lexical A/B evidence.
   hintEffectiveness: (project?: string) => {
