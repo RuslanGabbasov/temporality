@@ -173,6 +173,164 @@ export interface SemanticCluster {
   count: number
 }
 
+/** k-means-lite over 2D layout coordinates: cheap (points are already
+ *  projected), deterministic with a fixed seed, good enough to carve the
+ *  plane into themed regions the map can render per zoom tier. */
+function kmeans2d(points: Array<{ x: number; y: number }>, k: number, iterations = 10): number[] {
+  const random = rng(points.length * 7919 + k)
+  // Seed centers by the k-means++ idea: spread the first picks out.
+  const centers: Array<{ x: number; y: number }> = []
+  let minDist = new Array<number>(points.length).fill(Number.POSITIVE_INFINITY)
+  for (let c = 0; c < k; c++) {
+    let pick: { x: number; y: number }
+    if (c === 0) {
+      pick = points[Math.floor(random() * points.length)]
+    } else {
+      let total = minDist.reduce((acc, value) => acc + value, 0)
+      let roll = random() * total
+      pick = points[points.length - 1]
+      for (let i = 0; i < points.length; i++) {
+        roll -= minDist[i]
+        if (roll <= 0) { pick = points[i]; break }
+      }
+    }
+    centers.push({ x: pick.x, y: pick.y })
+    for (let i = 0; i < points.length; i++) {
+      const dx = points[i].x - pick.x, dy = points[i].y - pick.y
+      minDist[i] = Math.min(minDist[i], dx * dx + dy * dy)
+    }
+  }
+  const assign = new Array<number>(points.length).fill(0)
+  for (let iter = 0; iter < iterations; iter++) {
+    for (let i = 0; i < points.length; i++) {
+      let best = 0, bestDist = Number.POSITIVE_INFINITY
+      for (let c = 0; c < centers.length; c++) {
+        const dx = points[i].x - centers[c].x, dy = points[i].y - centers[c].y
+        const dist = dx * dx + dy * dy
+        if (dist < bestDist) { bestDist = dist; best = c }
+      }
+      assign[i] = best
+    }
+    for (let c = 0; c < centers.length; c++) {
+      let sx = 0, sy = 0, count = 0
+      for (let i = 0; i < points.length; i++) {
+        if (assign[i] !== c) continue
+        sx += points[i].x; sy += points[i].y; count++
+      }
+      if (count > 0) { centers[c] = { x: sx / count, y: sy / count } }
+    }
+  }
+  return assign
+}
+
+export interface ClusterTreeNode {
+  label: string
+  count: number
+  /** Centroid and covering radius in layout coordinates. */
+  cx: number
+  cy: number
+  radius: number
+  color: string
+  /** Level-2 nodes only: their points. */
+  members?: number[]
+  children?: ClusterTreeNode[]
+}
+
+function captionFor(items: MapItem[], memberIndices: number[]): string {
+  const frequency = new Map<string, number>()
+  for (const index of memberIndices) {
+    for (const topic of items[index].topics ?? []) {
+      const key = topic.trim()
+      if (key) frequency.set(key, (frequency.get(key) ?? 0) + 1)
+    }
+  }
+  let label = '', bestCount = 1
+  for (const [topic, count] of frequency) {
+    if (count > bestCount) { bestCount = count; label = topic }
+  }
+  return label
+}
+
+/** The map's zoom pyramid (docs/human-knowledge-explorer.md §12):
+ *  level 1 — a few dozen broad regions, level 2 — themed sub-clusters inside
+ *  each region, level 3 — the individual statements. Each node carries its
+ *  centroid, covering radius, caption (most frequent topic) and palette
+ *  color, so every zoom tier renders aggregates instead of raw dots until
+ *  there is room for them. */
+export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
+  level1: ClusterTreeNode[]
+  level2: ClusterTreeNode[]
+} {
+  const n = nodes.length
+  if (n === 0) return { level1: [], level2: [] }
+  const k1 = Math.max(4, Math.min(28, Math.round(Math.sqrt(n) / 1.6)))
+  const assign1 = kmeans2d(nodes, k1)
+
+  const groups1 = new Map<number, number[]>()
+  for (let i = 0; i < n; i++) {
+    const g = groups1.get(assign1[i])
+    if (g) g.push(i)
+    else groups1.set(assign1[i], [i])
+  }
+
+  const level1: ClusterTreeNode[] = []
+  const level2: ClusterTreeNode[] = []
+  for (const memberIndices of [...groups1.values()].sort((a, b) => b.length - a.length)) {
+    const color = CLUSTER_COLORS[level1.length % CLUSTER_COLORS.length]
+    let cx = 0, cy = 0
+    for (const index of memberIndices) { cx += nodes[index].x; cy += nodes[index].y }
+    cx /= memberIndices.length; cy /= memberIndices.length
+    let radius = 0
+    for (const index of memberIndices) {
+      radius = Math.max(radius, Math.hypot(nodes[index].x - cx, nodes[index].y - cy))
+    }
+    const node1: ClusterTreeNode = {
+      label: captionFor(items, memberIndices), count: memberIndices.length,
+      cx, cy, radius: radius + 14, color,
+    }
+    // Level 2: subdivide big regions only — small ones are their own detail.
+    if (memberIndices.length >= 12) {
+      const sub = memberIndices.map((index) => nodes[index])
+      const k2 = Math.max(2, Math.min(10, Math.round(Math.sqrt(memberIndices.length) / 1.4)))
+      const assign2 = kmeans2d(sub, k2)
+      const groups2 = new Map<number, number[]>()
+      memberIndices.forEach((pointIndex, i) => {
+        const g = groups2.get(assign2[i])
+        if (g) g.push(pointIndex)
+        else groups2.set(assign2[i], [pointIndex])
+      })
+      const children: ClusterTreeNode[] = []
+      for (const subMembers of [...groups2.values()].sort((a, b) => b.length - a.length)) {
+        let scx = 0, scy = 0
+        for (const index of subMembers) { scx += nodes[index].x; scy += nodes[index].y }
+        scx /= subMembers.length; scy /= subMembers.length
+        let sRadius = 0
+        for (const index of subMembers) {
+          sRadius = Math.max(sRadius, Math.hypot(nodes[index].x - scx, nodes[index].y - scy))
+        }
+        const child: ClusterTreeNode = {
+          label: captionFor(items, subMembers), count: subMembers.length,
+          cx: scx, cy: scy, radius: sRadius + 8, color,
+          members: subMembers,
+        }
+        children.push(child)
+        level2.push(child)
+      }
+      node1.children = children
+    } else {
+      node1.members = memberIndices
+      // A small region is its own level-2 detail: every point must be
+      // reachable at the sub-cluster tier, small themes included.
+      level2.push({
+        label: node1.label, count: node1.count, cx, cy, radius: node1.radius, color,
+        members: memberIndices,
+      })
+    }
+    level1.push(node1)
+  }
+  return { level1, level2 }
+}
+
 /** The map's skeleton: kNN edges plus super-clusters — union-find over the
  *  strong edges (cosine ≥ strong). Clusters are what the far-zoom plane
  *  renders instead of hundreds of dots: one bubble per theme, a caption per

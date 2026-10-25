@@ -136,7 +136,7 @@ type knowledgeProjectLister interface {
 // explorer.md): every embedded knowledge item visible to the caller — vector
 // plus the meta the map renders (proposition, state, topics, scope, project).
 // Vectors ride as plain float arrays; the client projects them to 2D. Bound:
-// newest 1500 items — a map with more dots is unreadable anyway.
+// newest 20000 items — the client renders the top levels server-independently;
 func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request) {
 	if !s.gate.Allow(w, r, controlplane.RoleReader) {
 		return
@@ -232,8 +232,8 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	}
 	// Newest first, bounded: a map beyond this size is unreadable anyway.
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	if len(items) > 1500 {
-		items = items[:1500]
+	if len(items) > 20000 {
+		items = items[:20000]
 	}
 	writeJSON(w, 200, map[string]any{"items": items, "model": model})
 }

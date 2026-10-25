@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clusterAssign, knnEdges, projectSemanticMap, type MapItem } from './semanticMap'
+import { buildClusterTree, clusterAssign, knnEdges, projectSemanticMap, type MapItem } from './semanticMap'
 
 function item(id: string, vector: number[], topics: string[] = []): MapItem {
   return { id, project: 'p', proposition: `statement ${id}`, state: 'confirmed', topics, vector }
@@ -79,5 +79,41 @@ describe('projectSemanticMap', () => {
     const { nodes } = projectSemanticMap(items, { width: 600, height: 400 })
     expect(nodes).toHaveLength(2)
     expect(nodes.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y))).toBe(true)
+  })
+})
+
+describe('buildClusterTree', () => {
+  const items: MapItem[] = Array.from({ length: 40 }, (_, i) => ({
+    id: `k${i}`,
+    project: 'p',
+    proposition: `statement ${i}`,
+    state: 'confirmed',
+    topics: [i % 2 === 0 ? 'frontend' : 'backend'],
+    // Two tight blobs far apart: even indices near (10,10), odd near (90,90).
+    vector: i % 2 === 0 ? [1, 0.05, 0] : [0, 0.05, 1],
+  }))
+  const { nodes } = projectSemanticMap(items, { width: 800, height: 600 })
+
+  it('builds two pyramid levels with captions and counts', () => {
+    const tree = buildClusterTree(items, nodes)
+    expect(tree.level1.length).toBeGreaterThanOrEqual(2)
+    expect(tree.level2.length).toBeGreaterThanOrEqual(tree.level1.length)
+    const total = tree.level1.reduce((acc, node) => acc + node.count, 0)
+    expect(total).toBe(items.length)
+    for (const node of tree.level1) {
+      if (node.count >= 2) expect(typeof node.label).toBe('string')
+    }
+  })
+
+  it('covers every point exactly once at level 2', () => {
+    const tree = buildClusterTree(items, nodes)
+    const seen = new Set<number>()
+    for (const child of tree.level2) {
+      for (const member of child.members ?? []) {
+        expect(seen.has(member)).toBe(false)
+        seen.add(member)
+      }
+    }
+    expect(seen.size).toBe(items.length)
   })
 })

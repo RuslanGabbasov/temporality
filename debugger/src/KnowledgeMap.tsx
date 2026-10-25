@@ -6,11 +6,12 @@ import { stateLabel } from './explorer/shared'
 import {
   CLUSTER_COLORS,
   STATE_COLORS,
+  buildClusterTree,
   projectSemanticMap,
   semanticGraph,
+  type ClusterTreeNode,
   type LayoutNode,
   type MapItem,
-  type SemanticCluster,
 } from './semanticMap'
 
 /** Semantic knowledge map (docs/human-knowledge-explorer.md §12): the whole
@@ -38,9 +39,11 @@ const STATE_TAG: Record<string, 'green' | 'blue' | 'red' | 'warm-gray' | 'cool-g
 /** Layout world size; the canvas scales it to fit (see viewScale). */
 const WORLD_W = 1400
 const WORLD_H = 900
-/** Zoom tiers (in effective on-screen scale). */
-const FAR = 0.62 // below: cluster bubbles
-const NEAR = 1.5 // above: item labels
+/** Zoom tiers (effective on-screen scale): below FAR — broad-region heat
+ *  map; FAR..NEAR — sub-cluster bubbles over cluster-colored dots; above
+ *  NEAR — state-colored cores and the bounded item labels. */
+const FAR = 0.55
+const NEAR = 1.6
 /** A label is drawn only if no already-drawn label sits within this box. */
 const LABEL_BOX_W = 92
 const LABEL_BOX_H = 18
@@ -63,7 +66,11 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const transformRef = useRef({ x: 0, y: 0, k: 1 })
   const frameRef = useRef(0)
   const edgesRef = useRef<Array<[number, number, number]>>([])
-  const clustersRef = useRef<SemanticCluster[]>([])
+  const level1Ref = useRef<ClusterTreeNode[]>([])
+  const level2Ref = useRef<ClusterTreeNode[]>([])
+  /** Aggregate opacity per zoom: which pyramid tier is on stage. Kept in a
+   *  ref + state mirror so the tier badges re-render without redrawing hooks. */
+  const [tier, setTier] = useState<1 | 2 | 3>(1)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -80,17 +87,18 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
   useEffect(() => { void load() }, [load])
 
-  // Re-layout when the dataset changes; the graph skeleton (edges +
-  // super-clusters) is computed once here, not per frame.
+  // Re-layout when the dataset changes; the cluster pyramid (regions →
+  // sub-clusters) is computed once here, not per frame.
   useEffect(() => {
     if (!items) return
-    if (items.length === 0) { setPoints([]); edgesRef.current = []; clustersRef.current = []; return }
+    if (items.length === 0) { setPoints([]); level1Ref.current = []; level2Ref.current = []; return }
     const layout = projectSemanticMap(items, { k: 6, width: WORLD_W, height: WORLD_H })
     const radius = Math.max(2.2, Math.min(4, 900 / Math.sqrt(layout.nodes.length + 1)))
     setPoints(layout.nodes.map((node) => ({ ...node, r: radius })))
-    const graph = semanticGraph(items, 8, 0.6)
-    edgesRef.current = graph.edges
-    clustersRef.current = graph.clusters
+    const tree = buildClusterTree(items, layout.nodes)
+    level1Ref.current = tree.level1
+    level2Ref.current = tree.level2
+    edgesRef.current = semanticGraph(items, 8, 0.6).edges
     transformRef.current = { x: 0, y: 0, k: 1 }
   }, [items])
 
@@ -139,84 +147,88 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue
       visible.push({ p: points[i], sx, sy, active: matches[i] })
     }
+    const dotR = Math.max(1.6, Math.min(3.2, points[0]?.r ?? 3)) * Math.min(1.5, Math.max(0.8, scale))
 
-    const dotR = Math.max(1.4, Math.min(3.4, points[0]?.r ?? 3)) * Math.min(1.6, Math.max(0.75, scale))
+    // Tier tracking for the legend badges (state mirror, cheap guard).
+    const nextTier: 1 | 2 | 3 = scale < FAR ? 1 : scale < NEAR ? 2 : 3
+    setTier((current) => (current === nextTier ? current : nextTier))
 
-    // ── far plane: topic bubbles instead of a swarm of dots ──
-    if (scale < FAR) {
-      for (const cluster of clustersRef.current) {
-        if (cluster.count < 4) continue
-        let cx = 0, cy = 0, matched = 0
-        for (const index of cluster.members) {
-          cx += points[index].x * scale + tx
-          cy += points[index].y * scale + ty
-          if (matches[index]) matched++
-        }
-        cx /= cluster.count; cy /= cluster.count
-        if (cx < -120 || cx > w + 120 || cy < -80 || cy > h + 80) continue
-        const radius = 12 + Math.sqrt(matched || cluster.count) * 6
-        const palette = CLUSTER_COLORS[Math.abs(cluster.label.length * 31 + cluster.count) % CLUSTER_COLORS.length]
-        ctx.beginPath()
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-        ctx.fillStyle = palette
-        ctx.globalAlpha = 0.16
-        ctx.fill()
-        ctx.globalAlpha = 0.55
-        ctx.lineWidth = 1.2
-        ctx.strokeStyle = palette
-        ctx.stroke()
-        ctx.globalAlpha = 1
-        ctx.fillStyle = palette
-        ctx.font = '600 12px Inter, sans-serif'
+    /** Heat bubble: soft radial fill, no outline — a density glow, not a
+     *  drawn circle. Caption only when it fits the bubble width. */
+    const drawBubble = (node: ClusterTreeNode, alpha: number, font: number) => {
+      const cx = node.cx * scale + tx
+      const cy = node.cy * scale + ty
+      const r = node.radius * scale
+      if (cx + r < 0 || cx - r > w || cy + r < 0 || cy - r > h) return
+      const gradient = ctx.createRadialGradient(cx, cy, r * 0.15, cx, cy, r)
+      gradient.addColorStop(0, node.color)
+      gradient.addColorStop(1, node.color + '00')
+      ctx.globalAlpha = alpha * 0.5
+      ctx.fillStyle = gradient
+      ctx.beginPath()
+      ctx.arc(cx, cy, r, 0, Math.PI * 2)
+      ctx.fill()
+      if (node.label && r > 34) {
+        ctx.globalAlpha = alpha
+        ctx.fillStyle = node.color
+        ctx.font = `600 ${font}px Inter, sans-serif`
         ctx.textAlign = 'center'
-        const caption = cluster.label || '•'
-        ctx.fillText(`${caption} · ${matched || cluster.count}`, cx, cy + 4)
-        if (cluster.label) {
-          ctx.font = '10px Inter, sans-serif'
-          ctx.fillStyle = 'var(--tm-muted, #8a8a8a)'
+        const caption = `${node.label} · ${node.count}`
+        if (ctx.measureText(caption).width < r * 1.7) {
+          ctx.fillText(caption, cx, cy + font / 3)
         }
-      }
-      // Dots shrink to a quiet texture under the bubbles.
-      for (const { sx, sy, active } of visible) {
-        ctx.globalAlpha = active ? 0.7 : 0.12
-        ctx.beginPath()
-        ctx.arc(sx, sy, 1.7, 0, Math.PI * 2)
-        ctx.fillStyle = '#7aa2f7'
-        ctx.fill()
       }
       ctx.globalAlpha = 1
-      return
     }
 
-    // ── kNN skeleton: only from the mid plane up, only visible endpoints ──
-    if (scale >= FAR * 0.8) {
+    // ── tier 1: broad regions as a heat map ──
+    if (scale < FAR) {
+      for (const region of level1Ref.current) drawBubble(region, 1, 13)
+    } else if (scale < NEAR) {
+      // ── tier 2: sub-clusters; the regions fade out as detail fades in ──
+      const regionAlpha = Math.max(0, Math.min(1, (FAR + 0.65 - scale) / 0.5))
+      if (regionAlpha > 0.02) {
+        for (const region of level1Ref.current) drawBubble(region, regionAlpha * 0.7, 12)
+      }
+      const subAlpha = Math.max(0, Math.min(1, (scale - FAR * 0.8) / 0.3))
+      for (const child of level2Ref.current) drawBubble(child, subAlpha, 11)
+    }
+
+    // ── dots: cluster color from the mid plane on; state joins near ──
+    const showEdges = scale >= 0.5
+    if (showEdges) {
       ctx.lineWidth = 1
-      ctx.strokeStyle = 'rgba(122, 162, 247, 0.10)'
-      const onScreen = new Set(visible.map((entry) => entry.p.id))
+      ctx.strokeStyle = 'rgba(122, 162, 247, 0.08)'
+      const visibleIds = new Set(visible.map((entry) => entry.p.id))
       const indexById = new Map(points.map((p, i) => [p.id, i]))
       for (const [a, b] of edgesRef.current) {
         const pa = points[a], pb = points[b]
-        if (!onScreen.has(pa.id) || !onScreen.has(pb.id)) continue
-        const ai = indexById.get(pa.id)!, bi = indexById.get(pb.id)!
-        if (!matches[ai] || !matches[bi]) continue
+        if (!visibleIds.has(pa.id) || !visibleIds.has(pb.id)) continue
+        if (!matches[indexById.get(pa.id)!] || !matches[indexById.get(pb.id)!]) continue
         ctx.beginPath()
         ctx.moveTo(pa.x * scale + tx, pa.y * scale + ty)
         ctx.lineTo(pb.x * scale + tx, pb.y * scale + ty)
         ctx.stroke()
       }
     }
-
-    // ── dots: cluster color mid, state color near ──
     const near = scale >= NEAR
+    const stateAlpha = Math.max(0, Math.min(1, (scale - (NEAR - 0.2)) / 0.6))
     for (const { p, sx, sy, active } of visible) {
-      const color = near
-        ? (STATE_COLORS[p.item.state] ?? '#7aa2f7')
-        : (p.cluster > 0 ? CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length] : '#7aa2f7')
-      ctx.globalAlpha = active ? 1 : 0.15
+      const clusterColor = p.cluster > 0 ? CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length] : '#7aa2f7'
+      // Cluster color is the base identity at every tier; from the near tier
+      // the state color blends in as an inner core, never replacing it.
+      ctx.globalAlpha = active ? 1 : 0.18
       ctx.beginPath()
       ctx.arc(sx, sy, dotR, 0, Math.PI * 2)
-      ctx.fillStyle = color
+      ctx.fillStyle = clusterColor
       ctx.fill()
+      if (near && stateAlpha > 0) {
+        ctx.globalAlpha = (active ? 1 : 0.18) * stateAlpha
+        ctx.beginPath()
+        ctx.arc(sx, sy, dotR * 0.55, 0, Math.PI * 2)
+        ctx.fillStyle = STATE_COLORS[p.item.state] ?? '#7aa2f7'
+        ctx.fill()
+      }
     }
     ctx.globalAlpha = 1
 
@@ -379,7 +391,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       </div>
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-muted)' }}>
         <span>{t('knowledge.map_hint_zoom') ?? 'Колесо — масштаб: сначала кластеры с подписями, при приближении — отдельные знания. Клик по точке — досье.'}</span>
-        <span style={{ marginLeft: 'auto' }}>{t('knowledge.map_hint_labels') ?? 'Подписи появляются, когда на экране есть место.'}</span>
+        <span style={{ marginLeft: 'auto' }}>
+          {tier === 1 ? (t('knowledge.map_tier_regions') ?? 'уровень: темы') : tier === 2 ? (t('knowledge.map_tier_sub') ?? 'уровень: подкластеры') : (t('knowledge.map_tier_points') ?? 'уровень: знания')}
+        </span>
       </div>
     </div>
   )
