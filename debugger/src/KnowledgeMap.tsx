@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, InlineNotification, Tag, TextInput } from '@carbon/react'
 import { observationApi } from './observationApi'
 import { useT } from './i18n'
+import { useTheme } from './theme'
 import { stateLabel } from './explorer/shared'
 import {
   CLUSTER_COLORS,
@@ -96,6 +97,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   onOpenDossier: (id: string) => void
 }) {
   const t = useT()
+  const { resolved: theme } = useTheme()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const [items, setItems] = useState<MapItem[] | null>(null)
@@ -179,6 +181,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
     const { scale, tx, ty } = viewScale()
+    // Dark theme: glows and captions need less fill and dimmer text to read
+    // as a heat map; light theme packs stronger fills for the same contrast.
+    const dark = theme === 'dark'
 
     // Project + cull once; everything below works in screen pixels, so fonts
     // stay constant-size and dots grow only mildly with zoom.
@@ -196,7 +201,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     setTier((current) => (current === nextTier ? current : nextTier))
 
     /** Heat bubble: soft radial fill, no outline — a density glow, not a
-     *  drawn circle. Caption only when it fits the bubble width. */
+     *  drawn circle. Caption is theme-tuned text with a soft shadow —
+     *  labels sit on their own cluster glow, raw fill-on-fill was
+     *  unreadable. Up to two caption lines. */
     const drawBubble = (node: ClusterTreeNode, alpha: number, font: number) => {
       const cx = node.cx * scale + tx
       const cy = node.cy * scale + ty
@@ -205,20 +212,30 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const gradient = ctx.createRadialGradient(cx, cy, r * 0.15, cx, cy, r)
       gradient.addColorStop(0, node.color)
       gradient.addColorStop(1, node.color + '00')
-      ctx.globalAlpha = alpha * 0.5
+      ctx.globalAlpha = alpha * (dark ? 0.24 : 0.36)
       ctx.fillStyle = gradient
       ctx.beginPath()
       ctx.arc(cx, cy, r, 0, Math.PI * 2)
       ctx.fill()
       if (node.label && r > 34) {
-        ctx.globalAlpha = alpha
-        ctx.fillStyle = node.color
+        ctx.globalAlpha = alpha * (dark ? 0.95 : 1)
+        ctx.fillStyle = dark ? '#eef1f6' : '#181f2a'
         ctx.font = `600 ${font}px Inter, sans-serif`
         ctx.textAlign = 'center'
-        const caption = `${node.label} · ${node.count}`
-        if (ctx.measureText(caption).width < r * 1.7) {
-          ctx.fillText(caption, cx, cy + font / 3)
-        }
+        ctx.shadowColor = dark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.95)'
+        ctx.shadowBlur = 5
+        ctx.shadowOffsetY = 1
+        const lines = node.labelLines ?? [node.label]
+        const startY = cy - ((lines.length - 1) * (font + 2)) / 2 + font / 3
+        lines.forEach((line, index) => {
+          const caption = `${line} · ${node.count}`
+          if (ctx.measureText(caption).width < r * 2.1) {
+            ctx.fillText(caption, cx, startY + index * (font + 2))
+          }
+        })
+        ctx.shadowColor = 'transparent'
+        ctx.shadowBlur = 0
+        ctx.shadowOffsetY = 0
       }
       ctx.globalAlpha = 1
     }

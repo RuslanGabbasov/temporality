@@ -225,6 +225,9 @@ function kmeans2d(points: Array<{ x: number; y: number }>, k: number, iterations
 
 export interface ClusterTreeNode {
   label: string
+  /** Up to two caption lines (two most distinctive topics); the canvas
+   *  renders the count per line. Falls back to [label]. */
+  labelLines: string[]
   count: number
   /** Centroid and covering radius in layout coordinates. */
   cx: number
@@ -249,6 +252,28 @@ function captionFor(items: MapItem[], memberIndices: number[]): string {
     if (count > bestCount) { bestCount = count; label = topic }
   }
   return label
+}
+
+/** Caption as up to two topic words (two stacked lines on the map): one
+ *  word kept repeating across neighbouring clusters («testing, testing,
+ *  testing»); the second word is the cluster's next distinctive topic, so
+ *  adjacent regions stay tellable apart. The count is rendered per line by
+ *  the canvas layer, hence it is not part of the label here. */
+function captionLinesFor(items: MapItem[], memberIndices: number[]): string[] {
+  const frequency = new Map<string, number>()
+  for (const index of memberIndices) {
+    for (const topic of items[index].topics ?? []) {
+      const key = topic.trim()
+      if (key) frequency.set(key, (frequency.get(key) ?? 0) + 1)
+    }
+  }
+  const sorted = [...frequency.entries()].filter(([, count]) => count > 1).sort((a, b) => b[1] - a[1])
+  const lines = sorted.slice(0, 2).map(([topic]) => topic)
+  if (lines.length === 0) {
+    const fallback = sorted[0]?.[0] ?? captionFor(items, memberIndices)
+    return fallback ? [fallback] : []
+  }
+  return lines
 }
 
 /** The map's zoom pyramid (docs/human-knowledge-explorer.md §12):
@@ -285,7 +310,9 @@ export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
       radius = Math.max(radius, Math.hypot(nodes[index].x - cx, nodes[index].y - cy))
     }
     const node1: ClusterTreeNode = {
-      label: captionFor(items, memberIndices), count: memberIndices.length,
+      label: captionFor(items, memberIndices),
+      labelLines: captionLinesFor(items, memberIndices),
+      count: memberIndices.length,
       cx, cy, radius: radius + 14, color,
     }
     // Level 2: subdivide big regions only — small ones are their own detail.
@@ -309,7 +336,9 @@ export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
           sRadius = Math.max(sRadius, Math.hypot(nodes[index].x - scx, nodes[index].y - scy))
         }
         const child: ClusterTreeNode = {
-          label: captionFor(items, subMembers), count: subMembers.length,
+          label: captionFor(items, subMembers),
+          labelLines: captionLinesFor(items, subMembers),
+          count: subMembers.length,
           cx: scx, cy: scy, radius: sRadius + 8, color,
           members: subMembers,
         }
@@ -322,7 +351,7 @@ export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
       // A small region is its own level-2 detail: every point must be
       // reachable at the sub-cluster tier, small themes included.
       level2.push({
-        label: node1.label, count: node1.count, cx, cy, radius: node1.radius, color,
+        label: node1.label, labelLines: node1.labelLines, count: node1.count, cx, cy, radius: node1.radius, color,
         members: memberIndices,
       })
     }
