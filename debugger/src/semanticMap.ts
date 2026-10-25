@@ -165,6 +165,66 @@ export function knnEdges(vectors: number[][], k = 6): Array<[number, number, num
   return edges
 }
 
+export interface SemanticCluster {
+  /** Indices into the items array. */
+  members: number[]
+  /** The cluster's caption: its most frequent topic ('' when topic-less). */
+  label: string
+  count: number
+}
+
+/** The map's skeleton: kNN edges plus super-clusters — union-find over the
+ *  strong edges (cosine ≥ strong). Clusters are what the far-zoom plane
+ *  renders instead of hundreds of dots: one bubble per theme, a caption per
+ *  bubble, detail appears as the user zooms in. */
+export function semanticGraph(items: MapItem[], k = 8, strong = 0.6): {
+  edges: Array<[number, number, number]>
+  clusters: SemanticCluster[]
+} {
+  const normalized = items.map((item) => normalize(item.vector))
+  const edges = knnEdges(normalized, k)
+  const parent = items.map((_, i) => i)
+  const find = (a: number): number => {
+    while (parent[a] !== a) {
+      parent[a] = parent[parent[a]]
+      a = parent[a]
+    }
+    return a
+  }
+  for (const [a, b, sim] of edges) {
+    if (sim < strong) continue
+    const ra = find(a), rb = find(b)
+    if (ra !== rb) parent[ra] = rb
+  }
+  const groups = new Map<number, number[]>()
+  for (let i = 0; i < items.length; i++) {
+    const root = find(i)
+    const group = groups.get(root)
+    if (group) group.push(i)
+    else groups.set(root, [i])
+  }
+  const clusters: SemanticCluster[] = []
+  for (const members of groups.values()) {
+    const frequency = new Map<string, number>()
+    for (const index of members) {
+      for (const topic of items[index].topics ?? []) {
+        const key = topic.trim()
+        if (key) frequency.set(key, (frequency.get(key) ?? 0) + 1)
+      }
+    }
+    let label = ''
+    let bestCount = 1 // a caption needs at least two members sharing a topic
+    for (const [topic, count] of frequency) {
+      if (count > bestCount) {
+        bestCount = count
+        label = topic
+      }
+    }
+    clusters.push({ members, label, count: members.length })
+  }
+  return { edges, clusters }
+}
+
 /** Topic clusters: every topic gets a stable palette index (by hash), an item
  *  takes the index of its rarest topic (rare topics group tighter than
  *  «общие» ones). Items without topics share the neutral cluster 0. */

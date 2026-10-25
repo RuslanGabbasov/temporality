@@ -2,15 +2,29 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, InlineNotification, Tag, TextInput } from '@carbon/react'
 import { observationApi } from './observationApi'
 import { useT } from './i18n'
-import { CLUSTER_COLORS, STATE_COLORS, projectSemanticMap, type LayoutNode, type MapItem } from './semanticMap'
+import {
+  CLUSTER_COLORS,
+  STATE_COLORS,
+  projectSemanticMap,
+  semanticGraph,
+  type LayoutNode,
+  type MapItem,
+  type SemanticCluster,
+} from './semanticMap'
 
 /** Semantic knowledge map (docs/human-knowledge-explorer.md §12): the whole
  *  visible knowledge base laid out by embedding similarity — proximity reads
- *  as meaning. Rendered on canvas (dots + kNN edges) with d3-zoom/pan;
- *  labels appear as the zoom level makes room. Click opens the dossier.
+ *  as meaning. Rendered on canvas with level-of-detail, the way map UIs do
+ *  it (Nomic Atlas, Embedding Projector):
  *
- *  The layout math runs once per dataset in projectSemanticMap; this
- *  component is rendering + interaction only. */
+ *   - far:  topic-cluster bubbles with captions («React · 42»), tiny dots;
+ *   - mid:  dots in cluster colors, no labels yet;
+ *   - near: state colors + a bounded set of item labels (greedy spacing —
+ *           never more than fits without overlapping).
+ *
+ *  At every zoom level the screen shows O(tens) of labels, not hundreds —
+ *  the earlier single-threshold version dumped every proposition on screen
+ *  at once and turned into unreadable sludge. */
 
 interface MapPoint extends LayoutNode {
   r: number
@@ -19,6 +33,17 @@ interface MapPoint extends LayoutNode {
 const STATE_TAG: Record<string, 'green' | 'blue' | 'red' | 'warm-gray' | 'cool-gray' | 'purple'> = {
   proposed: 'blue', confirmed: 'green', challenged: 'purple', invalidated: 'red', superseded: 'warm-gray', rejected: 'red', corrected: 'cool-gray',
 }
+
+/** Layout world size; the canvas scales it to fit (see viewScale). */
+const WORLD_W = 1400
+const WORLD_H = 900
+/** Zoom tiers (in effective on-screen scale). */
+const FAR = 0.62 // below: cluster bubbles
+const NEAR = 1.5 // above: item labels
+/** A label is drawn only if no already-drawn label sits within this box. */
+const LABEL_BOX_W = 92
+const LABEL_BOX_H = 18
+const LABEL_MAX = 70
 
 export default function KnowledgeMap({ project, onOpenDossier }: {
   project: string
@@ -36,6 +61,8 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const [hover, setHover] = useState<{ point: MapPoint; clientX: number; clientY: number } | null>(null)
   const transformRef = useRef({ x: 0, y: 0, k: 1 })
   const frameRef = useRef(0)
+  const edgesRef = useRef<Array<[number, number, number]>>([])
+  const clustersRef = useRef<SemanticCluster[]>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -52,15 +79,17 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
   useEffect(() => { void load() }, [load])
 
-  // Re-layout when the dataset changes.
+  // Re-layout when the dataset changes; the graph skeleton (edges +
+  // super-clusters) is computed once here, not per frame.
   useEffect(() => {
     if (!items) return
-    if (items.length === 0) { setPoints([]); return }
-    // Bounded work: the largest supported corpus settles in well under a
-    // second on commodity hardware.
-    const layout = projectSemanticMap(items, { k: 6, width: 1400, height: 900 })
-    const radius = Math.max(2.6, Math.min(6, 900 / Math.sqrt(layout.nodes.length + 1)))
+    if (items.length === 0) { setPoints([]); edgesRef.current = []; clustersRef.current = []; return }
+    const layout = projectSemanticMap(items, { k: 6, width: WORLD_W, height: WORLD_H })
+    const radius = Math.max(2.2, Math.min(4, 900 / Math.sqrt(layout.nodes.length + 1)))
     setPoints(layout.nodes.map((node) => ({ ...node, r: radius })))
+    const graph = semanticGraph(items, 8, 0.6)
+    edgesRef.current = graph.edges
+    clustersRef.current = graph.clusters
     transformRef.current = { x: 0, y: 0, k: 1 }
   }, [items])
 
@@ -74,6 +103,15 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         || (point.item.topics ?? []).some((topic) => topic.toLowerCase().includes(needle))
     })
   }, [points, query, stateFilter])
+
+  const viewScale = useCallback(() => {
+    const wrap = wrapRef.current
+    const w = wrap?.clientWidth ?? WORLD_W
+    const h = wrap?.clientHeight ?? WORLD_H
+    const base = Math.min(w / WORLD_W, h / WORLD_H)
+    const { x, y, k } = transformRef.current
+    return { scale: k * base, tx: x, ty: y, w, h }
+  }, [])
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -89,56 +127,119 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
-    const { x: tx, y: ty, k } = transformRef.current
-    ctx.save()
-    ctx.translate(tx, ty)
-    ctx.scale(k, k)
-    const base = points.length ? Math.min(w / 1400, h / 900) : 1
-    const matchesArr = matches
-    // kNN skeleton: faint links make neighborhoods readable even before dots.
-    ctx.lineWidth = 1 / k
+    const { scale, tx, ty } = viewScale()
+
+    // Project + cull once; everything below works in screen pixels, so fonts
+    // stay constant-size and dots grow only mildly with zoom.
+    const visible: Array<{ p: MapPoint; sx: number; sy: number; active: boolean }> = []
     for (let i = 0; i < points.length; i++) {
-      if (!matchesArr[i]) continue
-      for (let j = i + 1; j < points.length; j++) {
-        if (!matchesArr[j]) continue
-        const dx = points[i].x - points[j].x, dy = points[i].y - points[j].y
-        if (dx * dx + dy * dy > 130 * 130) continue
-        ctx.strokeStyle = 'rgba(122, 162, 247, 0.10)'
+      const sx = points[i].x * scale + tx
+      const sy = points[i].y * scale + ty
+      if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue
+      visible.push({ p: points[i], sx, sy, active: matches[i] })
+    }
+
+    const dotR = Math.max(1.4, Math.min(3.4, points[0]?.r ?? 3)) * Math.min(1.6, Math.max(0.75, scale))
+
+    // ── far plane: topic bubbles instead of a swarm of dots ──
+    if (scale < FAR) {
+      for (const cluster of clustersRef.current) {
+        if (cluster.count < 4) continue
+        let cx = 0, cy = 0, matched = 0
+        for (const index of cluster.members) {
+          cx += points[index].x * scale + tx
+          cy += points[index].y * scale + ty
+          if (matches[index]) matched++
+        }
+        cx /= cluster.count; cy /= cluster.count
+        if (cx < -120 || cx > w + 120 || cy < -80 || cy > h + 80) continue
+        const radius = 12 + Math.sqrt(matched || cluster.count) * 6
+        const palette = CLUSTER_COLORS[Math.abs(cluster.label.length * 31 + cluster.count) % CLUSTER_COLORS.length]
         ctx.beginPath()
-        ctx.moveTo(points[i].x, points[i].y)
-        ctx.lineTo(points[j].x, points[j].y)
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+        ctx.fillStyle = palette
+        ctx.globalAlpha = 0.16
+        ctx.fill()
+        ctx.globalAlpha = 0.55
+        ctx.lineWidth = 1.2
+        ctx.strokeStyle = palette
+        ctx.stroke()
+        ctx.globalAlpha = 1
+        ctx.fillStyle = palette
+        ctx.font = '600 12px Inter, sans-serif'
+        ctx.textAlign = 'center'
+        const caption = cluster.label || '•'
+        ctx.fillText(`${caption} · ${matched || cluster.count}`, cx, cy + 4)
+        if (cluster.label) {
+          ctx.font = '10px Inter, sans-serif'
+          ctx.fillStyle = 'var(--tm-muted, #8a8a8a)'
+        }
+      }
+      // Dots shrink to a quiet texture under the bubbles.
+      for (const { sx, sy, active } of visible) {
+        ctx.globalAlpha = active ? 0.7 : 0.12
+        ctx.beginPath()
+        ctx.arc(sx, sy, 1.7, 0, Math.PI * 2)
+        ctx.fillStyle = '#7aa2f7'
+        ctx.fill()
+      }
+      ctx.globalAlpha = 1
+      return
+    }
+
+    // ── kNN skeleton: only from the mid plane up, only visible endpoints ──
+    if (scale >= FAR * 0.8) {
+      ctx.lineWidth = 1
+      ctx.strokeStyle = 'rgba(122, 162, 247, 0.10)'
+      const onScreen = new Set(visible.map((entry) => entry.p.id))
+      const indexById = new Map(points.map((p, i) => [p.id, i]))
+      for (const [a, b] of edgesRef.current) {
+        const pa = points[a], pb = points[b]
+        if (!onScreen.has(pa.id) || !onScreen.has(pb.id)) continue
+        const ai = indexById.get(pa.id)!, bi = indexById.get(pb.id)!
+        if (!matches[ai] || !matches[bi]) continue
+        ctx.beginPath()
+        ctx.moveTo(pa.x * scale + tx, pa.y * scale + ty)
+        ctx.lineTo(pb.x * scale + tx, pb.y * scale + ty)
         ctx.stroke()
       }
     }
-    // Labels only when the zoom makes room for them.
-    const showLabels = k * base > 1.15
-    ctx.textAlign = 'center'
-    for (let i = 0; i < points.length; i++) {
-      const point = points[i]
-      const active = matchesArr[i]
-      const color = STATE_COLORS[point.item.state] ?? '#7aa2f7'
-      ctx.globalAlpha = active ? 1 : 0.14
+
+    // ── dots: cluster color mid, state color near ──
+    const near = scale >= NEAR
+    for (const { p, sx, sy, active } of visible) {
+      const color = near
+        ? (STATE_COLORS[p.item.state] ?? '#7aa2f7')
+        : (p.cluster > 0 ? CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length] : '#7aa2f7')
+      ctx.globalAlpha = active ? 1 : 0.15
       ctx.beginPath()
-      ctx.arc(point.x, point.y, point.r, 0, Math.PI * 2)
+      ctx.arc(sx, sy, dotR, 0, Math.PI * 2)
       ctx.fillStyle = color
       ctx.fill()
-      // Cluster ring: the topic palette around the state fill.
-      if (point.cluster > 0) {
-        ctx.lineWidth = 1.6
-        ctx.strokeStyle = CLUSTER_COLORS[point.cluster % CLUSTER_COLORS.length]
-        ctx.stroke()
-      }
-      if (showLabels && active) {
-        ctx.globalAlpha = 1
-        ctx.fillStyle = 'var(--tm-text, #cfcfcf)'
-        ctx.font = `${11 / 1}px Inter, sans-serif`
-        const label = point.item.proposition.length > 46 ? `${point.item.proposition.slice(0, 45)}…` : point.item.proposition
-        ctx.fillText(label, point.x, point.y - point.r - 5)
-      }
     }
     ctx.globalAlpha = 1
-    ctx.restore()
-  }, [points, matches])
+
+    // ── near plane: bounded, non-overlapping item labels ──
+    if (near) {
+      ctx.font = '10.5px Inter, sans-serif'
+      ctx.textAlign = 'center'
+      const accepted: Array<{ x: number; y: number }> = []
+      let drawn = 0
+      for (const { p, sx, sy, active } of visible) {
+        if (!active || drawn >= LABEL_MAX) continue
+        let crowded = false
+        for (const spot of accepted) {
+          if (Math.abs(spot.x - sx) < LABEL_BOX_W && Math.abs(spot.y - sy) < LABEL_BOX_H) { crowded = true; break }
+        }
+        if (crowded) continue
+        accepted.push({ x: sx, y: sy })
+        drawn++
+        ctx.fillStyle = 'var(--tm-text, #cfcfcf)'
+        const label = p.item.proposition.length > 44 ? `${p.item.proposition.slice(0, 43)}…` : p.item.proposition
+        ctx.fillText(label, sx, sy - dotR - 4)
+      }
+    }
+  }, [points, matches, viewScale])
 
   useEffect(() => {
     frameRef.current = requestAnimationFrame(draw)
@@ -179,15 +280,15 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       // tooltip rides the cursor (clamped to the container) — a fixed panel
       // across the top kept disconnecting the hint from the dot.
       const rect = wrap.getBoundingClientRect()
-      const transform = transformRef.current
-      const mx = (event.clientX - rect.left - transform.x) / transform.k
-      const my = (event.clientY - rect.top - transform.y) / transform.k
+      const { scale, tx, ty } = viewScale()
+      const mx = (event.clientX - rect.left - tx) / scale
+      const my = (event.clientY - rect.top - ty) / scale
       let best: MapPoint | null = null
-      let bestDist = 14 / transform.k
+      let bestDist = 14 / scale
       for (const point of points) {
         const dx = point.x - mx, dy = point.y - my
         const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist < Math.max(point.r + 3 / transform.k, bestDist)) { best = point; bestDist = dist }
+        if (dist < Math.max(point.r + 3 / scale, bestDist)) { best = point; bestDist = dist }
       }
       if (best) setHover({ point: best, clientX: event.clientX - rect.left, clientY: event.clientY - rect.top })
       else setHover(null)
@@ -195,15 +296,15 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     const onUp = () => { dragging = false }
     const onClick = (event: MouseEvent) => {
       const rect = wrap.getBoundingClientRect()
-      const transform = transformRef.current
-      const mx = (event.clientX - rect.left - transform.x) / transform.k
-      const my = (event.clientY - rect.top - transform.y) / transform.k
+      const { scale, tx, ty } = viewScale()
+      const mx = (event.clientX - rect.left - tx) / scale
+      const my = (event.clientY - rect.top - ty) / scale
       let best: MapPoint | null = null
-      let bestDist = 14 / transform.k
+      let bestDist = 14 / scale
       for (const point of points) {
         const dx = point.x - mx, dy = point.y - my
         const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist < Math.max(point.r + 3 / transform.k, bestDist)) { best = point; bestDist = dist }
+        if (dist < Math.max(point.r + 3 / scale, bestDist)) { best = point; bestDist = dist }
       }
       if (best) onOpenDossier(best.item.id)
     }
@@ -219,7 +320,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       window.removeEventListener('mouseup', onUp)
       wrap.removeEventListener('click', onClick)
     }
-  }, [points, draw, onOpenDossier])
+  }, [points, draw, onOpenDossier, viewScale])
 
   const states = useMemo(() => [...new Set((items ?? []).map((item) => item.state))].sort(), [items])
 
@@ -276,8 +377,8 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         )}
       </div>
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-muted)' }}>
-        <span>{t('knowledge.map_hint_zoom') ?? 'Колесо — масштаб, перетаскивание — панорама, клик по точке — досье.'}</span>
-        <span style={{ marginLeft: 'auto' }}>{t('knowledge.map_hint_labels') ?? 'Подписи появляются при увеличении.'}</span>
+        <span>{t('knowledge.map_hint_zoom') ?? 'Колесо — масштаб: сначала кластеры с подписями, при приближении — отдельные знания. Клик по точке — досье.'}</span>
+        <span style={{ marginLeft: 'auto' }}>{t('knowledge.map_hint_labels') ?? 'Подписи появляются, когда на экране есть место.'}</span>
       </div>
     </div>
   )
