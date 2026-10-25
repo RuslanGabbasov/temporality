@@ -330,7 +330,17 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     const lastRunId = model.runs.length ? model.runs[model.runs.length - 1].id : ''
     const now = Date.now()
     const recencyCutoff = recencyFilter === 'all' ? 0 : recencyFilter === 'last-run' ? (model.runs.length ? ms(model.runs[model.runs.length - 1].startedAt) : 0) : recencyFilter === '24h' ? now - 86400e3 : recencyFilter === '7d' ? now - 7 * 86400e3 : now - 30 * 86400e3
-    const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role) && (recencyFilter === 'all' || ms(run.startedAt) >= recencyCutoff)
+    // Runs must EARN their lane: only runs with at least one knowledge
+    // activity point inside the active window stay visible — otherwise the
+    // timeline fills with long empty stripes of runs that did nothing here.
+    const runsWithWindowActivity = new Set<string>()
+    for (const row of model.rows) {
+      for (const point of row.points) {
+        const at = ms(point.at)
+        if (at >= active.t0 && at <= active.t1 && point.run) runsWithWindowActivity.add(point.run)
+      }
+    }
+    const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role) && (recencyFilter === 'all' || ms(run.startedAt) >= recencyCutoff) && runsWithWindowActivity.has(run.id)
     const visibleRuns = model.runs.filter(visibleRun)
     const visibleRunIds = new Set(visibleRuns.map((r) => r.id))
     const visibleRow = (row: KnowledgeRow) =>
