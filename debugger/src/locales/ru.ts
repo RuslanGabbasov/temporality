@@ -12,6 +12,7 @@ export const ru: Record<string, string> = {
     'knowledge.map_hint_zoom': 'Колесо — масштаб, перетаскивание — панорама, клик по точке — досье.',
     'knowledge.map_hint_labels': 'Кольцо — топик-кластер, подписи появляются при увеличении.',
     'knowledge.map_tier_regions': 'уровень: темы',
+    'knowledge.map_legend_topics': 'Темы:',
     'knowledge.map_shape_live': 'живые',
     'knowledge.map_shape_challenged': 'оспоренные',
     'knowledge.map_shape_dead': 'выбыли (инвалидированы/заменены)',

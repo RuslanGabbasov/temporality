@@ -115,6 +115,10 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   /** Aggregate opacity per zoom: which pyramid tier is on stage. Kept in a
    *  ref + state mirror so the tier badges re-render without redrawing hooks. */
   const [tier, setTier] = useState<1 | 2 | 3>(1)
+  /** Topic legend: the largest regions with their palette colors — the map
+   *  paints dots by cluster color, so «what does blue mean» needs an answer
+   *  that follows the data. */
+  const [legendTopics, setLegendTopics] = useState<Array<{ label: string; color: string; count: number }>>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -132,7 +136,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   useEffect(() => { void load() }, [load])
 
   // Re-layout when the dataset changes; the cluster pyramid (regions →
-  // sub-clusters) is computed once here, not per frame.
+  // sub-clusters) is computed once here, not per frame. The initial view
+  // fits every point on screen (with a margin) instead of opening at a
+  // zoom that crops half the map.
   useEffect(() => {
     if (!items) return
     if (items.length === 0) { setPoints([]); level1Ref.current = []; level2Ref.current = []; return }
@@ -143,7 +149,30 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     level1Ref.current = tree.level1
     level2Ref.current = tree.level2
     edgesRef.current = semanticGraph(items, 8, 0.6).edges
-    transformRef.current = { x: 0, y: 0, k: 1 }
+    setLegendTopics(
+      [...tree.level1]
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 6)
+        .filter((node) => node.label)
+        .map((node) => ({ label: node.label, color: node.color, count: node.count })),
+    )
+    // Fit-to-screen: the world layout is drawn at WORLD_W×H; scale it into
+    // the actual canvas box with a margin, centered.
+    requestAnimationFrame(() => {
+      const wrap = wrapRef.current
+      if (!wrap) return
+      const w = wrap.clientWidth, h = wrap.clientHeight
+      const margin = 40
+      const fit = Math.min((w - margin) / WORLD_W, (h - margin) / WORLD_H)
+      const base = Math.min(w / WORLD_W, h / WORLD_H)
+      // transform.k is relative to base (screen scale = k * base): the fit
+      // factor expressed in that space.
+      transformRef.current = {
+        k: Math.max(0.2, Math.min(8, fit / base)),
+        x: (w - WORLD_W * fit) / 2,
+        y: (h - WORLD_H * fit) / 2,
+      }
+    })
   }, [items])
 
   const matches = useMemo(() => {
@@ -232,22 +261,12 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       ctx.shadowBlur = 5
       ctx.shadowOffsetY = 1
       const lines = node.labelLines ?? [node.label]
-      const startY = cy - (lines.length * (font + 2)) / 2 + font / 3
+      const startY = cy - ((lines.length - 1) * (font + 2)) / 2 + font / 3
       lines.forEach((line, index) => {
         if (ctx.measureText(line).width < r * 2.1) {
           ctx.fillText(line, cx, startY + index * (font + 2))
         }
       })
-      // The size counter sits on its own line below the names — repeating it
-      // on every caption line read like a bug.
-      ctx.font = `500 ${font - 1}px Inter, sans-serif`
-      ctx.globalAlpha *= 0.85
-      ctx.fillText(String(node.count), cx, startY + lines.length * (font + 2))
-      ctx.globalAlpha = alpha * (dark ? 0.95 : 1)
-      ctx.shadowColor = 'transparent'
-      ctx.shadowBlur = 0
-      ctx.shadowOffsetY = 0
-      ctx.globalAlpha = 1
     }
 
     // ── layer 1: heat fills (tier 1: broad regions; tier 2: regions fading
@@ -480,6 +499,19 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
           </div>
         )}
       </div>
+      {/* Topic legend: which cluster color is which theme. Built from the
+          same pyramid the canvas renders — the largest regions first. */}
+      {legendTopics.length > 0 && (
+        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-text-2)', alignItems: 'center' }}>
+          <span style={{ color: 'var(--tm-muted)' }}>{t('knowledge.map_legend_topics') ?? 'Темы:'}</span>
+          {legendTopics.map((topic) => (
+            <span key={topic.label} style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
+              <span style={{ display: 'inline-block', width: '0.6rem', height: '0.6rem', borderRadius: '50%', background: topic.color, flexShrink: 0 }} />
+              {topic.label} · {topic.count}
+            </span>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-muted)', alignItems: 'center' }}>
         <span>{t('knowledge.map_hint_zoom') ?? 'Колесо — масштаб: сначала кластеры с подписями, при приближении — отдельные знания. Клик по точке — досье.'}</span>
         <span style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>

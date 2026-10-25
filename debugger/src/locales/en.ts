@@ -12,6 +12,7 @@ export const en: Record<string, string> = {
     'knowledge.map_hint_zoom': 'Wheel — zoom, drag — pan, click a dot — dossier.',
     'knowledge.map_hint_labels': 'The ring marks the topic cluster; labels appear as you zoom in.',
     'knowledge.map_tier_regions': 'tier: topics',
+    'knowledge.map_legend_topics': 'Topics:',
     'knowledge.map_shape_live': 'live',
     'knowledge.map_shape_challenged': 'challenged',
     'knowledge.map_shape_dead': 'retired (invalidated/superseded)',
