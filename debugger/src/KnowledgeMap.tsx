@@ -4,7 +4,7 @@ import { observationApi } from './observationApi'
 import { useT } from './i18n'
 import { useTheme } from './theme'
 import { stateLabel } from './explorer/shared'
-import { useSemanticLayout } from './useSemanticLayout'
+import { useSemanticLayoutState } from './useSemanticLayout'
 import {
   CLUSTER_COLORS,
   STATE_COLORS,
@@ -138,7 +138,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
   // The heavy pipeline (normalize → kNN → force → cluster pyramid) runs in a
   // worker; this effect just installs the results into the render state.
-  const layout = useSemanticLayout(items)
+  const { result: layout, pending: layoutPending } = useSemanticLayoutState(items)
   useEffect(() => {
     if (!layout) return
     const radius = Math.max(2.2, Math.min(4, 900 / Math.sqrt(layout.nodes.length + 1)))
@@ -280,20 +280,24 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const cy = node.cy * scale + ty
       const r = node.radius * scale
       if (cx + r < 0 || cx - r > w || cy + r < 0 || cy - r > h || r <= 34) return
-      ctx.globalAlpha = alpha * (dark ? 0.95 : 1)
-      ctx.fillStyle = dark ? '#eef1f6' : '#181f2a'
       ctx.font = `600 ${font}px Inter, sans-serif`
       ctx.textAlign = 'center'
-      ctx.shadowColor = dark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.95)'
-      ctx.shadowBlur = 5
-      ctx.shadowOffsetY = 1
+      // Contrast via a two-pass offset draw: shadowBlur is prohibitively
+      // slow on Firefox's software canvas paths.
+      const halo = dark ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.95)'
+      const ink = dark ? '#eef1f6' : '#181f2a'
       const lines = node.labelLines ?? [node.label]
       const startY = cy - ((lines.length - 1) * (font + 2)) / 2 + font / 3
-      lines.forEach((line, index) => {
-        if (ctx.measureText(line).width < r * 2.1) {
-          ctx.fillText(line, cx, startY + index * (font + 2))
-        }
-      })
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.globalAlpha = alpha * (pass === 0 ? 0.85 : (dark ? 0.98 : 1))
+        ctx.fillStyle = pass === 0 ? halo : ink
+        lines.forEach((line, index) => {
+          const caption = `${line} · ${node.count}`
+          if (ctx.measureText(caption).width < r * 2.1) {
+            ctx.fillText(caption, cx + (pass === 0 ? 1 : 0), startY + index * (font + 2) + (pass === 0 ? 1 : 0))
+          }
+        })
+      }
     }
 
     // ── layer 1: heat fills (tier 1: broad regions; tier 2: regions fading
@@ -439,8 +443,15 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const mx = (event.clientX - rect.left - tx) / scale
       const my = (event.clientY - rect.top - ty) / scale
       const best = pickPoint(mx, my, 14 / scale)
-      if (best) setHover({ point: best, clientX: event.clientX - rect.left, clientY: event.clientY - rect.top })
-      else setHover(null)
+      // Guard by id: a fresh object per mousemove re-rendered the whole
+      // component at pointer frequency for no visual change.
+      setHover((current) => {
+        const same = current?.point.id === best?.id && (best !== null || current !== null)
+        if (same && current) {
+          return { point: best ?? current.point, clientX: event.clientX - rect.left, clientY: event.clientY - rect.top }
+        }
+        return best ? { point: best, clientX: event.clientX - rect.left, clientY: event.clientY - rect.top } : null
+      })
     }
     const onUp = () => { dragging = false }
     const onClick = (event: MouseEvent) => {
