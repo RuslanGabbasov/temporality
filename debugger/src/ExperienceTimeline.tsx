@@ -43,10 +43,11 @@ const RANGE_OPTIONS: { value: RangeFilter; label: string }[] = [
   { value: 'all', label: 'timeline.range.all' },
 ]
 /** Primary run-section grouping dimension. */
-type GroupBy = 'unit' | 'agent' | 'day' | 'none'
+type GroupBy = 'unit' | 'agent' | 'day' | 'theme' | 'none'
 const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'unit', label: 'timeline.group.unit' },
   { value: 'agent', label: 'timeline.group.agent' },
+  { value: 'theme', label: 'timeline.group.theme' },
   { value: 'day', label: 'timeline.group.day' },
   { value: 'none', label: 'timeline.group.none' },
 ]
@@ -205,7 +206,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const [error, setError] = useState('')
   const [users, setUsers] = useState<User[]>([])
   const [range, setRange] = useState<RangeFilter>(() => { const v = params.get('range'); return (['24h','7d','30d','all'] as const).includes(v as RangeFilter) ? v as RangeFilter : '7d' })
-  const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','agent','day','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','agent','day','theme','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
   const parseLens = (s: string | null): Lens => { if (!s) return DEFAULT_LENS; try { return { ...DEFAULT_LENS, ...JSON.parse(s) } } catch { return DEFAULT_LENS } }
   const [lens, setLens] = useState<Lens>(() => parseLens(params.get('lens')))
   const parseKinds = (s: string | null): Set<LifecycleKind> => { if (!s) return new Set(LIFECYCLE_KINDS); const arr = s.split(',').filter((k): k is LifecycleKind => LIFECYCLE_KINDS.includes(k as LifecycleKind)); return arr.length ? new Set(arr) : new Set(LIFECYCLE_KINDS) }
@@ -383,12 +384,46 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     // At team scale a flat run list is unreadable, so runs collapse three
     // levels deep: org group (or agent/day) → delegation chain → single run.
     const { chains, rootOf } = buildRunChains(visibleRuns)
+    // Run → dominant theme (for group-by-theme): the topic most of the run's
+    // knowledge activity belongs to, from the same taxonomy as the map.
+    const runTheme = (() => {
+      const counts = new Map<string, Map<string, number>>()
+      for (const row of model.rows) {
+        for (const topic of row.topics ?? []) {
+          const key = topic.trim().toLowerCase()
+          if (!key) continue
+          for (const point of row.points) {
+            if (!point.run) continue
+            const perRun = counts.get(point.run) ?? new Map<string, number>()
+            perRun.set(key, (perRun.get(key) ?? 0) + 1)
+            counts.set(point.run, perRun)
+          }
+        }
+      }
+      const top = new Map<string, string>()
+      for (const [run, topics] of counts) {
+        let best = '', bestCount = 0
+        for (const [topic, count] of topics) {
+          if (count > bestCount) { bestCount = count; best = topic }
+        }
+        if (best) top.set(run, best)
+      }
+      return top
+    })()
     const userById = new Map(users.map((u) => [u.id, u]))
     const unitName = new Map(org.units.map((u) => [u.id, u.name]))
     const groupOf = (root: RunInfo): { key: string; label: string; order: string } => {
       if (groupBy === 'none') return { key: 'all', label: t('timeline.group.all_runs'), order: '0' }
       if (groupBy === 'day') { const day = root.startedAt.slice(0, 10); return { key: day, label: day, order: day } }
       if (groupBy === 'agent') { const agent = root.agentId || root.role || '—'; return { key: agent, label: agent, order: agent } }
+      if (groupBy === 'theme') {
+        // The run's dominant theme: the topic most of its knowledge activity
+        // belongs to (unknown → «без темы»). Тема — та же таксономия, что
+        // красит карту и treemap.
+        const topic = runTheme.get(root.id) || runTheme.get(`${root.id}/%`)
+        if (topic) return { key: `theme:${topic}`, label: topic, order: topic }
+        return { key: 'theme:none', label: t('timeline.group.unassigned'), order: 'zzz-theme' }
+      }
       const actor = root.actor
       const user = actor ? userById.get(actor) : undefined
       if (user?.org_unit_id) { const name = unitName.get(user.org_unit_id) ?? user.org_unit_id; return { key: user.org_unit_id, label: name, order: name } }

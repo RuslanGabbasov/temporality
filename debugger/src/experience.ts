@@ -93,6 +93,8 @@ export interface KnowledgeRow {
   relatedIds: string[]
   runs: string[]
   roles: string[]
+  /** Topic names from the proposal event — the unified taxonomy input. */
+  topics: string[]
   strength: number
 }
 
@@ -547,6 +549,7 @@ interface MemberFold {
   command?: string
   commandClass?: string
   policy?: string
+  topics: string[]
   points: ExperiencePoint[]
   episodes: EpisodeRef[]
   deaths: DeathRecord[]
@@ -648,6 +651,7 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
           command: command || undefined,
           commandClass: stringOf(event.data?.command_class) || undefined,
           policy: stringOf(event.data?.policy_id) || undefined,
+          topics: Array.isArray(event.data?.topics) ? (event.data?.topics as unknown[]).filter((t): t is string => typeof t === 'string' && t.trim() !== '') : [],
           points: [],
           episodes: [],
           deaths: [],
@@ -845,6 +849,7 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
       relatedIds: relatedOf.get(member.knowledgeId) ?? [],
       runs: distinct(points.map((point) => point.run)),
       roles: distinct(points.map((point) => point.role)),
+      topics: member.topics,
       strength: derivedStrength(member.state, useCount),
     }
   })

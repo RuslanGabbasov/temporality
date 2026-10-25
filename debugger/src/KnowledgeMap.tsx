@@ -40,9 +40,10 @@ const WORLD_W = 1400
 const WORLD_H = 900
 /** Zoom tiers (effective on-screen scale): below FAR — broad-region heat
  *  map; FAR..NEAR — sub-cluster bubbles over cluster-colored dots; above
- *  NEAR — state-colored cores and the bounded item labels. */
+ *  NEAR — state cores and the bounded item labels. NEAR sits deep: points
+ *  are the last thing you get, after two tiers of themes. */
 const FAR = 0.55
-const NEAR = 1.6
+const NEAR = 2.6
 /** A label is drawn only if no already-drawn label sits within this box. */
 const LABEL_BOX_W = 92
 const LABEL_BOX_H = 18

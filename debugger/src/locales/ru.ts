@@ -2081,6 +2081,7 @@ export const ru: Record<string, string> = {
     'timeline.group.unit': 'оргединица',
     'timeline.group.agent': 'агент',
     'timeline.group.day': 'день',
+    'timeline.group.theme': 'по темам',
     'timeline.group.none': 'без группировки',
     'timeline.group.all_runs': 'все прогоны',
     'timeline.group.unassigned': 'без привязки',

@@ -2081,6 +2081,7 @@ export const en: Record<string, string> = {
     'timeline.group.unit': 'org unit',
     'timeline.group.agent': 'agent',
     'timeline.group.day': 'day',
+    'timeline.group.theme': 'by theme',
     'timeline.group.none': 'no grouping',
     'timeline.group.all_runs': 'all runs',
     'timeline.group.unassigned': 'unassigned',
