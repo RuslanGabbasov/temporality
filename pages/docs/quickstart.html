@@ -42,7 +42,7 @@
 <h2 id="требования"><a class="anchor" href="#требования" aria-label="Section link">#</a>Требования</h2><ul>
 <li>Docker (Linux, macOS; Windows — через WSL2). Рекомендуется BuildKit.</li>
 <li>~4 ГБ свободной памяти для стека (PostgreSQL, Temporal, Journal, Kernel, UI).</li>
-<li>Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный Ollama и т.д.).</li>
+<li>Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный Ollama и т.д.). Anthropic подключается напрямую: base URL <code>https://api.anthropic.com/v1</code>, модель — например <code>claude-sonnet-4-5</code> (совместимый слой Anthropic поддерживает инструменты и стриминг).</li>
 </ul>
 <h2 id="запуск"><a class="anchor" href="#запуск" aria-label="Section link">#</a>Запуск</h2><p>Готовые образы из GHCR — рекомендуемый путь, ничего клонировать и собирать
 не нужно:</p>

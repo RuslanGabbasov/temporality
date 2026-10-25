@@ -196,6 +196,24 @@ export default function Providers() {
             <Stack gap={3}>
               <TextInput id="prov-name" labelText={t('providers.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="z.ai" autoFocus />
               <TextInput id="prov-url" labelText={t('providers.url_label') ?? 'Base URL'} value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
+              {/* One-click presets for the two direct-connection hosts people
+                  reach for first; everything OpenAI-compatible works by URL. */}
+              <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '-0.75rem' }}>
+                {[
+                  { label: 'Anthropic', url: 'https://api.anthropic.com/v1' },
+                  { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+                ].map((preset) => (
+                  <Tag
+                    key={preset.label}
+                    size="sm"
+                    type={form.base_url === preset.url ? 'green' : 'outline'}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setForm({ ...form, base_url: preset.url, name: form.name?.trim() || preset.label })}
+                  >
+                    {preset.label}
+                  </Tag>
+                ))}
+              </div>
               <TextInput id="prov-key" labelText={t('providers.key_label') ?? 'API Key'} value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="secret://my-api-key, Z_AI_API_KEY or the key itself" helperText={t('providers.key_helper') ?? 'secret://name (recommended), an env var name, or the key itself'} />
               {secrets.length > 0 && (
                 <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '-0.75rem' }}>

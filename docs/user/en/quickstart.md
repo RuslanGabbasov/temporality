@@ -11,7 +11,7 @@ description: From zero to your first agent task — installation, onboarding, th
 
 - Docker (Linux, macOS; Windows via WSL2). BuildKit recommended.
 - ~4 GB of free memory for the stack (PostgreSQL, Temporal, Journal, Kernel, UI).
-- A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama, etc.).
+- A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama, etc.). Anthropic connects directly: base URL `https://api.anthropic.com/v1`, model — e.g. `claude-sonnet-4-5` (Anthropic's compatibility layer supports tools and streaming).
 
 ## Run it
 

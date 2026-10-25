@@ -11,7 +11,7 @@ description: От нуля до первой задачи агента — ус�
 
 - Docker (Linux, macOS; Windows — через WSL2). Рекомендуется BuildKit.
 - ~4 ГБ свободной памяти для стека (PostgreSQL, Temporal, Journal, Kernel, UI).
-- Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный Ollama и т.д.).
+- Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный Ollama и т.д.). Anthropic подключается напрямую: base URL `https://api.anthropic.com/v1`, модель — например `claude-sonnet-4-5` (совместимый слой Anthropic поддерживает инструменты и стриминг).
 
 ## Запуск
 

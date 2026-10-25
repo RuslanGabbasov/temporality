@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -295,6 +296,15 @@ func fetchProviderModels(ctx context.Context, client *http.Client, baseURL, apiK
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	// Anthropic's catalog authenticates differently from its OpenAI-compat
+	// chat surface: x-api-key + anthropic-version, not the bearer token.
+	// Sending both is harmless for every other provider.
+	if host := hostOf(endpoint); host == "api.anthropic.com" {
+		if apiKey != "" {
+			req.Header.Set("x-api-key", apiKey)
+		}
+		req.Header.Set("anthropic-version", "2023-06-01")
+	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -362,4 +372,13 @@ func normalizeModelIDs(entries []providerModelEntry) []string {
 	}
 	slices.Sort(models)
 	return models
+}
+
+// hostOf extracts the hostname from an endpoint URL ("" when unparsable).
+func hostOf(endpoint string) string {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return ""
+	}
+	return parsed.Host
 }

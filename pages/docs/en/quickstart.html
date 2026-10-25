@@ -42,7 +42,7 @@
 <h2 id="requirements"><a class="anchor" href="#requirements" aria-label="Section link">#</a>Requirements</h2><ul>
 <li>Docker (Linux, macOS; Windows via WSL2). BuildKit recommended.</li>
 <li>~4 GB of free memory for the stack (PostgreSQL, Temporal, Journal, Kernel, UI).</li>
-<li>A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama, etc.).</li>
+<li>A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama, etc.). Anthropic connects directly: base URL <code>https://api.anthropic.com/v1</code>, model — e.g. <code>claude-sonnet-4-5</code> (Anthropic&#39;s compatibility layer supports tools and streaming).</li>
 </ul>
 <h2 id="run-it"><a class="anchor" href="#run-it" aria-label="Section link">#</a>Run it</h2><p>Prebuilt images from GHCR — the recommended path, nothing to clone or build:</p>
 <pre><code class="language-sh">mkdir temporality &amp;&amp; cd temporality

@@ -282,6 +282,28 @@ func New(cfg Config) *Client {
 	}
 }
 
+// anthropicCompatHost reports that the endpoint is Anthropic's OpenAI-
+// compatibility layer (api.anthropic.com/v1/chat/completions). The layer is
+// deliberately minimal: stream_options and response_format are not part of
+// its surface, and its /models catalog authenticates with x-api-key +
+// anthropic-version instead of a bearer token. Everything else (messages,
+// tools, streaming) speaks the OpenAI wire format as-is.
+func anthropicCompatHost(host string) bool {
+	return strings.EqualFold(host, "api.anthropic.com")
+}
+
+// compatSanitize drops envelope fields the configured provider does not
+// speak. Today that is only the Anthropic compatibility layer; OpenAI-
+// proper and the gateways tolerate all of these.
+func (c *Client) compatSanitize(req *chatRequest) {
+	if !anthropicCompatHost(c.providerHost) {
+		return
+	}
+	req.StreamOptions = nil
+	req.ResponseFormat = nil
+	req.PromptCacheKey = ""
+}
+
 // Model identifies the configured model in reports.
 func (c *Client) Model() string { return c.cfg.Model }
 
@@ -539,6 +561,7 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 	for _, option := range options {
 		option(&req)
 	}
+	c.compatSanitize(&req)
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return Completion{}, err
@@ -608,13 +631,18 @@ type ToolCallDelta struct {
 // The final Completion is returned with accumulated content and tool calls.
 func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools []ToolDef, onToken TokenCallback, options ...Option) (Completion, error) {
 	req := chatRequest{
-		Model:         c.cfg.Model,
-		Messages:      toRequestMessages(messages),
-		Temperature:   c.cfg.Temperature,
-		MaxTokens:     c.cfg.MaxOutputTokens,
-		Reasoning:     reasoningRequest(c.cfg.Reasoning),
-		Stream:        true,
-		StreamOptions: &streamOptions{IncludeUsage: true},
+		Model:       c.cfg.Model,
+		Messages:    toRequestMessages(messages),
+		Temperature: c.cfg.Temperature,
+		MaxTokens:   c.cfg.MaxOutputTokens,
+		Reasoning:   reasoningRequest(c.cfg.Reasoning),
+		Stream:      true,
+	}
+	// The Anthropic compatibility layer keeps its surface minimal: unknown
+	// envelope fields (stream_options, response_format, prompt_cache_key) are
+	// not part of it — do not send what it did not ask for.
+	if !anthropicCompatHost(c.providerHost) {
+		req.StreamOptions = &streamOptions{IncludeUsage: true}
 	}
 	if len(tools) > 0 {
 		req.ToolChoice = "auto"
@@ -627,6 +655,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	for _, option := range options {
 		option(&req)
 	}
+	c.compatSanitize(&req)
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return Completion{}, err
