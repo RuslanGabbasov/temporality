@@ -6,12 +6,12 @@ import { useTheme } from './theme'
 import { stateLabel } from './explorer/shared'
 import { useSemanticLayoutState } from './useSemanticLayout'
 import {
-  CLUSTER_COLORS,
   STATE_COLORS,
   type ClusterTreeNode,
   type LayoutNode,
   type MapItem,
 } from './semanticMap'
+import { itemTopic, topicColor } from './knowledgeTaxonomy'
 
 /** Semantic knowledge map (docs/human-knowledge-explorer.md §12): the whole
  *  visible knowledge base laid out by embedding similarity — proximity reads
@@ -342,7 +342,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       // Color = the point's region (legend «Регионы»); shape = the lifecycle
       // verdict (circle/diamond/cross) — two channels, no rainbow inside a
       // region.
-      const regionColor = p.cluster > 0 ? CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length] : '#7aa2f7'
+      // Region color = the point's own dominant topic color — the same
+      // shade the region bubble and the treemap show for this theme.
+      const regionColor = topicColor(itemTopic(p.item.topics) || p.item.proposition)
       const shape = stateShape(p.item.state)
       const dead = shape === 'cross'
       const rowAlpha = active ? dotAlpha : dotAlpha * 0.35

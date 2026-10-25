@@ -11,6 +11,7 @@
 // pass stay in the tens of milliseconds to low seconds range.
 
 import { forceSimulation, forceLink, forceManyBody, forceX, forceY } from 'd3-force'
+import { captionLines, dominantTopic, topicColor } from './knowledgeTaxonomy'
 
 export interface MapItem {
   id: string
@@ -240,40 +241,11 @@ export interface ClusterTreeNode {
 }
 
 function captionFor(items: MapItem[], memberIndices: number[]): string {
-  const frequency = new Map<string, number>()
-  for (const index of memberIndices) {
-    for (const topic of items[index].topics ?? []) {
-      const key = topic.trim()
-      if (key) frequency.set(key, (frequency.get(key) ?? 0) + 1)
-    }
-  }
-  let label = '', bestCount = 1
-  for (const [topic, count] of frequency) {
-    if (count > bestCount) { bestCount = count; label = topic }
-  }
-  return label
+  return dominantTopic(memberIndices.map((index) => items[index].topics))
 }
 
-/** Caption as up to two topic words (two stacked lines on the map): one
- *  word kept repeating across neighbouring clusters («testing, testing,
- *  testing»); the second word is the cluster's next distinctive topic, so
- *  adjacent regions stay tellable apart. The count is rendered per line by
- *  the canvas layer, hence it is not part of the label here. */
 function captionLinesFor(items: MapItem[], memberIndices: number[]): string[] {
-  const frequency = new Map<string, number>()
-  for (const index of memberIndices) {
-    for (const topic of items[index].topics ?? []) {
-      const key = topic.trim()
-      if (key) frequency.set(key, (frequency.get(key) ?? 0) + 1)
-    }
-  }
-  const sorted = [...frequency.entries()].filter(([, count]) => count > 1).sort((a, b) => b[1] - a[1])
-  const lines = sorted.slice(0, 2).map(([topic]) => topic)
-  if (lines.length === 0) {
-    const fallback = sorted[0]?.[0] ?? captionFor(items, memberIndices)
-    return fallback ? [fallback] : []
-  }
-  return lines
+  return captionLines(memberIndices.map((index) => items[index].topics))
 }
 
 /** The map's zoom pyramid (docs/human-knowledge-explorer.md §12):
@@ -301,7 +273,9 @@ export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
   const level1: ClusterTreeNode[] = []
   const level2: ClusterTreeNode[] = []
   for (const memberIndices of [...groups1.values()].sort((a, b) => b.length - a.length)) {
-    const color = CLUSTER_COLORS[level1.length % CLUSTER_COLORS.length]
+    // Region color = the color of its dominant TOPIC (stable hash), the
+    // same color the treemap and every other surface show for this theme.
+    const color = topicColor(captionFor(items, memberIndices) || `region-${level1.length}`)
     // The region's palette index becomes every member point's cluster color:
     // dots inside one bubble share one shade — no rainbow inside a region.
     const regionPalette = level1.length % CLUSTER_COLORS.length

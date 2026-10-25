@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useT } from '../i18n'
 import type { ExploreArea } from '../observationApi'
 import { stateLabel } from './shared'
+import { topicColor } from '../knowledgeTaxonomy'
 
 /** Treemap of the knowledge areas (ТЗ §4.3). Area encodes the amount of
  *  knowledge (never veracity), color encodes the dominant lifecycle state,
@@ -187,8 +188,8 @@ export default function AreaMap({ areas, selectedKey, onSelect, canvasWidth = 32
               <title>{`${area.name} (${area.kind}) — ${area.knowledge_count}${area.contradictions ? `, ${area.contradictions} ⚠` : ''}`}</title>
               <rect
                 x={x + 1} y={y + 1} width={Math.max(0, w - 2)} height={Math.max(0, h - 2)} rx={4}
-                fill={STATE_FILL[dominant] ?? 'var(--tm-info)'}
-                fillOpacity={active ? 0.55 : hover === key ? 0.48 : 0.35}
+                fill={topicColor(area.name)}
+                fillOpacity={active ? 0.5 : hover === key ? 0.42 : 0.3}
                 stroke={active ? 'var(--tm-teal)' : hover === key ? 'var(--tm-text-2)' : 'transparent'}
                 strokeWidth={active ? 2 : 1.5}
               />
