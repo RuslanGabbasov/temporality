@@ -2816,6 +2816,17 @@ button.header-nav-link {
 .experience-grid.no-details { grid-template-columns: minmax(0, 1fr); }
 .experience-canvas { position: relative; }
 .experience-canvas-scroll { overflow-x: auto; min-width: 0; }
+/* Sticky time axis: pinned to the top of the canvas scrollport so tick
+   labels stay visible while the tall lane sea scrolls by. */
+.experience-axis-sticky {
+  position: sticky;
+  top: 0;
+  height: 22px;
+  z-index: 4;
+  background: var(--tm-bg);
+  pointer-events: none;
+}
+.experience-axis-sticky svg { display: block; }
 .timeline-fit-float {
   position: absolute;
   top: 0.75rem;

@@ -831,6 +831,18 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       <section className="obs-panel experience-canvas" ref={canvasRef}>
         <button className="timeline-fit-float" title={t('timeline.fit_hint')} aria-label={t('timeline.fit')} onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}><CenterToFit size={16} /></button>
         <div className="experience-canvas-scroll">
+        {/* Sticky time axis: the tick strip stays pinned while the lane sea
+            scrolls, so an event never floats without its moment. */}
+        <div className="experience-axis-sticky" aria-hidden="true">
+          <svg width={width} height={22}>
+            {ticks.map((tick) => (
+              <g key={tick}>
+                <text x={x(tick)} y={14} textAnchor="middle" className="tick-label">{formatTick(tick, view.active.t1 - view.active.t0)}</text>
+                <line x1={x(tick)} x2={x(tick)} y1={19} y2={22} stroke="#1c2530" strokeWidth={1} />
+              </g>
+            ))}
+          </svg>
+        </div>
         <svg ref={svgRef} width={width} height={view.height} className="experience-svg"
           onPointerDown={(down) => {
             if (down.button !== 0) return
