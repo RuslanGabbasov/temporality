@@ -49,6 +49,48 @@ const LABEL_BOX_W = 92
 const LABEL_BOX_H = 18
 const LABEL_MAX = 70
 
+/** Shape codes the lifecycle, the way the experience timeline does: live
+ *  statements are circles, challenged — diamonds, invalidated/superseded —
+ *  crosses. Color carries the topic cluster, shape carries the verdict. */
+function stateShape(state: string): 'circle' | 'diamond' | 'cross' | 'square' {
+  if (state === 'invalidated' || state === 'disproved' || state === 'superseded') return 'cross'
+  if (state === 'challenged') return 'diamond'
+  if (state === 'rejected') return 'square'
+  return 'circle' // proposed / confirmed / corrected — live
+}
+
+function drawShape(ctx: CanvasRenderingContext2D, shape: 'circle' | 'diamond' | 'cross' | 'square', x: number, y: number, r: number) {
+  switch (shape) {
+    case 'cross': {
+      const arm = r * 0.9
+      ctx.beginPath()
+      ctx.moveTo(x - arm, y - arm); ctx.lineTo(x + arm, y + arm)
+      ctx.moveTo(x + arm, y - arm); ctx.lineTo(x - arm, y + arm)
+      ctx.stroke()
+      break
+    }
+    case 'diamond': {
+      ctx.beginPath()
+      ctx.moveTo(x, y - r * 1.2); ctx.lineTo(x + r * 1.2, y)
+      ctx.lineTo(x, y + r * 1.2); ctx.lineTo(x - r * 1.2, y)
+      ctx.closePath()
+      ctx.fill()
+      break
+    }
+    case 'square': {
+      const half = r * 0.85
+      ctx.beginPath()
+      ctx.rect(x - half, y - half, half * 2, half * 2)
+      ctx.fill()
+      break
+    }
+    default:
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fill()
+  }
+}
+
 export default function KnowledgeMap({ project, onOpenDossier }: {
   project: string
   onOpenDossier: (id: string) => void
@@ -215,19 +257,29 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     const stateAlpha = Math.max(0, Math.min(1, (scale - (NEAR - 0.2)) / 0.6))
     for (const { p, sx, sy, active } of visible) {
       const clusterColor = p.cluster > 0 ? CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length] : '#7aa2f7'
-      // Cluster color is the base identity at every tier; from the near tier
-      // the state color blends in as an inner core, never replacing it.
-      ctx.globalAlpha = active ? 1 : 0.18
-      ctx.beginPath()
-      ctx.arc(sx, sy, dotR, 0, Math.PI * 2)
-      ctx.fillStyle = clusterColor
-      ctx.fill()
-      if (near && stateAlpha > 0) {
-        ctx.globalAlpha = (active ? 1 : 0.18) * stateAlpha
-        ctx.beginPath()
-        ctx.arc(sx, sy, dotR * 0.55, 0, Math.PI * 2)
-        ctx.fillStyle = STATE_COLORS[p.item.state] ?? '#7aa2f7'
-        ctx.fill()
+      const shape = stateShape(p.item.state)
+      const dead = shape === 'cross'
+      ctx.globalAlpha = active ? (dead ? 0.85 : 1) : 0.18
+      if (dead) {
+        // Retired statements: a cross in the cluster color — reads at any
+        // zoom without filling space.
+        ctx.lineWidth = Math.max(1.1, dotR * 0.55)
+        ctx.strokeStyle = clusterColor
+        ctx.lineCap = 'round'
+        drawShape(ctx, 'cross', sx, sy, dotR)
+      } else {
+        ctx.fillStyle = clusterColor
+        drawShape(ctx, shape, sx, sy, dotR)
+        if (near && stateAlpha > 0) {
+          // The state core joins only at the near zoom (confirmed = a light
+          // center, challenged keeps the diamond) — it never replaces the
+          // cluster identity.
+          ctx.globalAlpha = (active ? 1 : 0.18) * stateAlpha
+          ctx.beginPath()
+          ctx.arc(sx, sy, dotR * 0.5, 0, Math.PI * 2)
+          ctx.fillStyle = STATE_COLORS[p.item.state] ?? '#7aa2f7'
+          ctx.fill()
+        }
       }
     }
     ctx.globalAlpha = 1
@@ -389,8 +441,20 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
           </div>
         )}
       </div>
-      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-muted)' }}>
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-muted)', alignItems: 'center' }}>
         <span>{t('knowledge.map_hint_zoom') ?? 'Колесо — масштаб: сначала кластеры с подписями, при приближении — отдельные знания. Клик по точке — досье.'}</span>
+        <span style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
+          <span style={{ display: 'inline-block', width: '0.55rem', height: '0.55rem', borderRadius: '50%', background: '#73daca', flexShrink: 0 }} />
+          {t('knowledge.map_shape_live') ?? 'живые'}
+        </span>
+        <span style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
+          <span style={{ display: 'inline-block', width: '0.55rem', height: '0.55rem', background: '#7aa2f7', transform: 'rotate(45deg)', flexShrink: 0 }} />
+          {t('knowledge.map_shape_challenged') ?? 'оспоренные'}
+        </span>
+        <span style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
+          <span style={{ color: '#f7768e', fontFamily: 'var(--tm-font-mono)', fontWeight: 700, flexShrink: 0 }}>✕</span>
+          {t('knowledge.map_shape_dead') ?? 'выбыли'}
+        </span>
         <span style={{ marginLeft: 'auto' }}>
           {tier === 1 ? (t('knowledge.map_tier_regions') ?? 'уровень: темы') : tier === 2 ? (t('knowledge.map_tier_sub') ?? 'уровень: подкластеры') : (t('knowledge.map_tier_points') ?? 'уровень: знания')}
         </span>
