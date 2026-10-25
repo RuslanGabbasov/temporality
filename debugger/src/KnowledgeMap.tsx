@@ -200,11 +200,10 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     const nextTier: 1 | 2 | 3 = scale < FAR ? 1 : scale < NEAR ? 2 : 3
     setTier((current) => (current === nextTier ? current : nextTier))
 
-    /** Heat bubble: soft radial fill, no outline — a density glow, not a
-     *  drawn circle. Caption is theme-tuned text with a soft shadow —
-     *  labels sit on their own cluster glow, raw fill-on-fill was
-     *  unreadable. Up to two caption lines. */
-    const drawBubble = (node: ClusterTreeNode, alpha: number, font: number) => {
+    /** Layer model (bottom → top): bubble fills → edges → dots → bubble
+     *  captions → item labels. Captions must sit on TOP — they used to be
+     *  painted before the dots and vanished under them. */
+    const drawBubbleFill = (node: ClusterTreeNode, alpha: number) => {
       const cx = node.cx * scale + tx
       const cy = node.cy * scale + ty
       const r = node.radius * scale
@@ -217,40 +216,46 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       ctx.beginPath()
       ctx.arc(cx, cy, r, 0, Math.PI * 2)
       ctx.fill()
-      if (node.label && r > 34) {
-        ctx.globalAlpha = alpha * (dark ? 0.95 : 1)
-        ctx.fillStyle = dark ? '#eef1f6' : '#181f2a'
-        ctx.font = `600 ${font}px Inter, sans-serif`
-        ctx.textAlign = 'center'
-        ctx.shadowColor = dark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.95)'
-        ctx.shadowBlur = 5
-        ctx.shadowOffsetY = 1
-        const lines = node.labelLines ?? [node.label]
-        const startY = cy - ((lines.length - 1) * (font + 2)) / 2 + font / 3
-        lines.forEach((line, index) => {
-          const caption = `${line} · ${node.count}`
-          if (ctx.measureText(caption).width < r * 2.1) {
-            ctx.fillText(caption, cx, startY + index * (font + 2))
-          }
-        })
-        ctx.shadowColor = 'transparent'
-        ctx.shadowBlur = 0
-        ctx.shadowOffsetY = 0
-      }
+      ctx.globalAlpha = 1
+    }
+    const drawBubbleCaption = (node: ClusterTreeNode, alpha: number, font: number) => {
+      if (!node.label) return
+      const cx = node.cx * scale + tx
+      const cy = node.cy * scale + ty
+      const r = node.radius * scale
+      if (cx + r < 0 || cx - r > w || cy + r < 0 || cy - r > h || r <= 34) return
+      ctx.globalAlpha = alpha * (dark ? 0.95 : 1)
+      ctx.fillStyle = dark ? '#eef1f6' : '#181f2a'
+      ctx.font = `600 ${font}px Inter, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.shadowColor = dark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.95)'
+      ctx.shadowBlur = 5
+      ctx.shadowOffsetY = 1
+      const lines = node.labelLines ?? [node.label]
+      const startY = cy - ((lines.length - 1) * (font + 2)) / 2 + font / 3
+      lines.forEach((line, index) => {
+        const caption = `${line} · ${node.count}`
+        if (ctx.measureText(caption).width < r * 2.1) {
+          ctx.fillText(caption, cx, startY + index * (font + 2))
+        }
+      })
+      ctx.shadowColor = 'transparent'
+      ctx.shadowBlur = 0
+      ctx.shadowOffsetY = 0
       ctx.globalAlpha = 1
     }
 
-    // ── tier 1: broad regions as a heat map ──
+    // ── layer 1: heat fills (tier 1: broad regions; tier 2: regions fading
+    // out as sub-clusters fade in) ──
     if (scale < FAR) {
-      for (const region of level1Ref.current) drawBubble(region, 1, 13)
+      for (const region of level1Ref.current) drawBubbleFill(region, 1)
     } else if (scale < NEAR) {
-      // ── tier 2: sub-clusters; the regions fade out as detail fades in ──
       const regionAlpha = Math.max(0, Math.min(1, (FAR + 0.65 - scale) / 0.5))
       if (regionAlpha > 0.02) {
-        for (const region of level1Ref.current) drawBubble(region, regionAlpha * 0.7, 12)
+        for (const region of level1Ref.current) drawBubbleFill(region, regionAlpha * 0.7)
       }
       const subAlpha = Math.max(0, Math.min(1, (scale - FAR * 0.8) / 0.3))
-      for (const child of level2Ref.current) drawBubble(child, subAlpha, 11)
+      for (const child of level2Ref.current) drawBubbleFill(child, subAlpha)
     }
 
     // ── dots: cluster color from the mid plane on; state joins near ──
@@ -301,7 +306,19 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     }
     ctx.globalAlpha = 1
 
-    // ── near plane: bounded, non-overlapping item labels ──
+    // ── layer 4: cluster captions, on top of the dots ──
+    if (scale < FAR) {
+      for (const region of level1Ref.current) drawBubbleCaption(region, 1, 13)
+    } else if (scale < NEAR) {
+      const regionAlpha = Math.max(0, Math.min(1, (FAR + 0.65 - scale) / 0.5))
+      if (regionAlpha > 0.02) {
+        for (const region of level1Ref.current) drawBubbleCaption(region, regionAlpha * 0.7, 12)
+      }
+      const subAlpha = Math.max(0, Math.min(1, (scale - FAR * 0.8) / 0.3))
+      for (const child of level2Ref.current) drawBubbleCaption(child, subAlpha, 11)
+    }
+
+    // ── layer 5: bounded, non-overlapping item labels ──
     if (near) {
       ctx.font = '10.5px Inter, sans-serif'
       ctx.textAlign = 'center'
