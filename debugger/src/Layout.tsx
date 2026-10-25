@@ -55,6 +55,7 @@ const NAV_ITEMS = [
   // Knowledge explorer is the main research surface (docs/human-knowledge-
   // explorer.md §3.1); its operational counterpart lives inside the dashboard.
   { path: '/knowledge', label: 'nav.knowledge' },
+  { path: '/knowledge-map', label: 'nav.knowledge_map' },
   { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/storage', label: 'nav.storage' },
   { path: '/experience', label: 'nav.timeline' },

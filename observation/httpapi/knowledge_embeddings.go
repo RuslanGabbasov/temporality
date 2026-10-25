@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/observation"
@@ -117,6 +119,124 @@ func (s *Server) getKnowledgeEmbeddingGaps(w http.ResponseWriter, r *http.Reques
 }
 
 var _ = observation.KnowledgeEmbeddingGap{}
+
+// mapStore is the capability set behind the semantic map endpoint: vectors
+// plus the per-project knowledge projection to join them with.
+type mapStore interface {
+	ListKnowledgeEmbeddings(ctx context.Context, model string) (map[string][]float32, error)
+}
+
+// knowledgeProjectLister enumerates the projects that carry knowledge events;
+// implemented by the postgres store, absent in memory fakes.
+type knowledgeProjectLister interface {
+	ListKnowledgeProjects(ctx context.Context) ([]string, error)
+}
+
+// getKnowledgeEmbeddingMap serves the semantic map (docs/human-knowledge-
+// explorer.md): every embedded knowledge item visible to the caller — vector
+// plus the meta the map renders (proposition, state, topics, scope, project).
+// Vectors ride as plain float arrays; the client projects them to 2D. Bound:
+// newest 1500 items — a map with more dots is unreadable anyway.
+func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request) {
+	if !s.gate.Allow(w, r, controlplane.RoleReader) {
+		return
+	}
+	model := strings.TrimSpace(r.URL.Query().Get("model")) // empty = any stored model
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	projects := []string{}
+	if project != "" {
+		if _, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, project); !allowed {
+			return
+		}
+		projects = []string{project}
+	} else {
+		principal, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, "")
+		if !allowed {
+			return
+		}
+		if visible, all := principal.AllowedProjects(); !all {
+			projects = visible
+		}
+	}
+	store, ok := s.store.(mapStore)
+	if !ok {
+		writeError(w, 501, errors.New("this journal store does not support knowledge embeddings"))
+		return
+	}
+	vectors, err := store.ListKnowledgeEmbeddings(r.Context(), model)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	type mapItem struct {
+		ID          string    `json:"id"`
+		Project     string    `json:"project"`
+		Proposition string    `json:"proposition"`
+		State       string    `json:"state"`
+		Kind        string    `json:"kind,omitempty"`
+		Topics      []string  `json:"topics,omitempty"`
+		ScopeKind   string    `json:"scope_kind,omitempty"`
+		ScopeID     string    `json:"scope_id,omitempty"`
+		UpdatedAt   string    `json:"updated_at,omitempty"`
+		Vector      []float32 `json:"vector"`
+	}
+	items := []mapItem{}
+	seen := map[string]bool{}
+	collect := func(project string) error {
+		knowledge, _, err := s.cachedKnowledge(r.Context(), project, nil, nil)
+		if err != nil {
+			return err
+		}
+		for _, item := range knowledge {
+			vector, ok := vectors[item.ID]
+			if !ok || seen[item.ID] {
+				continue
+			}
+			seen[item.ID] = true
+			items = append(items, mapItem{
+				ID: item.ID, Project: project, Proposition: item.Proposition,
+				State: item.State, Kind: item.Kind, Topics: item.Topics,
+				ScopeKind: item.ScopeKind, ScopeID: item.ScopeID,
+				UpdatedAt: item.UpdatedAt.Format(time.RFC3339), Vector: vector,
+			})
+		}
+		return nil
+	}
+	if len(projects) > 0 {
+		for _, project := range projects {
+			if err := collect(project); err != nil {
+				writeError(w, 500, err)
+				return
+			}
+		}
+	} else {
+		// Global view: enumerate the projects that carry knowledge events
+		// (few in an installation; each projection is cached after the first
+		// read), then collect their embedded items.
+		lister, ok := s.store.(knowledgeProjectLister)
+		if !ok {
+			writeError(w, 501, errors.New("the store cannot enumerate knowledge projects; pass ?project="))
+			return
+		}
+		all, err := lister.ListKnowledgeProjects(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		for _, project := range all {
+			if err := collect(project); err != nil {
+				writeError(w, 500, err)
+				return
+			}
+		}
+	}
+	// Newest first, bounded: a map beyond this size is unreadable anyway.
+	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
+	if len(items) > 1500 {
+		items = items[:1500]
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "model": model})
+}
 
 // neighborStore is the vector-listing capability behind the neighbors lookup.
 type neighborStore interface {

@@ -322,6 +322,28 @@ func (s *Store) ListKnowledgeEmbeddings(ctx context.Context, model string) (map[
 	return out, rows.Err()
 }
 
+// KnowledgeProjects enumerates the projects that carry knowledge events —
+// the semantic map walks them to join vectors with the projections.
+func (s *Store) ListKnowledgeProjects(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT context->>'project' FROM observation_events
+		 WHERE type LIKE 'knowledge.%' AND COALESCE(context->>'project', '') <> ''
+		 ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	projects := []string{}
+	for rows.Next() {
+		var project string
+		if err := rows.Scan(&project); err != nil {
+			return nil, err
+		}
+		projects = append(projects, project)
+	}
+	return projects, rows.Err()
+}
+
 // KnowledgeEmbeddingGap is the observation.KnowledgeEmbeddingGap row: id
 // plus proposition text.
 // ListKnowledgeEmbeddingGaps returns knowledge items without a vector for the
