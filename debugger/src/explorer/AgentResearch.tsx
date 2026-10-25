@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, InlineNotification, Tag, TextInput } from '@carbon/react'
 import { observationApi, runEvents, type ExploreResult } from '../observationApi'
-import { extractExploreCalls, parseExploreArguments, type AgentExploreCall } from './agentExploreCalls'
+import { extractExploreCalls, extractCallResult, extractRunHintOutcome, parseExploreArguments, type AgentExploreCall, type ExploreCallResult, type RunHintOutcome } from './agentExploreCalls'
 import { stateLabel } from './shared'
 import { useT } from '../i18n'
 
@@ -21,6 +21,9 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
   const [replays, setReplays] = useState<Map<string, ExploreResult>>(new Map())
   const [replayBusy, setReplayBusy] = useState('')
   const [replayErrors, setReplayErrors] = useState<Map<string, string>>(new Map())
+  /** What each call returned (from tool.completed) + the run's hint fate. */
+  const [callResults, setCallResults] = useState<Map<string, ExploreCallResult>>(new Map())
+  const [hintOutcome, setHintOutcome] = useState<RunHintOutcome | null>(null)
   const seq = useRef(0)
 
   // The tab opens on WHAT THE AGENTS ACTUALLY RESEARCHED: scan the recent
@@ -64,11 +67,24 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
     if (!run) return
     const current = ++seq.current
     setLoading(true); setError(''); setCalls([]); setReplays(new Map()); setReplayErrors(new Map())
+    setCallResults(new Map()); setHintOutcome(null)
     setLoadedRun(run)
     try {
       const events = await runEvents(run, project.trim() || undefined)
       if (seq.current !== current) return
       setCalls(extractExploreCalls(events))
+      // What the calls returned + what happened to the hints afterwards.
+      const results = new Map<string, ExploreCallResult>()
+      for (const event of events) {
+        const data = event.data as Record<string, unknown> | undefined
+        const operationID = typeof data?.operation_id === 'string' ? data.operation_id : ''
+        if (event.type === 'tool.completed' && operationID) {
+          const result = extractCallResult(event)
+          if (result) results.set(operationID, result)
+        }
+      }
+      setCallResults(results)
+      setHintOutcome(extractRunHintOutcome(events))
     } catch (e) {
       if (seq.current === current) setError(e instanceof Error ? e.message : 'Request failed')
     } finally {
@@ -150,7 +166,29 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
                 {expanded && (
                   <div style={{ padding: '0 0.6rem 0.6rem', background: 'var(--tm-elevated)' }}>
                     {calls.length === 0 && loading && <div style={{ color: 'var(--tm-muted)', fontSize: '0.75rem' }}>…</div>}
-                    {calls.map((call) => <CallCard key={call.eventID} call={call} replays={replays} replayBusy={replayBusy} replayErrors={replayErrors} onReplay={replay} onOpenDossier={onOpenDossier} t={t} opLabel={opLabel} />)}
+                    {hintOutcome && hintOutcome.offered > 0 && (
+                      <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.5rem 0.65rem', margin: '0.4rem 0', fontSize: '0.76rem' }}>
+                        <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>{t('explorer.agent_hint_fate') ?? 'Что стало с найденным'}</div>
+                        <div style={{ display: 'flex', gap: '0.9rem', flexWrap: 'wrap', color: 'var(--tm-text-2)' }}>
+                          <span>🧠 {t('explorer.agent_hints_offered', { count: String(hintOutcome.offered) }) ?? `подсказок: ${hintOutcome.offered}`}</span>
+                          <span>📖 {t('explorer.agent_hints_used', { count: String(hintOutcome.used) }) ?? `взято в работу: ${hintOutcome.used}`}</span>
+                          <span>👍 {hintOutcome.helpful} · 👎 {hintOutcome.harmful}</span>
+                        </div>
+                        {hintOutcome.propositions.length > 0 && (
+                          <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                            {hintOutcome.propositions.slice(0, 8).map((prop) => (
+                              <div key={prop.id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'baseline', fontSize: '0.74rem' }}>
+                                <span style={{ color: prop.used ? 'var(--tm-success, #9ece6a)' : 'var(--tm-muted)', flexShrink: 0 }}>{prop.used ? '✓ взято' : '— не тронуто'}</span>
+                                <button onClick={() => onOpenDossier(prop.id)} style={{ background: 'none', border: 'none', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.74rem', padding: 0, textAlign: 'left' }}>
+                                  {prop.proposition.length > 90 ? `${prop.proposition.slice(0, 89)}…` : prop.proposition}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {calls.map((call) => <CallCard key={call.eventID} call={call} result={callResults.get(call.operationID)} replays={replays} replayBusy={replayBusy} replayErrors={replayErrors} onReplay={replay} onOpenDossier={onOpenDossier} t={t} opLabel={opLabel} />)}
                   </div>
                 )}
               </div>
@@ -182,15 +220,17 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
       )}
 
       {loadedRun && calls.length > 0 && researchRuns.every((entry) => entry.id !== loadedRun) && calls.map((call) => (
-        <CallCard key={call.eventID} call={call} replays={replays} replayBusy={replayBusy} replayErrors={replayErrors} onReplay={replay} onOpenDossier={onOpenDossier} t={t} opLabel={opLabel} />
+        <CallCard key={call.eventID} call={call} result={callResults.get(call.operationID)} replays={replays} replayBusy={replayBusy} replayErrors={replayErrors} onReplay={replay} onOpenDossier={onOpenDossier} t={t} opLabel={opLabel} />
       ))}
     </div>
   )
 }
 
-/** One knowledge_explore call: arguments as the agent sent them + replay. */
-function CallCard({ call, replays, replayBusy, replayErrors, onReplay, onOpenDossier, t, opLabel }: {
+/** One knowledge_explore call: the query as sent, what the agent got back
+ *  (from tool.completed), and the replay against the current base. */
+function CallCard({ call, result, replays, replayBusy, replayErrors, onReplay, onOpenDossier, t, opLabel }: {
   call: AgentExploreCall
+  result?: ExploreCallResult
   replays: Map<string, ExploreResult>
   replayBusy: string
   replayErrors: Map<string, string>
@@ -201,6 +241,7 @@ function CallCard({ call, replays, replayBusy, replayErrors, onReplay, onOpenDos
 }) {
   const replayResult = replays.get(call.eventID)
   const replayError = replayErrors.get(call.eventID)
+  const [showResult, setShowResult] = useState(false)
   return (
     <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.5rem', background: 'var(--tm-bg)' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -219,6 +260,31 @@ function CallCard({ call, replays, replayBusy, replayErrors, onReplay, onOpenDos
           {call.maxDepth > 0 && <Tag size="sm" type="cool-gray">depth {call.maxDepth}</Tag>}
           {call.maxItems > 0 && <Tag size="sm" type="cool-gray">max {call.maxItems}</Tag>}
           {call.includeCandidates && <Tag size="sm" type="cool-gray">candidates</Tag>}
+        </div>
+      )}
+      {result && (
+        <div style={{ marginTop: '0.4rem' }}>
+          <button
+            onClick={() => setShowResult((v) => !v)}
+            style={{ background: 'none', border: 'none', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.72rem', padding: 0 }}
+          >
+            {showResult ? '▾' : '▸'} {result.empty
+              ? (t('explorer.agent_result_empty') ?? 'агенту ничего не вернулось')
+              : t('explorer.agent_result_got', { results: String(result.results.length), areas: String(result.areas.length) }) ?? `получил: ${result.results.length} утверждений, ${result.areas.length} тем`}
+          </button>
+          {showResult && !result.empty && (
+            <div style={{ border: '1px dashed var(--tm-border)', borderRadius: '6px', padding: '0.4rem 0.55rem', marginTop: '0.35rem', maxHeight: '16rem', overflowY: 'auto' }}>
+              {result.results.slice(0, 8).map((row) => (
+                <div key={row.knowledge_id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'baseline', padding: '0.15rem 0', fontSize: '0.75rem' }}>
+                  <Tag type={STATE_TAG[row.state ?? 'proposed'] ?? 'gray'} size="sm">{stateLabel(row.state ?? 'proposed', t)}</Tag>
+                  <button onClick={() => onOpenDossier(row.knowledge_id)} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: 0, textAlign: 'left', flex: 1 }}>
+                    {row.proposition.length > 110 ? `${row.proposition.slice(0, 109)}…` : row.proposition}
+                  </button>
+                </div>
+              ))}
+              {result.relations > 0 && <small style={{ color: 'var(--tm-muted)', fontSize: '0.68rem' }}>+ {result.relations} связей</small>}
+            </div>
+          )}
         </div>
       )}
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.4rem' }}>
