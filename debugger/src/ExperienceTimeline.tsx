@@ -310,8 +310,18 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   useEffect(() => {
     const element = canvasRef.current
     if (!element) return
-    const observer = new ResizeObserver((entries) => setWidth(Math.max(640, entries[0].contentRect.width)))
+    const observer = new ResizeObserver((entries) => {
+      setWidth(Math.max(640, entries[0].contentRect.width))
+      // Whatever sits above the timeline (app header, controls, toolbar),
+      // measured — no guessed pixel constants in the viewport math.
+      const top = element.getBoundingClientRect().top + window.scrollY
+      element.style.setProperty('--tl-top', `${Math.max(0, Math.round(top))}px`)
+    })
     observer.observe(element)
+    window.addEventListener('resize', () => {
+      const top = element.getBoundingClientRect().top + window.scrollY
+      element.style.setProperty('--tl-top', `${Math.max(0, Math.round(top))}px`)
+    })
     return () => observer.disconnect()
   }, [model])
 

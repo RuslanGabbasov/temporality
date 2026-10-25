@@ -2814,9 +2814,9 @@ button.header-nav-link {
 // Timeline grid — the whole surface pinned to the viewport: controls on
 // top, the canvas (axis strip + lane scroller) takes the rest, details
 // pane beside it. No page scroll: every region scrolls internally.
-.experience-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; height: calc(100vh - 3rem); }
+.experience-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; height: calc(100vh - var(--tl-top, 3rem)); }
 .experience-grid.no-details { grid-template-columns: minmax(0, 1fr); }
-.observability-shell:has(.experience-grid) { display: flex; flex-direction: column; height: calc(100vh - 3rem); overflow: hidden; }
+.observability-shell:has(.experience-grid) { display: flex; flex-direction: column; height: calc(100vh - var(--tl-top, 3rem)); overflow: hidden; }
 .observability-shell:has(.experience-grid) > .experience-meta,
 .observability-shell:has(.experience-grid) > .obs-controls,
 .observability-shell:has(.experience-grid) > .experience-toolbar { flex: 0 0 auto; }
