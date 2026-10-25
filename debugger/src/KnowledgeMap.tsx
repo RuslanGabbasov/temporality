@@ -232,13 +232,18 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       ctx.shadowBlur = 5
       ctx.shadowOffsetY = 1
       const lines = node.labelLines ?? [node.label]
-      const startY = cy - ((lines.length - 1) * (font + 2)) / 2 + font / 3
+      const startY = cy - (lines.length * (font + 2)) / 2 + font / 3
       lines.forEach((line, index) => {
-        const caption = `${line} · ${node.count}`
-        if (ctx.measureText(caption).width < r * 2.1) {
-          ctx.fillText(caption, cx, startY + index * (font + 2))
+        if (ctx.measureText(line).width < r * 2.1) {
+          ctx.fillText(line, cx, startY + index * (font + 2))
         }
       })
+      // The size counter sits on its own line below the names — repeating it
+      // on every caption line read like a bug.
+      ctx.font = `500 ${font - 1}px Inter, sans-serif`
+      ctx.globalAlpha *= 0.85
+      ctx.fillText(String(node.count), cx, startY + lines.length * (font + 2))
+      ctx.globalAlpha = alpha * (dark ? 0.95 : 1)
       ctx.shadowColor = 'transparent'
       ctx.shadowBlur = 0
       ctx.shadowOffsetY = 0
