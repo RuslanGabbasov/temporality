@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, InlineNotification, Tag, TextInput } from '@carbon/react'
 import { observationApi } from './observationApi'
 import { useT } from './i18n'
+import { stateLabel } from './explorer/shared'
 import {
   CLUSTER_COLORS,
   STATE_COLORS,
@@ -337,7 +338,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         </Button>
         {states.map((state) => (
           <Button key={state} size="sm" kind={stateFilter === state ? 'primary' : 'ghost'} onClick={() => setStateFilter(stateFilter === state ? '' : state)}>
-            {state} ({(items ?? []).filter((item) => item.state === state).length})
+            {stateLabel(state, t)} ({(items ?? []).filter((item) => item.state === state).length})
           </Button>
         ))}
         <span style={{ flex: 1 }} />
@@ -361,7 +362,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
               transform: above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
             }}>
               <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
-                <Tag size="sm" type={STATE_TAG[hover.point.item.state] ?? 'cool-gray'}>{hover.point.item.state}</Tag>
+                <Tag size="sm" type={STATE_TAG[hover.point.item.state] ?? 'cool-gray'}>{stateLabel(hover.point.item.state, t)}</Tag>
                 <span style={{ color: 'var(--tm-muted)', fontFamily: 'var(--tm-font-mono)', fontSize: '0.66rem' }}>{hover.point.item.project}</span>
                 {(hover.point.item.topics ?? []).slice(0, 3).map((topic) => <Tag key={topic} size="sm" type="cool-gray">{topic}</Tag>)}
               </div>

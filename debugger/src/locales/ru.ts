@@ -1868,6 +1868,9 @@ export const ru: Record<string, string> = {
     // Knowledge explorer stage 3: dossier, relations, history, conflicts
     'explorer.tab_search': 'Поиск',
     'explorer.tab_map': 'Карта',
+    'explorer.agent_researched_runs': 'Прогоны, где агент исследовал знания',
+    'explorer.agent_no_research_runs': 'В последних прогонах агент ничего не исследовал через knowledge_explore. Укажите id рана вручную.',
+    'explorer.agent_calls': 'вызовов',
     'explorer.tab_conflicts': 'Противоречия',
     'explorer.dossier': 'Досье',
     'explorer.dossier_open': 'Открыть досье',

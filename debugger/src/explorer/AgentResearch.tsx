@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, InlineNotification, Tag, TextInput } from '@carbon/react'
 import { observationApi, runEvents, type ExploreResult } from '../observationApi'
-import { extractExploreCalls, type AgentExploreCall } from './agentExploreCalls'
+import { extractExploreCalls, parseExploreArguments, type AgentExploreCall } from './agentExploreCalls'
 import { stateLabel } from './shared'
 import { useT } from '../i18n'
 
@@ -12,7 +12,8 @@ import { useT } from '../i18n'
 export default function AgentResearch({ project, onOpenDossier }: { project: string; onOpenDossier: (id: string) => void }) {
   const t = useT()
   const [runInput, setRunInput] = useState('')
-  const [recentRuns, setRecentRuns] = useState<{ id: string; at: string; agent: string }[]>([])
+  const [researchRuns, setResearchRuns] = useState<{ id: string; at: string; calls: AgentExploreCall[] }[]>([])
+  const [scanLoading, setScanLoading] = useState(false)
   const [calls, setCalls] = useState<AgentExploreCall[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -22,23 +23,38 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
   const [replayErrors, setReplayErrors] = useState<Map<string, string>>(new Map())
   const seq = useRef(0)
 
-  const loadRecentRuns = useCallback(async () => {
-    if (!project.trim()) return
+  // The tab opens on WHAT THE AGENTS ACTUALLY RESEARCHED: scan the recent
+  // tool.started events for knowledge_explore calls and group them by run —
+  // a picker over all runs forced the user to guess which of the thousands
+  // ever looked at knowledge.
+  const loadResearchRuns = useCallback(async () => {
+    if (!project.trim()) { setResearchRuns([]); return }
+    setScanLoading(true)
     try {
-      const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.started', limit: 30 })
-      const runs = page.events
-        .map((event) => ({
-          id: event.context?.run ?? '',
-          at: event.occurred_at,
-          agent: typeof event.data?.title === 'string' ? event.data.title : '',
-        }))
-        .filter((run) => run.id !== '')
-        .filter((run, index, all) => all.findIndex((other) => other.id === run.id) === index)
-      setRecentRuns(runs)
-    } catch { /* suggestions are best-effort */ }
+      const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'tool.started', limit: 500 })
+      const byRun = new Map<string, { id: string; at: string; calls: AgentExploreCall[] }>()
+      for (const event of page.events ?? []) {
+        const data = event.data as Record<string, unknown> | undefined
+        if (!data || data.tool !== 'knowledge_explore') continue
+        const call = parseExploreArguments(data)
+        if (!call) continue
+        call.eventID = event.event_id
+        call.at = event.occurred_at
+        const run = event.context?.run ?? ''
+        if (!run) continue
+        const entry = byRun.get(run)
+        if (entry) entry.calls.push(call)
+        else byRun.set(run, { id: run, at: event.occurred_at, calls: [call] })
+      }
+      const runs = [...byRun.values()]
+        .map((entry) => ({ ...entry, calls: [...entry.calls].sort((a, b) => a.at.localeCompare(b.at)) }))
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .slice(0, 50)
+      setResearchRuns(runs)
+    } catch { setResearchRuns([]) } finally { setScanLoading(false) }
   }, [project])
 
-  useEffect(() => { void loadRecentRuns() }, [loadRecentRuns])
+  useEffect(() => { void loadResearchRuns() }, [loadResearchRuns])
 
   async function load() {
     const run = runInput.trim()
@@ -92,78 +108,124 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
         <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t('explorer.agent_title') ?? 'Agent research'}</div>
         <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{t('explorer.agent_hint') ?? ''}</div>
       </div>
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+
+      {/* The research-run list: what the agents actually explored, newest
+          first. Click a run — its calls expand in place with replay buttons. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600 }}>{t('explorer.agent_researched_runs') ?? 'Runs that explored knowledge'}</div>
+        <Button size="sm" kind="ghost" onClick={() => void loadResearchRuns()} disabled={scanLoading}>↻</Button>
+        <span style={{ flex: 1 }} />
         <TextInput
           id="agent-research-run"
           size="sm" labelText="" hideLabel
-          style={{ flex: 1, minWidth: '260px' }}
+          style={{ width: '240px' }}
           placeholder={t('explorer.agent_run_placeholder') ?? 'Run id…'}
           value={runInput}
           onChange={(e) => setRunInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void load() }}
         />
-        <select
-          value=""
-          onChange={(e) => { if (e.target.value) setRunInput(e.target.value) }}
-          style={{ background: 'var(--tm-bg)', color: 'var(--tm-text-2)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0 0.4rem', fontSize: '0.75rem' }}
-          title={t('explorer.agent_recent_runs') ?? 'Recent runs'}
-        >
-          <option value="">{t('explorer.agent_recent_runs') ?? 'Recent runs'}</option>
-          {recentRuns.map((run) => (
-            <option key={run.id} value={run.id}>{run.id}{run.agent ? ` · ${run.agent}` : ''}</option>
-          ))}
-        </select>
-        <Button size="sm" onClick={() => void load()} disabled={loading || !runInput.trim()}>
+        <Button size="sm" kind="ghost" onClick={() => void load()} disabled={loading || !runInput.trim()}>
           {loading ? '…' : (t('explorer.agent_load') ?? 'Load')}
         </Button>
       </div>
 
       {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
 
-      {loadedRun && calls.length === 0 && !loading && (
+      {scanLoading && <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem', marginBottom: '0.5rem' }}>…</div>}
+      {!scanLoading && researchRuns.length === 0 && !loadedRun && (
+        <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '1rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
+          {t('explorer.agent_no_research_runs') ?? 'В последних прогонах агент ничего не исследовал через knowledge_explore. Укажите id рана вручную.'}
+        </div>
+      )}
+
+      {researchRuns.length > 0 && (
+        <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', overflow: 'hidden', marginBottom: '0.75rem', maxHeight: '40vh', overflowY: 'auto' }}>
+          {researchRuns.map((entry) => {
+            const expanded = loadedRun === entry.id
+            const lastQuestion = entry.calls[entry.calls.length - 1]?.question || entry.calls[0]?.operation || ''
+            return (
+              <div key={entry.id} style={{ borderTop: entry.calls.length > 0 && researchRuns[0] !== entry ? '1px solid var(--tm-border)' : 'none' }}>
+                <div
+                  role="button" tabIndex={0}
+                  onClick={() => { if (expanded) { setLoadedRun(''); setCalls([]) } else { setRunInput(entry.id); void load() } }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { setRunInput(entry.id); void load() } }}
+                  style={{ padding: '0.45rem 0.6rem', cursor: 'pointer', background: expanded ? 'var(--tm-elevated)' : 'transparent', display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' }}
+                >
+                  <Tag size="sm" type="cool-gray">{entry.calls.length} {t('explorer.agent_calls') ?? 'calls'}</Tag>
+                  <span style={{ fontFamily: 'var(--tm-font-mono)', fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '40%' }}>{entry.id}</span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-2)', flex: 1, minWidth: '10rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastQuestion}</span>
+                  <small style={{ color: 'var(--tm-muted)', fontSize: '0.68rem', marginLeft: 'auto', flexShrink: 0 }}>{new Date(entry.at).toLocaleString()}</small>
+                </div>
+                {expanded && (
+                  <div style={{ padding: '0 0.6rem 0.6rem', background: 'var(--tm-elevated)' }}>
+                    {calls.length === 0 && loading && <div style={{ color: 'var(--tm-muted)', fontSize: '0.75rem' }}>…</div>}
+                    {calls.map((call) => <CallCard key={call.eventID} call={call} replays={replays} replayBusy={replayBusy} replayErrors={replayErrors} onReplay={replay} onOpenDossier={onOpenDossier} t={t} opLabel={opLabel} />)}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {loadedRun && researchRuns.every((entry) => entry.id !== loadedRun) && calls.length === 0 && !loading && (
         <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '1rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
           {t('explorer.agent_no_calls') ?? ''}
         </div>
       )}
 
-      {calls.map((call) => {
-        const replayResult = replays.get(call.eventID)
-        const replayError = replayErrors.get(call.eventID)
-        return (
-          <div key={call.eventID} style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <Tag type="cyan" size="sm">{opLabel(call.operation)}</Tag>
-              <div style={{ flex: 1, fontSize: '0.82rem', lineHeight: 1.45, minWidth: '200px' }}>
-                {call.question || call.targets.join(', ') || '—'}
-              </div>
-              <small style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }}>
-                {new Date(call.at).toLocaleString()}{call.turn ? ` · ${t('knowledge.turn') ?? 'turn'} ${call.turn}` : ''}
-              </small>
-            </div>
-            {(call.targets.length > 0 || call.relations.length > 0 || call.maxDepth || call.maxItems || call.includeCandidates) && (
-              <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.3rem' }}>
-                {call.targets.length > 0 && <Tag size="sm" type="cool-gray">targets: {call.targets.length}</Tag>}
-                {call.relations.length > 0 && <Tag size="sm" type="cool-gray">{call.relations.join('+')}</Tag>}
-                {call.maxDepth > 0 && <Tag size="sm" type="cool-gray">depth {call.maxDepth}</Tag>}
-                {call.maxItems > 0 && <Tag size="sm" type="cool-gray">max {call.maxItems}</Tag>}
-                {call.includeCandidates && <Tag size="sm" type="cool-gray">candidates</Tag>}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.4rem' }}>
-              <Button size="sm" kind="secondary" onClick={() => void replay(call)} disabled={replayBusy === call.eventID}>
-                {replayBusy === call.eventID ? '…' : (t('explorer.agent_replay') ?? 'Replay now')}
-              </Button>
-              {replayResult && (
-                <small style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }}>
-                  {t('explorer.agent_replayed') ?? 'replayed'} · {new Date().toLocaleTimeString()} · {replayResult.completeness}
-                </small>
-              )}
-            </div>
-            {replayError && <InlineNotification kind="error" title="Replay" subtitle={replayError} lowContrast style={{ marginTop: '0.4rem' }} />}
-            {replayResult && <ReplayResult result={replayResult} onOpenDossier={onOpenDossier} t={t} />}
-          </div>
-        )
-      })}
+      {loadedRun && calls.length > 0 && researchRuns.every((entry) => entry.id !== loadedRun) && calls.map((call) => (
+        <CallCard key={call.eventID} call={call} replays={replays} replayBusy={replayBusy} replayErrors={replayErrors} onReplay={replay} onOpenDossier={onOpenDossier} t={t} opLabel={opLabel} />
+      ))}
+    </div>
+  )
+}
+
+/** One knowledge_explore call: arguments as the agent sent them + replay. */
+function CallCard({ call, replays, replayBusy, replayErrors, onReplay, onOpenDossier, t, opLabel }: {
+  call: AgentExploreCall
+  replays: Map<string, ExploreResult>
+  replayBusy: string
+  replayErrors: Map<string, string>
+  onReplay: (call: AgentExploreCall) => void
+  onOpenDossier: (id: string) => void
+  t: (key: string, vars?: Record<string, string>) => string
+  opLabel: (operation: string) => string
+}) {
+  const replayResult = replays.get(call.eventID)
+  const replayError = replayErrors.get(call.eventID)
+  return (
+    <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.5rem', background: 'var(--tm-bg)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <Tag type="cyan" size="sm">{opLabel(call.operation)}</Tag>
+        <div style={{ flex: 1, fontSize: '0.82rem', lineHeight: 1.45, minWidth: '200px' }}>
+          {call.question || call.targets.join(', ') || '—'}
+        </div>
+        <small style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }}>
+          {new Date(call.at).toLocaleString()}{call.turn ? ` · ${t('knowledge.turn') ?? 'turn'} ${call.turn}` : ''}
+        </small>
+      </div>
+      {(call.targets.length > 0 || call.relations.length > 0 || call.maxDepth || call.maxItems || call.includeCandidates) && (
+        <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.3rem' }}>
+          {call.targets.length > 0 && <Tag size="sm" type="cool-gray">targets: {call.targets.length}</Tag>}
+          {call.relations.length > 0 && <Tag size="sm" type="cool-gray">{call.relations.join('+')}</Tag>}
+          {call.maxDepth > 0 && <Tag size="sm" type="cool-gray">depth {call.maxDepth}</Tag>}
+          {call.maxItems > 0 && <Tag size="sm" type="cool-gray">max {call.maxItems}</Tag>}
+          {call.includeCandidates && <Tag size="sm" type="cool-gray">candidates</Tag>}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.4rem' }}>
+        <Button size="sm" kind="secondary" onClick={() => onReplay(call)} disabled={replayBusy === call.eventID}>
+          {replayBusy === call.eventID ? '…' : (t('explorer.agent_replay') ?? 'Replay now')}
+        </Button>
+        {replayResult && (
+          <small style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }}>
+            {t('explorer.agent_replayed') ?? 'replayed'} · {new Date().toLocaleTimeString()} · {replayResult.completeness}
+          </small>
+        )}
+      </div>
+      {replayError && <InlineNotification kind="error" title="Replay" subtitle={replayError} lowContrast style={{ marginTop: '0.4rem' }} />}
+      {replayResult && <ReplayResult result={replayResult} onOpenDossier={onOpenDossier} t={t} />}
     </div>
   )
 }
