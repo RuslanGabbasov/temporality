@@ -310,19 +310,21 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   useEffect(() => {
     const element = canvasRef.current
     if (!element) return
+    const fitHeight = () => {
+      // The section gets exactly what the window has below its top edge:
+      // window height minus the real chrome stacked above (app header,
+      // controls, meta, toolbar — measured, never guessed).
+      const top = element.getBoundingClientRect().top
+      element.style.height = `${Math.max(360, window.innerHeight - Math.max(0, top))}px`
+    }
     const observer = new ResizeObserver((entries) => {
       setWidth(Math.max(640, entries[0].contentRect.width))
-      // Whatever sits above the timeline (app header, controls, toolbar),
-      // measured — no guessed pixel constants in the viewport math.
-      const top = element.getBoundingClientRect().top + window.scrollY
-      element.style.setProperty('--tl-top', `${Math.max(0, Math.round(top))}px`)
+      fitHeight()
     })
     observer.observe(element)
-    window.addEventListener('resize', () => {
-      const top = element.getBoundingClientRect().top + window.scrollY
-      element.style.setProperty('--tl-top', `${Math.max(0, Math.round(top))}px`)
-    })
-    return () => observer.disconnect()
+    window.addEventListener('resize', fitHeight)
+    fitHeight()
+    return () => { observer.disconnect(); window.removeEventListener('resize', fitHeight) }
   }, [model])
 
   const view = useMemo(() => {

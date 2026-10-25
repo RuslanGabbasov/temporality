@@ -2814,13 +2814,10 @@ button.header-nav-link {
 // Timeline grid — the whole surface pinned to the viewport: controls on
 // top, the canvas (axis strip + lane scroller) takes the rest, details
 // pane beside it. No page scroll: every region scrolls internally.
-.experience-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; height: calc(100vh - var(--tl-top, 3rem)); }
+.experience-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; align-items: start; }
 .experience-grid.no-details { grid-template-columns: minmax(0, 1fr); }
-.observability-shell:has(.experience-grid) { display: flex; flex-direction: column; height: calc(100vh - var(--tl-top, 3rem)); overflow: hidden; }
-.observability-shell:has(.experience-grid) > .experience-meta,
-.observability-shell:has(.experience-grid) > .obs-controls,
-.observability-shell:has(.experience-grid) > .experience-toolbar { flex: 0 0 auto; }
-.experience-canvas { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.observability-shell:has(.experience-grid) { overflow: hidden; }
+.experience-canvas { position: relative; display: flex; flex-direction: column; /* height set inline: window height minus the real chrome above */ }
 .experience-canvas-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; min-width: 0; }
 /* Constant time-axis strip above the lane scroller — always readable. */
 .experience-axis-strip { position: relative; height: 22px; background: var(--tm-bg); flex: 0 0 auto; }
