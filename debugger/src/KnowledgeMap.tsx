@@ -313,7 +313,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       for (const child of level2Ref.current) drawBubbleFill(child, subAlpha)
     }
 
-    // ── dots: cluster color from the mid plane on; state joins near ──
+    // ── dots: the color IS the lifecycle state (same palette as the
+    // timeline), the shape is the verdict category; cluster membership is
+    // already spoken by position and the region bubbles underneath. ──
     const showEdges = scale >= 0.5
     if (showEdges) {
       ctx.lineWidth = 1
@@ -337,31 +339,22 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // interpolated between the tier boundaries instead of stepping.
     const dotAlpha = Math.max(0.5, Math.min(1, 0.5 + ((scale - FAR) / (NEAR - FAR)) * 0.5))
     for (const { p, sx, sy, active } of visible) {
-      const clusterColor = p.cluster > 0 ? CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length] : '#7aa2f7'
+      // Color = the point's region (legend «Регионы»); shape = the lifecycle
+      // verdict (circle/diamond/cross) — two channels, no rainbow inside a
+      // region.
+      const regionColor = p.cluster > 0 ? CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length] : '#7aa2f7'
       const shape = stateShape(p.item.state)
       const dead = shape === 'cross'
       const rowAlpha = active ? dotAlpha : dotAlpha * 0.35
       ctx.globalAlpha = dead ? rowAlpha * 0.85 : rowAlpha
       if (dead) {
-        // Retired statements: a cross in the cluster color — reads at any
-        // zoom without filling space.
         ctx.lineWidth = Math.max(1.1, dotR * 0.55)
-        ctx.strokeStyle = clusterColor
+        ctx.strokeStyle = regionColor
         ctx.lineCap = 'round'
         drawShape(ctx, 'cross', sx, sy, dotR)
       } else {
-        ctx.fillStyle = clusterColor
+        ctx.fillStyle = regionColor
         drawShape(ctx, shape, sx, sy, dotR)
-        if (near && stateAlpha > 0) {
-          // The state core joins only at the near zoom (confirmed = a light
-          // center, challenged keeps the diamond) — it never replaces the
-          // cluster identity.
-          ctx.globalAlpha = rowAlpha * stateAlpha
-          ctx.beginPath()
-          ctx.arc(sx, sy, dotR * 0.5, 0, Math.PI * 2)
-          ctx.fillStyle = STATE_COLORS[p.item.state] ?? '#7aa2f7'
-          ctx.fill()
-        }
       }
     }
     ctx.globalAlpha = 1
@@ -532,12 +525,13 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       </div>
       {/* Topic legend: which cluster color is which theme. Built from the
           same pyramid the canvas renders — the largest regions first. */}
+      {/* Shape legend: color = region, shape = lifecycle verdict. */}
       {legendTopics.length > 0 && (
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-text-2)', alignItems: 'center' }}>
-          <span style={{ color: 'var(--tm-muted)' }}>{t('knowledge.map_legend_topics') ?? 'Темы:'}</span>
+          <span style={{ color: 'var(--tm-muted)' }}>{t('knowledge.map_legend_topics') ?? 'Регионы:'}</span>
           {legendTopics.map((topic) => (
             <span key={topic.label} style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
-              <span style={{ display: 'inline-block', width: '0.6rem', height: '0.6rem', borderRadius: '50%', background: topic.color, flexShrink: 0 }} />
+              <span style={{ display: 'inline-block', width: '0.6rem', height: '0.6rem', borderRadius: '50%', background: topic.color, opacity: 0.55, flexShrink: 0 }} />
               {topic.label} · {topic.count}
             </span>
           ))}
@@ -545,16 +539,16 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       )}
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-muted)', alignItems: 'center' }}>
         <span>{t('knowledge.map_hint_zoom') ?? 'Колесо — масштаб: сначала кластеры с подписями, при приближении — отдельные знания. Клик по точке — досье.'}</span>
-        <span style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
-          <span style={{ display: 'inline-block', width: '0.55rem', height: '0.55rem', borderRadius: '50%', background: '#73daca', flexShrink: 0 }} />
+        <span style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
+          <span style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: 'var(--tm-text-2)', flexShrink: 0 }} />
           {t('knowledge.map_shape_live') ?? 'живые'}
         </span>
-        <span style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
-          <span style={{ display: 'inline-block', width: '0.55rem', height: '0.55rem', background: '#7aa2f7', transform: 'rotate(45deg)', flexShrink: 0 }} />
+        <span style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
+          <span style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', background: 'var(--tm-text-2)', transform: 'rotate(45deg)', flexShrink: 0 }} />
           {t('knowledge.map_shape_challenged') ?? 'оспоренные'}
         </span>
-        <span style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
-          <span style={{ color: '#f7768e', fontFamily: 'var(--tm-font-mono)', fontWeight: 700, flexShrink: 0 }}>✕</span>
+        <span style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
+          <span style={{ color: 'var(--tm-text-2)', fontFamily: 'var(--tm-font-mono)', fontWeight: 700, flexShrink: 0 }}>✕</span>
           {t('knowledge.map_shape_dead') ?? 'выбыли'}
         </span>
         <span style={{ marginLeft: 'auto' }}>

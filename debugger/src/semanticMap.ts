@@ -302,6 +302,10 @@ export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
   const level2: ClusterTreeNode[] = []
   for (const memberIndices of [...groups1.values()].sort((a, b) => b.length - a.length)) {
     const color = CLUSTER_COLORS[level1.length % CLUSTER_COLORS.length]
+    // The region's palette index becomes every member point's cluster color:
+    // dots inside one bubble share one shade — no rainbow inside a region.
+    const regionPalette = level1.length % CLUSTER_COLORS.length
+    for (const index of memberIndices) { nodes[index].cluster = regionPalette }
     let cx = 0, cy = 0
     for (const index of memberIndices) { cx += nodes[index].x; cy += nodes[index].y }
     cx /= memberIndices.length; cy /= memberIndices.length
