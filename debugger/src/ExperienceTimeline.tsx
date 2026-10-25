@@ -1151,8 +1151,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             </marker>
           </defs>
         </svg>
-        <p className="experience-hint">{t('timeline.hint')}</p>
         </div>
+        <p className="experience-hint">{t('timeline.hint')}</p>
       </section>
       {selectedRow && <aside className="obs-panel experience-detail">
         <button className="detail-close" title={t('timeline.close_details')} onClick={() => setSelected('')} aria-label="Close details">×</button>
