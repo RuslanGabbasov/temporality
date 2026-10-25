@@ -240,7 +240,6 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const parseWindow = (s: string | null): { t0: number; t1: number } | null => { if (!s) return null; const [a, b] = s.split(',').map(Number); return a && b ? { t0: a, t1: b } : null }
   const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(() => parseWindow(params.get('w')))
   const [width, setWidth] = useState(1100)
-  const [canvasHeight, setCanvasHeight] = useState(0)
 
   const shellRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLElement>(null)
@@ -311,13 +310,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   useEffect(() => {
     const element = canvasRef.current
     if (!element) return
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      setWidth(Math.max(640, entry.contentRect.width))
-      // The canvas section is its own scrollport: knowing its height lets the
-      // inner scroller fill exactly the remaining space under the axis strip.
-      setCanvasHeight(Math.max(320, entry.contentRect.height))
-    })
+    const observer = new ResizeObserver((entries) => setWidth(Math.max(640, entries[0].contentRect.width)))
     observer.observe(element)
     return () => observer.disconnect()
   }, [model])
@@ -849,7 +842,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             ))}
           </svg>
         </div>
-        <div className="experience-canvas-scroll" style={canvasHeight ? { maxHeight: canvasHeight - 22 } : undefined}>
+        <div className="experience-canvas-scroll">
         <svg ref={svgRef} width={width} height={view.height} className="experience-svg"
           onPointerDown={(down) => {
             if (down.button !== 0) return
