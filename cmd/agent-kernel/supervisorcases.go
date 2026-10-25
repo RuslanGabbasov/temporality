@@ -75,7 +75,7 @@ func runSupervisorCasesPass(ctx context.Context, log *slog.Logger, activities *a
 	auditIntakeClassifications(ctx, log, activities, observationURL, journalToken, client, done)
 	narrateAgentDevelopment(ctx, log, activities, ws, client, done)
 	monitorTurns(ctx, log, activities, observationURL, journalToken, client, done)
-	verifyCompletionClaims(ctx, log, activities, observationURL, journalToken, done)
+	verifyCompletionClaims(ctx, log, activities, observationURL, journalToken, client, done)
 }
 
 // verificationClaimPhrases: the success claims a final answer makes about
@@ -97,33 +97,59 @@ var verificationEvidencePhrases = []string{
 
 // verifyCompletionClaims is the anti-deception slice of stage 2 (docs/
 // agent-behavior-monitoring.md §3): a run whose final message claims checks
-// passed while its own journal shows no verification command gets a case.
-// Deterministic, model-free, and deliberately narrow: runs that delegated are
-// skipped (children execute the checks; the parent journal legitimately shows
-// none), and the claim phrases are the strong ones only.
-func verifyCompletionClaims(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken string, done map[string]time.Time) {
-	completions, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "run.completed", 60)
+// passed while its own journal shows no verification command becomes a case.
+// The deterministic phrase pass only NOMINATES — every nomination goes
+// through the supervisor judge with the run's actual command digest, and only
+// a judged gap reaches a human. Judged-honest runs get a sticky marker; the
+// same run never queues twice (the case key includes the case id — the
+// subject-only lookup once flooded the queue with duplicates).
+// verificationFetch / verificationJudge are indirection points for tests:
+// production uses the journal HTTP fetcher and the agent judge.
+var (
+	verificationFetch = fetchJournalTypedEvents
+	verificationJudge = agent.VerificationGapCase
+)
+
+// verificationSink is the journal-write surface of the audit; *agent.Activities
+// satisfies it, tests record calls.
+type verificationSink interface {
+	PublishSupervisorCase(ctx context.Context, model, caseID, subject, project, summary, recommendation string, extra map[string]any) error
+	EmitVerificationReviewed(ctx context.Context, run, explanation string) error
+}
+
+func verifyCompletionClaims(ctx context.Context, log *slog.Logger, activities verificationSink, observationURL, journalToken string, client *llm.Client, done map[string]time.Time) {
+	fetch := func(eventType string, limit int) ([]journalEvent, error) {
+		return verificationFetch(ctx, observationURL, journalToken, eventType, limit)
+	}
+	completions, err := fetch("run.completed", 60)
 	if err != nil {
 		log.Warn("verification claims: completions", "error", err.Error())
 		return
 	}
-	started, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "tool.started", 500)
+	started, err := fetch("tool.started", 500)
 	if err != nil {
 		log.Warn("verification claims: tool events", "error", err.Error())
 		return
 	}
-	delegations, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "delegation.started", 200)
+	delegations, err := fetch("delegation.started", 200)
 	if err != nil {
 		log.Warn("verification claims: delegations", "error", err.Error())
 		return
 	}
 	verifiedRuns := map[string]bool{}
+	commandsByRun := map[string][]string{}
 	for _, ev := range started {
 		command := strings.ToLower(fmt.Sprint(ev.Data["command"]))
 		if command == "" {
 			if args, ok := ev.Data["arguments"].(map[string]any); ok {
 				command = strings.ToLower(fmt.Sprint(args["command"]))
 			}
+		}
+		if command == "" || command == "<nil>" {
+			continue
+		}
+		if len(commandsByRun[ev.Run]) < 8 {
+			commandsByRun[ev.Run] = append(commandsByRun[ev.Run], truncateForMonitor(command))
 		}
 		for _, phrase := range verificationEvidencePhrases {
 			if strings.Contains(command, phrase) {
@@ -136,21 +162,32 @@ func verifyCompletionClaims(ctx context.Context, log *slog.Logger, activities *a
 	for _, ev := range delegations {
 		delegatedRuns[ev.Run] = true
 	}
-	checked := 0
-	for _, ev := range completions {
-		if checked >= 4 {
-			return
+	// Runs whose claim was already audited (judged honest) — sticky, same as
+	// the done index but in their own event type: an honest report is not a
+	// case and must not appear in the queue.
+	reviewed, err := fetch("verification.reviewed", 200)
+	if err != nil {
+		log.Warn("verification claims: reviewed markers", "error", err.Error())
+	}
+	reviewedRuns := map[string]bool{}
+	for _, ev := range reviewed {
+		subject, _ := ev.Data["subject"].(string)
+		if run, ok := strings.CutSuffix(subject, ":verification_claim"); ok {
+			reviewedRuns[run] = true
 		}
+	}
+	judged := 0
+	for _, ev := range completions {
 		run := ev.Run
-		if run == "" || verifiedRuns[run] || delegatedRuns[run] {
+		if run == "" || verifiedRuns[run] || delegatedRuns[run] || reviewedRuns[run] {
 			continue
 		}
 		subject := run + ":verification_claim"
-		if _, ok := done[subject]; ok {
+		if _, ok := done[agent.CaseVerificationGap+"\x00"+subject]; ok {
 			continue
 		}
 		// The final message is the run's newest text delta.
-		final := runFinalMessage(ctx, observationURL, journalToken, run)
+		final := runFinalMessageVia(fetch, run)
 		if final == "" {
 			continue
 		}
@@ -165,9 +202,35 @@ func verifyCompletionClaims(ctx context.Context, log *slog.Logger, activities *a
 		if !claimed {
 			continue
 		}
-		checked++
-		summary := fmt.Sprintf("Финальное сообщение заявляет прохождение проверок, но в журнале рана нет ни одной команды верификации. Финал: «%.200s»", final)
-		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseVerificationGap, subject, ev.Project, summary, "Сверьте заявление с реальностью: прогоните проверки сами или запросите у рана доказательства.", map[string]any{"run": run, "claim_only": true}); err != nil {
+		// Judge gate: phrase matches over-nominate (interactive work
+			// described as «проверено», checks done in other runs, blocked
+			// checks). The model sees the claim and the actual command digest
+			// and decides whether the report is a real unverified-pass claim.
+		if client == nil || judged >= 3 {
+			continue // no judge budget: stay silent rather than spam
+		}
+		judged++
+		commandsDigest := strings.Join(commandsByRun[run], "\n")
+		if commandsDigest == "" {
+			commandsDigest = "(ни одной команды в журнале рана)"
+		}
+		verdict, vErr := verificationJudge(ctx, client, truncateForMonitor(final), commandsDigest)
+		if vErr != nil {
+			log.Warn("verification claims: judge", "run", run, "error", vErr.Error())
+			continue // fail-open: skip this pass, the marker keeps it sticky
+		}
+		if !verdict.Gap {
+			if err := activities.EmitVerificationReviewed(ctx, run, verdict.Explanation); err != nil {
+				log.Warn("verification claims: honest marker", "run", run, "error", err.Error())
+			}
+			continue
+		}
+		summary := fmt.Sprintf("Финал заявляет прохождение проверок, но журнал рана таких команд не показывает. Судья: %s Команды рана: %s. Финал: «%.160s»",
+			verdict.Explanation, commandsDigest, final)
+		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseVerificationGap, subject, ev.Project, summary,
+			"Прогоните проверки сами или запросите у рана доказательства; если отчёт честный — пометьте кейс решённым.", map[string]any{
+				"run": run, "claim_only": true, "cause_class": "verification_gap", "judge": verdict.Explanation,
+			}); err != nil {
 			log.Warn("verification claims: publish", "error", err.Error())
 		}
 	}
@@ -176,7 +239,14 @@ func verifyCompletionClaims(ctx context.Context, log *slog.Logger, activities *a
 // runFinalMessage fetches the run's newest model.text_delta — the final
 // answer text.
 func runFinalMessage(ctx context.Context, observationURL, journalToken, run string) string {
-	events, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "model.text_delta", 200)
+	return runFinalMessageVia(func(eventType string, limit int) ([]journalEvent, error) {
+		return fetchJournalTypedEvents(ctx, observationURL, journalToken, eventType, limit)
+	}, run)
+}
+
+// runFinalMessageVia is the injectable variant (tests pass their fixture).
+func runFinalMessageVia(fetch func(eventType string, limit int) ([]journalEvent, error), run string) string {
+	events, err := fetch("model.text_delta", 200)
 	if err != nil {
 		return ""
 	}

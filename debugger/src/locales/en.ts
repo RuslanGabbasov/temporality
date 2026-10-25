@@ -201,6 +201,7 @@ export const en: Record<string, string> = {
     'supervisor.cause_user_error': 'User error',
     'supervisor.cause_external_dependency': 'External dependency',
     'supervisor.cause_unknown': 'Cause not determined',
+    'supervisor.cause_verification_gap': 'Unverified success claim',
     'runs.event.eval_source_succeeded_run': 'from a succeeded run',
     'runs.event.eval_source_human_corrected': 'from a human correction',
     'supervisor.case_sandbox_limit': 'Sandbox limit',

@@ -218,9 +218,9 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     setError('')
     try {
       const [verdictPage, insightPage, ackPage, settings, effect] = await Promise.all([
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict', limit: 300 }),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict', limit: 500 }),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.insight', limit: 50 }),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 300 }),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 500 }),
         workspaceApi.getSupervisorSettings().catch(() => null),
         observationApi.hintEffectiveness().catch(() => null),
       ])
