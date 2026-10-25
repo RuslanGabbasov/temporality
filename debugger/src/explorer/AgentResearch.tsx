@@ -56,16 +56,19 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
 
   useEffect(() => { void loadResearchRuns() }, [loadResearchRuns])
 
-  async function load() {
-    const run = runInput.trim()
+  async function load(runID?: string) {
+    // Explicit id first: the run list calls load(entry.id) — reading runInput
+    // here would see the stale (pre-setState) value and silently no-op on the
+    // first click.
+    const run = (runID ?? runInput).trim()
     if (!run) return
     const current = ++seq.current
     setLoading(true); setError(''); setCalls([]); setReplays(new Map()); setReplayErrors(new Map())
+    setLoadedRun(run)
     try {
       const events = await runEvents(run, project.trim() || undefined)
       if (seq.current !== current) return
       setCalls(extractExploreCalls(events))
-      setLoadedRun(run)
     } catch (e) {
       if (seq.current === current) setError(e instanceof Error ? e.message : 'Request failed')
     } finally {
@@ -110,23 +113,11 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
       </div>
 
       {/* The research-run list: what the agents actually explored, newest
-          first. Click a run — its calls expand in place with replay buttons. */}
+          first. Click a run — its calls expand in place with replay buttons.
+          The manual run-id entry is a secondary path below the list. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
         <div style={{ fontSize: '0.75rem', fontWeight: 600 }}>{t('explorer.agent_researched_runs') ?? 'Runs that explored knowledge'}</div>
         <Button size="sm" kind="ghost" onClick={() => void loadResearchRuns()} disabled={scanLoading}>↻</Button>
-        <span style={{ flex: 1 }} />
-        <TextInput
-          id="agent-research-run"
-          size="sm" labelText="" hideLabel
-          style={{ width: '240px' }}
-          placeholder={t('explorer.agent_run_placeholder') ?? 'Run id…'}
-          value={runInput}
-          onChange={(e) => setRunInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void load() }}
-        />
-        <Button size="sm" kind="ghost" onClick={() => void load()} disabled={loading || !runInput.trim()}>
-          {loading ? '…' : (t('explorer.agent_load') ?? 'Load')}
-        </Button>
       </div>
 
       {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
@@ -140,15 +131,15 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
 
       {researchRuns.length > 0 && (
         <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', overflow: 'hidden', marginBottom: '0.75rem', maxHeight: '40vh', overflowY: 'auto' }}>
-          {researchRuns.map((entry) => {
+          {researchRuns.map((entry, index) => {
             const expanded = loadedRun === entry.id
             const lastQuestion = entry.calls[entry.calls.length - 1]?.question || entry.calls[0]?.operation || ''
             return (
-              <div key={entry.id} style={{ borderTop: entry.calls.length > 0 && researchRuns[0] !== entry ? '1px solid var(--tm-border)' : 'none' }}>
+              <div key={entry.id} style={{ borderTop: index > 0 ? '1px solid var(--tm-border)' : 'none' }}>
                 <div
                   role="button" tabIndex={0}
-                  onClick={() => { if (expanded) { setLoadedRun(''); setCalls([]) } else { setRunInput(entry.id); void load() } }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { setRunInput(entry.id); void load() } }}
+                  onClick={() => { if (expanded) { setLoadedRun(''); setCalls([]) } else void load(entry.id) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void load(entry.id) }}
                   style={{ padding: '0.45rem 0.6rem', cursor: 'pointer', background: expanded ? 'var(--tm-elevated)' : 'transparent', display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' }}
                 >
                   <Tag size="sm" type="cool-gray">{entry.calls.length} {t('explorer.agent_calls') ?? 'calls'}</Tag>
@@ -167,6 +158,22 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
           })}
         </div>
       )}
+
+      {/* Secondary path: a specific run by id (the list covers the recent 50). */}
+      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+        <TextInput
+          id="agent-research-run"
+          size="sm" labelText="" hideLabel
+          style={{ width: '240px' }}
+          placeholder={t('explorer.agent_run_placeholder') ?? 'Run id…'}
+          value={runInput}
+          onChange={(e) => setRunInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void load() }}
+        />
+        <Button size="sm" kind="ghost" onClick={() => void load()} disabled={loading || !runInput.trim()}>
+          {loading ? '…' : (t('explorer.agent_load') ?? 'Load')}
+        </Button>
+      </div>
 
       {loadedRun && researchRuns.every((entry) => entry.id !== loadedRun) && calls.length === 0 && !loading && (
         <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '1rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
