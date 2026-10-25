@@ -1895,7 +1895,7 @@ export const en: Record<string, string> = {
     'explorer.dossier_created_by': 'by',
     'explorer.dossier_formed_in': 'Formed in run',
     'explorer.dossier_usage_runs': 'Used in runs',
-    'explorer.dossier_used_in_runs': 'applied in {count} runs',
+    'explorer.dossier_used_in_runs': 'applied in {{count}} runs',
     'explorer.dossier_replacement': 'Replaced by',
     'explorer.dossier_sources': 'Primary sources',
     'explorer.dossier_research': 'Research from this statement',

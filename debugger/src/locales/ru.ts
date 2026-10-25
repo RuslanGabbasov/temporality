@@ -1895,7 +1895,7 @@ export const ru: Record<string, string> = {
     'explorer.dossier_created_by': 'Автор',
     'explorer.dossier_formed_in': 'Сформировано в запуске',
     'explorer.dossier_usage_runs': 'Использовано в запусках',
-    'explorer.dossier_used_in_runs': 'применено в {count} запусках',
+    'explorer.dossier_used_in_runs': 'применено в {{count}} запусках',
     'explorer.dossier_replacement': 'Заменено знанием',
     'explorer.dossier_sources': 'Первоисточники',
     'explorer.dossier_research': 'Исследовать от этого утверждения',

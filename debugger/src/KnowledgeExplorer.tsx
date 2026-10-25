@@ -69,7 +69,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const [view, setView] = useState<View>(
     initParams.get('view') === 'conflicts' ? 'conflicts'
       : initParams.get('view') === 'agent' ? 'agent'
-        : initParams.get('view') === 'map' ? 'map' : 'search')
+        : initParams.get('view') === 'search' ? 'search' : 'map')
   const [dossierID, setDossierID] = useState(initParams.get('dossier') ?? '')
 
   const [areas, setAreas] = useState<ExploreArea[]>([])
@@ -126,7 +126,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(params.get('q') ?? '')
     setQuestion(params.get('q') ?? '')
     setSelectedAreaKey(params.get('area') ?? '')
-    setView(params.get('view') === 'conflicts' ? 'conflicts' : params.get('view') === 'agent' ? 'agent' : params.get('view') === 'map' ? 'map' : 'search')
+    setView(params.get('view') === 'conflicts' ? 'conflicts' : params.get('view') === 'agent' ? 'agent' : params.get('view') === 'search' ? 'search' : 'map')
     setDossierID(params.get('dossier') ?? '')
     setFilters({
       state: params.get('state') ?? '',
