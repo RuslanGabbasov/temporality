@@ -185,3 +185,34 @@ func TestEventTriggerCycleFetchError(t *testing.T) {
 	}
 	require.Error(t, listener.cycle(context.Background()))
 }
+
+func TestRenderTriggerTemplate(t *testing.T) {
+	body := map[string]any{
+		"resource": map[string]any{
+			"pullRequestId": 25135,
+			"url":           "https://tfs/example/pullRequests/25135",
+		},
+		"detailedMessage": map[string]any{
+			"markdown": "## Что сделано\n* фикс",
+			"html":     "<p>…</p>",
+		},
+		"msg": []any{map[string]any{"text": "первое"}, map[string]any{"text": "второе"}},
+		"actor": map[string]any{
+			"displayName": "Дятлев Денис",
+		},
+	}
+
+	template := "Продолжи рецензирование PR:\n{{body.detailedMessage.markdown}}\nРесурс: {{body.resource}}\nКто: {{body.actor.displayName}}\nВторое сообщение: {{body.msg.1.text}}\nНет такого: {{body.missing.path}}"
+	prompt := renderTriggerTemplate(template, body)
+
+	require.Contains(t, prompt, "## Что сделано\n* фикс")
+	// Nested objects render as JSON, never as Go's map[...] dump.
+	require.Contains(t, prompt, "\"pullRequestId\": 25135")
+	require.NotContains(t, prompt, "map[pullRequestId")
+	// Dotted paths step through nested maps and arrays.
+	require.Contains(t, prompt, "Дятлев Денис")
+	require.Contains(t, prompt, "второе")
+	// Unknown paths render as empty, not as literal placeholder noise.
+	require.NotContains(t, prompt, "{{body.")
+	require.True(t, len(prompt) >= len("Нет такого: ") && prompt[len(prompt)-len("Нет такого: "):] == "Нет такого: ")
+}

@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -392,6 +394,57 @@ func (l *eventTriggerListener) fire(ctx context.Context, t *parsedEventTrigger, 
 	triggerData["execution_identity_id"] = identityID
 	emit("accepted", triggerData)
 	l.log.Info("event trigger fired", "trigger", t.trigger.ID, "name", t.trigger.Name, "event", ev.EventID, "run", input.RunID)
+}
+
+// renderTriggerTemplate expands {{body.<dotted.path>}} placeholders against
+// the parsed webhook body: every path segment steps into a map (by key) or a
+// slice (by numeric index, {{body.msg.0.text}}). A scalar renders as-is; a
+// missing path renders as an empty string — a placeholder pointing nowhere
+// must not leak into the prompt as literal «{{body…}}» noise; maps/slices
+// render as indented JSON, so nested structures stay readable instead of
+// collapsing into Go's map[k:v …] dump.
+func renderTriggerTemplate(template string, body map[string]any) string {
+	resolve := func(path string) (string, bool) {
+		var current any = body
+		for _, segment := range strings.Split(path, ".") {
+			switch node := current.(type) {
+			case map[string]any:
+				value, ok := node[segment]
+				if !ok {
+					return "", false
+				}
+				current = value
+			case []any:
+				index, err := strconv.Atoi(segment)
+				if err != nil || index < 0 || index >= len(node) {
+					return "", false
+				}
+				current = node[index]
+			default:
+				return "", false
+			}
+		}
+		switch value := current.(type) {
+		case string:
+			return value, true
+		case map[string]any, []any:
+			encoded, err := json.MarshalIndent(value, "", "  ")
+			if err != nil {
+				return fmt.Sprintf("%v", value), true
+			}
+			return string(encoded), true
+		default:
+			return fmt.Sprintf("%v", value), true
+		}
+	}
+	re := regexp.MustCompile(`\{\{body\.([A-Za-z0-9_\.\-]+)\}\}`)
+	return re.ReplaceAllStringFunc(template, func(match string) string {
+		path := match[len("{{body.") : len(match)-len("}}")]
+		if value, ok := resolve(path); ok {
+			return value
+		}
+		return ""
+	})
 }
 
 // eventTriggerContextJSON renders the matched event for the agent: the whole

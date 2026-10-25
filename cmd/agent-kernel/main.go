@@ -6096,11 +6096,11 @@ func main() {
 			"payload":   body,
 		}
 		// Build prompt from template + normalized event context (§3): the
-		// agent never depends on the raw webhook format.
-		prompt := cfg.PromptTemplate
-		for k, v := range body {
-			prompt = strings.ReplaceAll(prompt, "{{body."+k+"}}", fmt.Sprintf("%v", v))
-		}
+		// agent never depends on the raw webhook format. Template variables
+		// resolve by dotted path into the body ({{body.resource.pullRequestId}},
+		// {{body.detailedMessage.markdown}}, {{body.msg.0.text}}); nested values
+		// render as indented JSON, never as Go's map[...] dump.
+		prompt := renderTriggerTemplate(cfg.PromptTemplate, body)
 		if encoded, err := json.MarshalIndent(event, "", "  "); err == nil {
 			prompt = prompt + "\n\n--- Trigger event ---\n" + string(encoded)
 		}
