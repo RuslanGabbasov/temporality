@@ -240,6 +240,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const parseWindow = (s: string | null): { t0: number; t1: number } | null => { if (!s) return null; const [a, b] = s.split(',').map(Number); return a && b ? { t0: a, t1: b } : null }
   const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(() => parseWindow(params.get('w')))
   const [width, setWidth] = useState(1100)
+  const [canvasHeight, setCanvasHeight] = useState(0)
 
   const shellRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLElement>(null)
@@ -310,7 +311,13 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   useEffect(() => {
     const element = canvasRef.current
     if (!element) return
-    const observer = new ResizeObserver((entries) => setWidth(Math.max(640, entries[0].contentRect.width)))
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      setWidth(Math.max(640, entry.contentRect.width))
+      // The canvas section is its own scrollport: knowing its height lets the
+      // inner scroller fill exactly the remaining space under the axis strip.
+      setCanvasHeight(Math.max(320, entry.contentRect.height))
+    })
     observer.observe(element)
     return () => observer.disconnect()
   }, [model])
@@ -830,10 +837,9 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     <main className={`experience-grid ${selected ? '' : 'no-details'}`}>
       <section className="obs-panel experience-canvas" ref={canvasRef}>
         <button className="timeline-fit-float" title={t('timeline.fit_hint')} aria-label={t('timeline.fit')} onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}><CenterToFit size={16} /></button>
-        <div className="experience-canvas-scroll">
-        {/* Sticky time axis: the tick strip stays pinned while the lane sea
-            scrolls, so an event never floats without its moment. */}
-        <div className="experience-axis-sticky" aria-hidden="true">
+        {/* Constant time-axis strip: it sits OUTSIDE the lane scroller, so
+            the moment in time is always readable — the lanes scroll under it. */}
+        <div className="experience-axis-strip" aria-hidden="true">
           <svg width={width} height={22}>
             {ticks.map((tick) => (
               <g key={tick}>
@@ -843,6 +849,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             ))}
           </svg>
         </div>
+        <div className="experience-canvas-scroll" style={canvasHeight ? { maxHeight: canvasHeight - 22 } : undefined}>
         <svg ref={svgRef} width={width} height={view.height} className="experience-svg"
           onPointerDown={(down) => {
             if (down.button !== 0) return
@@ -869,10 +876,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
           }}
         >
           <g>
-            {ticks.map((tick) => <g key={tick}>
-              <line x1={x(tick)} x2={x(tick)} y1={20} y2={view.height} stroke="#1c2530" strokeWidth={1} />
-              <text x={x(tick)} y={14} textAnchor="middle" className="tick-label">{formatTick(tick, view.active.t1 - view.active.t0)}</text>
-            </g>)}
+            {ticks.map((tick) => <line key={tick} x1={x(tick)} x2={x(tick)} y1={0} y2={view.height} stroke="#1c2530" strokeWidth={1} />)}
           </g>
           {/* Activation links target run lanes: keep the lanes rendered
              (labels + bars) whenever the arrows need somewhere to land.

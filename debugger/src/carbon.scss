@@ -2814,19 +2814,11 @@ button.header-nav-link {
 // Timeline grid
 .experience-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; }
 .experience-grid.no-details { grid-template-columns: minmax(0, 1fr); }
-.experience-canvas { position: relative; }
-.experience-canvas-scroll { overflow-x: auto; min-width: 0; }
-/* Sticky time axis: pinned to the top of the canvas scrollport so tick
-   labels stay visible while the tall lane sea scrolls by. */
-.experience-axis-sticky {
-  position: sticky;
-  top: 0;
-  height: 22px;
-  z-index: 4;
-  background: var(--tm-bg);
-  pointer-events: none;
-}
-.experience-axis-sticky svg { display: block; }
+.experience-canvas { position: relative; display: flex; flex-direction: column; max-height: calc(100vh - 205px); }
+.experience-canvas-scroll { flex: 1 1 auto; min-height: 240px; overflow: auto; min-width: 0; }
+/* Constant time-axis strip above the lane scroller — always readable. */
+.experience-axis-strip { position: relative; height: 22px; background: var(--tm-bg); flex: 0 0 auto; }
+.experience-axis-strip svg { display: block; }
 .timeline-fit-float {
   position: absolute;
   top: 0.75rem;
