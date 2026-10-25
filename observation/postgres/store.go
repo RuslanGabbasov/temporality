@@ -326,8 +326,8 @@ func (s *Store) ListKnowledgeEmbeddings(ctx context.Context, model string) (map[
 // the semantic map walks them to join vectors with the projections.
 func (s *Store) ListKnowledgeProjects(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT context->>'project' FROM observation_events
-		 WHERE type LIKE 'knowledge.%' AND COALESCE(context->>'project', '') <> ''
+		`SELECT DISTINCT project_id FROM observation_events
+		 WHERE type LIKE 'knowledge.%' AND project_id <> ''
 		 ORDER BY 1`)
 	if err != nil {
 		return nil, err
