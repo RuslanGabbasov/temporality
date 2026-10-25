@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildClusterTree, clusterAssign, knnEdges, projectSemanticMap, type MapItem } from './semanticMap'
+import { buildClusterTree, buildSemanticMap, clusterAssign, knnEdges, knnEdgesFlat, projectSemanticMap, type MapItem } from './semanticMap'
 
 function item(id: string, vector: number[], topics: string[] = []): MapItem {
   return { id, project: 'p', proposition: `statement ${id}`, state: 'confirmed', topics, vector }
@@ -115,5 +115,56 @@ describe('buildClusterTree', () => {
       }
     }
     expect(seen.size).toBe(items.length)
+  })
+})
+
+describe('knnEdgesFlat', () => {
+  it('matches knnEdges on the same vectors', () => {
+    const vectors = [[1, 0], [0.9, 0.1], [0.95, 0.05], [0, 1], [0.05, 0.95]]
+    const n = vectors.length, dim = 2
+    const flat = new Float32Array(n * dim)
+    vectors.forEach((v, i) => { flat.set(v, i * dim) })
+    const fast = knnEdgesFlat(flat, n, dim, 2)
+    const reference = knnEdges(vectors, 2)
+    // Same source nodes and neighbors, order-insensitive per node.
+    const key = (e: [number, number, number]) => `${Math.min(e[0], e[1])}->${Math.max(e[0], e[1])}`
+    const fastSet = new Set(fast.map(key))
+    for (const e of reference) expect(fastSet.has(key(e))).toBe(true)
+  })
+
+  it('caps each source at k edges', () => {
+    const vectors = [[1, 0], [0.9, 0.1], [0.8, 0.2], [0.7, 0.3], [0, 1]]
+    const flat = new Float32Array(vectors.flat())
+    const edges = knnEdgesFlat(flat, vectors.length, 2, 2)
+    const out = new Map<number, number>()
+    for (const [a] of edges) out.set(a, (out.get(a) ?? 0) + 1)
+    for (let i = 0; i < vectors.length; i++) expect(out.get(i)).toBe(2)
+  })
+})
+
+describe('buildSemanticMap', () => {
+  const items: MapItem[] = Array.from({ length: 30 }, (_, i) => ({
+    id: `k${i}`, project: 'p', proposition: `statement ${i}`, state: 'confirmed',
+    topics: [i % 2 === 0 ? 'frontend' : 'backend'],
+    vector: i % 2 === 0 ? [1, 0.05, 0] : [0, 0.05, 1],
+  }))
+
+  it('produces a consistent pyramid and edges in one pass', () => {
+    const result = buildSemanticMap(items, { width: 800, height: 600 })
+    expect(result.nodes).toHaveLength(items.length)
+    expect(result.level1.length).toBeGreaterThanOrEqual(2)
+    expect(result.level2.length).toBeGreaterThanOrEqual(result.level1.length)
+    // Every edge references valid node indices.
+    for (const [a, b] of result.edges) {
+      expect(a).toBeLessThan(items.length)
+      expect(b).toBeLessThan(items.length)
+    }
+  })
+
+  it('is deterministic', () => {
+    const first = buildSemanticMap(items, { width: 800, height: 600 })
+    const second = buildSemanticMap(items, { width: 800, height: 600 })
+    expect(first.nodes.map((n) => [Math.round(n.x), Math.round(n.y)])).toEqual(
+      second.nodes.map((n) => [Math.round(n.x), Math.round(n.y)]))
   })
 })
