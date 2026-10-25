@@ -492,3 +492,106 @@ export function projectSemanticMap(
   }
   return { nodes, width, height }
 }
+
+// ── Fused fast pipeline (worker-ready) ──────────────────────────────────────
+// projectSemanticMap + semanticGraph + buildClusterTree each normalized the
+// vectors and each rebuilt the kNN graph — three O(n²·dim) passes where one
+// suffices. buildSemanticMap does the whole job in one pass and powers the
+// worker; the older composable functions stay for tests and small datasets.
+
+/** kNN over a flat normalized matrix with bounded top-k selection: O(n²·dim)
+ *  dot products on a Float32Array and an insertion-kept top-k (no per-node
+ *  sort of n elements). Returns [i, j, similarity] triples, ≤ k per source. */
+export function knnEdgesFlat(flat: Float32Array, n: number, dim: number, k = 6): Array<[number, number, number]> {
+  const edges: Array<[number, number, number]> = []
+  const bestIdx = new Int32Array(k)
+  const bestSim = new Float32Array(k)
+  for (let i = 0; i < n; i++) {
+    const base = i * dim
+    let count = 0
+    let worst = -2
+    let worstAt = 0
+    for (let j = 0; j < n; j++) {
+      if (i === j) continue
+      const other = j * dim
+      let dot = 0
+      for (let d = 0; d < dim; d++) dot += flat[base + d] * flat[other + d]
+      if (count < k) {
+        bestIdx[count] = j
+        bestSim[count] = dot
+        if (dot < worst || count === 0) { worst = dot; worstAt = count }
+        count++
+      } else if (dot > worst) {
+        // Replace the current worst and recompute the new worst lazily.
+        bestIdx[worstAt] = j
+        bestSim[worstAt] = dot
+        worst = 2
+        for (let e = 0; e < k; e++) {
+          if (bestSim[e] < worst) { worst = bestSim[e]; worstAt = e }
+        }
+      }
+    }
+    for (let e = 0; e < count; e++) edges.push([i, bestIdx[e], bestSim[e]])
+  }
+  return edges
+}
+
+export interface SemanticMapResult {
+  nodes: LayoutNode[]
+  edges: Array<[number, number, number]>
+  level1: ClusterTreeNode[]
+  level2: ClusterTreeNode[]
+  width: number
+  height: number
+}
+
+/** One-pass build: normalize once, kNN once, force layout, cluster pyramid.
+ *  Deterministic; heavy enough (a couple of seconds at a few thousand items)
+ *  to run inside a worker — the UI module imports this through one. */
+export function buildSemanticMap(
+  items: MapItem[],
+  options?: { k?: number; width?: number; height?: number; ticks?: number },
+): SemanticMapResult {
+  const width = options?.width ?? WORLD_DEFAULT_W
+  const height = options?.height ?? WORLD_DEFAULT_H
+  const k = options?.k ?? 8
+  const ticks = options?.ticks ?? (items.length > 1200 ? 160 : 240)
+
+  const dim = items.length ? items[0].vector.length : 0
+  const flat = new Float32Array(items.length * dim)
+  items.forEach((item, i) => {
+    const normalized = normalize(item.vector)
+    for (let d = 0; d < dim; d++) flat[i * dim + d] = normalized[d] ?? 0
+  })
+
+  const edges = knnEdgesFlat(flat, items.length, dim, k)
+
+  const pca = pca2(items.map((item) => item.vector))
+  const random = rng(hashStrings(items.map((item) => item.id)))
+  const nodes: LayoutNode[] = items.map((item, i) => ({
+    id: item.id,
+    item,
+    cluster: 0,
+    x: width / 2 + (pca.x[i] ?? 0) * 8 + (random() - 0.5) * 4,
+    y: height / 2 + (pca.y[i] ?? 0) * 8 + (random() - 0.5) * 4,
+  }))
+  clusterAssign(items).forEach((cluster, i) => { nodes[i].cluster = cluster })
+
+  const links = edges.map(([source, target, similarity]) => ({
+    source, target,
+    distance: 18 + (1 - Math.max(0, Math.min(1, similarity))) * 112,
+  }))
+  const simulation = forceSimulation(nodes)
+    .force('link', forceLink(links).distance((link: { distance: number }) => link.distance).strength(0.6))
+    .force('charge', forceManyBody().strength(-90))
+    .force('x', forceX(width / 2).strength(0.03))
+    .force('y', forceY(height / 2).strength(0.03))
+    .stop()
+  for (let i = 0; i < ticks; i++) simulation.tick()
+
+  const tree = buildClusterTree(items, nodes)
+  return { nodes, edges, level1: tree.level1, level2: tree.level2, width, height }
+}
+
+const WORLD_DEFAULT_W = 1400
+const WORLD_DEFAULT_H = 900

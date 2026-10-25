@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,6 +144,14 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	}
 	model := strings.TrimSpace(r.URL.Query().Get("model")) // empty = any stored model
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	// limit bounds the response for slow links; the client renders the map
+	// per zoom tier and does not need every dot at once.
+	limit := 2000
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 100 && parsed <= 20000 {
+			limit = parsed
+		}
+	}
 	projects := []string{}
 	if project != "" {
 		if _, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, project); !allowed {
@@ -230,10 +239,10 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
-	// Newest first, bounded: a map beyond this size is unreadable anyway.
+	// Newest first, bounded by the requested limit.
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	if len(items) > 20000 {
-		items = items[:20000]
+	if len(items) > limit {
+		items = items[:limit]
 	}
 	writeJSON(w, 200, map[string]any{"items": items, "model": model})
 }

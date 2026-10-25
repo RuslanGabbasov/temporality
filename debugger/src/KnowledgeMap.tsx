@@ -4,12 +4,10 @@ import { observationApi } from './observationApi'
 import { useT } from './i18n'
 import { useTheme } from './theme'
 import { stateLabel } from './explorer/shared'
+import { useSemanticLayout } from './useSemanticLayout'
 import {
   CLUSTER_COLORS,
   STATE_COLORS,
-  buildClusterTree,
-  projectSemanticMap,
-  semanticGraph,
   type ClusterTreeNode,
   type LayoutNode,
   type MapItem,
@@ -110,6 +108,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const transformRef = useRef({ x: 0, y: 0, k: 1 })
   const frameRef = useRef(0)
   const edgesRef = useRef<Array<[number, number, number]>>([])
+  // Spatial grid for O(1) hover/click picking: bucket centers by 40px world
+  // cells, rebuilt with the layout instead of a linear scan per mousemove.
+  const gridRef = useRef<Map<string, MapPoint[]>>(new Map())
   const level1Ref = useRef<ClusterTreeNode[]>([])
   const level2Ref = useRef<ClusterTreeNode[]>([])
   /** Aggregate opacity per zoom: which pyramid tier is on stage. Kept in a
@@ -123,7 +124,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined })
+      const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: 2000 })
       setItems(page.items ?? [])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Request failed')
@@ -135,22 +136,27 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
   useEffect(() => { void load() }, [load])
 
-  // Re-layout when the dataset changes; the cluster pyramid (regions →
-  // sub-clusters) is computed once here, not per frame. The initial view
-  // fits every point on screen (with a margin) instead of opening at a
-  // zoom that crops half the map.
+  // The heavy pipeline (normalize → kNN → force → cluster pyramid) runs in a
+  // worker; this effect just installs the results into the render state.
+  const layout = useSemanticLayout(items)
   useEffect(() => {
-    if (!items) return
-    if (items.length === 0) { setPoints([]); level1Ref.current = []; level2Ref.current = []; return }
-    const layout = projectSemanticMap(items, { k: 6, width: WORLD_W, height: WORLD_H })
+    if (!layout) return
     const radius = Math.max(2.2, Math.min(4, 900 / Math.sqrt(layout.nodes.length + 1)))
-    setPoints(layout.nodes.map((node) => ({ ...node, r: radius })))
-    const tree = buildClusterTree(items, layout.nodes)
-    level1Ref.current = tree.level1
-    level2Ref.current = tree.level2
-    edgesRef.current = semanticGraph(items, 8, 0.6).edges
+    const mapPoints = layout.nodes.map((node) => ({ ...node, r: radius }))
+    const grid = new Map<string, MapPoint[]>()
+    for (const point of mapPoints) {
+      const key = `${Math.floor(point.x / 40)}:${Math.floor(point.y / 40)}`
+      const bucket = grid.get(key)
+      if (bucket) bucket.push(point)
+      else grid.set(key, [point])
+    }
+    gridRef.current = grid
+    setPoints(mapPoints)
+    level1Ref.current = layout.level1
+    level2Ref.current = layout.level2
+    edgesRef.current = layout.edges
     setLegendTopics(
-      [...tree.level1]
+      [...layout.level1]
         .sort((a, b) => b.count - a.count)
         .slice(0, 6)
         .filter((node) => node.label)
@@ -173,7 +179,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         y: (h - WORLD_H * fit) / 2,
       }
     })
-  }, [items])
+  }, [layout])
 
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -185,6 +191,27 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         || (point.item.topics ?? []).some((topic) => topic.toLowerCase().includes(needle))
     })
   }, [points, query, stateFilter])
+
+  /** Nearest point to a world-space query within maxDist, via the spatial
+   *  grid: O(bucket) instead of a full scan per mousemove. */
+  const pickPoint = useCallback((mx: number, my: number, maxDist: number): MapPoint | null => {
+    let best: MapPoint | null = null
+    let bestDist = maxDist
+    const cell = 40
+    const gx = Math.floor(mx / cell), gy = Math.floor(my / cell)
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const bucket = gridRef.current.get(`${gx + ox}:${gy + oy}`)
+        if (!bucket) continue
+        for (const point of bucket) {
+          const dx = point.x - mx, dy = point.y - my
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          if (dist < Math.max(point.r + 3, bestDist)) { best = point; bestDist = dist }
+        }
+      }
+    }
+    return best
+  }, [])
 
   const viewScale = useCallback(() => {
     const wrap = wrapRef.current
@@ -411,13 +438,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const { scale, tx, ty } = viewScale()
       const mx = (event.clientX - rect.left - tx) / scale
       const my = (event.clientY - rect.top - ty) / scale
-      let best: MapPoint | null = null
-      let bestDist = 14 / scale
-      for (const point of points) {
-        const dx = point.x - mx, dy = point.y - my
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist < Math.max(point.r + 3 / scale, bestDist)) { best = point; bestDist = dist }
-      }
+      const best = pickPoint(mx, my, 14 / scale)
       if (best) setHover({ point: best, clientX: event.clientX - rect.left, clientY: event.clientY - rect.top })
       else setHover(null)
     }
@@ -427,13 +448,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const { scale, tx, ty } = viewScale()
       const mx = (event.clientX - rect.left - tx) / scale
       const my = (event.clientY - rect.top - ty) / scale
-      let best: MapPoint | null = null
-      let bestDist = 14 / scale
-      for (const point of points) {
-        const dx = point.x - mx, dy = point.y - my
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist < Math.max(point.r + 3 / scale, bestDist)) { best = point; bestDist = dist }
-      }
+      const best = pickPoint(mx, my, 14 / scale)
       if (best) onOpenDossier(best.item.id)
     }
     wrap.addEventListener('wheel', onWheel, { passive: false })
@@ -448,7 +463,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       window.removeEventListener('mouseup', onUp)
       wrap.removeEventListener('click', onClick)
     }
-  }, [points, draw, onOpenDossier, viewScale])
+  }, [points, draw, onOpenDossier, viewScale, pickPoint])
 
   const states = useMemo(() => [...new Set((items ?? []).map((item) => item.state))].sort(), [items])
 

@@ -171,8 +171,8 @@ export const observationApi = {
     request<{ event: ObservationEvent }>(`/v1/observations/events/${encodeURIComponent(eventID)}`, undefined, { source_id: opts?.source_id, project: opts?.project }),
   // Semantic map: every embedded knowledge item visible to the caller — raw
   // vectors + render meta, one request; the client projects them to 2D.
-  knowledgeEmbeddingMap: (opts?: { model?: string; project?: string }) =>
-    request<{ items: Array<import('./semanticMap').MapItem>; model: string }>('/v1/observations/knowledge/embeddings/map', undefined, { model: opts?.model, project: opts?.project }),
+  knowledgeEmbeddingMap: (opts?: { model?: string; project?: string; limit?: number }) =>
+    request<{ items: Array<import('./semanticMap').MapItem>; model: string }>('/v1/observations/knowledge/embeddings/map', undefined, { model: opts?.model, project: opts?.project, limit: opts?.limit }),
   healthStats: (project?: string, since?: string) =>
     request<HealthStats>('/v1/observations/stats/health', undefined, { project, since }),
   // Hint tier effectiveness (docs/supervisor-model.md §6.6): helpful/harmful
