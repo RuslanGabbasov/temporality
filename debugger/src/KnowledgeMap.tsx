@@ -12,6 +12,7 @@ import {
   type MapItem,
 } from './semanticMap'
 import { itemTopic, topicColor } from './knowledgeTaxonomy'
+import { queryMatchesItem } from './knowledgeQuery'
 
 /** Semantic knowledge map (docs/human-knowledge-explorer.md §12): the whole
  *  visible knowledge base laid out by embedding similarity — proximity reads
@@ -183,13 +184,13 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   }, [layout])
 
   const matches = useMemo(() => {
-    const needle = query.trim().toLowerCase()
+    const needle = query.trim()
     return points.map((point) => {
       if (stateFilter && point.item.state !== stateFilter) return false
       if (!needle) return true
-      return point.item.proposition.toLowerCase().includes(needle)
-        || point.item.id.toLowerCase().includes(needle)
-        || (point.item.topics ?? []).some((topic) => topic.toLowerCase().includes(needle))
+      // Word-form tolerant: «прогон» finds «прогона», «run» finds «runs» —
+      // plain includes() used to demand the exact substring form.
+      return queryMatchesItem(needle, point.item)
     })
   }, [points, query, stateFilter])
 

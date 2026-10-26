@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, TextInput } from '@carbon/react'
 import { observationApi, type ExploreKnowledgeCard, type ExploreRelation } from '../observationApi'
 import { useT } from '../i18n'
+import { queryMatchesItem } from '../knowledgeQuery'
 import { STATE_FILL } from './AreaMap'
 import { stateLabel } from './shared'
 
@@ -94,9 +95,9 @@ export function buildGraph(cards: ExploreKnowledgeCard[], relations: ExploreRela
   edges: ExploreRelation[]
   hiddenByFilter: number
 } {
-  const needle = nodeFilter.trim().toLowerCase()
+  const needle = nodeFilter.trim()
   const source = needle
-    ? cards.filter((c) => c.proposition.toLowerCase().includes(needle) || c.knowledge_id.toLowerCase().includes(needle))
+    ? cards.filter((c) => queryMatchesItem(needle, { id: c.knowledge_id, proposition: c.proposition }))
     : cards
   const keep = new Set(source.map((c) => c.knowledge_id))
   // A filtered-out node keeps its neighbors' edges only when both endpoints

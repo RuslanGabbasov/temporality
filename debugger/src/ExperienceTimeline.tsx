@@ -8,6 +8,7 @@ import { stateLabel } from './explorer/shared'
 import { aliveRowAt, buildRunChains, detectMisleads, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type MisleadSignal, type RunChain, type RunInfo } from './experience'
 import { useOrgUnits } from './orgUnits'
 import { workspaceApi, type User } from './workspaceApi'
+import { queryMatchesText } from './knowledgeQuery'
 
 const GUTTER = 210
 const AXIS_HEIGHT = 34
@@ -432,7 +433,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       (bucketFilter === 'all' || stateBucket(row.state) === bucketFilter) &&
       (scopeFilter === 'all' || row.scopes.primary === scopeFilter) &&
       (roleFilter === 'all' || row.roles.includes(roleFilter)) &&
-      (!needle || row.proposition.toLowerCase().includes(needle) || row.knowledgeId.toLowerCase().includes(needle)) &&
+      (!needle || queryMatchesText(needle, row.proposition) || row.knowledgeId.toLowerCase().includes(needle)) &&
       row.points.some((point) => kinds.has(point.kind)) &&
       row.runs.some((run) => !hiddenRoots.has(run.split('/')[0])) &&
       row.strength >= strengthMin &&
