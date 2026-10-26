@@ -299,10 +299,11 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       for (let pass = 0; pass < 2; pass++) {
         ctx.globalAlpha = alpha * (pass === 0 ? 0.85 : (dark ? 0.98 : 1))
         ctx.fillStyle = pass === 0 ? halo : ink
+        // Topic lines only — no per-cluster counts: they used to ride on
+        // every caption line (twice per two-line caption) and read as noise.
         lines.forEach((line, index) => {
-          const caption = `${line} · ${node.count}`
-          if (ctx.measureText(caption).width < r * 2.1) {
-            ctx.fillText(caption, cx + (pass === 0 ? 1 : 0), startY + index * (font + 2) + (pass === 0 ? 1 : 0))
+          if (ctx.measureText(line).width < r * 2.1) {
+            ctx.fillText(line, cx + (pass === 0 ? 1 : 0), startY + index * (font + 2) + (pass === 0 ? 1 : 0))
           }
         })
       }
