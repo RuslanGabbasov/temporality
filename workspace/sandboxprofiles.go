@@ -93,7 +93,7 @@ func BuiltinSandboxProfiles() []SandboxProfile {
 		{
 			ID:          "node",
 			Name:        "Node 22",
-			Description: "Node.js 22 с git, curl, jq, bash и ripgrep — фронтенд-сборки, npm-скрипты, JS-инструменты.",
+			Description: "Node.js 22 + Python 3 с git, curl, jq, bash, ripgrep, unzip/tar/7z — фронтенд-сборки, npm-скрипты, JS-инструменты и офисный пакет скилов.",
 			Toolchains:  []string{"node"},
 			CacheEnv:    []string{"NPM_CONFIG_CACHE=/cache/npm"},
 			Builtin:     true,
@@ -101,7 +101,7 @@ func BuiltinSandboxProfiles() []SandboxProfile {
 		{
 			ID:          "python",
 			Name:        "Python 3.12",
-			Description: "Python 3.12 с git, curl, jq, bash и ripgrep — скрипты, тесты, data-обработка.",
+			Description: "Python 3.12 с git, curl, jq, bash, ripgrep, unzip/tar/7z — скрипты, тесты, data-обработка и офисный пакет скилов.",
 			Toolchains:  []string{"python"},
 			CacheEnv:    []string{"PIP_CACHE_DIR=/cache/pip", "UV_CACHE_DIR=/cache/uv"},
 			Builtin:     true,

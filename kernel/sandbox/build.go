@@ -77,12 +77,19 @@ func ProfileDefinitions() map[string]ProfileDefinition {
 
 // apkTools is the shared CLI layer over alpine bases: the base image's own
 // comment block (sandbox/Dockerfile) explains each package.
+// unzip/tar/p7zip: the office skill pack (docs/builtin-skills.md §2.1) needs
+// the archive trio on every profile — the archive skill's whole flow (inspect,
+// extract, ZipCrypto passwords via unzip, AES via 7z) depends on them.
+// python3+py3-pip: the same pack's bundled scripts (pdf_tool, docx_tool,
+// xlsx_tool, pptx_tool, fill_template) are Python — a profile without python
+// makes half the pack inert; libraries install through the egress proxy.
 const apkTools = `# curl: agents fetch URLs without falling back to hand-written python
 # scripts; jq: idiomatic JSON handling for HTTP API responses.
 # bash: model-authored heredocs and scripts assume a POSIX-plus shell — plain
 # ash breaks them in subtle ways.
 # ripgrep: fast code search without fragile grep -r invocations.
-RUN apk add --no-cache git openssh-client ca-certificates curl jq bash ripgrep
+# unzip/tar/p7zip + python3/py3-pip: office skill pack baseline (docs/builtin-skills.md).
+RUN apk add --no-cache git openssh-client ca-certificates curl jq bash ripgrep unzip tar p7zip python3 py3-pip
 `
 
 // aptTools is the same CLI layer for debian-based bases (browser profile).

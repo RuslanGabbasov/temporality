@@ -269,6 +269,15 @@ func main() {
 	if err := ws.SeedSandboxProfiles(ctx); err != nil {
 		log.Error("seed builtin sandbox profiles", "error", err)
 	}
+	// Builtin office skills (docs/builtin-skills.md): seed the document pack
+	// into the registry idempotently — existing rows are never overwritten.
+	// An admin can turn seeding off with KERNEL_BUILTIN_SKILLS=off; failure
+	// is logged, not fatal (the registry works without the pack).
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("KERNEL_BUILTIN_SKILLS")), "off") {
+		log.Info("builtin skills seeding disabled (KERNEL_BUILTIN_SKILLS=off)")
+	} else if err := ws.SeedBuiltinSkills(ctx); err != nil {
+		log.Error("seed builtin skills", "error", err)
+	}
 	// Kernel→journal auth must be resolved before every consumer reads
 	// TEMPORALITY_API_TOKEN: the outbox publisher, the cost API and the
 	// activities' direct journal calls. On a fresh install the env is empty and
