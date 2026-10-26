@@ -223,6 +223,13 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     return { scale: k * base, tx: x, ty: y, w, h }
   }, [])
 
+  /** The point's region shade: its level1 region's color — the same hue its
+   *  bubble and legend entry carry. Falls back to the dominant-topic hash for
+   *  points the cluster tree has not reached. */
+  const regionColorOf = useCallback((p: MapPoint): string =>
+    level1Ref.current[p.cluster]?.color
+    ?? topicColor(itemTopic(p.item.topics) || p.item.proposition), [])
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     const wrap = wrapRef.current
@@ -340,12 +347,10 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // interpolated between the tier boundaries instead of stepping.
     const dotAlpha = Math.max(0.5, Math.min(1, 0.5 + ((scale - FAR) / (NEAR - FAR)) * 0.5))
     for (const { p, sx, sy, active } of visible) {
-      // Color = the point's region (legend «Регионы»); shape = the lifecycle
-      // verdict (circle/diamond/cross) — two channels, no rainbow inside a
-      // region.
-      // Region color = the point's own dominant topic color — the same
-      // shade the region bubble and the treemap show for this theme.
-      const regionColor = topicColor(itemTopic(p.item.topics) || p.item.proposition)
+      // Color = the point's REGION (the same shade as its bubble, its
+      // sub-bubbles and the legend entry): a region reads as one hue on every
+      // tier. Shape = the lifecycle verdict (circle/diamond/cross).
+      const regionColor = regionColorOf(p)
       const shape = stateShape(p.item.state)
       const dead = shape === 'cross'
       const rowAlpha = active ? dotAlpha : dotAlpha * 0.35
@@ -389,12 +394,23 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         if (crowded) continue
         accepted.push({ x: sx, y: sy })
         drawn++
-        ctx.fillStyle = 'var(--tm-text, #cfcfcf)'
+        // The label rides its point's region color — one hue per region, the
+        // same the dot below shows — over a two-pass halo for contrast. A
+        // CSS var() string is not a canvas color: assigning one silently
+        // keeps the previous fillStyle, so every label used to inherit
+        // whatever the last drawn dot had — all labels flipped hue together
+        // as the zoom moved the visible set.
+        const halo = dark ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.95)'
         const label = p.item.proposition.length > 44 ? `${p.item.proposition.slice(0, 43)}…` : p.item.proposition
-        ctx.fillText(label, sx, sy - dotR - 4)
+        ctx.globalAlpha = active ? 1 : 0.55
+        for (let pass = 0; pass < 2; pass++) {
+          ctx.fillStyle = pass === 0 ? halo : regionColorOf(p)
+          ctx.fillText(label, sx + (pass === 0 ? 1 : 0), sy - dotR - 4 + (pass === 0 ? 1 : 0))
+        }
+        ctx.globalAlpha = 1
       }
     }
-  }, [points, matches, viewScale])
+  }, [points, matches, viewScale, regionColorOf])
 
   useEffect(() => {
     frameRef.current = requestAnimationFrame(draw)
@@ -402,11 +418,18 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   }, [draw])
 
   // Zoom & pan (d3-zoom semantics, minimal hand-rolled version on canvas).
+  // A drag that ends over a point used to open the dossier — the click event
+  // fires after mouseup wherever the gesture started. The pointer travel is
+  // now measured: only a press-release without real movement counts as a
+  // click (CLICK_SLOP absorbs the tremor of an honest standing click).
   useEffect(() => {
     const wrap = wrapRef.current
     if (!wrap) return
     let dragging = false
     let lastX = 0, lastY = 0
+    let downX = 0, downY = 0
+    let movedFar = false
+    const CLICK_SLOP = 4
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       const transform = transformRef.current
@@ -420,10 +443,12 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       frameRef.current = requestAnimationFrame(draw)
     }
     const onDown = (event: MouseEvent) => {
-      dragging = true; lastX = event.clientX; lastY = event.clientY
+      dragging = true; movedFar = false
+      downX = lastX = event.clientX; downY = lastY = event.clientY
     }
     const onMove = (event: MouseEvent) => {
       if (dragging) {
+        if (Math.hypot(event.clientX - downX, event.clientY - downY) > CLICK_SLOP) movedFar = true
         const transform = transformRef.current
         transform.x += event.clientX - lastX
         transform.y += event.clientY - lastY
@@ -451,6 +476,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     }
     const onUp = () => { dragging = false }
     const onClick = (event: MouseEvent) => {
+      if (movedFar) return // a pan gesture ended where it happened to land
       const rect = wrap.getBoundingClientRect()
       const { scale, tx, ty } = viewScale()
       const mx = (event.clientX - rect.left - tx) / scale

@@ -116,6 +116,19 @@ describe('buildClusterTree', () => {
     }
     expect(seen.size).toBe(items.length)
   })
+
+  it('stamps every point with its region index so a region paints one hue', () => {
+    const tree = buildClusterTree(items, nodes)
+    // Every point's cluster points at an existing region, and that region
+    // carries its own color — the renderer paints a dot in the same shade as
+    // its bubble and legend entry.
+    for (const [index, node] of nodes.entries()) {
+      const region = tree.level1[node.cluster]
+      expect(region).toBeDefined()
+      expect(region.color).toMatch(/^#/)
+      expect(node.item.id).toBe(items[index].id)
+    }
+  })
 })
 
 describe('knnEdgesFlat', () => {

@@ -31,7 +31,9 @@ export interface LayoutNode {
   item: MapItem
   x: number
   y: number
-  /** Index into the cluster palette: the item's dominant topic cluster. */
+  /** Topic palette index after clusterAssign; after buildClusterTree — the
+   *  index into the returned level1 regions the point belongs to, so the
+   *  renderer can paint a dot in its region's exact shade. */
   cluster: number
 }
 
@@ -276,10 +278,11 @@ export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
     // Region color = the color of its dominant TOPIC (stable hash), the
     // same color the treemap and every other surface show for this theme.
     const color = topicColor(captionFor(items, memberIndices) || `region-${level1.length}`)
-    // The region's palette index becomes every member point's cluster color:
-    // dots inside one bubble share one shade — no rainbow inside a region.
-    const regionPalette = level1.length % CLUSTER_COLORS.length
-    for (const index of memberIndices) { nodes[index].cluster = regionPalette }
+    // Every member's cluster becomes the region's index into level1: the
+    // renderer paints each dot in its region's exact shade — dots inside one
+    // bubble share one hue, the same the bubble fill and legend entry show.
+    const regionIndex = level1.length
+    for (const index of memberIndices) { nodes[index].cluster = regionIndex }
     let cx = 0, cy = 0
     for (const index of memberIndices) { cx += nodes[index].x; cy += nodes[index].y }
     cx /= memberIndices.length; cy /= memberIndices.length
