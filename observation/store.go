@@ -48,6 +48,10 @@ type Filter struct {
 	// KnowledgeIDs restricts to events whose data.knowledge_id is listed;
 	// used to pull the full lifecycle of shared knowledge across projects.
 	KnowledgeIDs []string
+	// Order: "desc" walks the window newest-first (the experience timeline's
+	// progressive load paints the newest activity first, then extends into
+	// the past). Empty or "asc" — the default chronological order.
+	Order string
 }
 
 type Page struct {

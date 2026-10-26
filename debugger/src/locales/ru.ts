@@ -2073,6 +2073,7 @@ export const ru: Record<string, string> = {
     'timeline.range.label': 'период',
     'timeline.range.title': 'Окно загрузки с сервера — смена периода перезагружает события из журнала',
     'timeline.range.24h': '24 часа',
+    'timeline.range.3d': '3 дня',
     'timeline.range.7d': '7 дней',
     'timeline.range.30d': '30 дней',
     'timeline.range.all': 'Всё время',

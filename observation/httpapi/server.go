@@ -343,6 +343,7 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 		Project: r.URL.Query().Get("project"), SourceID: r.URL.Query().Get("source_id"), EventID: r.URL.Query().Get("event_id"), Run: r.URL.Query().Get("run"),
 		Task: r.URL.Query().Get("task"), Actor: r.URL.Query().Get("actor"),
 		Type: r.URL.Query().Get("type"), Since: since, Until: until, KnownAt: knownAt, Limit: limit,
+		Order: r.URL.Query().Get("order"),
 	}
 	if filter.Project == "" {
 		// Global listing: constrain to the principal's visible set. Run-scoped

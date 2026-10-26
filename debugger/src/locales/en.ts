@@ -2073,6 +2073,7 @@ export const en: Record<string, string> = {
     'timeline.range.label': 'period',
     'timeline.range.title': 'Server-side load window — switch reloads events from the journal',
     'timeline.range.24h': '24 hours',
+    'timeline.range.3d': '3 days',
     'timeline.range.7d': '7 days',
     'timeline.range.30d': '30 days',
     'timeline.range.all': 'All time',

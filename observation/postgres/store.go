@@ -122,18 +122,28 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 		cursorOccurred, cursorReceived = cursor.OccurredAt, cursor.ReceivedAt
 		cursorSource, cursorEvent = cursor.SourceID, cursor.EventID
 	}
+	// Desc mode walks the window newest-first (the experience timeline loads
+	// «от свежих к старым» so the newest activity paints first). Cursor
+	// comparisons flip with the order; the cursor itself is the same tuple.
+	desc := filter.Order == "desc"
+	order := "ASC"
+	cursorCmp := ">"
+	if desc {
+		order = "DESC"
+		cursorCmp = "<"
+	}
 	rows, err := s.pool.Query(ctx, `SELECT source_id,event_id,schema,occurred_at,received_at,integration,source_version,project_id,run_id,task_id,actor_id,actor_type,parent_event_id,type,data,evidence
 		FROM observation_events
 		WHERE ($1='' OR project_id=$1) AND ($2='' OR source_id=$2) AND ($3='' OR event_id=$3)
 		AND ($4='' OR run_id=$4) AND ($5='' OR task_id=$5) AND ($6='' OR actor_id=$6) AND ($7='' OR type=$7)
 		AND ($8::timestamptz IS NULL OR occurred_at >= $8) AND ($9::timestamptz IS NULL OR occurred_at <= $9)
 		AND ($10::timestamptz IS NULL OR received_at <= $10)
-		AND ($11::timestamptz IS NULL OR (occurred_at,received_at,source_id,event_id) > ($11,$12,$13,$14))
+		AND ($11::timestamptz IS NULL OR (occurred_at,received_at,source_id,event_id) `+cursorCmp+` ($11,$12,$13,$14))
 		AND ($16='' OR data->>'scope_kind'=$16)
 		AND (cardinality($17::text[]) = 0 OR data->>'scope_id' = ANY($17))
 		AND (cardinality($18::text[]) = 0 OR data->>'knowledge_id' = ANY($18))
 		AND (cardinality($19::text[]) = 0 OR project_id = ANY($19))
-		ORDER BY occurred_at,received_at,source_id,event_id LIMIT $15`,
+		ORDER BY occurred_at `+order+`,received_at `+order+`,source_id `+order+`,event_id `+order+` LIMIT $15`,
 		filter.Project, filter.SourceID, filter.EventID, filter.Run, filter.Task, filter.Actor, filter.Type,
 		filter.Since, filter.Until, filter.KnownAt, cursorOccurred, cursorReceived, cursorSource, cursorEvent, limit+1,
 		filter.ScopeKind, textList(filter.ScopeIDs), textList(filter.KnowledgeIDs), textList(filter.Projects))

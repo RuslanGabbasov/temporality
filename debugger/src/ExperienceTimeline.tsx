@@ -35,9 +35,10 @@ type RecencyFilter = 'all' | 'last-run' | '24h' | '7d' | '30d'
 type TerminalFilter = 'all' | 'alive' | 'dead'
 /** Server-side load window: the timeline never needs the full history to be
  * useful — a week of runs is already thousands of events at team scale. */
-type RangeFilter = '24h' | '7d' | '30d' | 'all'
+type RangeFilter = '24h' | '3d' | '7d' | '30d' | 'all'
 const RANGE_OPTIONS: { value: RangeFilter; label: string }[] = [
   { value: '24h', label: 'timeline.range.24h' },
+  { value: '3d', label: 'timeline.range.3d' },
   { value: '7d', label: 'timeline.range.7d' },
   { value: '30d', label: 'timeline.range.30d' },
   { value: 'all', label: 'timeline.range.all' },
@@ -51,7 +52,7 @@ const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'day', label: 'timeline.group.day' },
   { value: 'none', label: 'timeline.group.none' },
 ]
-const RANGE_MS: Record<Exclude<RangeFilter, 'all'>, number> = { '24h': 86400e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3 }
+const RANGE_MS: Record<Exclude<RangeFilter, 'all'>, number> = { '24h': 86400e3, '3d': 3 * 86400e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3 }
 
 /** One collapsed run group: everything a team lead needs before drilling into
  * individual chains — volume, failures, knowledge touched, disagreements. */
@@ -205,7 +206,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const [progress, setProgress] = useState<{ count: number; more: boolean } | null>(null)
   const [error, setError] = useState('')
   const [users, setUsers] = useState<User[]>([])
-  const [range, setRange] = useState<RangeFilter>(() => { const v = params.get('range'); return (['24h','7d','30d','all'] as const).includes(v as RangeFilter) ? v as RangeFilter : '7d' })
+  const [range, setRange] = useState<RangeFilter>(() => { const v = params.get('range'); return (['24h','3d','7d','30d','all'] as const).includes(v as RangeFilter) ? v as RangeFilter : '3d' })
   const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','agent','day','theme','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
   const parseLens = (s: string | null): Lens => { if (!s) return DEFAULT_LENS; try { return { ...DEFAULT_LENS, ...JSON.parse(s) } } catch { return DEFAULT_LENS } }
   const [lens, setLens] = useState<Lens>(() => parseLens(params.get('lens')))
@@ -246,28 +247,66 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const dragRef = useRef<{ x: number; t0: number; t1: number } | null>(null)
 
+  // Progressive load: the first page (newest events of the window) paints
+  // immediately; further pages extend into the past in the background, and
+  // panning the viewport into not-yet-loaded time triggers the next page.
+  const eventsRef = useRef<ObservationEvent[]>([])
+  const cursorRef = useRef<{ cursor: string; since?: string } | null>(null)
+  const loadingMoreRef = useRef(false)
+  const exhaustedRef = useRef(false)
+  const [loadedCount, setLoadedCount] = useState(0)
+
   const load = useCallback(async (projectID: string, rangeFilter: RangeFilter) => {
     if (!projectID.trim()) return
     setLoading(true); setError(''); setEvents([]); setWindow(null); setSelected('')
+    eventsRef.current = []
+    cursorRef.current = null
+    exhaustedRef.current = false
+    setLoadedCount(0)
     try {
       const since = rangeFilter !== 'all' ? new Date(Date.now() - RANGE_MS[rangeFilter]).toISOString() : undefined
-      const collected: ObservationEvent[] = []
-      let cursor: string | undefined
-      let pages = 0
-      do {
-        const page = await observationApi.events(projectID.trim(), cursor, undefined, undefined, { limit: 500, since })
-        collected.push(...page.events)
-        cursor = page.next_cursor
-        pages += 1
-        setProgress({ count: collected.length, more: Boolean(cursor) })
-        if (pages > 60) break
-      } while (cursor)
-      setEvents(collected)
+      const first = await observationApi.events(projectID.trim(), undefined, undefined, undefined, { limit: 500, since, order: 'desc' })
+      eventsRef.current = first.events
+      cursorRef.current = first.next_cursor ? { cursor: first.next_cursor, since } : null
+      exhaustedRef.current = !first.next_cursor
+      setEvents(first.events)
+      setLoadedCount(first.events.length)
+      // Refill the rest of the window in the background; the map/timeline
+      // keep painting while pages land.
+      void refillOlder(projectID.trim(), rangeFilter)
       const query = new URLSearchParams({ project: projectID.trim() })
       window.history.replaceState(null, '', `/experience?${query}`)
     } catch (failure) { setError(message(failure)) }
-    finally { setLoading(false); setProgress(null) }
+    finally { setLoading(false) }
   }, [])
+
+  /** Loads the next page of older events into the current dataset.
+   *  No-op while another page is in flight or the window is exhausted. */
+  const refillOlder = useCallback(async (projectID: string, rangeFilter: RangeFilter) => {
+    if (loadingMoreRef.current || exhaustedRef.current) return
+    if (!cursorRef.current) { exhaustedRef.current = true; return }
+    loadingMoreRef.current = true
+    setProgress({ count: eventsRef.current.length, more: true })
+    try {
+      const { cursor, since } = cursorRef.current
+      const page = await observationApi.events(projectID.trim(), cursor, undefined, undefined, { limit: 500, since, order: 'desc' })
+      if (cursorRef.current?.cursor !== cursor) return // a reset happened meanwhile
+      eventsRef.current = [...eventsRef.current, ...page.events]
+      cursorRef.current = page.next_cursor ? { cursor: page.next_cursor, since } : null
+      exhaustedRef.current = !page.next_cursor
+      setEvents([...eventsRef.current])
+      setLoadedCount(eventsRef.current.length)
+    } catch { /* the next pan retries */ } finally { loadingMoreRef.current = false; setProgress(null) }
+  }, [])
+
+  // When the viewport stretches past the oldest loaded moment, pull the next
+  // page of history in (progressive backfill on pan/zoom into the past).
+  useEffect(() => {
+    if (!window_ || !project.trim() || exhaustedRef.current) return
+    const oldest = eventsRef.current.length ? eventsRef.current[eventsRef.current.length - 1].occurred_at : ''
+    if (!oldest) return
+    if (window_.t0 < ms(oldest)) void refillOlder(project.trim(), range)
+  }, [window_, project, range, refillOlder])
 
   const [initialised, setInitialised] = useState(false)
   useEffect(() => { setInitialised(true); void load(project, range) }, [project, load])
