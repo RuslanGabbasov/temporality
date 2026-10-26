@@ -203,9 +203,9 @@ func verifyCompletionClaims(ctx context.Context, log *slog.Logger, activities ve
 			continue
 		}
 		// Judge gate: phrase matches over-nominate (interactive work
-			// described as «проверено», checks done in other runs, blocked
-			// checks). The model sees the claim and the actual command digest
-			// and decides whether the report is a real unverified-pass claim.
+		// described as «проверено», checks done in other runs, blocked
+		// checks). The model sees the claim and the actual command digest
+		// and decides whether the report is a real unverified-pass claim.
 		if client == nil || judged >= 3 {
 			continue // no judge budget: stay silent rather than spam
 		}
