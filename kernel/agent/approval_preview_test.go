@@ -50,3 +50,21 @@ func TestApprovalOperationHashesCanonicalArgsAndRedactsDisplay(t *testing.T) {
 	redaction := first["redaction"].(map[string]any)
 	require.Equal(t, true, redaction["applied"])
 }
+
+func TestFormAnswerTextPrefersFormValues(t *testing.T) {
+	// A form answer arrives as structured values: the model receives the
+	// canonical JSON — not squeezed through the 256-byte preview bound.
+	long := map[string]any{"note": strings.Repeat("x", 300), "confirm": true}
+	answer := Approval{Values: long, Response: ""}
+	got := formAnswerText(answer)
+	if !strings.Contains(got, `"confirm":true`) || !strings.Contains(got, `"note":"`) || len(got) < 300 {
+		t.Fatalf("expected full canonical JSON, got %d bytes: %.80s", len(got), got)
+	}
+	// Plain answers keep the redacting preview path.
+	if got := formAnswerText(Approval{Response: "yes, deploy"}); got != "yes, deploy" {
+		t.Fatalf("unexpected plain answer: %q", got)
+	}
+	if got := formAnswerText(Approval{Reason: "escalated"}); got != "escalated" {
+		t.Fatalf("unexpected reason fallback: %q", got)
+	}
+}

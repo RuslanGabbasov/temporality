@@ -317,6 +317,11 @@ type Approval struct {
 	// Response carries the human's answer for ask_human requests: a chosen
 	// option or free text. Empty for plain approvals.
 	Response string `json:"response,omitempty"`
+	// Values carries the structured form answer (docs/interactive-HITL.md §7):
+	// the submission UI validates it against the request's schema; the approval
+	// endpoint folds the canonical JSON into Response before the signal lands,
+	// so the workflow contract stays a string. Empty for plain questions.
+	Values map[string]any `json:"values,omitempty"`
 }
 
 // Nudge is the manual "unstick this model call" signal: it cancels the
@@ -1715,12 +1720,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if call.Name == "ask_human" {
 				// Escalation to a human (docs/triggers-and-escalations.md §5-13,
 				// docs/org-structure.md §25-33): a self-contained question with
-				// optional structured options. The run pauses on the approval signal
-				// channel; the answer rides the same Approval payload with Response set.
+				// optional structured options or a form schema (docs/interactive-HITL.md
+				// §7). The run pauses on the approval signal channel; the answer rides
+				// the same Approval payload — Response (option/free text) or the
+				// canonical JSON of the validated form values.
 				question, _ := call.Args["question"].(string)
 				humanContext, _ := call.Args["context"].(string)
 				options := stringList(call.Args["options"])
 				recipient, _ := call.Args["recipient"].(string)
+				formSchema := boundedFormSchema(call.Args["schema"])
 				timeoutSeconds := input.ApprovalTimeoutSeconds
 				if requested, ok := numericArg(call.Args["timeout_sec"]); ok && requested > 0 {
 					timeoutSeconds = int(requested)
@@ -1740,7 +1748,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := startTool(); err != nil {
 					return result, err
 				}
-				if err := emit(activityCtx, state, "human.requested", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "recipient": recipient, "question": question, "context": humanContext, "options": options, "timeout_seconds": timeoutSeconds, "timeout_policy": timeoutPolicy}); err != nil {
+				if err := emit(activityCtx, state, "human.requested", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "recipient": recipient, "question": question, "context": humanContext, "options": options, "schema": formSchema, "timeout_seconds": timeoutSeconds, "timeout_policy": timeoutPolicy}); err != nil {
 					return result, err
 				}
 				// Route the question to the recipient's preferred channel (§6-7,
@@ -1748,7 +1756,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// problems are recorded, never fatal — the run keeps waiting.
 				notifyCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 2}})
 				var delivery NotificationDelivery
-				notifyReq := NotifyChannelRequest{Project: input.Project, RunID: input.RunID, OperationID: operationID, Recipient: recipient, ActorID: input.ActorID, AgentID: input.AgentID, Question: question, Context: humanContext, Options: options, TimeoutSeconds: timeoutSeconds, TimeoutPolicy: timeoutPolicy, ExecutionIdentityID: input.ExecutionIdentityID}
+				notifyReq := NotifyChannelRequest{Project: input.Project, RunID: input.RunID, OperationID: operationID, Recipient: recipient, ActorID: input.ActorID, AgentID: input.AgentID, Question: question, Context: humanContext, Options: options, TimeoutSeconds: timeoutSeconds, TimeoutPolicy: timeoutPolicy, Schema: formSchema, ExecutionIdentityID: input.ExecutionIdentityID}
 				if err := workflow.ExecuteActivity(notifyCtx, ActivityNotifyChannel, notifyReq).Get(ctx, &delivery); err != nil {
 					delivery = NotificationDelivery{Recipient: recipient, Channel: "web", Status: "failed", Detail: boundedFailureDetail(err)}
 				}
@@ -1837,15 +1845,16 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						toolBlocked = true
 					}
 				case approved:
-					_ = workflow.ExecuteActivity(closeCtx, ActivityCloseHumanRequest, CloseHumanRequestInput{OperationID: operationID, Status: "answered", Response: approvalText(answer.Response), ActorID: answer.ActorID}).Get(ctx, nil)
-					response := approvalText(answer.Response)
-					if response == "" {
-						response = approvalText(answer.Reason)
-					}
-					if err := emit(activityCtx, state, "human.answered", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "actor": answer.ActorID, "response": response}); err != nil {
+					// The answer payload: form values as canonical JSON (the endpoint
+					// validated them against the schema before signaling), or the plain
+					// option/free-text answer. Empty payload must not reach the model —
+					// it reads as "the transport lost the answer" and triggers retries.
+					answerText := formAnswerText(answer)
+					_ = workflow.ExecuteActivity(closeCtx, ActivityCloseHumanRequest, CloseHumanRequestInput{OperationID: operationID, Status: "answered", Response: answerText, ActorID: answer.ActorID}).Get(ctx, nil)
+					if err := emit(activityCtx, state, "human.answered", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "actor": answer.ActorID, "response": answerText}); err != nil {
 						return result, err
 					}
-					toolResult.Content = "Human response: " + response
+					toolResult.Content = "Human response: " + answerText
 				default:
 					_ = workflow.ExecuteActivity(closeCtx, ActivityCloseHumanRequest, CloseHumanRequestInput{OperationID: operationID, Status: "cancelled", ActorID: answer.ActorID}).Get(ctx, nil)
 					if err := emit(activityCtx, state, "human.cancelled", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "actor": answer.ActorID, "reason": approvalText(answer.Reason)}); err != nil {
@@ -3467,7 +3476,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "remember", Description: "Record a high-confidence durable conclusion with optional evidence refs. Verification and build outcomes are recorded automatically; use this only for conclusions you are confident in and can ground in evidence. If the conclusion came from applying a skill, include skill_id and capability", Parameters: map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "skill_id": map[string]any{"type": "string", "description": "Skill this knowledge came from, e.g. deploy-service"}, "capability": map[string]any{"type": "string", "description": "Specific capability of the skill, e.g. verify"}}, "required": []string{"proposition"}}},
 		{Name: "remember_many", Description: "Record MANY atomic conclusions in one call — the way to memorize a document, a map, a spec or a domain area. Decompose the material yourself: one self-contained, verifiable fact per item (a hint surfaces one item, not a chapter). Submit batches of up to 50 items; call repeatedly for larger material and report the total to the user", Parameters: map[string]any{"type": "object", "properties": map[string]any{"items": map[string]any{"type": "array", "description": "Atomic facts, one per item", "items": map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string", "description": "One self-contained fact, e.g. 'The billing domain is covered by tests A, B, C in e2e/billing/'"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []string{"proposition"}}}}, "required": []string{"items"}}},
 		{Name: "request_approval", Description: "Pause this run and request a human decision before a consequential action", Parameters: map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}}, "required": []string{"action"}}},
-		{Name: "ask_human", Description: "Ask a human a question when you cannot proceed without additional context or a decision. The question must be self-contained: what task you are running, what you have established, what exactly is missing and which options exist. Prefer short structured options over open-ended questions. The run pauses until an answer arrives or the timeout expires.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "The exact question for the human, self-contained"}, "recipient": map[string]any{"type": "string", "description": "Logical recipient: a workspace user id/name (user:ruslan), role:admin, org:<unit-id>, or project_owner. Defaults to the operator who started this run"}, "context": map[string]any{"type": "string", "description": "Brief human-facing background: what you are doing and what you already established"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Short answer variants to choose from"}, "timeout_sec": map[string]any{"type": "integer", "description": "How long to wait for the answer"}, "timeout_policy": map[string]any{"type": "string", "enum": []string{"fallback", "fail", "retry", "escalate", "cancel"}, "description": "What happens on timeout: fallback (default) proceeds with the safest option, fail aborts the tool call, retry asks once more, escalate re-asks the project owner, cancel stops the run"}}, "required": []string{"question"}}},
+		{Name: "ask_human", Description: "Ask a human a question when you cannot proceed without additional context or a decision. The question must be self-contained: what task you are running, what you have established, what exactly is missing and which options exist. Prefer short structured options over open-ended questions; for structured input beyond one choice, attach a form schema — the human gets a real form to fill. The run pauses until an answer arrives or the timeout expires.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "The exact question for the human, self-contained"}, "recipient": map[string]any{"type": "string", "description": "Logical recipient: a workspace user id/name (user:ruslan), role:admin, org:<unit-id>, or project_owner. Defaults to the operator who started this run"}, "context": map[string]any{"type": "string", "description": "Brief human-facing background: what you are doing and what you already established"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Short answer variants to choose from"}, "schema": map[string]any{"type": "object", "description": "Optional form definition (JSON Schema subset) the human fills instead of free text: {type:'object', properties:{name:{type:'string',minLength:3},priority:{type:'string',enum:['high','normal']},count:{type:'integer',minimum:1,maximum:100},confirm:{type:'boolean'}}, required:['name']}. Supported field types: string (+enum, pattern RE2, minLength/maxLength, format: date/date-time/time/email/url/password), integer/number (+minimum/maximum), boolean, array (+enum = multi-select choices, minItems/maxItems, items format date with minItems=maxItems=2 = date range). Use it to build surveys and structured intake forms. Max 20 fields; the answer arrives as JSON in the response", "properties": map[string]any{}}, "timeout_sec": map[string]any{"type": "integer", "description": "How long to wait for the answer"}, "timeout_policy": map[string]any{"type": "string", "enum": []string{"fallback", "fail", "retry", "escalate", "cancel"}, "description": "What happens on timeout: fallback (default) proceeds with the safest option, fail aborts the tool call, retry asks once more, escalate re-asks the project owner, cancel stops the run"}}, "required": []string{"question"}}},
 		{Name: "human_contacts", Description: "Find who to ask before ask_human: search workspace users by name, role or org unit, or resolve an escalation target with escalate_for (the nearest org level above that user with active people, falling back to installation admins). Returns contact cards with user_id, role, org unit and enabled channel types — channel addresses are never exposed, delivery is automatic", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional substring matched against user name or id"}, "role": map[string]any{"type": "string", "description": "Filter by workspace role: admin, operator, writer, reader"}, "org_unit_id": map[string]any{"type": "string", "description": "Filter by org unit id (the exact unit, not its subtree)"}, "escalate_for": map[string]any{"type": "string", "description": "User id or name: resolve who to escalate to when that user cannot answer"}}}},
 		{Name: "send_file", Description: "Deliver a file you produced in the workspace to a human: it is uploaded to their enabled messaging channels (Matrix, Telegram) and appears as a download in the product UI. Use it to hand over reports, archives, generated documents — not for files the user can already find in the repo", Parameters: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "description": "Workspace path of the file, e.g. /workspace/report.md"}, "note": map[string]any{"type": "string", "description": "One-line human-facing caption for the file"}, "recipient": map[string]any{"type": "string", "description": "Logical recipient like ask_human: user id/name, role:admin, org:<unit>, project_owner. Defaults to the operator who started this run"}}, "required": []string{"path"}}},
 		{Name: "list_triggers", Description: "List all configured triggers (schedules, webhooks, event listeners) for this project", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},

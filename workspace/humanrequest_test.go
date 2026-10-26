@@ -15,7 +15,7 @@ import (
 func TestScanHumanRequestIncludesThreadRef(t *testing.T) {
 	now := time.Now()
 	values := sliceRow{"op-2", "run-2", "proj", "agent-a", 3, "user:ruslan", "ruslan",
-		"Ship?", "", []byte(`[]`), "delivered", "slackbot", "1697000000.000100", "", "",
+		"Ship?", "", []byte(`[]`), nil, "delivered", "slackbot", "1697000000.000100", "", "",
 		0, "fallback", "", now, nil, nil, nil}
 	request, err := scanHumanRequest(values)
 	require.NoError(t, err)

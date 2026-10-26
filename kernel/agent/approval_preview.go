@@ -12,7 +12,27 @@ const (
 	approvalDisplayMaxBytes = 4096
 	approvalValueMaxBytes   = 256
 	approvalCollectionLimit = 32
+	// approvalFormValuesMaxBytes bounds the canonical form JSON the model
+	// receives as the ask_human answer — the same bound the submission
+	// endpoint enforces (workspace.CanonicalFormValues).
+	approvalFormValuesMaxBytes = 4 * 1024
 )
+
+// formAnswerText renders the answer payload the model receives for an
+// ask_human (docs/interactive-HITL.md §7): a structured form answer wins —
+// canonical JSON, not squeezed through the 256-byte preview bound; a plain
+// option/free-text answer goes through the redacting preview as before.
+func formAnswerText(answer Approval) string {
+	if len(answer.Values) > 0 {
+		if raw, err := json.Marshal(answer.Values); err == nil && len(raw) <= approvalFormValuesMaxBytes {
+			return string(raw)
+		}
+	}
+	if text := approvalText(answer.Response); text != "" {
+		return text
+	}
+	return approvalText(answer.Reason)
+}
 
 func approvalText(value string) string {
 	var redacted bool
@@ -36,6 +56,48 @@ func stringList(value any) []string {
 		}
 	}
 	return out
+}
+
+// formSchemaMaxBytes bounds the ask_human form schema — the schema rides the
+// journal event, the human_request row and every SSE replay, so an agent
+// dumping a giant spec must not bloat all three. 8KB is generous for the
+// supported subset (docs/interactive-HITL.md §7).
+const formSchemaMaxBytes = 8 * 1024
+
+// boundedFormSchema extracts and validates the optional ask_human form schema:
+// it must be a JSON object with a "properties" object. Anything else (wrong
+// type, malformed, oversized) degrades to nil — the ask stays a plain
+// question instead of failing the tool call.
+func boundedFormSchema(value any) json.RawMessage {
+	switch v := value.(type) {
+	case map[string]any:
+		raw, err := json.Marshal(v)
+		if err != nil || len(raw) > formSchemaMaxBytes {
+			return nil
+		}
+		var probe struct {
+			Properties map[string]any `json:"properties"`
+		}
+		if json.Unmarshal(raw, &probe) != nil || len(probe.Properties) == 0 {
+			return nil
+		}
+		return raw
+	case string:
+		// Tolerate a model that sent the schema as a JSON string.
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" || len(trimmed) > formSchemaMaxBytes {
+			return nil
+		}
+		var probe struct {
+			Properties map[string]any `json:"properties"`
+		}
+		if json.Unmarshal([]byte(trimmed), &probe) != nil || len(probe.Properties) == 0 {
+			return nil
+		}
+		return json.RawMessage(trimmed)
+	default:
+		return nil
+	}
 }
 
 // numericArg extracts a positive numeric argument regardless of whether the

@@ -55,6 +55,7 @@ var channelMessages = map[string][2]string{
 	"ask_header":      {"Temporality: an agent is waiting for your answer", "Temporality: агент ждёт вашего ответа"},
 	"ask_context":     {"Context:", "Контекст:"},
 	"ask_options":     {"Options:", "Варианты:"},
+	"ask_form":        {"Form fields (answer in the web UI): %s", "Поля формы (заполняются в веб-интерфейсе): %s"},
 	"ask_project_run": {"Project %s · run %s", "Проект %s · ран %s"},
 	"ask_waiting":     {"waiting %ds", "ждёт %dс"},
 	"ask_answer_here": {"Answer here:", "Ответьте здесь:"},

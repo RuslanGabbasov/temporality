@@ -37,6 +37,11 @@ type NotifyChannelRequest struct {
 	Options        []string
 	TimeoutSeconds int
 	TimeoutPolicy  string
+	// Schema is the optional form the human fills instead of free text
+	// (docs/interactive-HITL.md §7): a bounded JSON Schema object delivered
+	// with the question and enforced server-side on submission. nil = plain
+	// question (options + free text).
+	Schema json.RawMessage
 	// ExecutionIdentityID scopes whom this run may address (§30); empty for
 	// manual runs without an identity.
 	ExecutionIdentityID string
@@ -349,6 +354,9 @@ func (a *Activities) recordHumanRequest(ctx context.Context, request NotifyChann
 		"execution_identity_id": request.ExecutionIdentityID,
 		"expires_at":            expiresAt,
 	}
+	if len(request.Schema) > 0 {
+		body["schema"] = request.Schema
+	}
 	if deliveries != nil {
 		body["deliveries"] = deliveries
 	}
@@ -613,6 +621,24 @@ func outboundText(request NotifyChannelRequest, uiURL string) OutboundText {
 	return msg
 }
 
+// formFieldNames lists a form schema's property names for the text-channel
+// hint — best-effort: a malformed schema degrades to no hint, never to a
+// failed delivery.
+func formFieldNames(schema json.RawMessage) []string {
+	var parsed struct {
+		Properties map[string]any `json:"properties"`
+	}
+	if json.Unmarshal(schema, &parsed) != nil {
+		return nil
+	}
+	names := make([]string, 0, len(parsed.Properties))
+	for name := range parsed.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // notificationText renders the human-facing message for external transports.
 // The answer itself always happens in the product UI; external channels
 // carry the question and a link. The envelope follows the question's
@@ -634,6 +660,10 @@ func notificationText(request NotifyChannelRequest, uiURL string) string {
 		builder.WriteString(ChannelText(lang, "ask_options"))
 		builder.WriteString(" ")
 		builder.WriteString(strings.Join(request.Options, " / "))
+	}
+	if fields := formFieldNames(request.Schema); len(fields) > 0 {
+		builder.WriteString("\n")
+		builder.WriteString(ChannelText(lang, "ask_form", strings.Join(fields, ", ")))
 	}
 	builder.WriteString("\n")
 	builder.WriteString(ChannelText(lang, "ask_project_run", request.Project, request.RunID))

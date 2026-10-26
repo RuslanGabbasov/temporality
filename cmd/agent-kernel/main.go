@@ -1051,6 +1051,31 @@ func main() {
 			// workflow (top-level or child) is identified by the full run path.
 			workflowID = workflowIDFor(sourceID, project, childRunID)
 		}
+		// Structured form answer (docs/interactive-HITL.md §7): validate the
+		// values against the request's schema and fold the canonical JSON into
+		// approval.Response BEFORE the signal — an invalid submission must not
+		// resume the run, and the workflow must receive the payload, not an
+		// empty string. Tool approvals carry operation ids matching no row —
+		// values are then ignored.
+		if approval.Approved && len(approval.Values) > 0 {
+			row, rowErr := ws.GetHumanRequest(r.Context(), approval.OperationID)
+			switch {
+			case rowErr == nil && len(row.Schema) > 0:
+				if err := workspace.ValidateFormValues(row.Schema, approval.Values); err != nil {
+					writeError(w, 422, err)
+					return
+				}
+				canonical, cerr := workspace.CanonicalFormValues(approval.Values)
+				if cerr != nil {
+					writeError(w, 422, cerr)
+					return
+				}
+				approval.Response = canonical
+			case rowErr != nil && !errors.Is(rowErr, workspace.ErrNotFound):
+				writeError(w, 500, rowErr)
+				return
+			}
+		}
 		// R1 (kernel-wedge-2026-10-21): the approval signal rides the temporal
 		// RPC deadline — expiry answers 503 "temporal rpc timeout: …"; every
 		// other failure keeps the 409 mapping below.

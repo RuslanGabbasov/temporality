@@ -18,15 +18,15 @@ import (
 // delivery row per member; the first answer wins and supersedes the rest.
 
 const humanRequestColumns = `id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context,
-options, status, channel, thread_ref, response, answered_by, timeout_seconds, timeout_policy,
+options, schema, status, channel, thread_ref, response, answered_by, timeout_seconds, timeout_policy,
 execution_identity_id, created_at, delivered_at, answered_at, expires_at`
 
 func scanHumanRequest(scanner interface{ Scan(dest ...any) error }) (HumanRequest, error) {
 	var r HumanRequest
-	var options []byte
+	var options, schema []byte
 	var deliveredAt, answeredAt, expiresAt *time.Time
 	err := scanner.Scan(&r.ID, &r.RunID, &r.ProjectID, &r.AgentID, &r.AgentVersion, &r.Recipient, &r.ResolvedUser,
-		&r.Question, &r.Context, &options, &r.Status, &r.Channel, &r.ThreadRef, &r.Response, &r.AnsweredBy,
+		&r.Question, &r.Context, &options, &schema, &r.Status, &r.Channel, &r.ThreadRef, &r.Response, &r.AnsweredBy,
 		&r.TimeoutSeconds, &r.TimeoutPolicy, &r.ExecutionIdentityID,
 		&r.CreatedAt, &deliveredAt, &answeredAt, &expiresAt)
 	if err != nil {
@@ -34,6 +34,9 @@ func scanHumanRequest(scanner interface{ Scan(dest ...any) error }) (HumanReques
 	}
 	if len(options) > 0 {
 		_ = json.Unmarshal(options, &r.Options)
+	}
+	if len(schema) > 0 {
+		r.Schema = json.RawMessage(schema)
 	}
 	r.DeliveredAt = deliveredAt
 	r.AnsweredAt = answeredAt
@@ -62,14 +65,23 @@ func (s *Store) CreateHumanRequest(ctx context.Context, r *HumanRequest) error {
 	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO human_request
-		 (id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context, options,
+		 (id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context, options, schema,
 		  status, channel, thread_ref, timeout_seconds, timeout_policy, execution_identity_id, created_at, expires_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now(),$17)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),$18)
 		 ON CONFLICT (id) DO NOTHING`,
 		r.ID, r.RunID, r.ProjectID, r.AgentID, r.AgentVersion, r.Recipient, r.ResolvedUser, r.Question, r.Context,
-		marshalStrings(r.Options), r.Status, r.Channel, r.ThreadRef, r.TimeoutSeconds, r.TimeoutPolicy,
+		marshalStrings(r.Options), nullableJSON(r.Schema), r.Status, r.Channel, r.ThreadRef, r.TimeoutSeconds, r.TimeoutPolicy,
 		r.ExecutionIdentityID, expiresAt)
 	return err
+}
+
+// nullableJSON maps an empty raw message to SQL NULL — an absent form must
+// read back as NULL, not as the JSON literal "null".
+func nullableJSON(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
 }
 
 // DeliverHumanRequest records the resolution and delivery outcome: the

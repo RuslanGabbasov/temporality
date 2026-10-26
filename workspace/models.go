@@ -107,8 +107,12 @@ type HumanRequest struct {
 	Question     string   `json:"question"`
 	Context      string   `json:"context,omitempty"`
 	Options      []string `json:"options"`
-	Status       string   `json:"status"`
-	Channel      string   `json:"channel,omitempty"`
+	// Schema is the optional form definition (docs/interactive-HITL.md §7): a
+	// JSON Schema object the submission must satisfy. nil = plain question
+	// (options + free text). Bounded at creation (8KB, workflow-side).
+	Schema  json.RawMessage `json:"schema,omitempty"`
+	Status  string          `json:"status"`
+	Channel string          `json:"channel,omitempty"`
 	// ThreadRef is the conversation thread of the delivered question on
 	// thread-capable transports (slack ts; docs/channels.md §9): follow-ups of
 	// the same run join it and threaded replies match their ask exactly.

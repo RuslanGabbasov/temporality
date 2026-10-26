@@ -76,13 +76,14 @@ func (r sliceRow) Scan(dest ...any) error {
 func TestScanHumanRequestIncludesAgentVersion(t *testing.T) {
 	now := time.Now()
 	values := sliceRow{"op-1", "run-1", "proj", "agent-a", 7, "user:ruslan", "ruslan",
-		"Deploy?", "", []byte(`["yes","no"]`), "answered", "web", "", "yes", "ruslan",
+		"Deploy?", "", []byte(`["yes","no"]`), nil, "answered", "web", "", "yes", "ruslan",
 		300, "fallback", "", now, nil, nil, nil}
 	request, err := scanHumanRequest(values)
 	require.NoError(t, err)
 	require.Equal(t, 7, request.AgentVersion)
 	require.Equal(t, []string{"yes", "no"}, request.Options)
 	require.Equal(t, "answered", request.Status)
+	require.Nil(t, request.Schema)
 }
 
 // TestAgentVersionIsWrittenOnlyAtCreation guards the §3.1 immutability
