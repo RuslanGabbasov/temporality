@@ -20,6 +20,8 @@ import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge, type OrgUnitsState } from './orgUnits'
 import Markdown from './Markdown'
 import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions, type SectionProvenance } from './SkillManifestEditor'
+import { extractBundledFiles, scanBundledFiles, type BundledFile, type RiskFinding } from './skillFiles'
+import { highlightCode, languageForFile } from './syntax'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -1119,7 +1121,109 @@ export default function Skills() {
   )
 }
 
-type SkillFormTab = 'general' | 'instructions' | 'contract' | 'runtime'
+type SkillFormTab = 'general' | 'instructions' | 'files' | 'contract' | 'runtime'
+
+/** Read-only reviewer for the files bundled with a skill (the import
+ * pipeline inlines them into the "## Bundled files" markdown appendix):
+ * file list + content view + automatic risk scan, so a foreign skill's
+ * scripts are reviewed BEFORE the skill is bound to an agent. */
+function BundledFilesTab({ markdown }: { markdown: string }) {
+  const t = useT()
+  const bundled = extractBundledFiles(markdown)
+  const findings = scanBundledFiles(bundled.files)
+  const [selected, setSelected] = useState<string | null>(null)
+  if (bundled.files.length === 0 && bundled.listed.length === 0) {
+    return (
+      <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)', margin: 0 }}>
+        {t('skills.files_none') ?? 'No bundled files — this skill is instructions only.'}
+      </p>
+    )
+  }
+  const current: BundledFile | undefined = bundled.files.find((f) => f.path === selected) ?? bundled.files[0]
+  const currentFindings: RiskFinding[] = current ? (findings[current.path] ?? []) : []
+  const totalDanger = Object.values(findings).flat().filter((f) => f.severity === 'danger').length
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minHeight: 0 }}>
+      {totalDanger > 0 && (
+        <InlineNotification
+          kind="warning"
+          title={t('skills.files_risk_title') ?? 'Review before binding'}
+          subtitle={t('skills.files_risk_hint', { count: String(totalDanger) }) ?? `${totalDanger} dangerous pattern(s) detected in bundled files`}
+          lowContrast
+          hideCloseButton
+        />
+      )}
+      <div style={{ display: 'flex', gap: '0.75rem', minHeight: 0, flex: 1 }}>
+        <div style={{ width: '260px', flexShrink: 0, border: '1px solid var(--tm-border)', borderRadius: '6px', overflowY: 'auto', maxHeight: '420px' }}>
+          {bundled.files.map((file) => {
+            const fileFindings = findings[file.path] ?? []
+            const danger = fileFindings.some((f) => f.severity === 'danger')
+            const warn = fileFindings.some((f) => f.severity === 'warning')
+            const active = current?.path === file.path
+            return (
+              <button
+                key={file.path}
+                onClick={() => setSelected(file.path)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.4rem', width: '100%', textAlign: 'left', cursor: 'pointer',
+                  padding: '0.45rem 0.6rem', fontSize: '0.78rem', border: 'none',
+                  background: active ? 'var(--tm-elevated)' : 'transparent',
+                  borderLeft: active ? '2px solid var(--tm-teal)' : '2px solid transparent',
+                  color: 'var(--tm-text)',
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.path}>{file.path}</span>
+                {danger && <span title={t('skills.files_danger') ?? 'dangerous patterns'}>🔴</span>}
+                {!danger && warn && <span title={t('skills.files_warning') ?? 'review recommended'}>🟡</span>}
+              </button>
+            )
+          })}
+          {bundled.listed.map((item) => (
+            <div key={item.path} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 0.6rem', fontSize: '0.75rem', color: 'var(--tm-text-3)' }} title={t('skills.files_not_inlined') ?? 'not inlined — binary or over the size cap'}>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.path}</span>
+              <span>{item.sizeLabel}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+          {current ? (
+            <>
+              <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
+                {current.path} · {languageForFile(current.path) || current.lang || 'text'}
+              </div>
+              {currentFindings.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  {currentFindings.map((finding, i) => (
+                    <div key={i} style={{
+                      fontSize: '0.72rem', padding: '0.3rem 0.5rem', borderRadius: '4px',
+                      border: `1px solid ${finding.severity === 'danger' ? 'var(--tm-danger)' : 'var(--tm-amber)'}`,
+                      color: finding.severity === 'danger' ? 'var(--tm-danger)' : 'var(--tm-amber)',
+                    }}>
+                      <strong>{finding.severity === 'danger' ? (t('skills.files_danger') ?? 'DANGER') : (t('skills.files_warning') ?? 'WARNING')}:</strong>{' '}
+                      {finding.label} · {t('skills.files_line') ?? 'line'} {finding.line} — <code style={{ fontSize: '0.68rem' }}>{finding.excerpt}</code>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <pre
+                className="skill-file-view"
+                style={{
+                  margin: 0, padding: '0.6rem', background: 'var(--tm-raised)', border: '1px solid var(--tm-border)',
+                  borderRadius: '6px', fontSize: '0.72rem', lineHeight: 1.5, overflow: 'auto', maxHeight: '380px',
+                }}
+                dangerouslySetInnerHTML={{ __html: highlightCode(current.content, languageForFile(current.path) || current.lang) }}
+              />
+            </>
+          ) : (
+            <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)', margin: 0 }}>
+              {t('skills.files_only_listed') ?? 'Only non-text files are bundled; their content is not stored in the registry.'}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 /** Shared CRUD fields: used by the create/edit modal (and available for inline editing). */
 function SkillFormFields({
@@ -1149,8 +1253,9 @@ function SkillFormFields({
   const tabs: Array<{ key: SkillFormTab; label: string }> = [
     { key: 'general', label: t('skills.ftab_general') ?? 'General' },
     { key: 'instructions', label: t('skills.ftab_instructions') ?? 'Instructions' },
+    { key: 'files', label: t('skills.ftab_files') ?? 'Bundled files' },
     { key: 'contract', label: t('skills.ftab_contract') ?? 'Contract' },
-    { key: 'runtime', label: t('skills.ftab_runtime') ?? 'Runtime' },
+    { key: 'runtime', label: t('skills.ftab_runtime') ?? 'Runtime & requirements' },
   ]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minHeight: 0, flex: 1 }}>
@@ -1221,6 +1326,7 @@ function SkillFormFields({
         {tab === 'instructions' && (
           <TextArea id="skill-markdown" labelText={t('skills.instructions') ?? 'Instructions (SKILL.md)'} rows={18} value={form.markdown} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { onTouch('markdown'); setForm({ ...form, markdown: e.target.value }) }} />
         )}
+        {tab === 'files' && <BundledFilesTab markdown={form.markdown} />}
         {tab === 'contract' && (
           <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} suggestions={suggestions} provenance={provenance} onTouch={onTouch} variant="contract" />
         )}
