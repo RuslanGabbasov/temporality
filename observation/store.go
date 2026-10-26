@@ -52,6 +52,11 @@ type Filter struct {
 	// progressive load paints the newest activity first, then extends into
 	// the past). Empty or "asc" — the default chronological order.
 	Order string
+	// Types is an any-of allow-list on the event type (exact match). The
+	// experience timeline uses it to load only its lifecycle vocabulary —
+	// supervision verdicts and acks would otherwise fill whole pages of the
+	// newest-first window with events the timeline cannot render.
+	Types []string
 }
 
 type Page struct {

@@ -1737,3 +1737,61 @@ func TestObservationHealthStatsUnsupportedStore(t *testing.T) {
 		t.Fatalf("501 body = %v, want the health stats notice", body)
 	}
 }
+
+// The experience timeline loads newest-first through an any-of type
+// allow-list; pages must respect both filters and walk the window in the
+// requested order, with the cursor resuming in the same order.
+func TestEventsTypesFilterAndDescOrder(t *testing.T) {
+	handler := newTestServer(t)
+	events := []observation.Event{
+		proposedEvent("lighthouse", "evt-1", "K1", "first"),
+		{Schema: observation.Schema, EventID: "evt-2", OccurredAt: time.Date(2026, 9, 25, 13, 0, 0, 0, time.UTC),
+			Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+			Context: observation.Context{Project: "lighthouse", Run: "run-1"}, Type: "run.started"},
+		{Schema: observation.Schema, EventID: "evt-3", OccurredAt: time.Date(2026, 9, 25, 14, 0, 0, 0, time.UTC),
+			Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+			Context: observation.Context{Project: "lighthouse", Run: "run-1"}, Type: "supervisor.verdict"},
+	}
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// The allow-list excludes the verdict: the timeline page carries only its
+	// own vocabulary, and desc order puts the newest first.
+	res, body := doJSON(t, handler, "GET", "/v1/observations/events?project=lighthouse&types=run.started,knowledge.proposed&order=desc", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("types+desc list status = %d", res.StatusCode)
+	}
+	got := body["events"].([]any)
+	if len(got) != 2 {
+		t.Fatalf("types+desc events = %d, want 2 (verdict excluded)", len(got))
+	}
+	if id := got[0].(map[string]any)["event_id"]; id != "evt-2" {
+		t.Fatalf("desc first event = %v, want evt-2 (newest first)", id)
+	}
+	if id := got[1].(map[string]any)["event_id"]; id != "evt-1" {
+		t.Fatalf("desc second event = %v, want evt-1", id)
+	}
+
+	// Paging in desc mode resumes strictly older than the cursor.
+	res1, body1 := doJSON(t, handler, "GET", "/v1/observations/events?project=lighthouse&types=run.started,knowledge.proposed&order=desc&limit=1", nil)
+	if res1.StatusCode != http.StatusOK {
+		t.Fatalf("desc page 1 status = %d", res1.StatusCode)
+	}
+	page := body1["events"].([]any)
+	if len(page) != 1 || page[0].(map[string]any)["event_id"] != "evt-2" {
+		t.Fatalf("desc page 1 = %v, want [evt-2]", page)
+	}
+	cursor, _ := body1["next_cursor"].(string)
+	if cursor == "" {
+		t.Fatal("desc page 1 must carry a next_cursor")
+	}
+	res2, body2 := doJSON(t, handler, "GET", "/v1/observations/events?project=lighthouse&types=run.started,knowledge.proposed&order=desc&limit=1&cursor="+cursor, nil)
+	if res2.StatusCode != http.StatusOK {
+		t.Fatalf("desc page 2 status = %d", res2.StatusCode)
+	}
+	page2 := body2["events"].([]any)
+	if len(page2) != 1 || page2[0].(map[string]any)["event_id"] != "evt-1" {
+		t.Fatalf("desc page 2 = %v, want [evt-1] (strictly older)", page2)
+	}
+}

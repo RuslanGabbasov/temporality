@@ -143,10 +143,11 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 		AND (cardinality($17::text[]) = 0 OR data->>'scope_id' = ANY($17))
 		AND (cardinality($18::text[]) = 0 OR data->>'knowledge_id' = ANY($18))
 		AND (cardinality($19::text[]) = 0 OR project_id = ANY($19))
+		AND (cardinality($20::text[]) = 0 OR type = ANY($20))
 		ORDER BY occurred_at `+order+`,received_at `+order+`,source_id `+order+`,event_id `+order+` LIMIT $15`,
 		filter.Project, filter.SourceID, filter.EventID, filter.Run, filter.Task, filter.Actor, filter.Type,
 		filter.Since, filter.Until, filter.KnownAt, cursorOccurred, cursorReceived, cursorSource, cursorEvent, limit+1,
-		filter.ScopeKind, textList(filter.ScopeIDs), textList(filter.KnowledgeIDs), textList(filter.Projects))
+		filter.ScopeKind, textList(filter.ScopeIDs), textList(filter.KnowledgeIDs), textList(filter.Projects), textList(filter.Types))
 	if err != nil {
 		return observation.Page{}, err
 	}

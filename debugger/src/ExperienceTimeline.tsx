@@ -33,16 +33,27 @@ const MEMORY_BUCKETS: MemoryBucket[] = ['active', 'stale', 'invalidated', 'archi
 
 type RecencyFilter = 'all' | 'last-run' | '24h' | '7d' | '30d'
 type TerminalFilter = 'all' | 'alive' | 'dead'
-/** Server-side load window: the timeline never needs the full history to be
- * useful — a week of runs is already thousands of events at team scale. */
-type RangeFilter = '24h' | '3d' | '7d' | '30d' | 'all'
-const RANGE_OPTIONS: { value: RangeFilter; label: string }[] = [
-  { value: '24h', label: 'timeline.range.24h' },
-  { value: '3d', label: 'timeline.range.3d' },
-  { value: '7d', label: 'timeline.range.7d' },
-  { value: '30d', label: 'timeline.range.30d' },
-  { value: 'all', label: 'timeline.range.all' },
+/** The lazy-load window has no user-facing date filter: loading always starts
+ *  at «now» and walks into the past, so the range chips went away. This is
+ *  just how deep the initial auto-load goes before it pauses for the pan.
+ *  The user asked for the last 3 working days as the standing window. */
+const INITIAL_DEPTH_MS = 3 * 86400e3
+/** The timeline's own event vocabulary: everything foldExperience renders
+ *  (run lifecycle, approvals with commands, hint/knowledge points). Loading
+ *  without it lets a supervision-verdict burst fill the newest-first page
+ *  with events the timeline cannot draw — the lane area went blank. */
+const TIMELINE_TYPES = [
+  'run.started', 'run.completed', 'run.failed', 'run.cancelled',
+  'tool.started', 'model.started',
+  'approval.requested', 'approval.granted', 'approval.rejected', 'approval.auto_granted', 'approval.timed_out',
+  'hint.offered',
+  'knowledge.proposed', 'knowledge.confirmed', 'knowledge.challenged', 'knowledge.disproved',
+  'knowledge.corrected', 'knowledge.invalidated', 'knowledge.superseded', 'knowledge.used',
 ]
+/** Enough structure: a page burst without a single run/row means keep paging.
+ *  Cap guards against paging a project that genuinely has no timeline events. */
+const MIN_RUNS_FOR_PAUSE = 1
+const MAX_INITIAL_PAGES = 24
 /** Primary run-section grouping dimension. */
 type GroupBy = 'unit' | 'agent' | 'day' | 'theme' | 'none'
 const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
@@ -52,7 +63,6 @@ const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'day', label: 'timeline.group.day' },
   { value: 'none', label: 'timeline.group.none' },
 ]
-const RANGE_MS: Record<Exclude<RangeFilter, 'all'>, number> = { '24h': 86400e3, '3d': 3 * 86400e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3 }
 
 /** One collapsed run group: everything a team lead needs before drilling into
  * individual chains — volume, failures, knowledge touched, disagreements. */
@@ -206,7 +216,6 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const [progress, setProgress] = useState<{ count: number; more: boolean } | null>(null)
   const [error, setError] = useState('')
   const [users, setUsers] = useState<User[]>([])
-  const [range, setRange] = useState<RangeFilter>(() => { const v = params.get('range'); return (['24h','3d','7d','30d','all'] as const).includes(v as RangeFilter) ? v as RangeFilter : '3d' })
   const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','agent','day','theme','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
   const parseLens = (s: string | null): Lens => { if (!s) return DEFAULT_LENS; try { return { ...DEFAULT_LENS, ...JSON.parse(s) } } catch { return DEFAULT_LENS } }
   const [lens, setLens] = useState<Lens>(() => parseLens(params.get('lens')))
@@ -247,72 +256,98 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const dragRef = useRef<{ x: number; t0: number; t1: number } | null>(null)
 
-  // Progressive load: the first page (newest events of the window) paints
-  // immediately; further pages extend into the past in the background, and
-  // panning the viewport into not-yet-loaded time triggers the next page.
+  // Progressive load: pages walk newest-first from «now» using the timeline's
+  // type vocabulary; every page paints as it lands. The initial burst stops at
+  // the standing depth (3 days) once real structure (a run or a knowledge
+  // row) is on the canvas; panning into the older, not-yet-loaded time pulls
+  // the next page — the lazy-loading design has no date-filter UI.
   const eventsRef = useRef<ObservationEvent[]>([])
-  const cursorRef = useRef<{ cursor: string; since?: string } | null>(null)
+  const cursorRef = useRef<string | null>(null)
   const loadingMoreRef = useRef(false)
   const exhaustedRef = useRef(false)
+  const windowRef = useRef<{ t0: number; t1: number } | null>(null)
   const [loadedCount, setLoadedCount] = useState(0)
+  const [loadedRuns, setLoadedRuns] = useState(0)
 
-  const load = useCallback(async (projectID: string, rangeFilter: RangeFilter) => {
+  const foldHasStructure = (events: ObservationEvent[]) => {
+    const folded = foldExperience(events)
+    return folded.runs.length >= MIN_RUNS_FOR_PAUSE || folded.rows.length >= MIN_RUNS_FOR_PAUSE
+  }
+
+  /** One page of the walk. Returns whether more pages may follow. */
+  const fetchPage = async (projectID: string): Promise<boolean> => {
+    if (!cursorRef.current) return false
+    const cursor = cursorRef.current
+    const page = await observationApi.events(projectID.trim(), cursor, undefined, undefined, { limit: 500, order: 'desc', types: TIMELINE_TYPES })
+    if (cursorRef.current !== cursor) return false // a reset happened meanwhile
+    eventsRef.current = [...eventsRef.current, ...page.events]
+    cursorRef.current = page.next_cursor ?? null
+    exhaustedRef.current = !page.next_cursor
+    setEvents([...eventsRef.current])
+    setLoadedCount(eventsRef.current.length)
+    setLoadedRuns(foldExperience(eventsRef.current).runs.length)
+    return !exhaustedRef.current
+  }
+
+  const load = useCallback(async (projectID: string) => {
     if (!projectID.trim()) return
     setLoading(true); setError(''); setEvents([]); setWindow(null); setSelected('')
     eventsRef.current = []
     cursorRef.current = null
     exhaustedRef.current = false
     setLoadedCount(0)
+    setLoadedRuns(0)
     try {
-      const since = rangeFilter !== 'all' ? new Date(Date.now() - RANGE_MS[rangeFilter]).toISOString() : undefined
-      const first = await observationApi.events(projectID.trim(), undefined, undefined, undefined, { limit: 500, since, order: 'desc' })
+      // First page paints immediately; further pages extend into the past in
+      // the background until the standing window has enough structure.
+      const first = await observationApi.events(projectID.trim(), undefined, undefined, undefined, { limit: 500, order: 'desc', types: TIMELINE_TYPES })
       eventsRef.current = first.events
-      cursorRef.current = first.next_cursor ? { cursor: first.next_cursor, since } : null
+      cursorRef.current = first.next_cursor ?? null
       exhaustedRef.current = !first.next_cursor
       setEvents(first.events)
       setLoadedCount(first.events.length)
-      // Refill the rest of the window in the background; the map/timeline
-      // keep painting while pages land.
-      void refillOlder(projectID.trim(), rangeFilter)
+      setLoadedRuns(foldExperience(first.events).runs.length)
+      const oldestLoaded = () => eventsRef.current.length ? ms(eventsRef.current[eventsRef.current.length - 1].occurred_at) : Number.POSITIVE_INFINITY
+      const depthReached = () => oldestLoaded() <= Date.now() - INITIAL_DEPTH_MS
+      const structured = () => foldHasStructure(eventsRef.current)
+      let pages = 1
+      while (!exhaustedRef.current && cursorRef.current && pages < MAX_INITIAL_PAGES && !(depthReached() && structured())) {
+        pages += 1
+        await fetchPage(projectID.trim())
+      }
       const query = new URLSearchParams({ project: projectID.trim() })
       window.history.replaceState(null, '', `/experience?${query}`)
     } catch (failure) { setError(message(failure)) }
     finally { setLoading(false) }
   }, [])
 
-  /** Loads the next page of older events into the current dataset.
-   *  No-op while another page is in flight or the window is exhausted. */
-  const refillOlder = useCallback(async (projectID: string, rangeFilter: RangeFilter) => {
-    if (loadingMoreRef.current || exhaustedRef.current) return
-    if (!cursorRef.current) { exhaustedRef.current = true; return }
+  /** Backfills pages of history while the viewport reaches past the oldest
+   *  loaded moment. Bounded per call so a deep pan loads in visible steps. */
+  const refillOlder = useCallback(async (projectID: string) => {
+    if (loadingMoreRef.current || exhaustedRef.current || !cursorRef.current) return
     loadingMoreRef.current = true
     setProgress({ count: eventsRef.current.length, more: true })
     try {
-      const { cursor, since } = cursorRef.current
-      const page = await observationApi.events(projectID.trim(), cursor, undefined, undefined, { limit: 500, since, order: 'desc' })
-      if (cursorRef.current?.cursor !== cursor) return // a reset happened meanwhile
-      eventsRef.current = [...eventsRef.current, ...page.events]
-      cursorRef.current = page.next_cursor ? { cursor: page.next_cursor, since } : null
-      exhaustedRef.current = !page.next_cursor
-      setEvents([...eventsRef.current])
-      setLoadedCount(eventsRef.current.length)
+      for (let page = 0; page < 6; page += 1) {
+        const oldest = eventsRef.current.length ? ms(eventsRef.current[eventsRef.current.length - 1].occurred_at) : Number.POSITIVE_INFINITY
+        const viewportNeedsMore = (windowRef.current?.t0 ?? Number.NEGATIVE_INFINITY) < oldest
+        if (!viewportNeedsMore) break
+        if (!(await fetchPage(projectID.trim()))) break
+      }
     } catch { /* the next pan retries */ } finally { loadingMoreRef.current = false; setProgress(null) }
   }, [])
 
   // When the viewport stretches past the oldest loaded moment, pull the next
   // page of history in (progressive backfill on pan/zoom into the past).
   useEffect(() => {
+    windowRef.current = window_
     if (!window_ || !project.trim() || exhaustedRef.current) return
     const oldest = eventsRef.current.length ? eventsRef.current[eventsRef.current.length - 1].occurred_at : ''
     if (!oldest) return
-    if (window_.t0 < ms(oldest)) void refillOlder(project.trim(), range)
-  }, [window_, project, range, refillOlder])
+    if (window_.t0 < ms(oldest)) void refillOlder(project.trim())
+  }, [window_, project, refillOlder])
 
-  const [initialised, setInitialised] = useState(false)
-  useEffect(() => { setInitialised(true); void load(project, range) }, [project, load])
-  // Range switches reload from the server: the window is a load filter, not a
-  // client-side mask.
-  useEffect(() => { if (initialised) void load(project, range) }, [range])
+  useEffect(() => { void load(project) }, [project, load])
   // Org-unit grouping maps run actors to their unit via the user directory.
   useEffect(() => { void workspaceApi.listUsers().then((data) => setUsers(data.users ?? [])).catch(() => setUsers([])) }, [])
 
@@ -337,10 +372,9 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     if (query) urlParams.set('q', query)
     if (selected) urlParams.set('selected', selected)
     if (window_) urlParams.set('w', `${window_.t0},${window_.t1}`)
-    if (range !== '7d') urlParams.set('range', range)
     if (groupBy !== 'unit') urlParams.set('group', groupBy)
     window.history.replaceState(null, '', `/experience?${urlParams.toString()}`)
-  }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, hiddenRoots, query, selected, window_, range, groupBy])
+  }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, hiddenRoots, query, selected, window_, groupBy])
 
   const model = useMemo(() => (events.length ? foldExperience(events) : null), [events])
 
@@ -658,11 +692,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       {loading && <div className="status" role="status"><span className="spinner" /> {t('timeline.loading')} {progress ? `${pluralT(t, locale, 'timeline.loaded_events_n', progress.count)}${progress.more ? '…' : ''}` : ''}</div>}
       {!loading && !error && <div className="obs-controls">
         <p className="obs-empty">{project
-          ? (range === 'all'
-              ? (t('timeline.empty_project') ?? 'No events for this project yet.')
-              : (t('timeline.empty_range') ?? `No events in the selected period (${RANGE_OPTIONS.find((opt) => opt.value === range) ? t(RANGE_OPTIONS.find((opt) => opt.value === range)!.label) : range}). Try a wider period.`))
+          ? (t('timeline.empty_project') ?? 'No events for this project yet.')
           : (t('timeline.empty_no_project') ?? 'Enter a project ID and open the timeline.')}</p>
-        {project && range !== 'all' && <p><button className="preset-chip" onClick={() => setRange('30d')}>{t('timeline.range.30d')}</button>{' '}<button className="preset-chip" onClick={() => setRange('all')}>{t('timeline.range.all')}</button></p>}
       </div>}
     </div>
   }
@@ -739,6 +770,11 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       <span className="experience-note">
         {t('timeline.active')} {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · {t('timeline.stale')} {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · {t('timeline.invalidated')} {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · {t('timeline.archived')} {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · {t('timeline.activations')} {view.visibleLinks.length}
       </span>
+      {loading || progress ? (
+        <span className="experience-note" role="status">
+          <span className="spinner" /> {pluralT(t, locale, 'timeline.loaded_events_n', loadedCount)} · {pluralT(t, locale, 'timeline.loaded_runs_n', loadedRuns)}{exhaustedRef.current ? '' : ` · ${t('timeline.loading_more')}`}
+        </span>
+      ) : null}
       {lens.conflicts && !view.conflictsPresent && <span className="experience-note">{t('timeline.no_conflicts')}</span>}
     </div>
     <div className="experience-toolbar">
@@ -747,11 +783,6 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       ))}
       <span className="lens-sep" />
       <input className="toolbar-search" type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder={t('timeline.claim_text_id')} title={t('timeline.filter_experiences')} />
-      <label className="toolbar-select">{t('timeline.range.label')}
-        <select value={range} onChange={(change) => setRange(change.target.value as RangeFilter)} title={t('timeline.range.title')}>
-          {RANGE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
-        </select>
-      </label>
       <label className="toolbar-select">{t('timeline.group.label')}
         <select value={groupBy} onChange={(change) => { setGroupBy(change.target.value as GroupBy); setGroupOverrides({}); setChainOverrides({}) }} title={t('timeline.group.title')}>
           {GROUP_BY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
@@ -1215,7 +1246,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
 
 
 
-function Header({ project, load, loading }: { project: string; load: (project: string, range: RangeFilter) => Promise<void> | void; loading: boolean }) {
+function Header({ project, load, loading }: { project: string; load: (project: string) => Promise<void> | void; loading: boolean }) {
   return null
 }
 

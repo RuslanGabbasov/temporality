@@ -2069,14 +2069,7 @@ export const en: Record<string, string> = {
     'timeline.recency.7d': 'Last 7 days',
     'timeline.recency.30d': 'Last 30 days',
 
-    // Timeline - Load range and grouping
-    'timeline.range.label': 'period',
-    'timeline.range.title': 'Server-side load window — switch reloads events from the journal',
-    'timeline.range.24h': '24 hours',
-    'timeline.range.3d': '3 days',
-    'timeline.range.7d': '7 days',
-    'timeline.range.30d': '30 days',
-    'timeline.range.all': 'All time',
+    // Timeline - Lazy load and grouping
     'timeline.group.label': 'group by',
     'timeline.group.title': 'Run section grouping dimension',
     'timeline.group.unit': 'org unit',
@@ -2099,9 +2092,12 @@ export const en: Record<string, string> = {
     'timeline.loaded_events_n_one': 'loaded {{count}} event',
     'timeline.loaded_events_n_few': 'loaded {{count}} events',
     'timeline.loaded_events_n_other': 'loaded {{count}} events',
+    'timeline.loaded_runs_n_one': '{{count}} run',
+    'timeline.loaded_runs_n_few': '{{count}} runs',
+    'timeline.loaded_runs_n_other': '{{count}} runs',
+    'timeline.loading_more': 'history loads as you pan left',
     'timeline.load_more': 'Load more events',
     'timeline.more_available': 'More events are in this window — loading continues from where it stopped',
-    'timeline.empty_range': 'No events in the selected period. Try a wider one.',
     'timeline.empty_no_project': 'Enter a project ID and open the timeline.',
 
     // Timeline - Filters

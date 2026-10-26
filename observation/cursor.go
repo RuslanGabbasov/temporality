@@ -46,3 +46,18 @@ func AfterCursor(event Event, value cursor) bool {
 	}
 	return event.EventID > value.EventID
 }
+
+// BeforeCursor is the desc-order mirror of AfterCursor: the event sorts
+// strictly before the cursor position (the newest-first walk resumes there).
+func BeforeCursor(event Event, value cursor) bool {
+	if !event.OccurredAt.Equal(value.OccurredAt) {
+		return event.OccurredAt.Before(value.OccurredAt)
+	}
+	if !event.ReceivedAt.Equal(value.ReceivedAt) {
+		return event.ReceivedAt.Before(value.ReceivedAt)
+	}
+	if event.Source.ID != value.SourceID {
+		return event.Source.ID < value.SourceID
+	}
+	return event.EventID < value.EventID
+}

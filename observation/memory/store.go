@@ -73,6 +73,7 @@ func (s *Store) ListObservations(ctx context.Context, filter observation.Filter)
 func (s *Store) listObservationsAll(filter observation.Filter) []observation.Event {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	desc := filter.Order == "desc"
 	result := make([]observation.Event, 0)
 	for _, event := range s.observationEvents {
 		if filter.Project != "" && event.Context.Project != filter.Project ||
@@ -83,6 +84,7 @@ func (s *Store) listObservationsAll(filter observation.Filter) []observation.Eve
 			filter.Task != "" && event.Context.Task != filter.Task ||
 			filter.Actor != "" && event.Context.Actor.ID != filter.Actor ||
 			filter.Type != "" && event.Type != filter.Type ||
+			len(filter.Types) > 0 && !containsStringValue(filter.Types, event.Type) ||
 			filter.ScopeKind != "" && stringDataValue(event.Data, "scope_kind") != filter.ScopeKind ||
 			len(filter.ScopeIDs) > 0 && !containsStringValue(filter.ScopeIDs, stringDataValue(event.Data, "scope_id")) ||
 			len(filter.KnowledgeIDs) > 0 && !containsStringValue(filter.KnowledgeIDs, stringDataValue(event.Data, "knowledge_id")) ||
@@ -93,17 +95,23 @@ func (s *Store) listObservationsAll(filter observation.Filter) []observation.Eve
 		}
 		result = append(result, event)
 	}
+	less := func(i, j observation.Event) bool {
+		if !i.OccurredAt.Equal(j.OccurredAt) {
+			return i.OccurredAt.Before(j.OccurredAt)
+		}
+		if !i.ReceivedAt.Equal(j.ReceivedAt) {
+			return i.ReceivedAt.Before(j.ReceivedAt)
+		}
+		if i.Source.ID != j.Source.ID {
+			return i.Source.ID < j.Source.ID
+		}
+		return i.EventID < j.EventID
+	}
 	sort.Slice(result, func(i, j int) bool {
-		if !result[i].OccurredAt.Equal(result[j].OccurredAt) {
-			return result[i].OccurredAt.Before(result[j].OccurredAt)
+		if desc {
+			return less(result[j], result[i])
 		}
-		if !result[i].ReceivedAt.Equal(result[j].ReceivedAt) {
-			return result[i].ReceivedAt.Before(result[j].ReceivedAt)
-		}
-		if result[i].Source.ID != result[j].Source.ID {
-			return result[i].Source.ID < result[j].Source.ID
-		}
-		return result[i].EventID < result[j].EventID
+		return less(result[i], result[j])
 	})
 	return result
 }
@@ -118,9 +126,21 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 		return observation.Page{}, err
 	}
 	events := s.listObservationsAll(filter)
+	// The walk skips every row at-or-before the cursor in the page's own order:
+	// asc drops rows the cursor already passed (strictly-after keeps), desc
+	// drops rows at-or-newer than it (strictly-before keeps) — the same mirror
+	// the postgres store applies in SQL.
+	desc := filter.Order == "desc"
 	if cursor != nil {
 		start := 0
-		for start < len(events) && !observation.AfterCursor(events[start], *cursor) {
+		for start < len(events) {
+			passed := observation.AfterCursor(events[start], *cursor)
+			if desc {
+				passed = observation.BeforeCursor(events[start], *cursor)
+			}
+			if passed {
+				break
+			}
 			start++
 		}
 		events = events[start:]

@@ -2069,14 +2069,7 @@ export const ru: Record<string, string> = {
     'timeline.recency.7d': 'Последние 7 дней',
     'timeline.recency.30d': 'Последние 30 дней',
 
-    // Timeline - Load range and grouping
-    'timeline.range.label': 'период',
-    'timeline.range.title': 'Окно загрузки с сервера — смена периода перезагружает события из журнала',
-    'timeline.range.24h': '24 часа',
-    'timeline.range.3d': '3 дня',
-    'timeline.range.7d': '7 дней',
-    'timeline.range.30d': '30 дней',
-    'timeline.range.all': 'Всё время',
+    // Timeline - Lazy load and grouping
     'timeline.group.label': 'группировка',
     'timeline.group.title': 'Измерение группировки секции прогонов',
     'timeline.group.unit': 'оргединица',
@@ -2099,9 +2092,12 @@ export const ru: Record<string, string> = {
     'timeline.loaded_events_n_one': 'загружено {{count}} событие',
     'timeline.loaded_events_n_few': 'загружено {{count}} события',
     'timeline.loaded_events_n_other': 'загружено {{count}} событий',
+    'timeline.loaded_runs_n_one': '{{count}} прогон',
+    'timeline.loaded_runs_n_few': '{{count}} прогона',
+    'timeline.loaded_runs_n_other': '{{count}} прогонов',
+    'timeline.loading_more': 'догружаем историю при прокрутке влево',
     'timeline.load_more': 'Загрузить ещё события',
     'timeline.more_available': 'В этом окне ещё события — догрузка продолжит с места остановки',
-    'timeline.empty_range': 'В выбранном периоде нет событий. Попробуйте расширить период.',
     'timeline.empty_no_project': 'Введите project ID и нажмите Open timeline.',
 
     // Timeline - Filters

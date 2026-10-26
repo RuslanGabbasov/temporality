@@ -344,6 +344,7 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 		Task: r.URL.Query().Get("task"), Actor: r.URL.Query().Get("actor"),
 		Type: r.URL.Query().Get("type"), Since: since, Until: until, KnownAt: knownAt, Limit: limit,
 		Order: r.URL.Query().Get("order"),
+		Types: commaList(r.URL.Query().Get("types"), 32),
 	}
 	if filter.Project == "" {
 		// Global listing: constrain to the principal's visible set. Run-scoped
@@ -1724,6 +1725,26 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+// commaList splits a comma-separated query parameter into trimmed non-empty
+// values, capped at max values (abuse guard: the allow-list lands in an SQL
+// ANY() array, so its size must stay bounded).
+func commaList(value string, max int) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	if len(parts) > max {
+		parts = parts[:max]
+	}
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 func newUUID() string {
