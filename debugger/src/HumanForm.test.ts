@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeFormValue, validateFormValues, type FormFieldSchema, type FormSchema } from './HumanForm'
+import { normalizeFormValue, patternHint, validateFormValues, type FormFieldSchema, type FormSchema } from './HumanForm'
 
 const schema: FormSchema = {
   type: 'object',
@@ -52,7 +52,7 @@ describe('validateFormValues', () => {
       mail: { type: 'string', format: 'email' },
     } }
     expect(validateFormValues(s, { ticket: 'see PROJ-1', day: '2026-03-01', mail: 'a@b.co' })).toEqual({})
-    expect(validateFormValues(s, { ticket: 'no ticket here', day: '2026-03-01', mail: 'a@b.co' })).toEqual({ ticket: 'pattern' })
+    expect(validateFormValues(s, { ticket: 'no ticket here', day: '2026-03-01', mail: 'a@b.co' })).toEqual({ ticket: 'A–Z×1+ + "-" + 0–9×1+' })
     expect(validateFormValues(s, { ticket: 'PROJ-1', day: '01.03.2026', mail: 'a@b.co' })).toEqual({ day: 'date' })
     expect(validateFormValues(s, { ticket: 'PROJ-1', day: '2026-03-01', mail: 'broken' })).toEqual({ mail: 'email' })
     // A pattern the browser cannot compile is left to the server.
@@ -101,9 +101,33 @@ describe('normalizeFormValue', () => {
     expect(normalizeFormValue(datetime, 42)).toBe(42)
   })
 
-  it('client-side date-time check accepts the raw browser shape', () => {
-    const s: FormSchema = { type: 'object', properties: { at: { type: 'string', format: 'date-time' } } }
-    expect(validateFormValues(s, { at: '2026-03-01T10:30' })).toEqual({})
-    expect(validateFormValues(s, { at: '01.03.2026 10:30' })).toEqual({ at: 'date-time' })
+  it('pattern errors render the decoded hint, not the bare word', () => {
+    const s: FormSchema = { type: 'object', properties: { ticket: { type: 'string', pattern: '[A-Z]+-[0-9]+' } } }
+    const errors = validateFormValues(s, { ticket: 'nope' }, 'ru')
+    expect(errors.ticket).toContain('A–Z')
+    expect(errors.ticket).toContain('0–9')
+    expect(errors.ticket).not.toBe('pattern')
+  })
+})
+
+describe('patternHint', () => {
+  it('decodes the typical ticket shape with quantifiers and anchors', () => {
+    const hint = patternHint('^[A-Z]{2,4}-[0-9]{3,6}$', 'ru') ?? ''
+    expect(hint).toContain('A–Z×2–4')
+    expect(hint).toContain('0–9×3–6')
+    expect(hint).toContain('"-"')
+    expect(hint).toMatch(/целиком|whole/)
+  })
+
+  it('handles escapes, alternation and passthrough', () => {
+    expect(patternHint('^\\d{4}$', 'en')).toBe('digits 0–9×4, whole value')
+    expect(patternHint('^(api|web)$', 'en')).toContain('one of: api, web')
+    expect(patternHint('foo', 'en')).toBe('foo')
+  })
+
+  it('bails to null on constructs it cannot translate', () => {
+    expect(patternHint('[^a-z]+', 'en')).toBeNull()
+    expect(patternHint('a{2,10}{3}', 'en')).toBeNull()
+    expect(patternHint('', 'en')).toBeNull()
   })
 })

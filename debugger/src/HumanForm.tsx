@@ -40,6 +40,118 @@ const FORMAT_CHECKS: Record<string, RegExp> = {
   email: /^[^@\s]+@[^@\s]+\.[^@\s]+$/,
 }
 
+/** Human-readable pattern decoder: turns the common RE2 shapes into a plain
+ * phrase so a field with a regex but no title/description is still enterable:
+ * ^[A-Z]{2,4}-[0-9]{3,6}$ → "2–4 × A–Z + "-" + 3–6 × 0–9, whole value".
+ * Returns null when the pattern has constructs the decoder does not know —
+ * the caller falls back to showing the raw pattern. */
+export function patternHint(pattern: string, locale: string): string | null {
+  if (!pattern || pattern.length > 256) return null
+  const ru = locale.startsWith('ru')
+  const word = (en: string, ruText: string) => (ru ? ruText : en)
+  let body = pattern
+  let whole = false
+  if (body.startsWith('^')) { body = body.slice(1); whole = true }
+  if (body.endsWith('$') && !body.endsWith('\\$')) { body = body.slice(0, -1); whole = true }
+  const classText = (cls: string): string | null => {
+    if (cls.startsWith('^')) return null // negated classes: not worth guessing
+    // Ranges and single symbols: A-Z, 0-9, abc → "A–Z 0–9 a b c"
+    const parts: string[] = []
+    let i = 0
+    while (i < cls.length) {
+      if (i + 2 < cls.length && cls[i + 1] === '-') {
+        parts.push(`${cls[i]}–${cls[i + 2]}`)
+        i += 3
+      } else {
+        parts.push(cls[i])
+        i += 1
+      }
+    }
+    if (!parts.length) return null
+    return parts.join(' ')
+  }
+  const quantifier = (): string => {
+    const m = body.match(/^\{(\d+)(,(\d+))?\}/)
+    if (m) {
+      body = body.slice(m[0].length)
+      if (m[2] === undefined) return word(`×${m[1]}`, `×${m[1]}`)
+      return m[3] ? word(`×${m[1]}–${m[3]}`, `×${m[1]}–${m[3]}`) : word(`×${m[1]}+`, `×${m[1]}+`)
+    }
+    if (body.startsWith('+')) { body = body.slice(1); return word('×1+', '×1+') }
+    if (body.startsWith('*')) { body = body.slice(1); return word('×0+', '×0+') }
+    if (body.startsWith('?')) { body = body.slice(1); return word('×0–1', '×0–1') }
+    return ''
+  }
+  const pieces: string[] = []
+  let alternation: string[] | null = null
+  while (body.length) {
+    if (body.startsWith('|')) {
+      // Top-level alternation: everything so far was option 1.
+      if (alternation === null) alternation = [pieces.join('')]
+      else alternation.push(pieces.join(''))
+      pieces.length = 0
+      body = body.slice(1)
+      continue
+    }
+    const classMatch = body.match(/^\[([^\]]*)\]/)
+    if (classMatch) {
+      const text = classText(classMatch[1])
+      if (text === null) return null
+      body = body.slice(classMatch[0].length)
+      const q = quantifier()
+      pieces.push(text + q)
+      continue
+    }
+    const escape = body.match(/^\\([dwsDWS])/)
+    if (escape) {
+      const names: Record<string, [string, string]> = {
+        d: ['digits 0–9', 'цифры 0–9'], w: ['letters, digits, _', 'буквы, цифры, _'], s: ['whitespace', 'пробелы'],
+      }
+      const key = escape[1].toLowerCase()
+      const name = names[key]
+      if (!name) return null
+      body = body.slice(escape[0].length)
+      const q = quantifier()
+      pieces.push(word(name[0], name[1]) + q)
+      continue
+    }
+    if (body.startsWith('(')) {
+      const close = body.indexOf(')')
+      if (close < 0) return null
+      const options = body.slice(1, close).split('|')
+      if (options.some((o) => /[{+*?\\[\]()]/.test(o))) return null
+      body = body.slice(close + 1)
+      const q = quantifier()
+      pieces.push(word(`one of: ${options.join(', ')}`, `одно из: ${options.join(', ')}`) + q)
+      continue
+    }
+    const char = body[0]
+    if ('\\[](){}.+*?$^'.includes(char) && !(char === '.')) return null
+    body = body.slice(1)
+    const q = quantifier()
+    pieces.push(char === '-' ? word('"-"', '"-"') : char + q)
+  }
+  if (alternation !== null) {
+    alternation.push(pieces.join(''))
+    return word(`one of the shapes: ${alternation.join(' / ')}`, `один из вариантов: ${alternation.join(' / ')}`) + (whole ? word(', whole value', ', строка целиком') : '')
+  }
+  if (!pieces.length) return null
+  // A run of single-character pieces is a literal word: ["f","o","o"] reads
+  // better as "foo" than "f + o + o". Multi-char pieces stay as they are.
+  let phrase = ''
+  let literal = ''
+  const flush = () => {
+    if (literal) { phrase += literal; literal = '' }
+  }
+  for (const piece of pieces) {
+    if (piece.length === 1) { flush(); literal += piece; continue }
+    flush()
+    phrase += (phrase ? ' + ' : '') + piece
+  }
+  flush()
+  return phrase + (whole ? word(', whole value', ', строка целиком') : '')
+}
+
 /** Local UTC offset as ±HH:MM — the datetime-local control carries no zone,
  * so the submission adds the user's own. */
 function localOffsetSuffix(): string {
@@ -82,8 +194,10 @@ export function normalizeFormValues(schema: FormSchema | undefined | null, value
 
 /** Pure client-side mirror of workspace.ValidateFormValues: quick feedback
  * before submission. The server re-checks everything — a value that passes
- * here can still be rejected with 422. */
-export function validateFormValues(schema: FormSchema | undefined | null, values: Record<string, unknown>): Record<string, string> {
+ * here can still be rejected with 422. `locale` shapes the human-readable
+ * pattern hint (the field title may be absent — the decoded pattern is what
+ * the user can actually act on). */
+export function validateFormValues(schema: FormSchema | undefined | null, values: Record<string, unknown>, locale = 'en'): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!schema?.properties) return errors
   for (const [name, field] of Object.entries(schema.properties)) {
@@ -100,7 +214,7 @@ export function validateFormValues(schema: FormSchema | undefined | null, values
       else if (field.maxLength !== undefined && len > field.maxLength) errors[name] = `max ${field.maxLength}`
       else if (field.pattern) {
         try {
-          if (!new RegExp(field.pattern, 'u').test(raw)) errors[name] = 'pattern'
+          if (!new RegExp(field.pattern, 'u').test(raw)) errors[name] = patternHint(field.pattern, locale) ?? `format: ${field.pattern}`
         } catch { // a pattern the browser cannot compile — the server decides
         }
       } else if (field.format && FORMAT_CHECKS[field.format] && !FORMAT_CHECKS[field.format].test(raw)) errors[name] = field.format
@@ -244,7 +358,8 @@ export default function HumanForm({ schema, disabled, submitLabel, onValidSubmit
   onValidSubmit: (values: Record<string, unknown>) => void
 }) {
   const [values, setValues] = useState<Record<string, unknown>>({})
-  const errors = validateFormValues(schema, values)
+  const { locale } = useI18n()
+  const errors = validateFormValues(schema, values, locale)
   const fields = Object.entries(schema.properties ?? {})
 
   const set = (name: string, value: unknown) => {
@@ -284,6 +399,11 @@ export default function HumanForm({ schema, disabled, submitLabel, onValidSubmit
             <FieldLabel name={name} field={field} required={required} />
             <FieldInput name={name} field={field} value={values[name]} disabled={disabled} onChange={(v) => set(name, v)} />
             {field.description && <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)', marginTop: '0.1rem' }}>{field.description}</div>}
+            {!field.description && field.pattern && (
+              <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)', marginTop: '0.1rem' }}>
+                ⌗ {patternHint(field.pattern, locale) ?? field.pattern}
+              </div>
+            )}
             {invalid && <div style={{ fontSize: '0.68rem', color: 'var(--tm-danger)', marginTop: '0.1rem' }}>{invalid}</div>}
           </div>
         )
