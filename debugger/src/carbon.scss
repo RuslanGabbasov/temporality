@@ -1513,6 +1513,53 @@ button.header-nav-link {
   border-radius: 4px;
 }
 
+/* HITL question card inside an assistant bubble (docs/interactive-HITL.md §5):
+ * pending — highlighted panel; resolved — collapses to a quiet outcome line. */
+.chat-question {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--tm-amber);
+  border-radius: 6px;
+  background: var(--tm-raised);
+}
+
+.chat-question-resolved {
+  border-color: var(--tm-border);
+  padding: 0.3rem 0.6rem;
+}
+
+/* The question and its context arrive as agent markdown (tables, code, lists).
+ * Compact overrides: the card lives inside a chat bubble, so tables scroll
+ * instead of stretching it and code blocks stop at the card edge. */
+.chat-question .markdown-body > :first-child { margin-top: 0; }
+.chat-question .markdown-body > :last-child { margin-bottom: 0; }
+.chat-question .markdown-body table {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  font-size: 0.72rem;
+}
+.chat-question .markdown-body th,
+.chat-question .markdown-body td {
+  padding: 0.25em 0.5em;
+}
+.chat-question .markdown-body pre {
+  overflow-x: auto;
+  max-width: 100%;
+  font-size: 0.68rem;
+}
+.chat-question-context .markdown-body > :first-child,
+.chat-question-context .markdown-body > :last-child { margin: 0.15em 0; }
+
+/* Runs-page tile variant: same markdown question, wider surface. */
+.runs-question-body .markdown-body table {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .chat-streaming {
   font-size: 0.7rem;
   color: var(--tm-teal);

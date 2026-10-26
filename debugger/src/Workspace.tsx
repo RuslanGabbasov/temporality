@@ -11,8 +11,11 @@ import {
 } from '@carbon/react'
 import { Add, ArrowDown, Attachment, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile, ApiError } from './workspaceApi'
-import { runCost, taskCost } from './kernelApi'
+import { runCost, taskCost, KERNEL_API, whoami, type Whoami } from './kernelApi'
+import { authHeaders } from './api'
 import Markdown, { linkifyWorkspacePaths } from './Markdown'
+import HumanForm, { normalizeFormValues, validateFormValues, type FormSchema } from './HumanForm'
+import { useRunTokenMetrics } from './tokenStream'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -47,6 +50,27 @@ export function normalizeRunStatus(status: string | undefined | null): string {
   return status === 'canceled' ? 'cancelled' : (status ?? '')
 }
 
+// One ask_human question bound to a run (docs/interactive-HITL.md §5): the
+// chat renders it as an interactive card; the answer goes through the same
+// approval endpoint the runs page uses. State follows the journaled events:
+// human.requested → answered | cancelled | timed_out | rejected.
+export interface ChatQuestion {
+  operationId: string
+  argumentsHash: string
+  question: string
+  context?: string
+  options: string[]
+  recipient?: string
+  /** Optional form definition (docs/interactive-HITL.md §7): when present
+   *  the card renders a form instead of the free-text answer. */
+  schema?: FormSchema
+  state: 'pending' | 'answered' | 'cancelled' | 'timed_out' | 'rejected'
+  response?: string
+  actor?: string
+  busy?: boolean
+  error?: string
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -66,6 +90,9 @@ interface ChatMessage {
    *  message (reply-style, timestamped) instead of dangling at the chat
    *  bottom after the model's answer. */
   addenda?: { text: string; at: Date; attachments?: UploadedFile[] }[]
+  /** Open (or last resolved) ask_human question of this run — the interactive
+   *  HITL card. A newer human.requested replaces it. */
+  question?: ChatQuestion
 }
 
 interface Conversation {
@@ -105,46 +132,119 @@ function saveConversations(convs: Conversation[]) {
 
 type Translate = (key: string, vars?: Record<string, string>) => string
 
+/** Compact token count for trace lines: 980 stays, 1248 → 1.2k, 10000 → 10k. */
+function compactTokens(n: number): string {
+	if (n < 1000) return String(n)
+	const k = Math.round(n / 100) / 10
+	return `${k}k`
+}
+
+/** Pull a human-meaningful detail out of a tool call's arguments — the what
+ * it is doing right now line. Works on complete JSON and on a partial args
+ * stream (the model writes arguments token by token): falls back to a regex
+ * over the raw text. */
+export function toolArgDetail(rawArgs: string): string {
+	const raw = (rawArgs || '').trim()
+	if (!raw) return ''
+	let detail = ''
+	try {
+		const parsed = JSON.parse(raw) as Record<string, unknown>
+		for (const key of ['command', 'path', 'file_path', 'url', 'query', 'title', 'note', 'skill_id', 'artifact_id', 'pattern']) {
+			const value = parsed[key]
+			if (typeof value === 'string' && value.trim()) { detail = value.trim(); break }
+			if (Array.isArray(value) && value.length && typeof value[0] === 'string') { detail = value.join(' '); break }
+		}
+	} catch {
+		// Partial stream: regex the known keys out of the raw prefix. Built via
+		// new RegExp — three adjacent regex literals in one array trip esbuild's
+		// literal scanner.
+		const patterns = [
+			'"command"\\s*:\\s*\\[\\s*"((?:[^"\\\\]|\\\\.)*)',
+			'"(?:path|file_path|url|query|title|note|skill_id|artifact_id|pattern)"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)',
+			'"command"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)',
+		]
+		for (const pattern of patterns) {
+			const m = raw.match(new RegExp(pattern))
+			if (m?.[1]) { detail = m[1]; break }
+		}
+		if (!detail && raw.length > 2) detail = raw.slice(-30)
+	}
+	detail = detail.replace(/\s+/g, ' ').trim()
+	return detail.length > 64 ? detail.slice(0, 61) + '…' : detail
+}
+
 /** Format a stream event into a human-readable status line. */
 export function formatStreamEvent(type: string, outer: any, t: Translate, locale: string): string | null {
-  const d = outer.data ?? outer
-  switch (type) {
-    case 'run.started':
-      return t('chat.stream.run_started') + (d.model ? t('chat.stream.model_suffix', { model: String(d.model) }) : '')
-    case 'model.completed': {
-      const tokens = d.total_tokens ? t('chat.stream.tokens_suffix', { count: pluralT(t, locale, 'chat.stream.tokens_n', Number(d.total_tokens)) }) : ''
-      const latency = d.latency_ms ? t('chat.stream.latency_suffix', { seconds: (d.latency_ms / 1000).toFixed(1) }) : ''
-      return t('chat.stream.model_turn', { turn: String(d.turn ?? '') }) + tokens + latency
-    }
-    case 'turn.completed':
-      return t('chat.stream.turn_done', { turn: String(d.turn ?? '') }) + (d.tool_calls ? t('chat.stream.tool_calls_suffix', { count: pluralT(t, locale, 'chat.stream.tool_calls_n', Number(d.tool_calls)) }) : '')
-    case 'model.attempt': {
-      // Silent-recovery markers: without a line the user sees the chat freeze
-      // for minutes while the kernel quietly retries a stalled provider.
-      const attempt = String(d.attempt ?? '?')
-      if (d.reason === 'stream_timeout') return t('chat.stream.model_attempt_timeout', { attempt })
-      if (d.reason === 'stream_fallback') return t('chat.stream.model_attempt_fallback', { attempt })
-      return t('chat.stream.model_attempt_retry', { attempt })
-    }
-    case 'tool.completed':
-      return t('chat.stream.tool_line', { name: pseudoToolLabel(d.name ?? d.tool, t) })
-    case 'knowledge.proposed':
-      return t('chat.stream.learned', { proposition: String(d.proposition ?? '').slice(0, 60) })
-    case 'run.completed':
-      return t('chat.stream.completed', { turns: pluralT(t, locale, 'chat.stream.turns_n', Number(d.turns ?? 0)) })
-    case 'run.user_note':
-      // Confirmation that a mid-run chat message was drained into the model's
-      // conversation (turn = the turn that will consume it). When the lead was
-      // blocked on a delegation, the note was also steered into the running
-      // children's mailboxes.
-      return t('chat.stream.note_accepted', { turn: String(d.turn ?? '') }) + (d.forwarded ? t('chat.stream.note_forwarded') : '')
-    case 'run.note_dropped':
-      return t('chat.stream.note_dropped', { turn: String(d.turn ?? '') })
-    case 'run.failed':
-      return t('chat.stream.failed', { error: String(d.error ?? 'unknown') })
-    default:
-      return null
-  }
+	const d = outer.data ?? outer
+	// Timeline prefix: seconds since run start, when the caller knows it.
+	const elapsed = Number(d.elapsed_s)
+	const prefix = Number.isFinite(elapsed) && elapsed >= 5 ? `+${formatDuration(elapsed * 1000)} ` : ''
+	switch (type) {
+		case 'run.started':
+			return t('chat.stream.run_started') + (d.model ? t('chat.stream.model_suffix', { model: String(d.model) }) : '')
+		case 'model.completed': {
+			// One compact line per turn: thinking time (when the live stream saw
+			// reasoning deltas), tokens, provider latency.
+			const tokens = d.total_tokens ? t('chat.stream.tokens_suffix', { tokens: compactTokens(Number(d.total_tokens)) }) : ''
+			const thinking = d.thinking_s ? t('chat.stream.thinking_suffix', { seconds: Number(d.thinking_s).toFixed(1) }) : ''
+			const latency = d.latency_ms ? t('chat.stream.latency_suffix', { seconds: (d.latency_ms / 1000).toFixed(1) }) : ''
+			return prefix + t('chat.stream.model_turn', { turn: String(d.turn ?? '') }) + thinking + tokens + latency
+		}
+		case 'model.attempt': {
+			// Silent-recovery markers: without a line the user sees the chat freeze
+			// for minutes while the kernel quietly retries a stalled provider.
+			const attempt = String(d.attempt ?? '?')
+			if (d.reason === 'stream_timeout') return t('chat.stream.model_attempt_timeout', { attempt })
+			if (d.reason === 'stream_fallback') return t('chat.stream.model_attempt_fallback', { attempt })
+			return t('chat.stream.model_attempt_retry', { attempt })
+		}
+		case 'knowledge.proposed':
+			return t('chat.stream.learned', { proposition: String(d.proposition ?? '').slice(0, 60) })
+		case 'run.completed':
+			return t('chat.stream.completed', { turns: pluralT(t, locale, 'chat.stream.turns_n', Number(d.turns ?? 0)) })
+		case 'run.user_note':
+			// Confirmation that a mid-run chat message was drained into the model's
+			// conversation (turn = the turn that will consume it). When the lead was
+			// blocked on a delegation, the note was also steered into the running
+			// children's mailboxes.
+			return t('chat.stream.note_accepted', { turn: String(d.turn ?? '') }) + (d.forwarded ? t('chat.stream.note_forwarded') : '')
+		case 'run.note_dropped':
+			return t('chat.stream.note_dropped', { turn: String(d.turn ?? '') })
+		case 'run.failed':
+			return t('chat.stream.failed', { error: String(d.error ?? 'unknown') })
+		case 'human.requested':
+			return `❓ ${squashQuestion(String(d.question ?? ''))}`
+		case 'human.reasked':
+			return t('chat.stream.question_reasked', { policy: String(d.policy ?? '') })
+		case 'human.answered':
+			return t('chat.stream.question_answered', { response: String(d.response ?? '').slice(0, 80) })
+		case 'human.cancelled':
+			return t('chat.stream.question_cancelled')
+		case 'human.timed_out':
+			return t('chat.stream.question_timed_out')
+		case 'human.rejected':
+			return t('chat.stream.question_rejected')
+		case 'tool.started': {
+			const tool = pseudoToolLabel(d.tool ?? d.name ?? '', t)
+			const detail = toolArgDetail(String(d.arguments ?? d.args ?? ''))
+			return prefix + t('chat.stream.tool_started', { tool, detail })
+		}
+		case 'tool.failed': {
+			const tool = pseudoToolLabel(d.tool ?? d.name ?? '', t)
+			return prefix + t('chat.stream.tool_failed', { tool, error: String(d.error ?? '').slice(0, 60) })
+		}
+		default:
+			// tool.completed and turn.completed stay silent: the started line told
+			// the story, counts are noise in a compact trace.
+			return null
+	}
+}
+
+/** One-line question preview for the activity feed — newlines squashed, so a
+ * long ask stays a single status line like the other stream events. */
+function squashQuestion(text: string): string {
+  const squashed = text.replace(/\s+/g, ' ').trim()
+  return squashed.length > 100 ? squashed.slice(0, 97) + '…' : squashed
 }
 
 /** Live-activity feed with capped height. Auto-scrolls to the newest line
@@ -171,11 +271,111 @@ function ChatStreamLines({ lines }: { lines: string[] }) {
   )
 }
 
+/** Interactive HITL card (docs/interactive-HITL.md §5): pending questions
+ * render options + free-form answer + cancel; resolved questions collapse to
+ * a one-line outcome. With a form schema the card renders the shared form
+ * instead of the free-text input. Local input state keeps typing from
+ * re-rendering the whole conversation. */
+function ChatQuestionCard({ question, busy, onAnswer }: {
+  question: ChatQuestion
+  busy: boolean
+  onAnswer: (response: string, approved: boolean, values?: Record<string, unknown>) => void
+}) {
+  const { t } = useI18n()
+  const [answer, setAnswer] = useState('')
+  if (question.state !== 'pending') {
+    const outcome = t(`chat.question.${question.state}`) ?? question.state
+    return (
+      <div className="chat-question chat-question-resolved">
+        <span style={{ fontSize: '0.72rem', color: 'var(--tm-muted)' }}>
+          {outcome}{question.response ? `: ${question.response.slice(0, 120)}` : ''}
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className="chat-question">
+      <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--tm-amber)', marginBottom: '0.25rem' }}>
+        ❓ {t('runs.human_question') ?? 'Agent asks'}
+      </div>
+      <div className="chat-question-body" style={{ fontSize: '0.85rem' }}>
+        <Markdown content={question.question} />
+      </div>
+      {question.context && (
+        <div className="chat-question-context" style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginTop: '0.25rem' }}>
+          <Markdown content={question.context} />
+        </div>
+      )}
+      {question.schema && Object.keys(question.schema.properties ?? {}).length > 0 ? (
+        <HumanForm
+          schema={question.schema}
+          disabled={busy}
+          submitLabel={t('runs.send_answer') ?? 'Send'}
+          onValidSubmit={(values) => onAnswer('', true, values)}
+        />
+      ) : (
+        <>
+          {question.options.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+              {question.options.map((option) => (
+                <button
+                  key={option}
+                  disabled={busy}
+                  onClick={() => onAnswer(option, true)}
+                  style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-teal)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.2rem 0.6rem', whiteSpace: 'nowrap' }}
+                  title={option}
+                >{option}</button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.5rem' }}>
+            <input
+              value={answer}
+              disabled={busy}
+              onChange={(e) => setAnswer(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (answer.trim()) onAnswer(answer.trim(), true) }
+              }}
+              placeholder={t('runs.answer_placeholder') ?? 'Free-form answer…'}
+              aria-label={t('runs.answer_label') ?? 'Your answer'}
+              style={{ flex: 1, minWidth: 0, background: 'var(--tm-raised)', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text)', fontSize: '0.8rem', padding: '0.3rem 0.5rem' }}
+            />
+            <button
+              disabled={busy || !answer.trim()}
+              onClick={() => onAnswer(answer.trim(), true)}
+              style={{ background: 'var(--tm-teal)', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '0.72rem', padding: '0.3rem 0.6rem' }}
+            >{t('runs.send_answer') ?? 'Send'}</button>
+            {busy && <span className="spinner" />}
+          </div>
+        </>
+      )}
+      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.4rem' }}>
+        <button
+          disabled={busy}
+          onClick={() => onAnswer('', false)}
+          style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-muted)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
+        >{t('runs.cancel_question') ?? 'Cancel question'}</button>
+      </div>
+      {question.error && (
+        <div style={{ fontSize: '0.72rem', color: 'var(--tm-danger)', marginTop: '0.3rem' }}>
+          {t('chat.question.error', { error: question.error }) ?? `Answer failed: ${question.error}`}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Workspace({ project, defaultAgentId, defaultModel }: { project: string; defaultAgentId?: string; defaultModel?: string }) {
   const { locale, t } = useI18n()
   const [allAgents, setAllAgents] = useState<Agent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  // Answering HITL questions needs an actor id. Kernels without /whoami (or
+  // anonymous access) fall back to a stable label — the approval endpoint
+  // overrides it with the authenticated principal when one exists.
+  const [identity, setIdentity] = useState<Whoami | null>(null)
+  useEffect(() => { void whoami().then(setIdentity).catch(() => setIdentity(null)) }, [])
+  const humanActorID = identity?.subject && identity.subject !== 'anonymous' ? identity.subject : 'human-chat'
 
   // Chat state
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
@@ -201,6 +401,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const tokenStreamRef = useRef<Map<string, EventSource>>(new Map())
 
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null
+
+  // The live step line (what-is-it-doing-right-now) rides the shared token
+  // metrics hook — the same source the runs-page trace uses: elapsed tokens,
+  // rate, liveness (alive/stalled/reconnecting) and the pending tool's args
+  // tail. Only the active conversation's running run is watched: the user can
+  // only look at one chat at a time.
+  const activeRunningRunId = activeConv?.messages.find((m) => m.status === 'running' && m.runId)?.runId
+  const tokenMetrics = useRunTokenMetrics(activeRunningRunId ?? '', !!activeRunningRunId)
 
   // Pending attachments belong to the active conversation — never leak them
   // into another chat when the user switches.
@@ -397,6 +605,40 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
   const agentName = (id: string) => allAgents.find((a) => a.id === id)?.name ?? (t('chat.default_agent') ?? 'Default')
 
+  // Live step line for the running turn of the active chat — the compact-trace
+  // counterpart of the runs-page liveModelParts: elapsed, tool+args tail,
+  // token rate and liveness (alive/stalled/reconnecting). Ticks once a second
+  // so the elapsed part breathes while a thinking model is silent.
+  const [nowTick, setNowTick] = useState(0)
+  useEffect(() => {
+    if (!activeRunningRunId) return
+    const timer = window.setInterval(() => setNowTick((v) => v + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [activeRunningRunId])
+  const liveStepParts = (() => {
+    if (!tokenMetrics) return ['…']
+    const parts: string[] = []
+    if (!tokenMetrics.connected) {
+      parts.push(tokenMetrics.reconnects > 0
+        ? t('runs.live.sse_reconnecting', { count: String(tokenMetrics.reconnects) })
+        : t('runs.live.sse_down'))
+      return parts
+    }
+    if (tokenMetrics.tool) parts.push(`⚙ ${tokenMetrics.tool}`)
+    if (tokenMetrics.approxTokens > 0) parts.push(`~${tokenMetrics.approxTokens} tok`)
+    if (tokenMetrics.tps > 0) parts.push(`${tokenMetrics.tps} tok/s`)
+    const stalled = tokenMetrics.lastChunkAgoMs > 15_000
+    if (tokenMetrics.streaming) {
+      parts.push(stalled
+        ? t('runs.live.stalled', { seconds: String(Math.floor(tokenMetrics.lastChunkAgoMs / 1000)) })
+        : t('runs.live.alive'))
+    } else if (tokenMetrics.approxTokens === 0) {
+      parts.push(t('runs.live.waiting_first_token'))
+    }
+    return parts
+  })()
+  void nowTick
+
   // Client-side filter for the conversation list sidebar.
   const [convFilter, setConvFilter] = useState('')
   const visibleConversations = conversations.filter((conv) => matchesFilter(convFilter, conv.title, conv.agentId ? agentName(conv.agentId) : ''))
@@ -488,6 +730,19 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       if (linesTimer === undefined) linesTimer = window.setTimeout(flushLines, 120)
     }
 
+    // Compact-trace bookkeeping: per-turn stats (thinking measured from the
+    // live reasoning→text delta gap), the run's start time for +elapsed
+    // prefixes, and each turn's text fragment — flushed as an intermediate-
+    // answer line only when the turn turns out to have tools after it.
+    const runStartAt: { at?: number } = {}
+    const turnStats: Record<number, { reasoningAt?: number; textAt?: number }> = {}
+    const fragments: Record<number, string> = {}
+    const elapsedFor = (outer: any): number | undefined => {
+      const at = Date.parse(outer?.occurred_at ?? '')
+      if (!runStartAt.at || Number.isNaN(at)) return undefined
+      return Math.max(0, (at - runStartAt.at) / 1000)
+    }
+
     // Live token stream (ephemeral SSE, never journaled): preview the model's
     // answer and reasoning while it is being generated. The journal's
     // model.text_delta / model.reasoning events remain the authoritative
@@ -524,10 +779,21 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         liveReasoning = ''
         liveTool = ''
       }
-      if (data.text) liveText += data.text
+      // Thinking measurement for the compact trace: the gap between the first
+      // reasoning delta and the first text delta of the turn. Live-only — a
+      // tail replay shows the line without the 💭 part.
+      if (data.reasoning && !turnStats[turn]?.reasoningAt) {
+        turnStats[turn] = { ...turnStats[turn], reasoningAt: Date.now() }
+      }
+      if (data.text && !turnStats[turn]?.textAt) {
+        turnStats[turn] = { ...turnStats[turn], textAt: Date.now() }
+      }
       if (data.reasoning) liveReasoning += data.reasoning
+      if (data.text) liveText += data.text
       // Tool args are never rendered as content — they only say which tool the
-      // model is preparing, so the bubble shows life on tool-only turns.
+      // model is preparing, so the bubble shows life on tool-only turns. The
+      // live detail/metrics line comes from the shared useRunTokenMetrics hook
+      // (the same source the runs-page trace uses).
       if (data.tool) liveTool = data.tool
       else if (data.text) liveTool = ''
       updateMsg(convId, runId, { content: liveText || settledText, reasoning: liveReasoning || settledReasoning, liveTool: liveTool || undefined })
@@ -551,10 +817,61 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       } catch { /* ignore */ }
     }
 
-    es.addEventListener('model.completed', handleEvent('model.completed'))
+    // Compact trace: run start anchors the +elapsed prefixes; model.completed
+    // is enriched with the live-measured thinking time; a turn's text fragment
+    // becomes an intermediate-answer line only when tools follow it.
+    es.addEventListener('run.started', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        runStartAt.at = Date.parse(outer.occurred_at ?? '')
+        if (Number.isNaN(runStartAt.at)) runStartAt.at = Date.now()
+        const line = formatStreamEvent('run.started', outer, t, locale)
+        if (line) pushLine(line)
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('model.started', () => { /* pacing marker; the completed line carries the numbers */ })
+    es.addEventListener('model.completed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const stats = turnStats[Number(d.turn ?? 0)] ?? {}
+        const thinking = stats.reasoningAt && stats.textAt ? (stats.textAt - stats.reasoningAt) / 1000 : undefined
+        const line = formatStreamEvent('model.completed', { ...outer, data: { ...d, thinking_s: thinking, elapsed_s: elapsedFor(outer) } }, t, locale)
+        if (line) pushLine(line)
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('tool.started', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const line = formatStreamEvent('tool.started', { ...outer, data: { ...(outer.data ?? outer), elapsed_s: elapsedFor(outer) } }, t, locale)
+        if (line) pushLine(line)
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('tool.failed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const line = formatStreamEvent('tool.failed', { ...outer, data: { ...(outer.data ?? outer), elapsed_s: elapsedFor(outer) } }, t, locale)
+        if (line) pushLine(line)
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('turn.completed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const turn = Number(d.turn ?? 0)
+        const fragment = fragments[turn]
+        // Text followed by tools is intermediate commentary — the breadcrumbs
+        // worth keeping; a turn with no tools was the final answer, which the
+        // bubble already shows.
+        if (fragment && Number(d.tool_calls ?? 0) > 0) {
+          const elapsed = elapsedFor(outer)
+          const prefix = elapsed !== undefined && elapsed >= 5 ? `+${formatDuration(elapsed * 1000)} ` : ''
+          pushLine(prefix + t('chat.stream.fragment', { text: squashQuestion(fragment) }))
+        }
+        delete fragments[turn]
+      } catch { /* ignore */ }
+    })
     es.addEventListener('model.attempt', handleEvent('model.attempt'))
-    es.addEventListener('turn.completed', handleEvent('turn.completed'))
-    es.addEventListener('tool.completed', handleEvent('tool.completed'))
     es.addEventListener('knowledge.proposed', handleEvent('knowledge.proposed'))
 
     // model.text_delta (journal) carries the authoritative full text of the
@@ -567,6 +884,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const text = d.text ?? ''
         const turn = Number(d.turn ?? 0)
         if (!text || turn < liveTurn) return // stale: a newer turn already streams live
+        fragments[turn] = text
         settledText = text
         settledTurn = turn
         setConversations((prev) => prev.map((c) => {
@@ -638,6 +956,95 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         pushLine(t('chat.stream.auto_approved', { tool: String(tool) }))
       } catch { /* ignore */ }
     })
+
+    // HITL questions (docs/interactive-HITL.md §5): human.requested attaches
+    // the interactive card to this run's bubble; the terminal events close it.
+    // All of them also land in the activity feed via formatStreamEvent. The
+    // tail replay on reconnect re-attaches an open question, so a page reload
+    // during a paused run restores the card.
+    es.addEventListener('human.requested', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const line = formatStreamEvent('human.requested', outer, t, locale)
+        if (line) pushLine(line)
+        updateMsg(convId, runId, {
+          question: {
+            operationId: String(d.operation_id ?? ''),
+            argumentsHash: String(d.arguments_hash ?? ''),
+            question: String(d.question ?? ''),
+            context: d.context ? String(d.context) : undefined,
+            options: Array.isArray(d.options) ? d.options.map((o: unknown) => String(o)) : [],
+            recipient: d.recipient ? String(d.recipient) : undefined,
+            schema: (d.schema && typeof d.schema === 'object' && !Array.isArray(d.schema)) ? (d.schema as FormSchema) : undefined,
+            state: 'pending',
+          },
+        })
+      } catch { /* ignore */ }
+    })
+    // Terminal transitions resolve the card only when they belong to the
+    // question it shows — an older ask's events must not close the newer one.
+    es.addEventListener('human.answered', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const line = formatStreamEvent('human.answered', outer, t, locale)
+        if (line) pushLine(line)
+        setConversations((prev) => prev.map((c) => c.id !== convId ? c : ({
+          ...c,
+          messages: c.messages.map((m) => m.runId !== runId || m.question?.operationId !== String(d.operation_id ?? '') ? m : ({
+            ...m,
+            question: { ...m.question!, state: 'answered', response: d.response ? String(d.response) : undefined, actor: d.actor ? String(d.actor) : undefined },
+          })),
+        })))
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('human.cancelled', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const line = formatStreamEvent('human.cancelled', outer, t, locale)
+        if (line) pushLine(line)
+        setConversations((prev) => prev.map((c) => c.id !== convId ? c : ({
+          ...c,
+          messages: c.messages.map((m) => m.runId !== runId || m.question?.operationId !== String(d.operation_id ?? '') ? m : ({
+            ...m,
+            question: { ...m.question!, state: 'cancelled', actor: d.actor ? String(d.actor) : undefined },
+          })),
+        })))
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('human.timed_out', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const line = formatStreamEvent('human.timed_out', outer, t, locale)
+        if (line) pushLine(line)
+        setConversations((prev) => prev.map((c) => c.id !== convId ? c : ({
+          ...c,
+          messages: c.messages.map((m) => m.runId !== runId || m.question?.operationId !== String(d.operation_id ?? '') ? m : ({
+            ...m,
+            question: { ...m.question!, state: 'timed_out' },
+          })),
+        })))
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('human.rejected', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const line = formatStreamEvent('human.rejected', outer, t, locale)
+        if (line) pushLine(line)
+        setConversations((prev) => prev.map((c) => c.id !== convId ? c : ({
+          ...c,
+          messages: c.messages.map((m) => m.runId !== runId || m.question?.operationId !== String(d.operation_id ?? '') ? m : ({
+            ...m,
+            question: { ...m.question!, state: 'rejected' },
+          })),
+        })))
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('human.reasked', handleEvent('human.reasked'))
 
     es.addEventListener('run.completed', handleEvent('run.completed'))
 
@@ -877,6 +1284,28 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         updateMsg(activeConv.id, runId, { status: 'cancelled', content: t('chat.run_cancelled') ?? 'Run cancelled by user', streamLines: [] })
       }
     } catch (f) { setError(message(f)) }
+  }
+
+  // Answer one open ask_human question from the chat (docs/interactive-HITL.md
+  // §5): same approval endpoint the runs page uses — one signal path, one
+  // authorization model. Values carry the structured form answer; the server
+  // validates them against the row's schema before resuming the run. The
+  // journaled human.answered/human.cancelled event is the authoritative card
+  // state; the optimistic update below only keeps the UI honest while the
+  // event travels (and on flaky SSE reconnects).
+  const answerQuestion = async (convId: string, runId: string, q: ChatQuestion, response: string, approved: boolean, values?: Record<string, unknown>) => {
+    updateMsg(convId, runId, { question: { ...q, busy: true, error: undefined } })
+    try {
+      const resp = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(runId)}/approval?project=${encodeURIComponent(project)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ operation_id: q.operationId, arguments_hash: q.argumentsHash, approved, actor_id: humanActorID, response, values }),
+      })
+      if (!resp.ok) throw new Error(`${resp.status} ${await resp.text()}`)
+      updateMsg(convId, runId, { question: { ...q, state: approved ? 'answered' : 'cancelled', response: response || undefined, busy: false } })
+    } catch (f) {
+      updateMsg(convId, runId, { question: { ...q, busy: false, error: message(f) } })
+    }
   }
 
   const sendMessage = async () => {
@@ -1127,10 +1556,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       </div>
                     )}
 
-                    {msg.role === 'assistant' && msg.status === 'running' && msg.liveTool && (
-                      <div style={{ color: 'var(--tm-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: msg.content ? '0.35rem' : 0 }}>
+                    {msg.role === 'assistant' && msg.status === 'running' && msg.runId && msg.runId === activeRunningRunId && tokenMetrics && (
+                      <div style={{ color: 'var(--tm-muted)', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.3rem', minWidth: 0 }}>
                         <span className='spinner' />
-                        <span>⚙ {t('chat.tool_streaming', { tool: msg.liveTool }) ?? `streaming ${msg.liveTool}…`}</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                          {liveStepParts.join(' · ')}
+                        </span>
                       </div>
                     )}
 
@@ -1139,6 +1570,18 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         <DelegationTree project={project} runId={msg.runId} agents={allAgents} live={msg.status === 'running'} />
                         <PlanGraph project={project} runId={msg.runId} agents={allAgents} live={msg.status === 'running'} />
                       </>
+                    )}
+
+                    {/* Interactive HITL card: the agent's question and the
+                        answer controls ride the same bubble as the run. */}
+                    {msg.role === 'assistant' && msg.question && msg.runId && activeConv && (
+                      <div style={{ marginTop: msg.content || (msg.streamLines?.length ?? 0) > 0 ? '0.5rem' : 0 }}>
+                        <ChatQuestionCard
+                          question={msg.question}
+                          busy={!!msg.question.busy}
+                          onAnswer={(response, approved, values) => { void answerQuestion(activeConv.id, msg.runId!, msg.question!, response, approved, values) }}
+                        />
+                      </div>
                     )}
 
                     {msg.status === 'running' && msg.streamLines && msg.streamLines.length > 0 && (

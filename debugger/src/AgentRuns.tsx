@@ -33,6 +33,7 @@ import {
   type UncertainOperation, type ReconcileEffect, type Whoami,
 } from './kernelApi'
 import TraceLayers from './TraceLayers'
+import HumanForm, { type FormSchema } from './HumanForm'
 import { runStatusLabel } from './eventPresentation'
 import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
 import { useDebouncedValue } from './useDebouncedValue'
@@ -782,7 +783,7 @@ export default function AgentRuns({ project }: { project: string }) {
     finally { setBusy(false) }
   }
 
-  async function decide(event: ObservationEvent, approved: boolean, response = '') {
+  async function decide(event: ObservationEvent, approved: boolean, response = '', values?: Record<string, unknown>) {
     const operationID = String(event.data?.operation_id ?? '')
     setBusy(true); setError('')
     try {
@@ -791,7 +792,7 @@ export default function AgentRuns({ project }: { project: string }) {
       const approvalQuery = new URLSearchParams({ project: selectedProject, source_id: root?.source.id ?? '' })
       const response2 = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/approval?${approvalQuery}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ operation_id: operationID, arguments_hash: operation?.arguments_hash ?? String(event.data?.arguments_hash ?? ''), approved, actor_id: 'human-ui', reason: reason.trim(), response: response.trim() }),
+        body: JSON.stringify({ operation_id: operationID, arguments_hash: operation?.arguments_hash ?? String(event.data?.arguments_hash ?? ''), approved, actor_id: 'human-ui', reason: reason.trim(), response: response.trim(), values }),
       })
       if (!response2.ok) throw new Error(`${response2.status} ${await response2.text()}`)
       await loadRun(selected, true)
@@ -1019,25 +1020,40 @@ export default function AgentRuns({ project }: { project: string }) {
                   const risk = event.data?.risk as Record<string, unknown> | undefined
                   const isHuman = event.type === 'human.requested'
                   const options = Array.isArray(event.data?.options) ? (event.data?.options as unknown[]).map((o) => String(o)) : []
+                  const schema = (event.data?.schema && typeof event.data.schema === 'object' && !Array.isArray(event.data.schema)) ? event.data.schema as FormSchema : undefined
                   return (
                     <Tile key={event.event_id} style={{ borderLeft: `3px solid ${isHuman ? 'var(--tm-amber)' : '#e6b85c'}` }}>
                       <Heading style={{ fontSize: '0.875rem' }}>{isHuman ? `❓ ${t('runs.human_question') ?? 'Agent asks'}` : `⚠ ${t('runs.approval_required') ?? 'Approval Required'}`}</Heading>
                       {isHuman ? (
                         <>
-                          <p style={{ fontSize: '0.9rem', margin: '0.5rem 0' }}>{String(event.data?.question ?? '')}</p>
+                          <div className="runs-question-body" style={{ fontSize: '0.9rem', margin: '0.5rem 0' }}>
+                            <Markdown content={String(event.data?.question ?? '')} />
+                          </div>
                           {Boolean(event.data?.context) && (
-                            <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0 0 0.5rem', whiteSpace: 'pre-wrap' }}>{String(event.data?.context)}</p>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0 0 0.5rem' }}>
+                              <Markdown content={String(event.data?.context)} />
+                            </div>
                           )}
-                          								{options.length > 0 && (
-                          									<Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem', flexWrap: 'nowrap', overflowX: 'auto', maxWidth: '100%', paddingBottom: '0.25rem' }}>
+                          									{options.length > 0 && !schema && (
+                          										<Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem', flexWrap: 'nowrap', overflowX: 'auto', maxWidth: '100%', paddingBottom: '0.25rem' }}>
                           										{options.map((option) => (
                           											<Button key={option} size="sm" style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }} title={option} onClick={() => void decide(event, true, option)} disabled={busy}>{option}</Button>
                           										))}
                           									</Stack>
-                          								)}
-                          <div style={{ marginTop: '0.75rem' }}>
-                            <TextInput id="human-answer" labelText={t('runs.answer_label') ?? 'Your answer'} value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} placeholder={t('runs.answer_placeholder') ?? 'Type a free-form answer…'} />
-                          </div>
+                          									)}
+                          {schema && (
+                            <HumanForm
+                              schema={schema}
+                              disabled={busy}
+                              submitLabel={t('runs.send_answer') ?? 'Send'}
+                              onValidSubmit={(values) => { void decide(event, true, '', values) }}
+                            />
+                          )}
+                          {!schema && (
+                            <div style={{ marginTop: '0.75rem' }}>
+                              <TextInput id="human-answer" labelText={t('runs.answer_label') ?? 'Your answer'} value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} placeholder={t('runs.answer_placeholder') ?? 'Type a free-form answer…'} />
+                            </div>
+                          )}
                           <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem' }}>
                             <Button onClick={() => void decide(event, true)} disabled={busy}>{t('runs.send_answer') ?? 'Send'}</Button>
                             <Button kind="secondary" onClick={() => void decide(event, false)} disabled={busy}>{t('runs.cancel_question') ?? 'Cancel question'}</Button>
