@@ -1464,6 +1464,11 @@ func main() {
 		costAPI.TeamRunCostHandler(w, r)
 	})
 	liveness := &temporalLiveness{client: temporalClient}
+	// Orphaned-run sweep (docs/builtin-skills.md §3, run-lifecycle resilience):
+	// a stack rebuild while runs are in flight can leave workspace_run rows
+	// "started" forever when the Temporal state did not survive. Async — the
+	// sweep never blocks request wiring; failures are logged, not fatal.
+	go sweepOrphanedRuns(ctx, ws, liveness, observationURL, journalToken, activities.SourceID, log)
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		// Empty project = global listing constrained to the principal's visible

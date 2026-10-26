@@ -771,6 +771,36 @@ func (s *Store) RunSourceID(ctx context.Context, project, runID string) (string,
 	return source, nil
 }
 
+// ListStartedRuns returns runs whose status is still "started", oldest first,
+// capped — the orphaned-run sweep's candidate set (cmd/agent-kernel/
+// orphansweep.go). Children never appear here: delegated runs carry no
+// workspace_run row (docs/agent-delegation.md).
+func (s *Store) ListStartedRuns(ctx context.Context, limit int) ([]Run, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
+		 FROM workspace_run WHERE status = 'started' ORDER BY created_at LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Run
+	for rows.Next() {
+		var r Run
+		var agentID *string
+		var execContext []byte
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		r.AgentID = derefPtr(agentID)
+		r.ExecContext = decodeExecContext(execContext)
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 // StreamRunEvents fetches observation events for a run, optionally starting
 // after a cursor (event_id). Returns events ordered by occurred_at.
 func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCursor string, limit int) ([]StreamEvent, string, error) {

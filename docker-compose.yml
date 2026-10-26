@@ -73,11 +73,34 @@ services:
   temporal:
     image: temporalio/temporal:latest
     container_name: temporality-dev
-    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    depends_on:
+      temporal-data-init:
+        condition: service_completed_successfully
+    # File-backed persistence (docs/dev-stack-runs.md §2): the start-dev default is
+    # in-memory, and a stack rebuild (docker compose up --build) then recreates
+    # this container and erases every in-flight workflow — the kernel's runs
+    # stay "started" forever while their executions are gone (the 2026-10-26
+    # orphaned-turn incident). The SQLite file survives restarts and rebuilds;
+    # the orphan sweep (kernel startup) covers whatever still slips through.
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal-dev.db"]
+    volumes:
+      - temporality-temporal:/data
     restart: unless-stopped
     ports:
       - "7233:7233"
       - "8233:8233"
+
+  # The named volume lands root-owned (the image has no /data to inherit from)
+  # while the server runs as uid 1000 — SQLite cannot create its file and the
+  # server crash-loops (unable to open database file 14). One-shot chown fixes
+  # the ownership once, then stays out of the way.
+  temporal-data-init:
+    image: temporalio/temporal:latest
+    user: root
+    entrypoint: ["sh", "-c", "chown -R 1000:1000 /data"]
+    volumes:
+      - temporality-temporal:/data
+    restart: "no"
 
   # Self-hosted meta-search backing the agents' web_search tool. JSON output
   # must stay enabled in searxng-settings.yml — the kernel parses format=json.
@@ -326,6 +349,7 @@ services:
 volumes:
   rembed_cache:
   temporality-postgres:
+  temporality-temporal:
 
 networks:
   # The browser backend must not see the internal services (journal, postgres,
