@@ -269,7 +269,10 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue
       visible.push({ p: points[i], sx, sy, active: matches[i], i })
     }
-    const highlight = highlightRef.current
+    // Hover focus belongs to the statements layer only: on the topic and
+    // sub-cluster tiers the bubbles already aggregate the view, dimming the
+    // plane around one dot there reads as flicker, not focus.
+    const highlight = scale >= NEAR ? highlightRef.current : null
     const dotR = Math.max(1.6, Math.min(3.2, points[0]?.r ?? 3)) * Math.min(1.5, Math.max(0.8, scale))
 
     // Tier tracking for the legend badges (state mirror, cheap guard).
