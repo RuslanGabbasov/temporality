@@ -614,6 +614,7 @@ func outboundText(request NotifyChannelRequest, uiURL string) OutboundText {
 		AgentID:        request.AgentID,
 		TimeoutSeconds: request.TimeoutSeconds,
 		TimeoutPolicy:  request.TimeoutPolicy,
+		Schema:         request.Schema,
 	}
 	if trimmed := strings.TrimSpace(uiURL); trimmed != "" {
 		msg.AnswerURL = strings.TrimRight(trimmed, "/") + "/agents?project=" + url.QueryEscape(request.Project)

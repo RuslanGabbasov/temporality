@@ -128,6 +128,11 @@ type OutboundText struct {
 	// unknown values fall back to English. The dialog language is detected
 	// from the user's message (agent.DetectLang).
 	Lang string
+	// Schema is the optional form (docs/interactive-HITL.md §7) attached to
+	// the ask: channels that can render structured questions (matrix HTML
+	// cards) build a field table from it; text-only transports get the field
+	// list in the plain body. nil = plain question.
+	Schema json.RawMessage
 }
 
 // OutboundFile is one attachment pushed through a FilesOut channel.

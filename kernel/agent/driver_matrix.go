@@ -8,16 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/renderer/html"
+	htmlrenderer "github.com/yuin/goldmark/renderer/html"
 )
 
 // ReadMarker is the optional driver extension for marking an inbound message
@@ -36,7 +38,7 @@ type ReadMarker interface {
 // inject markup into the room.
 var matrixMarkdown = goldmark.New(
 	goldmark.WithExtensions(extension.GFM),
-	goldmark.WithRendererOptions(html.WithHardWraps()),
+	goldmark.WithRendererOptions(htmlrenderer.WithHardWraps()),
 )
 
 // matrixFormattedHTML converts markdown to the HTML fragment for
@@ -113,6 +115,22 @@ func (matrixDriver) SendText(ctx context.Context, client *http.Client, settings 
 	// back into the dialog. No canned hint is appended — the dialog itself
 	// (progress lines, asks, answers) makes the two-way nature obvious.
 	body := msg.Body
+	// A question with a form schema renders as an HTML card (field table,
+	// answer hint, UI link) — the rich-formatted path Element displays well;
+	// the plain body stays the fallback.
+	if len(msg.Schema) > 0 {
+		if card := matrixQuestionHTML(msg); card != "" {
+			_, err := matrixSendHTML(ctx, client, homeserver, accessToken, roomID, body, card)
+			return err
+		}
+	}
+	_, err := matrixSendText(ctx, client, homeserver, accessToken, roomID, body)
+	return err
+}
+
+// matrixSendText delivers one plain/markdown message and returns its event_id
+// (empty on failure) — the thread anchor for follow-ups and reactions.
+func matrixSendText(ctx context.Context, client *http.Client, homeserver, accessToken, roomID, body string) (string, error) {
 	txnID := "temporality-" + transactionFingerprint(roomID, body)
 	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
 	payload := map[string]any{"msgtype": "m.text", "body": body}
@@ -125,12 +143,143 @@ func (matrixDriver) SendText(ctx context.Context, client *http.Client, settings 
 	}
 	body2, status, err := postJSON(ctx, client, http.MethodPut, endpoint, payload, map[string]string{"Authorization": "Bearer " + accessToken})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("matrix returned %d: %s", status, truncate(body2, 200))
+		return "", fmt.Errorf("matrix returned %d: %s", status, truncate(body2, 200))
 	}
-	return nil
+	var receipt struct {
+		EventID string `json:"event_id"`
+	}
+	_ = json.Unmarshal([]byte(body2), &receipt)
+	return receipt.EventID, nil
+}
+
+// matrixSendHTML delivers one message with an explicit HTML formatted_body
+// (the caller controls escaping) and returns its event_id.
+func matrixSendHTML(ctx context.Context, client *http.Client, homeserver, accessToken, roomID, body, html string) (string, error) {
+	txnID := "temporality-" + transactionFingerprint(roomID, body)
+	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
+	payload := map[string]any{"msgtype": "m.text", "body": body, "format": "org.matrix.custom.html", "formatted_body": html}
+	body2, status, err := postJSON(ctx, client, http.MethodPut, endpoint, payload, map[string]string{"Authorization": "Bearer " + accessToken})
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("matrix returned %d: %s", status, truncate(body2, 200))
+	}
+	var receipt struct {
+		EventID string `json:"event_id"`
+	}
+	_ = json.Unmarshal([]byte(body2), &receipt)
+	return receipt.EventID, nil
+}
+
+// matrixField is one schema row of the question card.
+type matrixField struct {
+	Name        string
+	Type        string
+	Required    bool
+	HumanFormat string
+}
+
+// matrixQuestionHTML renders a form-schema ask as an HTML card for
+// HTML-capable clients (Element): the question, the field table (what to
+// enter and in which shape — a regex field never ships without its pattern
+// shown), the answer hint and the UI link. All interpolations go through html
+// escaping; a malformed schema degrades to an empty card (the plain body
+// fallback ships instead). Returns "" when there is nothing structured to
+// render.
+func matrixQuestionHTML(msg OutboundText) string {
+	var schema struct {
+		Properties map[string]struct {
+			Type     string   `json:"type"`
+			Title    string   `json:"title"`
+			Pattern  string   `json:"pattern"`
+			Format   string   `json:"format"`
+			Enum     []string `json:"enum"`
+			MinItems *int     `json:"minItems"`
+			MaxItems *int     `json:"maxItems"`
+			Items    *struct {
+				Format string `json:"format"`
+			} `json:"items"`
+		}
+		Required []string `json:"required"`
+	}
+	if json.Unmarshal(msg.Schema, &schema) != nil || len(schema.Properties) == 0 {
+		return ""
+	}
+	requiredSet := map[string]bool{}
+	for _, name := range schema.Required {
+		requiredSet[name] = true
+	}
+	names := make([]string, 0, len(schema.Properties))
+	for name := range schema.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	b.WriteString("<b>")
+	b.WriteString(html.EscapeString(msg.Question))
+	b.WriteString("</b>")
+	if msg.Context != "" {
+		b.WriteString("<br/>")
+		b.WriteString(html.EscapeString(msg.Context))
+	}
+	b.WriteString("<br/><br/><table>")
+	for _, name := range names {
+		property := schema.Properties[name]
+		label := property.Title
+		if label == "" {
+			label = name
+		}
+		shape := property.Type
+		if len(property.Enum) > 0 {
+			shape = fmt.Sprintf("one of: %s", strings.Join(property.Enum, " / "))
+		} else if property.Pattern != "" {
+			shape = fmt.Sprintf("matches %s", property.Pattern)
+		} else if property.Format != "" {
+			shape = property.Format
+		}
+		mark := ""
+		if requiredSet[name] {
+			mark = " <b>*</b>"
+		}
+		b.WriteString("<tr><td>")
+		b.WriteString(html.EscapeString(label))
+		b.WriteString(mark)
+		b.WriteString("</td><td>")
+		b.WriteString(html.EscapeString(shape))
+		b.WriteString("</td></tr>")
+	}
+	b.WriteString("</table>")
+	b.WriteString("<br/>")
+	b.WriteString("Reply in this room as <code>field: value</code> lines (required fields marked *).")
+	if msg.AnswerURL != "" {
+		b.WriteString(fmt.Sprintf(" Or <a href=\"%s\">open the form in the web UI</a>.", html.EscapeString(msg.AnswerURL)))
+	}
+	return b.String()
+}
+
+// SendTextThreaded is the ThreadedTextPoster extension: the same delivery as
+// SendText, but it returns the homeserver's event_id so the kernel pins the
+// question's thread_ref — threaded replies and (next step) option reactions
+// match their ask exactly (docs/channels.md §9).
+func (matrixDriver) SendTextThreaded(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) (string, error) {
+	homeserver := strings.TrimRight(setting(settings, "homeserver"), "/")
+	accessToken := TrimBearerPrefix(setting(settings, "access_token"))
+	roomID := address
+	if homeserver == "" || accessToken == "" || roomID == "" {
+		return "", errors.New("matrix transport is not configured")
+	}
+	body := msg.Body
+	if len(msg.Schema) > 0 {
+		if card := matrixQuestionHTML(msg); card != "" {
+			return matrixSendHTML(ctx, client, homeserver, accessToken, roomID, body, card)
+		}
+	}
+	return matrixSendText(ctx, client, homeserver, accessToken, roomID, body)
 }
 
 // SendFile uploads the bytes to the homeserver media store, then sends an
