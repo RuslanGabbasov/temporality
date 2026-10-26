@@ -122,6 +122,11 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
    *  paints dots by cluster color, so «what does blue mean» needs an answer
    *  that follows the data. */
   const [legendTopics, setLegendTopics] = useState<Array<{ label: string; color: string; count: number }>>([])
+  /** Hover focus: the hovered point and its kNN neighbors stay lit while the
+   *  rest of the map dims — reading a point's context beats hunting it in a
+   *  crowd. Kept in a ref so the draw pass stays out of React state. */
+  const highlightRef = useRef<{ center: number; set: Set<number> } | null>(null)
+  const pointIndexById = useMemo(() => new Map(points.map((p, i) => [p.id, i] as const)), [points])
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -194,6 +199,11 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     })
   }, [points, query, stateFilter])
 
+  // Recompute the lit neighborhood only when the hovered point changes (the
+  // tooltip state also carries cursor coordinates — those must not re-run
+  // this at pointer frequency).
+  const hoverId = hover?.point.id ?? ''
+
   /** Nearest point to a world-space query within maxDist, via the spatial
    *  grid: O(bucket) instead of a full scan per mousemove. */
   const pickPoint = useCallback((mx: number, my: number, maxDist: number): MapPoint | null => {
@@ -252,13 +262,14 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
     // Project + cull once; everything below works in screen pixels, so fonts
     // stay constant-size and dots grow only mildly with zoom.
-    const visible: Array<{ p: MapPoint; sx: number; sy: number; active: boolean }> = []
+    const visible: Array<{ p: MapPoint; sx: number; sy: number; active: boolean; i: number }> = []
     for (let i = 0; i < points.length; i++) {
       const sx = points[i].x * scale + tx
       const sy = points[i].y * scale + ty
       if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue
-      visible.push({ p: points[i], sx, sy, active: matches[i] })
+      visible.push({ p: points[i], sx, sy, active: matches[i], i })
     }
+    const highlight = highlightRef.current
     const dotR = Math.max(1.6, Math.min(3.2, points[0]?.r ?? 3)) * Math.min(1.5, Math.max(0.8, scale))
 
     // Tier tracking for the legend badges (state mirror, cheap guard).
@@ -327,7 +338,21 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // timeline), the shape is the verdict category; cluster membership is
     // already spoken by position and the region bubbles underneath. ──
     const showEdges = scale >= 0.5
-    if (showEdges) {
+    if (highlight) {
+      // Focus mode: only the hovered point's own links, clearly brighter —
+      // the context of one point beats two thousand faint lines. Filtered-out
+      // neighbors still draw here: exploring a point's company is the point.
+      ctx.lineWidth = 1.4
+      ctx.strokeStyle = 'rgba(122, 162, 247, 0.45)'
+      for (const [a, b] of edgesRef.current) {
+        if (a !== highlight.center && b !== highlight.center) continue
+        const pa = points[a], pb = points[b]
+        ctx.beginPath()
+        ctx.moveTo(pa.x * scale + tx, pa.y * scale + ty)
+        ctx.lineTo(pb.x * scale + tx, pb.y * scale + ty)
+        ctx.stroke()
+      }
+    } else if (showEdges) {
       ctx.lineWidth = 1
       ctx.strokeStyle = 'rgba(122, 162, 247, 0.08)'
       const visibleIds = new Set(visible.map((entry) => entry.p.id))
@@ -348,23 +373,34 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // statements 100% — the dots thicken as detail takes over, smoothly
     // interpolated between the tier boundaries instead of stepping.
     const dotAlpha = Math.max(0.5, Math.min(1, 0.5 + ((scale - FAR) / (NEAR - FAR)) * 0.5))
-    for (const { p, sx, sy, active } of visible) {
+    for (const { p, sx, sy, active, i } of visible) {
       // Color = the point's REGION (the same shade as its bubble, its
       // sub-bubbles and the legend entry): a region reads as one hue on every
       // tier. Shape = the lifecycle verdict (circle/diamond/cross).
       const regionColor = regionColorOf(p)
       const shape = stateShape(p.item.state)
       const dead = shape === 'cross'
-      const rowAlpha = active ? dotAlpha : dotAlpha * 0.35
-      ctx.globalAlpha = dead ? rowAlpha * 0.85 : rowAlpha
+      let alpha = active ? dotAlpha : dotAlpha * 0.35
+      let radius = dotR
+      if (highlight) {
+        // The lit neighborhood keeps (almost) full ink and the hovered point
+        // grows a little; everything else sinks to a whisper.
+        if (highlight.set.has(i)) {
+          alpha = Math.max(alpha, i === highlight.center ? 1 : 0.9)
+          if (i === highlight.center) radius = dotR * 1.5
+        } else {
+          alpha = Math.min(alpha, dotAlpha * 0.12)
+        }
+      }
+      ctx.globalAlpha = dead ? alpha * 0.85 : alpha
       if (dead) {
-        ctx.lineWidth = Math.max(1.1, dotR * 0.55)
+        ctx.lineWidth = Math.max(1.1, radius * 0.55)
         ctx.strokeStyle = regionColor
         ctx.lineCap = 'round'
-        drawShape(ctx, 'cross', sx, sy, dotR)
+        drawShape(ctx, 'cross', sx, sy, radius)
       } else {
         ctx.fillStyle = regionColor
-        drawShape(ctx, shape, sx, sy, dotR)
+        drawShape(ctx, shape, sx, sy, radius)
       }
     }
     ctx.globalAlpha = 1
@@ -387,8 +423,12 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       ctx.textAlign = 'center'
       const accepted: Array<{ x: number; y: number }> = []
       let drawn = 0
-      for (const { p, sx, sy, active } of visible) {
-        if (!active || drawn >= LABEL_MAX) continue
+      // With a hover focus the labels belong to the lit neighborhood only —
+      // labeling the dimmed crowd would bury the answer again.
+      const labelPool = highlight ? visible.filter((entry) => highlight.set.has(entry.i)) : visible
+      for (const { p, sx, sy, active } of labelPool) {
+        if (!highlight && (!active || drawn >= LABEL_MAX)) continue
+        if (drawn >= LABEL_MAX) continue
         let crowded = false
         for (const spot of accepted) {
           if (Math.abs(spot.x - sx) < LABEL_BOX_W && Math.abs(spot.y - sy) < LABEL_BOX_H) { crowded = true; break }
@@ -404,7 +444,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         // as the zoom moved the visible set.
         const halo = dark ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.95)'
         const label = p.item.proposition.length > 44 ? `${p.item.proposition.slice(0, 43)}…` : p.item.proposition
-        ctx.globalAlpha = active ? 1 : 0.55
+        ctx.globalAlpha = highlight ? 1 : active ? 1 : 0.55
         for (let pass = 0; pass < 2; pass++) {
           ctx.fillStyle = pass === 0 ? halo : regionColorOf(p)
           ctx.fillText(label, sx + (pass === 0 ? 1 : 0), sy - dotR - 4 + (pass === 0 ? 1 : 0))
@@ -418,6 +458,27 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     frameRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frameRef.current)
   }, [draw])
+
+  // Recompute the lit neighborhood when the hovered point changes and redraw.
+  useEffect(() => {
+    const redraw = () => { frameRef.current = requestAnimationFrame(draw) }
+    if (!hoverId) {
+      if (highlightRef.current) { highlightRef.current = null; redraw() }
+      return
+    }
+    const center = pointIndexById.get(hoverId)
+    if (center === undefined) {
+      if (highlightRef.current) { highlightRef.current = null; redraw() }
+      return
+    }
+    const set = new Set<number>([center])
+    for (const [a, b] of edgesRef.current) {
+      if (a === center) set.add(b)
+      else if (b === center) set.add(a)
+    }
+    highlightRef.current = { center, set }
+    redraw()
+  }, [hoverId, draw, pointIndexById])
 
   // Zoom & pan (d3-zoom semantics, minimal hand-rolled version on canvas).
   // A drag that ends over a point used to open the dossier — the click event
