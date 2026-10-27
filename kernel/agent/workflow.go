@@ -1363,6 +1363,23 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				continue
 			}
+			// A reasoning model can end the turn with reasoning only and an empty
+			// content (xiaomi mimo does). Completing here would publish an empty
+			// answer after a full run's worth of work. Nudge the conversation
+			// instead: the model gets a system reminder that its reply was empty
+			// and must produce the final text; the turn loop continues, and the
+			// turn budget/forced finale still bound the recovery.
+			if strings.TrimSpace(completion.Content) == "" {
+				usedTokens += completion.Usage.TotalTokens
+				usedCostUSD += modelCallCostUSD(input, completion.Usage)
+				messages = append(messages,
+					llm.Message{Role: "assistant", Content: ""},
+					llm.Message{Role: "system", Content: "Your previous reply contained no answer text (reasoning only). Produce the final answer to the user now as plain text — do not end the reply without it."})
+				if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "empty_answer_retry": true}); err != nil {
+					return result, err
+				}
+				continue
+			}
 			result.Answer = completion.Content
 			result.Status = "completed"
 			result.TotalTokens = usedTokens + completion.Usage.TotalTokens + subtree.tokens
@@ -2284,6 +2301,34 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	if finale.Content != "" {
 		result.Answer = finale.Content
+	}
+	// The finale is the last chance: a reasoning model can still answer with
+	// reasoning only. One explicit retry demanding plain text; if it is empty
+	// again, the run FAILS with an honest error instead of completing with an
+	// empty answer that reads as success after 15 turns of work.
+	if strings.TrimSpace(result.Answer) == "" {
+		finaleMessages = append(finaleMessages, llm.Message{Role: "system", Content: "Your reply was empty. Produce the final answer now as plain text — this is the last attempt; an empty reply fails the run."})
+		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": finaleTurn, "forced_finale": true, "empty_answer_retry": true, "model": input.Model}); err != nil {
+			return result, err
+		}
+		var finaleRetry llm.Completion
+		if retryErr := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finaleRetry); retryErr != nil {
+			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "empty_answer_retry": true, "error_type": "activity_failed", "error": boundedFailureDetail(retryErr)}); eventErr != nil {
+				return result, eventErr
+			}
+		} else {
+			finale = finaleRetry
+			if finale.Content != "" {
+				result.Answer = finale.Content
+			}
+		}
+		if strings.TrimSpace(result.Answer) == "" {
+			result.Status = "failed"
+			if eventErr := emit(activityCtx, state, "run.failed", map[string]any{"turn": finaleTurn, "error_type": "empty_final_answer", "error": "the model produced no answer text (reasoning only) on the finale and its retry"}); eventErr != nil {
+				return result, eventErr
+			}
+			return result, nil
+		}
 	}
 	if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_calls": len(finale.ToolCalls)}); err != nil {
 		return result, err
