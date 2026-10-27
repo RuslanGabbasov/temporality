@@ -3,12 +3,17 @@ package mcpclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -148,5 +153,182 @@ func TestSSEAgainstDeadServerHasNoHint(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "set the server type to http") {
 		t.Fatalf("dead server must not produce a transport hint: %v", err)
+	}
+}
+
+// fakeBackend stands in for a configured MCP server over in-memory transports
+// and counts session connects, so tests can pin the lazy-redial behaviour.
+type fakeBackend struct {
+	connects int32 // accessed atomically
+
+	mu    sync.Mutex
+	peers []*mcp.ServerSession // server side of each session; Close kills the transport
+}
+
+// newFakeClient returns a Client whose sessions connect to an in-memory MCP
+// server exposing one echo tool, plus the backend handle.
+func newFakeClient(t *testing.T) (*Client, *fakeBackend) {
+	t.Helper()
+	backend := &fakeBackend{}
+	c := NewClient(ServerConfig{ID: "test", Name: "Test", Type: TypeStdio, Enabled: true})
+	c.connectFn = func(ctx context.Context) (*mcp.ClientSession, error) {
+		atomic.AddInt32(&backend.connects, 1)
+		serverTransport, clientTransport := mcp.NewInMemoryTransports()
+		server := mcp.NewServer(&mcp.Implementation{Name: "fake-mcp", Version: "0.0.0"}, nil)
+		mcp.AddTool(server, &mcp.Tool{Name: "echo"}, func(ctx context.Context, req *mcp.CallToolRequest, in struct {
+			Msg string `json:"msg,omitempty"`
+		}) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "echo:" + in.Msg}}}, nil, nil
+		})
+		peer, err := server.Connect(ctx, serverTransport, nil)
+		if err != nil {
+			return nil, err
+		}
+		backend.mu.Lock()
+		backend.peers = append(backend.peers, peer)
+		backend.mu.Unlock()
+		client := mcp.NewClient(&mcp.Implementation{Name: "kernel-test", Version: "0.0.0"}, nil)
+		return client.Connect(ctx, clientTransport, nil)
+	}
+	return c, backend
+}
+
+func (f *fakeBackend) count() int32 { return atomic.LoadInt32(&f.connects) }
+
+// killLast closes the server side of the newest session, simulating a server
+// whose process died between calls.
+func (f *fakeBackend) killLast() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	peer := f.peers[len(f.peers)-1]
+	f.peers = f.peers[:len(f.peers)-1]
+	_ = peer.Close()
+}
+
+func TestPersistentSessionReusedAcrossCalls(t *testing.T) {
+	c, backend := newFakeClient(t)
+	ctx := context.Background()
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	got, err := c.Call(ctx, "mcp__test__echo", map[string]any{"msg": "one"}, "")
+	if err != nil || got != "echo:one" {
+		t.Fatalf("first call = %q, %v", got, err)
+	}
+	got, err = c.Call(ctx, "mcp__test__echo", map[string]any{"msg": "two"}, "")
+	if err != nil || got != "echo:two" {
+		t.Fatalf("second call = %q, %v", got, err)
+	}
+	if n := backend.count(); n != 1 {
+		t.Fatalf("two calls and a refresh must share one session, got %d connects", n)
+	}
+	// Refresh rides the same session instead of opening a second one.
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	if n := backend.count(); n != 1 {
+		t.Fatalf("refresh must not create a session when one is alive, got %d connects", n)
+	}
+}
+
+func TestBrokenTransportRedialsOnceAndRetries(t *testing.T) {
+	c, backend := newFakeClient(t)
+	ctx := context.Background()
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if _, err := c.Call(ctx, "mcp__test__echo", map[string]any{"msg": "alive"}, ""); err != nil {
+		t.Fatalf("call before crash: %v", err)
+	}
+	backend.killLast() // the server process died between calls
+	got, err := c.Call(ctx, "mcp__test__echo", map[string]any{"msg": "back"}, "")
+	if err != nil || got != "echo:back" {
+		t.Fatalf("call after crash = %q, %v", got, err)
+	}
+	if n := backend.count(); n != 2 {
+		t.Fatalf("dead session must be redialed exactly once, got %d connects", n)
+	}
+	// The replacement session is used for subsequent calls without redialing.
+	if _, err := c.Call(ctx, "mcp__test__echo", map[string]any{"msg": "again"}, ""); err != nil {
+		t.Fatalf("call on redialed session: %v", err)
+	}
+	if n := backend.count(); n != 2 {
+		t.Fatalf("healthy session must not be redialed, got %d connects", n)
+	}
+}
+
+func TestConcurrentCallsShareSession(t *testing.T) {
+	c, backend := newFakeClient(t)
+	ctx := context.Background()
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	const workers, calls = 8, 4
+	var wg sync.WaitGroup
+	errs := make([]error, workers*calls)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < calls; i++ {
+				_, err := c.Call(ctx, "mcp__test__echo", map[string]any{"msg": "w"}, "")
+				errs[w*calls+i] = err
+			}
+		}(w)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent call %d: %v", i, err)
+		}
+	}
+	if n := backend.count(); n != 1 {
+		t.Fatalf("concurrent calls must share one session, got %d connects", n)
+	}
+}
+
+func TestCloseIsIdempotentAndReconnects(t *testing.T) {
+	c, backend := newFakeClient(t)
+	ctx := context.Background()
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("second close must be a no-op, got %v", err)
+	}
+	if _, err := c.Call(ctx, "mcp__test__echo", map[string]any{"msg": "back"}, ""); err != nil {
+		t.Fatalf("call after close must lazily reconnect: %v", err)
+	}
+	if n := backend.count(); n != 2 {
+		t.Fatalf("expected exactly one reconnect after close, got %d connects", n)
+	}
+}
+
+func TestIsBrokenTransport(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"deadline", context.DeadlineExceeded, false},
+		{"canceled", context.Canceled, false},
+		{"wrapped deadline", fmt.Errorf("calling \"tools/call\": %w", context.DeadlineExceeded), false},
+		{"sdk connection closed", fmt.Errorf("calling \"tools/call\": %w", mcp.ErrConnectionClosed), true},
+		{"eof", io.EOF, true},
+		{"unexpected eof", io.ErrUnexpectedEOF, true},
+		{"closed pipe", io.ErrClosedPipe, true},
+		{"os closed", os.ErrClosed, true},
+		{"session closed text", errors.New("session closed by peer"), true},
+		{"closed pipe text", errors.New("write |1: broken pipe"), true},
+		{"plain failure", errors.New("tool exploded"), false},
+	}
+	for _, tc := range cases {
+		if got := isBrokenTransport(tc.err); got != tc.want {
+			t.Errorf("%s: isBrokenTransport(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
 	}
 }
