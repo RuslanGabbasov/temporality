@@ -37,6 +37,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/quota"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
+	"github.com/temporality-project/temporality/observation/postgres"
 	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/api/enums/v1"
@@ -296,6 +297,23 @@ func main() {
 	} else if err := ws.SeedBuiltinSkills(ctx); err != nil {
 		log.Error("seed builtin skills", "error", err)
 	}
+	// SSE event wake (PG LISTEN/NOTIFY): a dedicated connection to the shared
+	// journal database turns observation_events changes into instant wake-ups
+	// for /v1/workspace/runs/{id}/stream, instead of every stream polling
+	// blind every 1.5s. NOTIFY comes from whichever process ingests events
+	// (journal, kernel); every failure here degrades to pure polling — a Warn
+	// and the streams keep their old cadence, nothing else is affected.
+	wake := newEventWake()
+	if wakeStore, err := postgres.Open(ctx, databaseURL); err != nil {
+		log.Warn("event wake: journal store unavailable; run streams poll every 1.5s", "error", err)
+	} else {
+		// wakeCancel unwinds the listener before the pool closes (defers run
+		// LIFO), so shutdown never races the LISTEN goroutine against Close.
+		wakeCtx, wakeCancel := context.WithCancel(ctx)
+		defer wakeCancel()
+		defer wakeStore.Close()
+		startEventWakeRelay(wakeCtx, wakeStore, wake, log)
+	}
 	// Kernel→journal auth must be resolved before every consumer reads
 	// TEMPORALITY_API_TOKEN: the outbox publisher, the cost API and the
 	// activities' direct journal calls. On a fresh install the env is empty and
@@ -498,6 +516,10 @@ func main() {
 	temporalWorker.RegisterWorkflowWithOptions(agent.AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
 	temporalWorker.RegisterWorkflowWithOptions(agent.KnowledgeExtractionWorkflow, workflow.RegisterOptions{Name: agent.KnowledgeExtractionWorkflowName})
 	temporalWorker.RegisterActivityWithOptions(activities.RecordEvent, activity.RegisterOptions{Name: agent.ActivityRecordEvent})
+	// The record-event-local gate journals workflow events through local
+	// activities; the hook must exist in every binary that replays such
+	// histories, so it is wired unconditionally at boot.
+	agent.SetRecordEventLocal(activities.RecordEvent)
 	temporalWorker.RegisterActivityWithOptions(activities.CallModel, activity.RegisterOptions{Name: agent.ActivityCallModel})
 	temporalWorker.RegisterActivityWithOptions(activities.RunTool, activity.RegisterOptions{Name: agent.ActivityRunTool})
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeHints, activity.RegisterOptions{Name: agent.ActivityKnowledgeHints})
@@ -3697,7 +3719,11 @@ func main() {
 				}
 			}
 			if !done {
-				time.Sleep(1500 * time.Millisecond)
+				// Sleep until the next journal change wakes this project (PG
+				// NOTIFY via the event wake mux) or the 1.5s fallback tick
+				// elapses. Polling stays the source of truth: a missed or
+				// lost wake-up only costs one tick of latency, never data.
+				wake.Wait(ctx, project, 1500*time.Millisecond)
 			}
 		}
 		fmt.Fprintf(w, "event: done\ndata: {}\n\n")

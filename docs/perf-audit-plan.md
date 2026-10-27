@@ -71,15 +71,27 @@
 | 5.2 | Проводка `CleanupDelivered` (раз в час, батчами) | `cmd/agent-kernel/main.go` |
 | 5.3 | SSE-курсор стрима рана: полный кортеж `(occurred_at, event_id)` вместо подзапроса по `event_id` (seq-scan на каждый полл 1.5 c) | `workspace/store.go`, `cmd/agent-kernel/main.go` |
 
+## Волна 2 (реализована в этой же ветке)
+
+| # | Правка | Файлы | Примечания |
+|---|--------|-------|------------|
+| W1 | Sandbox: контейнер на ран — первый вызов делает `docker run -d` (keep-alive `sleep infinity`), дальше `docker exec`; fingerprint профиля отсекает exec в чужой контур; таймаут = `rm --force` + evict; reaper по idle (`KERNEL_SANDBOX_CONTAINER_IDLE`, дефолт 15м) + явный `TeardownRun` из `SweepRunScratch` | `kernel/sandbox/docker.go`, `swappable.go`, `kernel/agent/activities.go` | Пустой `ScratchKey` → прежний one-shot путь |
+| W2 | MCP: персистентная сессия с lazy-redial (ровно один реконнект при сломанном транспорте), один http.Client на инстанс, `connectFn`-шов для тестов; реестр закрывает вытесняемые клиенты (иначе утечка stdio-процессов) | `kernel/mcpclient/client.go`, `registry.go` | `ClientSession.CallTool` в go-sdk v1.8.0 concurrent-safe — вызовы вне мьютекса |
+| W3 | Вебхуки каналов: ack сразу после подписи/дедуп-вставки (at-least-once через durable-строку), пайплайн — в ограниченный пул (`KERNEL_WEBHOOK_WORKERS`=8, `KERNEL_WEBHOOK_QUEUE`=256); переполнение → 503; pre-ack-строка «усыновляется» воркером | `cmd/agent-kernel/channelwebhook.go` | Плата: потеря строгого порядка сообщений чата (как и было между каналами) |
+| W4 | События воркфлоу — через LocalActivity под гейтом `record-event-local` (v1): N событий ≈ 1 workflow-task вместо N server round-trips; DefaultVersion реплеит прежний ExecuteActivity; хук `agent.SetRecordEventLocal(activities.RecordEvent)` в main.go — обязателен в каждом бинаре, реплеящем такие истории | `kernel/agent/workflow.go`, `cmd/agent-kernel/main.go` | Батчинг событий сознательно не делался (потеря на return-путях); `emitKnowledgeEvent` — кандидат на ту же замену следующей итерацией |
+| W5 | Retention журнала: GUC `temporality.retention_sweep='on'` приподнимает append-only триггер ТОЛЬКО для DELETE на одном соединении (RESET перед возвратом в пул); `RetentionSweep` батчами по ctid; свипер в journal (`TEMPORALITY_JOURNAL_RETENTION_INTERVAL`=6h, `TEMPORALITY_JOURNAL_RETENTION_AGE`=90d, «off») | `observation/postgres/*`, `cmd/temporality-journal/*` | Рантайм-поведение триггера проверить на стенде с PG (список в отчёте аудита) |
+| W6 | Wake SSE через LISTEN/NOTIFY: ingest шлёт `pg_notify('observation_events_changed', <project>)` (best-effort, по одному на проект на батч); kernel слушает (`postgres.Open` на общий DATABASE_URL) и будит `eventWake`; SSE-полл 1.5с становится фолбэком | `observation/postgres/notify.go`, `cmd/agent-kernel/eventwake.go`, `main.go` | Корректность не зависит от NOTIFY |
+| W7 | TokenBus: 16 шардов по FNV-1a(runID) — мьютекс на дельту шардово-локальный; sweep обходит шарды по очереди | `kernel/agent/tokenbus.go` | Публичный API без изменений |
+
 ## Отложено (вне этой ветки)
 
-- Контейнер на ран + `docker exec` в sandbox (меняет lifecycle, требует дизайна по чистке).
-- Персистентная MCP-сессия с lazy-redial (требует интеграционной проверки с реальными
-  серверами; в этой ветке оставляем сессию на вызов).
-- Асинхронный ack вебхуков каналов (поведенческое изменение контракта со Slack).
-- Батч-emit / LocalActivity для событий (изменяет детерминизм воркфлоу, отдельная ветка
-  с нагрузочным прогоном на реплеях).
-- Retention/партиционирование `observation_events`, push-стриминг UI, шардирование TokenBus.
+- Партиционирование `observation_events` по времени (перенос таблицы — отдельная
+  миграционная история; retention-свитч уже решает острый рост).
+- Полный push-стриминг UI (LISTEN/NOTIFY-wake уже убирает холостые поллы;
+  остаток — дедупликация соединений и backpressure для очень большого числа
+  зрителей).
+- Перевод `emitKnowledgeEvent` на LocalActivity (тот же паттерн, что W4,
+  следующей итерацией).
 
 ## Критерии приёмки
 
