@@ -12,9 +12,37 @@ import (
 // model.text_delta records while this bus carries the live stream to
 // subscribed UI clients. It exists for the single-process kernel: with
 // multi-node workers the bus needs a real transport (see docs/ROADMAP.md).
+//
+// Runs are sharded: a publish only ever takes the one shard mutex its runID
+// hashes to, so concurrent streams do not serialize behind a single lock.
 type TokenBus struct {
+	shards [tokenBusShards]tokenShard
+}
+
+// tokenBusShards is the fixed shard count. Publishing a delta takes only its
+// run's shard mutex, so concurrent runs streaming tokens no longer serialize
+// behind one global lock (the per-delta lookup and lastSeen update were the
+// hot path; fan-out itself was already non-blocking).
+const tokenBusShards = 16
+
+// tokenShard owns the run entries hashed to it. Lock order is shard.mu ->
+// tokenRun.mu (sweep nests them); Publish/PublishTool/Close/Subscribe take
+// only the run mutex once run() has resolved the entry under the shard lock.
+type tokenShard struct {
 	mu   sync.Mutex
 	runs map[string]*tokenRun
+}
+
+// tokenShardIndex hashes a runID to its shard (FNV-1a, inlined so a delta
+// publish does zero allocations; deterministic within the process and across
+// them — the mapping must merely be stable from lookup to lookup).
+func tokenShardIndex(runID string) int {
+	h := uint32(2166136261)
+	for i := 0; i < len(runID); i++ {
+		h ^= uint32(runID[i])
+		h *= 16777619
+	}
+	return int(h % tokenBusShards)
 }
 
 // TokenEvent is one SSE frame of the ephemeral token stream.
@@ -54,16 +82,26 @@ type tokenRun struct {
 }
 
 func NewTokenBus() *TokenBus {
-	return &TokenBus{runs: make(map[string]*tokenRun)}
+	b := &TokenBus{}
+	for i := range b.shards {
+		b.shards[i].runs = make(map[string]*tokenRun)
+	}
+	return b
+}
+
+// shardFor resolves the shard owning runID; callers hold no bus locks.
+func (b *TokenBus) shardFor(runID string) *tokenShard {
+	return &b.shards[tokenShardIndex(runID)]
 }
 
 func (b *TokenBus) run(runID string) *tokenRun {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	r, ok := b.runs[runID]
+	s := b.shardFor(runID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
 	if !ok {
 		r = &tokenRun{subs: make(map[chan TokenEvent]struct{}), lastSeen: time.Now()}
-		b.runs[runID] = r
+		s.runs[runID] = r
 	}
 	r.lastSeen = time.Now()
 	return r
@@ -191,17 +229,22 @@ func (b *TokenBus) Subscribe(runID string) (<-chan TokenEvent, TokenEvent, func(
 }
 
 // sweep drops entries idle past idleSweep with no subscribers: dead runs of
-// crashed or delegated-only workflows whose nobody will ever close.
+// crashed or delegated-only workflows whose nobody will ever close. It walks
+// the shards one at a time under each shard's own mutex — never a global
+// lock — so a sweep in progress does not stall publishers on other shards.
 func (b *TokenBus) sweep() {
 	now := time.Now()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for id, r := range b.runs {
-		r.mu.Lock()
-		idle := len(r.subs) == 0 && now.Sub(r.lastSeen) > idleSweep
-		r.mu.Unlock()
-		if idle {
-			delete(b.runs, id)
+	for i := range b.shards {
+		s := &b.shards[i]
+		s.mu.Lock()
+		for id, r := range s.runs {
+			r.mu.Lock()
+			idle := len(r.subs) == 0 && now.Sub(r.lastSeen) > idleSweep
+			r.mu.Unlock()
+			if idle {
+				delete(s.runs, id)
+			}
 		}
+		s.mu.Unlock()
 	}
 }
