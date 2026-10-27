@@ -768,7 +768,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     }
   }
 
-  const applyProposal = async (proposal: AgentProposal, opts?: { gate?: boolean }) => {
+  const applyProposal = async (proposal: AgentProposal, opts?: { gate?: boolean; override?: boolean; justification?: string }) => {
     if (!selectedId) return
     setProposalBusy(true); setError(''); setProposalNotice(null); setSkipGateProposal(null)
     try {
