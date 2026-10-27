@@ -95,6 +95,35 @@ func RegisterEvalCandidateRoutes(ctx context.Context, mux *http.ServeMux, ws *wo
 		}
 	})
 
+	// Accept-all (warm-start, docs/agent-quality-loop.md §6): every pending
+	// candidate lands in one transaction, each re-checked against the suite
+	// cap and the 70 % rule; the ones that fail an invariant are skipped and
+	// reported. Reaching the gate's 3-case minimum becomes a single click
+	// instead of N per-candidate reviews.
+	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/eval-case-candidates/accept-all", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		agentID := r.PathValue("agentID")
+		if !resolveCandidateAgent(w, r, ws, agentID) {
+			return
+		}
+		accepted, skipped, reasons, err := ws.AcceptAllEvalCaseCandidates(r.Context(), agentID, requestUserID(r))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		for i := range accepted {
+			emitEvalCaseCandidateDecided(r.Context(), events, accepted[i])
+		}
+		writeJSON(w, 200, map[string]any{
+			"accepted":     accepted,
+			"accepted_n":   len(accepted),
+			"skipped":      skipped,
+			"skip_reasons": reasons,
+		})
+	})
+
 	// Reject (§8.2): the candidate stays in history (reaped after 90 days,
 	// §10.2); repeating the decision is a conflict, not a second verdict.
 	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/eval-case-candidates/{id}/reject", func(w http.ResponseWriter, r *http.Request) {

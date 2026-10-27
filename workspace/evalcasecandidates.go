@@ -503,6 +503,132 @@ func (s *Store) AcceptEvalCaseCandidate(ctx context.Context, agentID string, id 
 	return candidate, suite, nil
 }
 
+// AcceptAllEvalCaseCandidates accepts every pending candidate of an agent in
+// one transaction, reusing the per-candidate invariants (suite cap, 70 %
+// project share, pending-guard). Candidates failing an invariant are skipped
+// and reported with a reason instead of aborting the batch — warm-start is
+// about reaching the gate's minimum fast, not about all-or-nothing. The
+// caller sees how many landed, what was skipped and why.
+func (s *Store) AcceptAllEvalCaseCandidates(ctx context.Context, agentID, reviewer string) ([]EvalCaseCandidate, []EvalCaseCandidate, []string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`,
+		"eval-case-candidate:"+agentID); err != nil {
+		return nil, nil, nil, err
+	}
+
+	suite := AgentEvaluationSuite{AgentID: agentID, Cases: []EvaluationCase{}}
+	var raw []byte
+	err = tx.QueryRow(ctx,
+		`SELECT cases, updated_at FROM workspace_agent_evaluation_suite WHERE agent_id = $1`, agentID).
+		Scan(&raw, &suite.UpdatedAt)
+	switch {
+	case err == nil:
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &suite.Cases); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+		// No suite yet — the batch creates the row.
+	default:
+		return nil, nil, nil, err
+	}
+
+	counts, err := evalAcceptedProjectCounts(ctx, tx, agentID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	rows, err := tx.Query(ctx,
+		`SELECT `+evalCaseCandidateColumns+` FROM workspace_eval_case_candidate
+		 WHERE agent_id = $1 AND verdict = 'pending' ORDER BY created_at`, agentID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var pending []EvalCaseCandidate
+	for rows.Next() {
+		c, scanErr := scanEvalCaseCandidate(rows)
+		if scanErr != nil {
+			rows.Close()
+			return nil, nil, nil, scanErr
+		}
+		pending = append(pending, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	accepted := make([]EvalCaseCandidate, 0, len(pending))
+	var skipped []EvalCaseCandidate
+	var skipReasons []string
+	for _, candidate := range pending {
+		if len(suite.Cases) >= evalSuiteMaxCases {
+			skipped = append(skipped, candidate)
+			skipReasons = append(skipReasons, fmt.Sprintf("%s: suite full (%d)", candidate.RunID, evalSuiteMaxCases))
+			continue
+		}
+		if !evalProjectShareAllows(counts, candidate.ProjectID) {
+			total, same := 0, 0
+			for _, n := range counts {
+				total += n
+			}
+			same = counts[candidate.ProjectID]
+			skipped = append(skipped, candidate)
+			skipReasons = append(skipReasons, fmt.Sprintf("%s: project share (%d of %d goldens already in %q)", candidate.RunID, same, total, candidate.ProjectID))
+			continue
+		}
+		var reviewedAt time.Time
+		err := tx.QueryRow(ctx,
+			`UPDATE workspace_eval_case_candidate
+			 SET verdict = $3, reviewed_by = $4, reviewed_at = now()
+			 WHERE id = $1 AND agent_id = $2 AND verdict = 'pending'
+			 RETURNING reviewed_at`,
+			candidate.ID, agentID, EvalCandidateVerdictAccepted, reviewer).Scan(&reviewedAt)
+		if err != nil {
+			skipped = append(skipped, candidate)
+			skipReasons = append(skipReasons, fmt.Sprintf("%s: %v", candidate.RunID, err))
+			continue
+		}
+		candidate.Verdict = EvalCandidateVerdictAccepted
+		candidate.ReviewedBy = reviewer
+		candidate.ReviewedAt = &reviewedAt
+		staleAfter := reviewedAt.AddDate(0, 0, DefaultSuiteStaleDays)
+		suite.Cases = append(suite.Cases, EvaluationCase{
+			Name:           GoldenCaseName(candidate.RunID),
+			Input:          candidate.Input,
+			ExpectedOutput: candidate.ExpectedOutput,
+			StaleAfter:     &staleAfter,
+		})
+		counts[candidate.ProjectID]++
+		accepted = append(accepted, candidate)
+	}
+	if len(accepted) == 0 {
+		// Nothing landed: keep the suite untouched and report an honest no-op.
+		return nil, skipped, skipReasons, nil
+	}
+	encoded, err := json.Marshal(suite.Cases)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO workspace_agent_evaluation_suite (agent_id, cases, updated_at)
+		 VALUES ($1, $2, now())
+		 ON CONFLICT (agent_id) DO UPDATE SET cases = EXCLUDED.cases, updated_at = now()`,
+		agentID, encoded); err != nil {
+		return nil, nil, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, nil, err
+	}
+	return accepted, skipped, skipReasons, nil
+}
+
 // RejectEvalCaseCandidate decides a pending candidate out of the suite path
 // (§4.4): rejected candidates stay in history for the retention period and a
 // repeated reject is a conflict, not a second decision.
