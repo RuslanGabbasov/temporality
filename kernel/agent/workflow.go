@@ -360,6 +360,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// on determinism checks. Called unconditionally, in this fixed order.
 	noteSteering := workflow.GetVersion(ctx, "delegation-note-steering", workflow.DefaultVersion, 1)
 	modelSchedStart := workflow.GetVersion(ctx, "model-schedule-to-start", workflow.DefaultVersion, 1)
+	titleParallel := workflow.GetVersion(ctx, "run-title-parallel", workflow.DefaultVersion, 1)
 	// The team root seeds the shared context handle: every child run of the
 	// program (slots, reviewers, delegates below them) inherits it so scratch
 	// paths and run-scoped hints stay addressable across the tree.
@@ -402,59 +403,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if input.AgentVersion > 0 {
 		started["agent_version"] = input.AgentVersion
 	}
-	if input.ParentRunID == "" {
-		// Root runs get a short human title for the Runs list; delegated child
-		// runs are shown inside their parent. Ladder: the task's own title
-		// (deterministic, no model) → one minimal model call over the prompt →
-		// heuristic first line of the prompt. Best effort only: on total failure
-		// the UI falls back to the agent name, so this must not fail the run.
-		title := cleanTitle(input.Title)
-		if title == "" {
-			titleCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-			var modelTitle string
-			if err := workflow.ExecuteActivity(titleCtx, ActivityGenerateTitle, TitleRequest{Prompt: input.Prompt}).Get(ctx, &modelTitle); err == nil {
-				title = strings.TrimSpace(modelTitle)
-			}
-		}
-		if title == "" {
-			title = HeuristicTitle(input.Prompt)
-		}
-		if title != "" {
-			started["title"] = title
-		}
-	}
-	if err := emit(activityCtx, state, "run.started", started); err != nil {
+	// Title and prior-knowledge hints, with the run.started entry between their
+	// result handling. The wait order is replay-gated, see runTitleAndHints.
+	hintBlock, err := runTitleAndHints(ctx, activityCtx, state, input, started, titleParallel)
+	if err != nil {
 		return result, err
-	}
-	var priorHints []Hint
-	var hintBlock string
-	// A team program run has no model turns at the root, so prior-knowledge
-	// hints would never be consumed (docs/agent-teams.md §9).
-	if input.Team == nil && !input.SkipKnowledge {
-		hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-		hintsErr := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
-		if hintsErr != nil {
-			// The common miss is the boot-order race (kernel up, journal still
-			// projecting) — one short retry closes most of it without delaying
-			// a healthy start. A second failure is journaled with the cause.
-			workflow.Sleep(ctx, 3*time.Second)
-			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
-		}
-		if hintsErr != nil {
-			// Retrieval is best-effort, but the miss is still part of the trajectory.
-			if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable", "detail": boundedFailureDetail(hintsErr)}); eventErr != nil {
-				return result, eventErr
-			}
-			priorHints = nil
-		} else {
-			// One budgeted block instead of per-hint messages: the model sees a
-			// compact cue list with the knowledge_id contract, not a wall of prose.
-			rendered := observation.RenderHintBlock(toObservationHints(priorHints), observation.DefaultRenderOptions())
-			hintBlock = rendered.Block
-			if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints), "primed_hints": rendered.Kept, "primed_tokens": rendered.Tokens, "dropped_hints": rendered.Dropped}); err != nil {
-				return result, err
-			}
-		}
 	}
 	systemPrompt := systemPromptForRole(input.Role)
 	if input.SystemPrompt != "" {
@@ -1275,6 +1228,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if input.Team != nil {
 		return runTeamProgram(ctx, activityCtx, state, input, executePlan, &subtree)
 	}
+	// advertisedTools is a pure function of the prepared run input: KernelTools()
+	// builds a fresh literal, and input.Tools/ToolAllowlist/DenyTools/Project are
+	// constants after input preparation — the only writes to input happen at the
+	// top of AgentRun, and nothing inside the turn loop takes &input except the
+	// read-only delegationWidthLimit. The result is identical on every turn, so
+	// compute it once; a local computation issues no workflow commands and needs
+	// no GetVersion gate.
+	runTools := advertisedTools(&input)
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
 		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
@@ -1311,7 +1272,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// rewrite or drop earlier entries. Provider prompt caching (keyed by
 		// PromptCacheKey) relies on the prefix being byte-stable across turns;
 		// mutating history would silently invalidate the cache and reset billing.
-		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: advertisedTools(&input), RunID: input.RunID, Turn: turn, Project: input.Project, PromptCacheKey: input.TaskID}
+		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: runTools, RunID: input.RunID, Turn: turn, Project: input.Project, PromptCacheKey: input.TaskID}
 		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": turn, "model": input.Model}); err != nil {
 			return result, err
 		}
@@ -2340,6 +2301,99 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	startKnowledgeExtraction(ctx, activityCtx, state, input)
 	return result, nil
+}
+
+// runTitleAndHints resolves the two startup side quests of a root run — the
+// human title and the prior-knowledge hints — and journals them. It emits
+// run.started (the title rides its data) and returns the rendered hint block
+// for the system prompt ("" when hints are skipped or unavailable).
+//
+// Replay safety (docs/failure-model.md): titleParallel selects the schedule
+// order, gated by GetVersion("run-title-parallel"). Version 1 schedules the
+// GenerateTitle and KnowledgeHints activities together when BOTH are needed;
+// their results are applied in the same order as the sequential path and
+// run.started is still emitted after both complete, so only the schedule order
+// differs from the recorded history. Any other version (replays of histories
+// recorded before the gate) issues the original sequence: title activity →
+// run.started → hints activity. When only one of the two applies, the
+// sequential path runs as before — there is nothing to overlap.
+func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state *eventState, input RunInput, started map[string]any, titleParallel workflow.Version) (string, error) {
+	title := cleanTitle(input.Title)
+	needTitle := input.ParentRunID == "" && title == ""
+	// A team program run has no model turns at the root, so prior-knowledge
+	// hints would never be consumed (docs/agent-teams.md §9).
+	needHints := input.Team == nil && !input.SkipKnowledge
+	hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+	var titleFuture workflow.Future
+	var hintsFuture workflow.Future
+	if titleParallel == 1 && needTitle && needHints {
+		titleCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+		titleFuture = workflow.ExecuteActivity(titleCtx, ActivityGenerateTitle, TitleRequest{Prompt: input.Prompt})
+		hintsFuture = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID})
+	}
+	if input.ParentRunID == "" {
+		// Root runs get a short human title for the Runs list; delegated child
+		// runs are shown inside their parent. Ladder: the task's own title
+		// (deterministic, no model) → one minimal model call over the prompt →
+		// heuristic first line of the prompt. Best effort only: on total failure
+		// the UI falls back to the agent name, so this must not fail the run.
+		if title == "" {
+			var modelTitle string
+			var err error
+			if titleFuture != nil {
+				err = titleFuture.Get(ctx, &modelTitle)
+			} else {
+				titleCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+				err = workflow.ExecuteActivity(titleCtx, ActivityGenerateTitle, TitleRequest{Prompt: input.Prompt}).Get(ctx, &modelTitle)
+			}
+			if err == nil {
+				title = strings.TrimSpace(modelTitle)
+			}
+		}
+		if title == "" {
+			title = HeuristicTitle(input.Prompt)
+		}
+		if title != "" {
+			started["title"] = title
+		}
+	}
+	if err := emit(activityCtx, state, "run.started", started); err != nil {
+		return "", err
+	}
+	var priorHints []Hint
+	var hintBlock string
+	if needHints {
+		var hintsErr error
+		if hintsFuture != nil {
+			hintsErr = hintsFuture.Get(ctx, &priorHints)
+		} else {
+			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
+		}
+		if hintsErr != nil {
+			// The common miss is the boot-order race (kernel up, journal still
+			// projecting) — one short retry closes most of it without delaying
+			// a healthy start. A second failure is journaled with the cause.
+			// The parallel path retries only after the first attempt's future has
+			// been resolved, so the recorded command order stays deterministic.
+			workflow.Sleep(ctx, 3*time.Second)
+			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
+		}
+		if hintsErr != nil {
+			// Retrieval is best-effort, but the miss is still part of the trajectory.
+			if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable", "detail": boundedFailureDetail(hintsErr)}); eventErr != nil {
+				return "", eventErr
+			}
+		} else {
+			// One budgeted block instead of per-hint messages: the model sees a
+			// compact cue list with the knowledge_id contract, not a wall of prose.
+			rendered := observation.RenderHintBlock(toObservationHints(priorHints), observation.DefaultRenderOptions())
+			hintBlock = rendered.Block
+			if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints), "primed_hints": rendered.Kept, "primed_tokens": rendered.Tokens, "dropped_hints": rendered.Dropped}); err != nil {
+				return "", err
+			}
+		}
+	}
+	return hintBlock, nil
 }
 
 // delegationWidthLimit is the concurrency cap for one run's plan children:
