@@ -2360,6 +2360,8 @@ export const ru: Record<string, string> = {
     'org.policy_models_label': 'Разрешённые модели',
     'org.policy_models_placeholder': 'model-a, model-b — пусто = любые',
     'org.policy_mcp_label': 'Разрешённые MCP-серверы',
+    'org.policy_egress_label': 'Базовый egress-список (централизованный)',
+    'org.policy_egress_placeholder': 'По строке: домен, глоб (*.example.com), CIDR — доступ есть у каждого агента скоупа автоматически.',
     'org.policy_mcp_placeholder': 'server-a, server-b — пусто = любые',
     'org.policy_max_tokens_label': 'Макс. токенов на запуск',
     'org.policy_budget_label': 'Макс. стоимость запуска, USD',

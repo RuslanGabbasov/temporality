@@ -291,6 +291,19 @@ func startEgressLoop(ctx context.Context, log *slog.Logger, ws *workspace.Store,
 				log.Warn("egress: list agents", "error", err.Error())
 				return
 			}
+			// Centralized egress baseline: every policy's allowlist unions into
+			// the agent's own list (docs/agent-behavior-monitoring.md §7) — the
+			// policy is the shared baseline, the agent adds exceptions on top.
+			if policies, pErr := ws.ListPolicies(ctx); pErr == nil {
+				effective, _ := workspace.MergePolicies(policies)
+				if len(effective.EgressAllowlist) > 0 {
+					for i := range agents {
+						agents[i].EgressAllowlist = workspace.UnionEgressLists(agents[i].EgressAllowlist, effective.EgressAllowlist)
+					}
+				}
+			} else {
+				log.Warn("egress: list policies", "error", pErr.Error())
+			}
 			conf, ports := generateEgressConfig(agents)
 			writeEgressConfig(conf, ports, dockerBinary, log)
 		}

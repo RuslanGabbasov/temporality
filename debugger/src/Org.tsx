@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   Button,
   TextInput,
+  TextArea,
   Select,
   SelectItem,
   InlineNotification,
@@ -38,6 +39,7 @@ type PolicyForm = {
   org_unit_id: string
   allowed_models: string
   allowed_mcp: string
+  egress_allowlist: string
   max_tokens: string
   max_budget_usd: string
   timeout_seconds: string
@@ -49,7 +51,7 @@ type PolicyForm = {
 }
 
 const emptyPolicyForm = (): PolicyForm => ({
-  name: '', org_unit_id: '', allowed_models: '', allowed_mcp: '',
+  name: '', org_unit_id: '', allowed_models: '', allowed_mcp: '', egress_allowlist: '',
   max_tokens: '', max_budget_usd: '', timeout_seconds: '',
   network_mode: '', sandbox_mode: '', approval_mode: '', intake_mode: '', enabled: true,
 })
@@ -59,6 +61,7 @@ const policyFormOf = (p: Policy): PolicyForm => ({
   org_unit_id: p.org_unit_id ?? '',
   allowed_models: (p.allowed_models ?? []).join(', '),
   allowed_mcp: (p.allowed_mcp ?? []).join(', '),
+  egress_allowlist: (p.egress_allowlist ?? []).join('\n'),
   max_tokens: p.max_tokens != null ? String(p.max_tokens) : '',
   max_budget_usd: p.max_budget_usd != null ? String(p.max_budget_usd) : '',
   timeout_seconds: p.timeout_seconds != null ? String(p.timeout_seconds) : '',
@@ -339,6 +342,7 @@ export default function Org() {
       org_unit_id: policyForm.org_unit_id || '',
       allowed_models: splitList(policyForm.allowed_models),
       allowed_mcp: splitList(policyForm.allowed_mcp),
+      egress_allowlist: policyForm.egress_allowlist.split('\n').map((line) => line.trim()).filter(Boolean),
       max_tokens: optionalNumber(policyForm.max_tokens) ?? null,
       max_budget_usd: optionalNumber(policyForm.max_budget_usd) ?? null,
       timeout_seconds: optionalNumber(policyForm.timeout_seconds) ?? null,
@@ -980,6 +984,14 @@ export default function Org() {
                 value={policyForm.allowed_mcp}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, allowed_mcp: e.target.value })}
                 placeholder={t('org.policy_mcp_placeholder') ?? 'server-a, server-b — empty = any'}
+              />
+              <TextArea
+                id="policy-egress"
+                labelText={t('org.policy_egress_label') ?? 'Egress baseline (centralized)'}
+                value={policyForm.egress_allowlist}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setPolicyForm({ ...policyForm, egress_allowlist: e.target.value })}
+                rows={3}
+                placeholder={t('org.policy_egress_placeholder') ?? 'One entry per line: a domain, a glob (*.example.com), a CIDR. Every sandboxed agent in scope gets these for free.'}
               />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                 <TextInput

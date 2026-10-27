@@ -2362,6 +2362,8 @@ export const en: Record<string, string> = {
     'org.policy_models_label': 'Allowed models',
     'org.policy_models_placeholder': 'model-a, model-b — empty = any',
     'org.policy_mcp_label': 'Allowed MCP servers',
+    'org.policy_egress_label': 'Egress baseline (centralized)',
+    'org.policy_egress_placeholder': 'One entry per line: a domain, a glob (*.example.com), a CIDR — every sandboxed agent in scope gets these for free.',
     'org.policy_mcp_placeholder': 'server-a, server-b — empty = any',
     'org.policy_max_tokens_label': 'Max tokens per run',
     'org.policy_budget_label': 'Max cost per run, USD',

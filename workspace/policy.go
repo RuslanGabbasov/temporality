@@ -44,23 +44,24 @@ func ValidatePolicy(p Policy) error {
 
 const policyColumns = `id, org_unit_id, name, allowed_models, allowed_mcp,
 max_tokens, max_budget_usd, timeout_seconds, network_mode, sandbox_mode, approval_mode,
-intake_mode, enabled, created_at, updated_at`
+egress_allowlist, intake_mode, enabled, created_at, updated_at`
 
 func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	var p Policy
 	var orgUnitID *string
-	var models, mcp []byte
+	var models, mcp, egress []byte
 	var maxTokens, timeout *int
 	var budget *float64
 	err := scanner.Scan(&p.ID, &orgUnitID, &p.Name, &models, &mcp,
-		&maxTokens, &budget, &timeout, &p.NetworkMode, &p.SandboxMode, &p.ApprovalMode, &p.IntakeMode,
-		&p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+		&maxTokens, &budget, &timeout, &p.NetworkMode, &p.SandboxMode, &p.ApprovalMode,
+		&egress, &p.IntakeMode, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return p, err
 	}
 	p.OrgUnitID = derefPtr(orgUnitID)
 	p.AllowedModels = unmarshalStringList(models)
 	p.AllowedMCP = unmarshalStringList(mcp)
+	p.EgressAllowlist = unmarshalStringList(egress)
 	p.MaxTokens = maxTokens
 	p.MaxBudgetUSD = budget
 	p.TimeoutSeconds = timeout
@@ -83,11 +84,12 @@ func (s *Store) CreatePolicy(ctx context.Context, p *Policy) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO org_policy
 		 (id, org_unit_id, name, allowed_models, allowed_mcp, max_tokens, max_budget_usd,
-		  timeout_seconds, network_mode, sandbox_mode, approval_mode, intake_mode, enabled, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		  timeout_seconds, network_mode, sandbox_mode, approval_mode, egress_allowlist,
+		  intake_mode, enabled, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
-		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode, p.IntakeMode,
-		p.Enabled, p.CreatedAt, p.UpdatedAt)
+		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
+		marshalStrings(p.EgressAllowlist), p.IntakeMode, p.Enabled, p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
@@ -136,11 +138,11 @@ func (s *Store) UpdatePolicy(ctx context.Context, p Policy) error {
 		 SET org_unit_id = $2, name = $3, allowed_models = $4, allowed_mcp = $5,
 		     max_tokens = $6, max_budget_usd = $7, timeout_seconds = $8,
 		     network_mode = $9, sandbox_mode = $10, approval_mode = $11,
-		     intake_mode = $12, enabled = $13, updated_at = $14
+		     egress_allowlist = $12, intake_mode = $13, enabled = $14, updated_at = $15
 		 WHERE id = $1`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
-		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode, p.IntakeMode,
-		p.Enabled, p.UpdatedAt)
+		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
+		marshalStrings(p.EgressAllowlist), p.IntakeMode, p.Enabled, p.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -223,6 +225,12 @@ func MergePolicies(rows []Policy) (effective Policy, sources []Policy) {
 		if p.IntakeMode == "deny" {
 			effective.IntakeMode = "deny"
 		}
+		// Egress baseline merges by UNION (docs/agent-behavior-monitoring.md §7):
+		// a centrally blessed domain must not disappear because one agent's
+		// private list omits it — the policy widens, the agent narrows onto it.
+		if len(p.EgressAllowlist) > 0 {
+			effective.EgressAllowlist = UnionEgressLists(effective.EgressAllowlist, p.EgressAllowlist)
+		}
 	}
 	return effective, sources
 }
@@ -236,6 +244,23 @@ func concreteList(list []string) []string {
 		if v != "*" {
 			out = append(out, v)
 		}
+	}
+	return out
+}
+
+// UnionEgressLists merges two egress allowlists preserving order and
+// deduplicating case-insensitively — Example.com and example.com are the same
+// host. The centralized policy widens, the agent narrows onto it.
+func UnionEgressLists(a, b []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, v := range append(append([]string{}, a...), b...) {
+		key := strings.ToLower(strings.TrimSpace(v))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, v)
 	}
 	return out
 }

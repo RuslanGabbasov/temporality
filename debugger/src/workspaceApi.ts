@@ -54,6 +54,7 @@ export interface Policy {
   network_mode?: string // '' | 'deny'
   sandbox_mode?: string // '' | 'standard' | 'read_only'
   approval_mode?: string // '' | 'auto' | 'tools'
+  egress_allowlist?: string[] | null // centralized baseline, UNION with the agent's own list
   intake_mode?: string // '' | 'deny' — overlay that can only narrow, never widen (docs/inbound-messages.md §12)
   enabled: boolean
   created_at: string

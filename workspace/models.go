@@ -223,6 +223,11 @@ type Policy struct {
 	NetworkMode  string `json:"network_mode,omitempty"`  // 'deny' restricts
 	SandboxMode  string `json:"sandbox_mode,omitempty"`  // 'read_only' restricts
 	ApprovalMode string `json:"approval_mode,omitempty"` // 'tools' restricts
+	// EgressAllowlist is the centralized egress baseline (docs/agent-behavior-
+	// monitoring.md §7): destinations every sandboxed agent in scope may reach,
+	// merged by UNION with the agent's own list — the policy is the shared
+	// baseline, the agent adds its specific exceptions.
+	EgressAllowlist []string `json:"egress_allowlist,omitempty"`
 	// IntakeMode denies channel-initiated tasks for the subtree
 	// (docs/inbound-messages.md §12 phase 4); enabling is per project —
 	// there is no 'allow' overlay, a child cannot loosen an ancestor's deny.
