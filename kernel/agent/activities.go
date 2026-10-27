@@ -65,6 +65,13 @@ type Activities struct {
 	// (skills, triggers, projects). Agent tools that read or write workspace
 	// entities must call this, not the journal.
 	WorkspaceURL string
+	// FormsPublicBaseURL is the externally reachable base of THIS kernel
+	// (e.g. https://temporality.example.com or http://host:8090). When set, a
+	// chat-delivered schema ask mints a scoped form link and carries
+	// <base>/forms/<token> as the human-facing "fill the form" URL
+	// (docs/interactive-HITL.md §6.2). Empty disables hosted form links —
+	// channels fall back to the in-harness answer link.
+	FormsPublicBaseURL string
 	// WorkspaceToken authenticates loopback calls against the kernel's own
 	// workspace API when the kernel gate is enabled. It is a startup-random
 	// internal credential injected in main, never exposed via config.
@@ -1380,6 +1387,33 @@ func workspaceErrorDetail(body string) string {
 // workspace API (skills, triggers). It returns the response body and status;
 // transport failures come back as errors so tool results never present a
 // 404 payload as usable content.
+// mintFormLink creates the hosted form link for one schema ask via the
+// workspace API (internal token, like the human-request upsert). Best-effort
+// by contract: the caller logs the miss and the ask falls back to the
+// in-harness answer link.
+func (a *Activities) mintFormLink(ctx context.Context, request NotifyChannelRequest) (string, error) {
+	body, status, err := a.workspaceDo(ctx, http.MethodPost,
+		fmt.Sprintf("%s/v1/workspace/form-links", a.WorkspaceURL), map[string]any{
+			"operation_id": request.OperationID,
+			"run_id":       request.RunID,
+			"project_id":   request.Project,
+			"agent_id":     request.AgentID,
+		})
+	if err != nil {
+		return "", err
+	}
+	if status >= 400 {
+		return "", fmt.Errorf("form-link mint returned %d: %s", status, truncate(body, 200))
+	}
+	var link struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(body), &link); err != nil || link.Token == "" {
+		return "", fmt.Errorf("form-link mint returned no token")
+	}
+	return link.Token, nil
+}
+
 func (a *Activities) workspaceDo(ctx context.Context, method, url string, body any) (string, int, error) {
 	var reader io.Reader
 	if body != nil {

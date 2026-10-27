@@ -133,6 +133,11 @@ type OutboundText struct {
 	// cards) build a field table from it; text-only transports get the field
 	// list in the plain body. nil = plain question.
 	Schema json.RawMessage
+	// FormURL is the hosted one-click form for this ask (docs/interactive-
+	// HITL.md §6.2): a scoped-secret page answerable from any browser, no
+	// harness account. Empty when the kernel has no public URL — channels fall
+	// back to the in-harness answer link.
+	FormURL string
 }
 
 // OutboundFile is one attachment pushed through a FilesOut channel.

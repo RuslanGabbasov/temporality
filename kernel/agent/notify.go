@@ -42,6 +42,10 @@ type NotifyChannelRequest struct {
 	// with the question and enforced server-side on submission. nil = plain
 	// question (options + free text).
 	Schema json.RawMessage
+	// FormURL is the minted hosted-form link for this ask (docs/interactive-
+	// HITL.md §6.2) — filled by the notify activity before the channel pick;
+	// outboundText forwards it so channels render the fill-the-form button.
+	FormURL string
 	// ExecutionIdentityID scopes whom this run may address (§30); empty for
 	// manual runs without an identity.
 	ExecutionIdentityID string
@@ -172,6 +176,16 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	}
 	settings := a.transports(ctx)
 	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, settings.Configured)
+	// Hosted form link (docs/interactive-HITL.md §6.2): a schema ask minted a
+	// scoped-secret page URL — one per ask, before the channel pick, so every
+	// delivery (channel retries included) carries the same link.
+	if len(request.Schema) > 0 && a.FormsPublicBaseURL != "" {
+		if link, err := a.mintFormLink(ctx, request); err == nil {
+			request.FormURL = a.FormsPublicBaseURL + "/forms/" + link
+		} else {
+			slog.Warn("notify: mint form link", "operation", request.OperationID, "error", err.Error())
+		}
+	}
 	if mode != "web" {
 		// An empty address means the transport resolves the conversation itself
 		// (matrix: the user's DM room with the bot, from their registered mxid).
@@ -615,6 +629,7 @@ func outboundText(request NotifyChannelRequest, uiURL string) OutboundText {
 		TimeoutSeconds: request.TimeoutSeconds,
 		TimeoutPolicy:  request.TimeoutPolicy,
 		Schema:         request.Schema,
+		FormURL:        request.FormURL,
 	}
 	if trimmed := strings.TrimSpace(uiURL); trimmed != "" {
 		msg.AnswerURL = strings.TrimRight(trimmed, "/") + "/agents?project=" + url.QueryEscape(request.Project)
@@ -665,6 +680,14 @@ func notificationText(request NotifyChannelRequest, uiURL string) string {
 	if fields := formFieldNames(request.Schema); len(fields) > 0 {
 		builder.WriteString("\n")
 		builder.WriteString(ChannelText(lang, "ask_form", strings.Join(fields, ", ")))
+	}
+	// The hosted one-click form leads when present (docs/interactive-HITL.md
+	// §6.2): answerable from any browser without a harness account.
+	if request.FormURL != "" {
+		builder.WriteString("\n")
+		builder.WriteString(ChannelText(lang, "ask_form_url"))
+		builder.WriteString(" ")
+		builder.WriteString(request.FormURL)
 	}
 	builder.WriteString("\n")
 	builder.WriteString(ChannelText(lang, "ask_project_run", request.Project, request.RunID))

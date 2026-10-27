@@ -256,7 +256,12 @@ func matrixQuestionHTML(msg OutboundText) string {
 	b.WriteString("</table>")
 	b.WriteString("<br/>")
 	b.WriteString("Reply in this room as <code>field: value</code> lines (required fields marked *).")
-	if msg.AnswerURL != "" {
+	// The hosted one-click form (docs/interactive-HITL.md §6.2) is the
+	// primary call to action — answerable from any browser, no harness
+	// account. The in-harness link stays as the secondary path.
+	if msg.FormURL != "" {
+		b.WriteString(fmt.Sprintf(" Or <a href=\"%s\"><b>fill the form</b></a>.", html.EscapeString(msg.FormURL)))
+	} else if msg.AnswerURL != "" {
 		b.WriteString(fmt.Sprintf(" Or <a href=\"%s\">open the form in the web UI</a>.", html.EscapeString(msg.AnswerURL)))
 	}
 	return b.String()
