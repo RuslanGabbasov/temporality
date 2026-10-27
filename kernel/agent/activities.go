@@ -65,13 +65,6 @@ type Activities struct {
 	// (skills, triggers, projects). Agent tools that read or write workspace
 	// entities must call this, not the journal.
 	WorkspaceURL string
-	// FormsPublicBaseURL is the externally reachable base of THIS kernel
-	// (e.g. https://temporality.example.com or http://host:8090). When set, a
-	// chat-delivered schema ask mints a scoped form link and carries
-	// <base>/forms/<token> as the human-facing "fill the form" URL
-	// (docs/interactive-HITL.md §6.2). Empty disables hosted form links —
-	// channels fall back to the in-harness answer link.
-	FormsPublicBaseURL string
 	// WorkspaceToken authenticates loopback calls against the kernel's own
 	// workspace API when the kernel gate is enabled. It is a startup-random
 	// internal credential injected in main, never exposed via config.

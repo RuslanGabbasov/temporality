@@ -431,9 +431,6 @@ func main() {
 	// Behavior guard layer 2 (docs/agent-behavior-monitoring.md §5): the
 	// corpus matcher reuses the knowledge-embedding model — one extra
 	// in-process embed per run_command, no network, no LLM.
-	// Public base URL for chat-delivered form links (docs/interactive-HITL.md
-	// §6.2): unset → schema asks fall back to the in-harness answer link.
-	activities.FormsPublicBaseURL = strings.TrimRight(os.Getenv("KERNEL_PUBLIC_URL"), "/")
 	activities.Embedder = func(ctx context.Context, texts []string) ([][]float32, error) {
 		return activities.EmbedTexts(ctx, "", agent.EmbedQuery, texts)
 	}

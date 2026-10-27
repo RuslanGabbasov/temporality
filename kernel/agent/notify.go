@@ -176,12 +176,15 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	}
 	settings := a.transports(ctx)
 	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, settings.Configured)
-	// Hosted form link (docs/interactive-HITL.md §6.2): a schema ask minted a
+	// Hosted form link (docs/interactive-HITL.md §6.2): a schema ask mints a
 	// scoped-secret page URL — one per ask, before the channel pick, so every
-	// delivery (channel retries included) carries the same link.
-	if len(request.Schema) > 0 && a.FormsPublicBaseURL != "" {
+	// delivery (channel retries included) carries the same link. The base is
+	// the same public UI URL the notification links already use; the page and
+	// the answer API live behind /kernel-api on the kernel (the form routes
+	// are token-authed, no harness login).
+	if len(request.Schema) > 0 && strings.TrimSpace(settings.UIURL) != "" {
 		if link, err := a.mintFormLink(ctx, request); err == nil {
-			request.FormURL = a.FormsPublicBaseURL + "/forms/" + link
+			request.FormURL = strings.TrimRight(settings.UIURL, "/") + "/kernel-api/forms/" + link
 		} else {
 			slog.Warn("notify: mint form link", "operation", request.OperationID, "error", err.Error())
 		}
