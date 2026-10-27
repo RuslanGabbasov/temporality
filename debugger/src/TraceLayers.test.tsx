@@ -40,11 +40,11 @@ const ev = (type: string, data: Record<string, unknown> = {}, second = 0): Obser
   } as ObservationEvent
 }
 
-const renderLayers = (events: ObservationEvent[]) => {
+const renderLayers = (events: ObservationEvent[], props: Record<string, unknown> = {}) => {
   stubLocalStorage()
   return renderToStaticMarkup(
     <I18nProvider>
-      <TraceLayers events={events} locale="ru" t={t} project="p" />
+      <TraceLayers events={events} locale="ru" t={t} project="p" {...props} />
     </I18nProvider>,
   )
 }
@@ -168,5 +168,42 @@ describe('TraceLayers (three layers, §4)', () => {
     expect(withDetails).toContain('aria-label="Показать детали события: run_command"')
     const secret = renderLayers([ev('secret.issued', { secret: 'API_TOKEN' }, 1)])
     expect(secret).not.toContain('aria-label="Показать детали события')
+  })
+})
+
+// Regression (2026-10-27): the pending-tool block keyed on `pendingTool &&`
+// alone, so every EXPANDED turn rendered the streaming step — «⚙ write_file
+// формируется…» duplicated across turns 19, 20 and everything else open.
+// The block belongs to the turn the stream belongs to: liveModelTurn.
+describe('TraceLayers pendingTool placement', () => {
+  const twoTurns = [
+    ev('turn.started', { turn: 19 }, 1),
+    ev('model.started', { turn: 19 }, 2),
+    ev('model.completed', { turn: 19 }, 3),
+    ev('tool.completed', { tool: 'read_file', exit_code: 0 }, 4),
+    ev('turn.completed', { turn: 19, tool_calls: 1 }, 5),
+    ev('turn.started', { turn: 20 }, 6),
+    ev('model.started', { turn: 20 }, 7),
+  ]
+
+  it('renders the pending tool only in the liveModelTurn (20), not in expanded 19', () => {
+    const html = renderLayers(twoTurns, {
+      live: true,
+      pendingTool: { tool: 'write_file', argsTail: '...content...' },
+      liveModelTurn: 20,
+    })
+    expect(html).toContain('write_file')
+    // Count occurrences: exactly one pending-tool hint in the markup.
+    const hits = html.split('формируется').length - 1
+    expect(hits).toBe(1)
+  })
+
+  it('falls back to the still-running turn when liveModelTurn is undefined', () => {
+    const html = renderLayers(twoTurns, {
+      live: true,
+      pendingTool: { tool: 'write_file' },
+    })
+    const hits = html.split('формируется').length - 1
+    expect(hits).toBe(1)
   })
 })

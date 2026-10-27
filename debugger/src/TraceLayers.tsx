@@ -413,8 +413,11 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
               {/* The model is streaming a tool call RIGHT NOW: show the step
                   before it exists as an event — this is exactly the gap where
                   the human used to stare at «стрим идёт» seeing no step.
-                  Newest position (top) — it is the most recent activity. */}
-              {pendingTool && (
+                  Newest position (top) — it is the most recent activity.
+                  ONLY in the turn the stream belongs to (liveModelTurn, or
+                  the still-running turn as fallback): before the turn guard
+                  this block duplicated into every expanded turn. */}
+              {pendingTool && (liveModelTurn === undefined ? running : liveModelTurn === turn.number) && (
                 <div style={{ padding: '0.4rem 0.5rem', borderLeft: '3px dashed var(--tm-teal)', marginBottom: '0.15rem', background: 'var(--tm-raised)', borderRadius: '0 4px 4px 0', minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
                     <span style={{ color: 'var(--tm-teal)', width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>⚙</span>
