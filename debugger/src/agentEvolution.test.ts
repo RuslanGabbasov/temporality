@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyGateErrorView, detectRegressions, latestEvalByVersion, passRate, runsByVersion } from './agentEvolution'
+import { applyGateErrorView, detectRegressions, detectTurnsRegressions, latestEvalByVersion, passRate, runsByVersion } from './agentEvolution'
 import { ApiError } from './workspaceApi'
 import type { AgentEvaluationRun, Run } from './workspaceApi'
 
@@ -46,6 +46,35 @@ describe('runsByVersion', () => {
   it('keeps avgTurns null when no run reports turns', () => {
     const stats = runsByVersion([run(3, 'completed', 0)])
     expect(stats.get(3)).toEqual({ total: 1, completed: 1, failed: 0, avgTurns: null })
+  })
+})
+
+describe('detectTurnsRegressions', () => {
+  const run = (version: number, status: string, turns: number): Run => ({
+    id: `r-${version}-${status}-${turns}-${Math.random()}`, task_id: 't', project_id: 'p',
+    agent_version: version, run_id: 'r', status, turns, created_at: '', updated_at: '',
+  } as unknown as Run)
+
+  it('flags a version whose runs take meaningfully more turns', () => {
+    const runs: Run[] = [
+      ...Array.from({ length: 3 }, () => run(1, 'completed', 4)),
+      ...Array.from({ length: 4 }, () => run(2, 'completed', 8)),
+    ]
+    const result = detectTurnsRegressions(runs)
+    expect(result).toEqual([{ version: 2, previousVersion: 1, from: 4, to: 8 }])
+  })
+
+  it('stays quiet on noise and on thin samples', () => {
+    // +0.5 turn growth is noise, not a regression.
+    expect(detectTurnsRegressions([
+      ...Array.from({ length: 3 }, () => run(1, 'completed', 4)),
+      ...Array.from({ length: 4 }, () => run(2, 'completed', 4.5 as unknown as number)),
+    ])).toEqual([])
+    // Fewer than 3 completed runs per side cannot decide.
+    expect(detectTurnsRegressions([
+      run(1, 'completed', 3),
+      run(2, 'completed', 9),
+    ])).toEqual([])
   })
 })
 

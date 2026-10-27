@@ -50,6 +50,34 @@ export function runsByVersion(runs: Run[]): Map<number, RunStats> {
   return result
 }
 
+/** Cost regressions: a version whose completed runs take meaningfully more
+ * turns than the previous version's (≥+50% and ≥+1 turn, at least 3 runs per
+ * side so two flukes do not flag). Effort is a quality signal too — an agent
+ * that got smarter but 3× lazier is a regression. */
+export interface TurnsRegression {
+  version: number
+  previousVersion: number
+  from: number
+  to: number
+}
+
+export function detectTurnsRegressions(runs: Run[]): TurnsRegression[] {
+  const stats = [...runsByVersion(runs).entries()]
+    .map(([version, s]) => ({ version, avgTurns: s.avgTurns, completed: s.completed }))
+    .sort((a, b) => a.version - b.version)
+  const result: TurnsRegression[] = []
+  for (let i = 1; i < stats.length; i++) {
+    const current = stats[i]
+    const previous = stats[i - 1]
+    if (current.avgTurns === null || previous.avgTurns === null) continue
+    if (current.completed < 3 || previous.completed < 3) continue
+    if (current.avgTurns >= previous.avgTurns + 1 && current.avgTurns >= previous.avgTurns * 1.5) {
+      result.push({ version: current.version, previousVersion: previous.version, from: previous.avgTurns, to: current.avgTurns })
+    }
+  }
+  return result
+}
+
 /** True when both compared eval runs were executed against the current suite —
  * a pass-rate drop only means regression when the questions did not change. */
 function sameSuite(runA?: AgentEvaluationRun, runB?: AgentEvaluationRun, suiteUpdatedAt?: string): boolean {
