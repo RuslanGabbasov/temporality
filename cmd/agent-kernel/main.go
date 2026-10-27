@@ -37,6 +37,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/quota"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
+	"github.com/temporality-project/temporality/observation/postgres"
 	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/api/enums/v1"
@@ -80,6 +81,24 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return parsed
+}
+
+// envPollers reads a poller-count env override. The second return reports
+// whether a valid override is present: unset, malformed or out-of-range
+// values keep the SDK default (2 pollers per task type) — a broken env var
+// must not silently change worker behavior. 1..32: one poller is the floor
+// for a deliberate low-concurrency setup, 32 the ceiling where extra pollers
+// only burn Temporal and goroutine budget.
+func envPollers(name string) (int, bool) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 1 || parsed > 32 {
+		return 0, false
+	}
+	return parsed, true
 }
 
 // temporalRPCTimeout returns the R1 deadline for one RPC (default 15s,
@@ -278,6 +297,23 @@ func main() {
 	} else if err := ws.SeedBuiltinSkills(ctx); err != nil {
 		log.Error("seed builtin skills", "error", err)
 	}
+	// SSE event wake (PG LISTEN/NOTIFY): a dedicated connection to the shared
+	// journal database turns observation_events changes into instant wake-ups
+	// for /v1/workspace/runs/{id}/stream, instead of every stream polling
+	// blind every 1.5s. NOTIFY comes from whichever process ingests events
+	// (journal, kernel); every failure here degrades to pure polling — a Warn
+	// and the streams keep their old cadence, nothing else is affected.
+	wake := newEventWake()
+	if wakeStore, err := postgres.Open(ctx, databaseURL); err != nil {
+		log.Warn("event wake: journal store unavailable; run streams poll every 1.5s", "error", err)
+	} else {
+		// wakeCancel unwinds the listener before the pool closes (defers run
+		// LIFO), so shutdown never races the LISTEN goroutine against Close.
+		wakeCtx, wakeCancel := context.WithCancel(ctx)
+		defer wakeCancel()
+		defer wakeStore.Close()
+		startEventWakeRelay(wakeCtx, wakeStore, wake, log)
+	}
 	// Kernel→journal auth must be resolved before every consumer reads
 	// TEMPORALITY_API_TOKEN: the outbox publisher, the cost API and the
 	// activities' direct journal calls. On a fresh install the env is empty and
@@ -442,11 +478,48 @@ func main() {
 	}
 	defer temporalClient.Close()
 	go events.RunPublisher(ctx)
+	// Delivered outbox rows are pure audit history: without a sweep the table
+	// grows forever and drags every claim/stats query with it (perf audit
+	// 2026-10). One hourly pass deletes them after a week, batched inside
+	// CleanupDelivered so a large backlog cannot lock the table.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				deleted, err := events.CleanupDelivered(ctx, 7*24*time.Hour)
+				if err != nil {
+					log.Warn("outbox delivered cleanup failed", "error", err)
+				} else if deleted > 0 {
+					log.Info("outbox delivered cleanup", "deleted", deleted)
+				}
+			}
+		}
+	}()
 	taskQueue := env("TEMPORAL_TASK_QUEUE", agent.TaskQueue)
-	temporalWorker := worker.New(temporalClient, taskQueue, worker.Options{})
+	// Poller counts ride env only when set: an unset variable keeps the SDK
+	// default (2 per task type) — Options{} stays byte-identical to the old
+	// behavior. TEMPORALITY_WORKER_ACTIVITY_POLLERS /
+	// TEMPORALITY_WORKER_WORKFLOW_POLLERS tune hosts whose Temporal server
+	// chokes on (or starves from) the default.
+	workerOptions := worker.Options{}
+	if pollers, ok := envPollers("TEMPORALITY_WORKER_ACTIVITY_POLLERS"); ok {
+		workerOptions.MaxConcurrentActivityTaskPollers = pollers
+	}
+	if pollers, ok := envPollers("TEMPORALITY_WORKER_WORKFLOW_POLLERS"); ok {
+		workerOptions.MaxConcurrentWorkflowTaskPollers = pollers
+	}
+	temporalWorker := worker.New(temporalClient, taskQueue, workerOptions)
 	temporalWorker.RegisterWorkflowWithOptions(agent.AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
 	temporalWorker.RegisterWorkflowWithOptions(agent.KnowledgeExtractionWorkflow, workflow.RegisterOptions{Name: agent.KnowledgeExtractionWorkflowName})
 	temporalWorker.RegisterActivityWithOptions(activities.RecordEvent, activity.RegisterOptions{Name: agent.ActivityRecordEvent})
+	// The record-event-local gate journals workflow events through local
+	// activities; the hook must exist in every binary that replays such
+	// histories, so it is wired unconditionally at boot.
+	agent.SetRecordEventLocal(activities.RecordEvent)
 	temporalWorker.RegisterActivityWithOptions(activities.CallModel, activity.RegisterOptions{Name: agent.ActivityCallModel})
 	temporalWorker.RegisterActivityWithOptions(activities.RunTool, activity.RegisterOptions{Name: agent.ActivityRunTool})
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeHints, activity.RegisterOptions{Name: agent.ActivityKnowledgeHints})
@@ -3590,7 +3663,14 @@ func main() {
 		// deadlines (R1), not from the write budget.
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 		ctx := r.Context()
-		var cursor string
+		// The live loop carries the full (occurred_at, event_id) cursor in
+		// memory: row-wise comparison seeks the journal index instead of
+		// re-resolving the timestamp by event_id (a seq-scan of
+		// observation_events on every 1.5s poll). A client may also resume
+		// explicitly via ?after=: the tuple form
+		// (<occurred_at>|<event_id>) takes the fast path, a bare event id —
+		// the historical wire format — keeps the legacy subquery path.
+		cursor := workspace.ParseStreamCursor(r.URL.Query().Get("after"))
 		done := false
 		if r.URL.Query().Get("tail") == "1" {
 			// Reconnect mode: replay only the recent past — the latest answer
@@ -3634,12 +3714,16 @@ func main() {
 						done = true
 					}
 				}
-				if nextCursor != "" {
+				if nextCursor.EventID != "" {
 					cursor = nextCursor
 				}
 			}
 			if !done {
-				time.Sleep(1500 * time.Millisecond)
+				// Sleep until the next journal change wakes this project (PG
+				// NOTIFY via the event wake mux) or the 1.5s fallback tick
+				// elapses. Polling stays the source of truth: a missed or
+				// lost wake-up only costs one tick of latency, never data.
+				wake.Wait(ctx, project, 1500*time.Millisecond)
 			}
 		}
 		fmt.Fprintf(w, "event: done\ndata: {}\n\n")
@@ -3812,7 +3896,7 @@ func main() {
 			writeError(w, 404, workspace.ErrNotFound)
 			return
 		}
-		events, _, eErr := ws.StreamRunEvents(r.Context(), project, runID, "", 500)
+		events, _, eErr := ws.StreamRunEvents(r.Context(), project, runID, workspace.StreamCursor{}, 500)
 		if eErr != nil {
 			writeError(w, 500, eErr)
 			return
@@ -3856,7 +3940,7 @@ func main() {
 		}
 		var trajectories []agent.Trajectory
 		for _, run := range runs {
-			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, workspace.StreamCursor{}, 500)
 			if eErr != nil {
 				continue
 			}
@@ -3907,7 +3991,7 @@ func main() {
 			} else {
 				return nil, workspace.ErrNotFound
 			}
-			events, _, eErr := ws.StreamRunEvents(r.Context(), project, runID, "", 500)
+			events, _, eErr := ws.StreamRunEvents(r.Context(), project, runID, workspace.StreamCursor{}, 500)
 			if eErr != nil {
 				return nil, eErr
 			}
@@ -3973,7 +4057,7 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+		events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, workspace.StreamCursor{}, 500)
 		if eErr != nil {
 			writeError(w, 500, eErr)
 			return
@@ -4021,7 +4105,7 @@ func main() {
 		// Extract trajectories
 		var trajectories []agent.Trajectory
 		for _, run := range runs {
-			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, workspace.StreamCursor{}, 500)
 			if eErr != nil {
 				continue
 			}
@@ -4062,7 +4146,7 @@ func main() {
 		}
 		var trajectories []agent.Trajectory
 		for _, run := range runs {
-			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, workspace.StreamCursor{}, 500)
 			if eErr != nil {
 				continue
 			}

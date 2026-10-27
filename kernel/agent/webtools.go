@@ -36,12 +36,16 @@ const (
 	webFetchDefaultOutput = 48 << 10 // 48 KiB
 	// webFetchMaxOutput is the largest budget an agent may request.
 	webFetchMaxOutput = 128 << 10 // 128 KiB
-	// webFetchTimeout bounds one fetch including redirects.
+	// webFetchTimeout bounds one fetch including redirects; it is enforced
+	// through the per-call context, not the shared client.
 	webFetchTimeout = 30 * time.Second
+	// maxWebRedirects bounds the redirect chain one fetch may follow.
+	maxWebRedirects = 5
 	// webSearchTimeout bounds one SearXNG query.
 	webSearchTimeout = 15 * time.Second
 	// webCacheTTL keeps repeated fetches of the same URL within one kernel
-	// process cheap; the cache is keyed by URL and evicts everything when full.
+	// process cheap; the cache is keyed by URL and, when full, evicts expired
+	// entries first and then the oldest ones (never a wholesale reset).
 	webCacheTTL = 10 * time.Minute
 	webCacheCap = 64
 	// webSearchCacheTTL serves repeated identical queries without touching
@@ -85,11 +89,22 @@ type webCacheEntry struct {
 	body        []byte
 }
 
+func (e webCacheEntry) storedAt() time.Time { return e.at }
+
 var (
-	webCacheMu    sync.Mutex
-	webCache      = map[string]webCacheEntry{}
-	blockedNets   = mustCIDRs()
-	webHTTPClient = &http.Client{}
+	webCacheMu  sync.Mutex
+	webCache    = map[string]webCacheEntry{}
+	blockedNets = mustCIDRs()
+	// webHTTPClient is the process-wide client behind web_fetch and
+	// fetch_image: one transport (connection reuse, HTTP/2) instead of a new
+	// one per call. The SSRF guard lives in the transport's dialer; timeouts
+	// are enforced per call through the request context. The private variant
+	// drops the dial guard for WebFetchAllowPrivate — same policy otherwise.
+	webHTTPClient        = newWebHTTPClient(webTransport())
+	webHTTPPrivateClient = newWebHTTPClient(&http.Transport{
+		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
+		ForceAttemptHTTP2: true,
+	})
 )
 
 func mustCIDRs() []*net.IPNet {
@@ -137,7 +152,22 @@ func webTransport() *http.Transport {
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
 		},
 		// Public web only: TLS verification stays strict.
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
+		ForceAttemptHTTP2: true,
+	}
+}
+
+// newWebHTTPClient wraps a transport in the shared fetch client; redirect
+// capping is the only per-client policy left here.
+func newWebHTTPClient(transport http.RoundTripper) *http.Client {
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+			if len(via) >= maxWebRedirects {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
 	}
 }
 
@@ -174,19 +204,9 @@ func (a *Activities) handleWebFetch(ctx context.Context, request ToolRequest) (T
 		}
 	}
 
-	transport := webTransport()
+	client := webHTTPClient
 	if a.WebFetchAllowPrivate {
-		transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   webFetchTimeout,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("web_fetch: too many redirects")
-			}
-			return nil
-		},
+		client = webHTTPPrivateClient
 	}
 
 	if entry, ok := webCacheLookup(rawURL); ok {
@@ -319,9 +339,37 @@ func webCacheStore(key string, entry webCacheEntry) {
 	webCacheMu.Lock()
 	defer webCacheMu.Unlock()
 	if len(webCache) >= webCacheCap {
-		webCache = map[string]webCacheEntry{}
+		evictCacheRoomLocked(webCache, webCacheTTL, webCacheCap)
 	}
 	webCache[key] = entry
+}
+
+// webDatedEntry is a cache entry that knows when it was stored: eviction uses
+// the timestamp both for TTL expiry and for oldest-first selection.
+type webDatedEntry interface{ storedAt() time.Time }
+
+// evictCacheRoomLocked makes room in a cache at or over its cap: expired (TTL)
+// entries go first, then the oldest ones, one at a time — live entries are
+// never wiped wholesale. Call under the cache's mutex.
+func evictCacheRoomLocked[V webDatedEntry](cache map[string]V, ttl time.Duration, limit int) {
+	now := time.Now()
+	for key, entry := range cache {
+		if now.Sub(entry.storedAt()) > ttl {
+			delete(cache, key)
+		}
+	}
+	for len(cache) >= limit {
+		oldestKey, oldestAt := "", time.Time{}
+		for key, entry := range cache {
+			if stored := entry.storedAt(); oldestKey == "" || stored.Before(oldestAt) {
+				oldestKey, oldestAt = key, stored
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(cache, oldestKey)
+	}
 }
 
 // webSearchLimiter is a sliding-window rate limiter shared by every run in
@@ -368,6 +416,8 @@ type webSearchCacheEntry struct {
 	content string
 }
 
+func (e webSearchCacheEntry) storedAt() time.Time { return e.at }
+
 var (
 	webSearchCacheMu sync.Mutex
 	webSearchCache   = map[string]webSearchCacheEntry{}
@@ -387,7 +437,7 @@ func webSearchCacheStore(key, content string) {
 	webSearchCacheMu.Lock()
 	defer webSearchCacheMu.Unlock()
 	if len(webSearchCache) >= webSearchCacheCap {
-		webSearchCache = map[string]webSearchCacheEntry{}
+		evictCacheRoomLocked(webSearchCache, webSearchCacheTTL, webSearchCacheCap)
 	}
 	webSearchCache[key] = webSearchCacheEntry{at: time.Now(), content: content}
 }

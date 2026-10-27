@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/temporality-project/temporality/kernel/llm"
 )
@@ -100,7 +99,8 @@ func NewRegistry() *Registry {
 // Apply reconciles one server in the registry. Disabled configs are removed.
 // For a config equal to the registered one a failed refresh keeps the stale
 // tool set (a transient outage must not silently strip tools); a changed
-// config that fails to connect removes the previous tools instead.
+// config that fails to connect removes the previous tools instead. Sessions
+// outlive calls, so any client displaced here is closed with its transport.
 func (r *Registry) Apply(ctx context.Context, cfg ServerConfig) error {
 	if !cfg.Enabled {
 		r.Remove(cfg.ID)
@@ -114,21 +114,30 @@ func (r *Registry) Apply(ctx context.Context, cfg ServerConfig) error {
 		r.mu.Lock()
 		if previous, ok := r.servers[cfg.ID]; ok && !sameConfig(previous.cfg, cfg) {
 			delete(r.servers, cfg.ID)
+			previous.Close()
 		}
 		r.mu.Unlock()
 		return err
 	}
 	r.mu.Lock()
+	previous := r.servers[cfg.ID]
 	r.servers[cfg.ID] = client
 	r.mu.Unlock()
+	if previous != nil {
+		previous.Close()
+	}
 	return nil
 }
 
-// Remove drops a server and its tools from the registry.
+// Remove drops a server and its tools from the registry, closing its session.
 func (r *Registry) Remove(id string) {
 	r.mu.Lock()
+	previous := r.servers[id]
 	delete(r.servers, id)
 	r.mu.Unlock()
+	if previous != nil {
+		previous.Close()
+	}
 }
 
 // AdoptLegacy registers the pre-connected env server under ID "".
@@ -137,17 +146,23 @@ func (r *Registry) AdoptLegacy(client *Client) {
 		return
 	}
 	r.mu.Lock()
+	previous := r.servers[""]
 	r.servers[""] = client
 	r.mu.Unlock()
+	if previous != nil {
+		previous.Close()
+	}
 }
 
 // Discover connects with the given config, lists tools and returns them
-// without registering the server. Used by the UI before saving a server.
+// without registering the server. Used by the UI before saving a server; the
+// one-shot session is closed before returning.
 func (r *Registry) Discover(ctx context.Context, cfg ServerConfig) ([]ToolInfo, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	client := NewClient(cfg)
+	defer client.Close()
 	if err := client.Refresh(ctx); err != nil {
 		return nil, err
 	}
@@ -301,13 +316,21 @@ func sameConfig(a, b ServerConfig) bool {
 	return true
 }
 
-// headerClient builds an HTTP client that adds the configured static headers
-// to every request (authentication for remote MCP endpoints).
-func headerClient(headers map[string]string) *http.Client {
+// headerClient equips base with a transport that adds the configured static
+// headers to every request (authentication for remote MCP endpoints). base
+// must be a client the caller owns — never http.DefaultClient — because its
+// Transport is wrapped in place; callers pass one shared client per Client so
+// keep-alive and TLS session resumption survive reconnects.
+func headerClient(base *http.Client, headers map[string]string) *http.Client {
 	if len(headers) == 0 {
-		return &http.Client{Timeout: 30 * time.Second}
+		return base
 	}
-	return &http.Client{Timeout: 30 * time.Second, Transport: headerTransport{headers: headers, base: http.DefaultTransport}}
+	inner := base.Transport
+	if inner == nil {
+		inner = http.DefaultTransport
+	}
+	base.Transport = headerTransport{headers: headers, base: inner}
+	return base
 }
 
 type headerTransport struct {

@@ -266,7 +266,7 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 	for _, event := range input.Events {
 		event.ReceivedAt = s.now().UTC()
 		inserted, err := s.store.AppendObservation(r.Context(), event)
-		if inserted && err == nil && strings.HasPrefix(event.Type, "knowledge.") && event.Context.Project != "" {
+		if inserted && err == nil && event.Context.Project != "" && affectsKnowledgeProjection(event.Type) {
 			knowledgeProjects[event.Context.Project] = true
 		}
 		entry := observationEventResult{SourceID: event.Source.ID, EventID: event.EventID}
@@ -292,6 +292,10 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 	if partialFailure {
 		status = http.StatusMultiStatus
 	}
+	// Only batches carrying projection-relevant events drop the project's
+	// cache (affectsKnowledgeProjection): during an active run most batches
+	// are tool/run telemetry the projection never reads, and a per-batch drop
+	// kept the cache permanently cold.
 	for project := range knowledgeProjects {
 		s.invalidateKnowledge(project)
 	}
@@ -681,8 +685,10 @@ type knowledgeCacheEntry struct {
 // cachedKnowledge returns the project's visible, alias-normalized knowledge —
 // the projection the listing (and every filter/pagination on top of it)
 // builds on. Bitemporal queries skip the cache: their inputs are the
-// timestamps themselves. The returned slice is shared between requests —
-// callers must not sort or filter it in place.
+// timestamps themselves. The returned slice is shared between requests — it
+// is already in the deterministic listing order (updated_at DESC, id ASC,
+// sorted once at projection time), and callers must not sort or filter it in
+// place.
 func (s *Server) cachedKnowledge(ctx context.Context, project string, asOf, knownAt *time.Time) ([]observation.Knowledge, []string, error) {
 	if asOf != nil || knownAt != nil {
 		return s.computeKnowledge(ctx, project, asOf, knownAt)
@@ -708,9 +714,32 @@ func (s *Server) cachedKnowledge(ctx context.Context, project string, asOf, know
 	return items, chain, nil
 }
 
+// affectsKnowledgeProjection reports whether an ingested event type can
+// change the ProjectKnowledge output (observation/knowledge.go), and therefore
+// whether the ingest batch must drop the projection cache. The projection
+// consumes exactly:
+//   - hint.offered / hint.used / hint.ignored / hint.outcome (applyHint:
+//     HintOffers/ReuseCount/LastUsedAt and UpdatedAt — the listing order key);
+//   - every knowledge.* lifecycle type (proposed/promoted/confirmed/challenged/
+//     corrected/invalidated/disproved/superseded/used/linked/
+//     relation_confirmed/relation_dismissed);
+//
+// but skips knowledge.extraction.* markers explicitly (they carry no
+// knowledge_id) and never reads hint.query (activation telemetry). Everything
+// else — run/tool/task telemetry — cannot move the projection, so it must not
+// invalidate.
+func affectsKnowledgeProjection(eventType string) bool {
+	switch eventType {
+	case "hint.offered", "hint.used", "hint.ignored", "hint.outcome":
+		return true
+	}
+	return strings.HasPrefix(eventType, "knowledge.") && !strings.HasPrefix(eventType, "knowledge.extraction.")
+}
+
 // invalidateKnowledge drops the project's cached projection. Called from the
-// knowledge-mutating handlers (ingest of knowledge.* events, invalidate,
-// challenge, promote) so a manual action is visible without waiting the TTL.
+// knowledge-mutating handlers (ingest of projection-relevant events,
+// invalidate, challenge, promote) so a manual action is visible without
+// waiting the TTL.
 func (s *Server) invalidateKnowledge(project string) {
 	s.knowledgeMu.Lock()
 	delete(s.knowledgeCache, project)
@@ -738,6 +767,11 @@ func (s *Server) computeKnowledge(ctx context.Context, project string, asOf, kno
 	}
 	knowledge = filterKnowledgeVisible(knowledge, project, chain)
 	knowledge = s.withAreaAliases(ctx, project, knowledge)
+	// Sort exactly once, here: the slice is shared between requests (cache
+	// hits return it verbatim), and a per-handler in-place sort would be a
+	// data race. Every consumer — listing cursor pagination, facets, hint
+	// matching — relies on this deterministic updated_at DESC, id ASC order.
+	sortKnowledgeList(knowledge)
 	return knowledge, chain, nil
 }
 
@@ -787,11 +821,12 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 		}
 		knowledge = filtered
 	}
-	// Deterministic order, then post-projection filters (state/scope/text are
-	// projection outputs, so they cannot live in SQL) and cursor pagination.
-	// Without a limit the full filtered set is returned — the legacy callers
-	// (run inspector, kernel skill memory) rely on that shape.
-	sortKnowledgeList(knowledge)
+	// The cached projection arrives in the deterministic listing order (sorted
+	// once at projection time) — the shared slice must not be sorted or
+	// filtered in place. Post-projection filters (state/scope/text are
+	// projection outputs, so they cannot live in SQL) and cursor pagination
+	// run on top. Without a limit the full filtered set is returned — the
+	// legacy callers (run inspector, kernel skill memory) rely on that shape.
 	facets := knowledgeFacetsFor(knowledge, query)
 	filtered := filterKnowledgeList(knowledge, query)
 	page, nextCursor := paginateKnowledgeList(filtered, query.Cursor, query.Limit)
@@ -1513,18 +1548,14 @@ func (s *Server) exploreObservationKnowledge(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("max_depth must be between 1 and %d", observation.ExploreMaxDepth))
 		return
 	}
-	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, asOf, knownAt)
+	// Same projection cache as the listing: with as_of/known_at the cache is
+	// bypassed and the slice is computed fresh (bitemporal inputs cannot be
+	// cache keys), without them the cached projection is served as-is.
+	knowledge, _, err := s.cachedKnowledge(r.Context(), input.Project, asOf, knownAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
 		return
 	}
-	knowledge, err := observation.ProjectKnowledge(events)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err)
-		return
-	}
-	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
-	knowledge = s.withAreaAliases(r.Context(), input.Project, knowledge)
 	result := observation.ExploreKnowledge(knowledge, observation.ExploreQuery{
 		Operation: input.Operation, Question: input.Question, Targets: input.Targets,
 		Relations: input.Relations, MaxDepth: input.MaxDepth, MaxItems: input.MaxItems,
@@ -1609,22 +1640,27 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, errors.New("team_root exceeds the 256 character limit"))
 		return
 	}
-	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
-		return
-	}
-	knowledge, err := observation.ProjectKnowledge(events)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err)
-		return
-	}
-	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
-	// Team-run scoping (docs/agent-teams.md §8): knowledge whose proposal or
-	// confirmation originated under the team root is collected from the same
-	// event stream the projection just consumed — no extra store round-trip.
+	// The plain per-turn path rides the shared projection cache (the same
+	// cachedKnowledge entry the listing fills). Team-run queries keep the full
+	// event-stream path: the run-tree scan below needs the raw visible events,
+	// which the cache (projected items only) does not retain.
+	var knowledge []observation.Knowledge
 	var teamRunKnowledgeIDs []string
 	if input.TeamRunRoot != "" {
+		events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
+			return
+		}
+		projected, err := observation.ProjectKnowledge(events)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err)
+			return
+		}
+		knowledge = s.withAreaAliases(r.Context(), input.Project, filterKnowledgeVisible(projected, input.Project, chain))
+		// Team-run scoping (docs/agent-teams.md §8): knowledge whose proposal or
+		// confirmation originated under the team root is collected from the same
+		// event stream the projection just consumed — no extra store round-trip.
 		root := input.TeamRunRoot
 		seenTeamRun := make(map[string]bool)
 		for _, event := range events {
@@ -1638,18 +1674,31 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 				}
 			}
 		}
+	} else {
+		cached, _, err := s.cachedKnowledge(r.Context(), input.Project, nil, nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
+			return
+		}
+		knowledge = cached
 	}
 	// Semantic tier inputs: the query embedding rides the request; knowledge
-	// vectors come from the store when it supports them (postgres journal).
-	// Any failure degrades to the lexical matcher.
+	// vectors come from the store when it supports them (postgres journal),
+	// filtered to this project's visible knowledge ids so one hints call no
+	// longer loads every project's vectors. Any failure degrades to the
+	// lexical matcher.
 	var knowledgeEmbeddings map[string][]float32
 	embeddingUsed := false
-	if len(input.Embedding) > 0 && input.EmbeddingModel != "" {
+	if len(input.Embedding) > 0 && input.EmbeddingModel != "" && len(knowledge) > 0 {
 		if len(input.Embedding) <= 4096 {
 			if store, ok := s.store.(interface {
-				ListKnowledgeEmbeddings(context.Context, string) (map[string][]float32, error)
+				ListKnowledgeEmbeddings(context.Context, string, []string) (map[string][]float32, error)
 			}); ok {
-				if vectors, err := store.ListKnowledgeEmbeddings(r.Context(), input.EmbeddingModel); err != nil {
+				ids := make([]string, 0, len(knowledge))
+				for _, item := range knowledge {
+					ids = append(ids, item.ID)
+				}
+				if vectors, err := store.ListKnowledgeEmbeddings(r.Context(), input.EmbeddingModel, ids); err != nil {
 					s.log.Warn("load knowledge embeddings; semantic tier skipped", "error", err)
 				} else if len(vectors) > 0 {
 					knowledgeEmbeddings = vectors
@@ -1661,38 +1710,61 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs, Embedding: input.Embedding, KnowledgeEmbeddings: knowledgeEmbeddings})
 	activationID := newUUID()
 	context := observation.Context{Project: input.Project, Run: input.Run, Task: input.Task, Actor: input.Actor}
-	activationEvent := observation.Event{
-		Schema: observation.Schema, EventID: activationID, OccurredAt: s.now().UTC(),
+	// Activation telemetry in one frame: hint.query plus one hint.offered per
+	// offer, appended by a single batched store call. Hint IDs ride on the
+	// hints before any write is attempted — they belong to the answer, not to
+	// the journal.
+	telemetry := make([]observation.Event, 0, 1+len(hints))
+	telemetry = append(telemetry, observation.Event{
+		Schema: observation.Schema, EventID: activationID, OccurredAt: s.now().UTC(), ReceivedAt: s.now().UTC(),
 		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 		Context: context, Type: "hint.query",
 		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs), "team_root": input.TeamRunRoot, "team_run_knowledge_count": len(teamRunKnowledgeIDs), "semantic_tier": embeddingUsed},
-	}
-	if err = appendObservationNow(r, s.store, s.now, activationEvent); err != nil {
-		writeError(w, http.StatusInternalServerError, errors.New("could not record hint activation"))
-		return
-	}
+	})
 	for i := range hints {
 		offerID := newUUID()
 		hints[i].HintID = offerID
 		hints[i].OfferEventID = offerID
-		offered := observation.Event{
-			Schema: observation.Schema, EventID: offerID, OccurredAt: s.now().UTC(),
+		telemetry = append(telemetry, observation.Event{
+			Schema: observation.Schema, EventID: offerID, OccurredAt: s.now().UTC(), ReceivedAt: s.now().UTC(),
 			Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 			Context: context, Type: "hint.offered",
 			// The proposition rides along so run timelines show what was actually
 			// suggested — raw hint/knowledge ids mean nothing to a human.
 			Data: map[string]any{"hint_id": offerID, "activation_id": activationID, "knowledge_id": hints[i].KnowledgeID, "state": hints[i].State, "matched_by": hints[i].MatchedBy, "proposition": hints[i].Proposition, "algorithm_version": observation.HintsAlgorithmVersion},
-		}
-		if err = appendObservationNow(r, s.store, s.now, offered); err != nil {
-			writeError(w, http.StatusInternalServerError, errors.New("could not record offered hint"))
-			return
-		}
+		})
 	}
+	// Telemetry is advisory: a storage failure costs reuse statistics, not the
+	// agent's prompt — log it and ship the hints either way.
+	s.recordHintTelemetry(r, telemetry)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"activation_id": activationID, "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion,
 		"context_block": map[string]any{"type": "temporality.memory", "activation_id": activationID, "items": hints},
 		"hints":         hints, "count": len(hints),
 	})
+}
+
+// recordHintTelemetry persists hint.query/hint.offered events. Stores that
+// batch (postgres) take one round trip; the rest fall back to per-event
+// appends. Any failure is logged and swallowed: losing telemetry must never
+// turn a answered hints call into a 500.
+func (s *Server) recordHintTelemetry(r *http.Request, events []observation.Event) {
+	if len(events) == 0 {
+		return
+	}
+	if batcher, ok := s.store.(interface {
+		AppendObservationBatch(context.Context, []observation.Event) error
+	}); ok {
+		if err := batcher.AppendObservationBatch(r.Context(), events); err != nil {
+			s.log.Warn("record hint telemetry", "error", err, "events", len(events))
+		}
+		return
+	}
+	for _, event := range events {
+		if err := appendObservationNow(r, s.store, s.now, event); err != nil {
+			s.log.Warn("record hint telemetry", "error", err, "event_type", event.Type)
+		}
+	}
 }
 
 func appendObservationNow(r *http.Request, store observation.Store, now func() time.Time, event observation.Event) error {

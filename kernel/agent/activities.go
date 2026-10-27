@@ -2481,6 +2481,15 @@ func (a *Activities) SweepRunScratch(now time.Time, ttl time.Duration) (int, err
 			if err != nil || now.Sub(info.ModTime()) <= ttl {
 				continue
 			}
+			// The run's reusable sandbox container shares this tree's
+			// "<project>/<run>" key: a swept tree belongs to a run long over,
+			// so its keep-alive container goes with it (kernel/sandbox also
+			// runs an idle reaper as the safety net for runs this sweep has
+			// not reached yet). Best-effort and optional on the runner — fakes
+			// without container reuse just skip the hook.
+			if teardown, ok := a.Sandbox.(interface{ TeardownRun(string) }); ok {
+				teardown.TeardownRun(project.Name() + "/" + run.Name())
+			}
 			if err := os.RemoveAll(full); err == nil {
 				removed++
 			}

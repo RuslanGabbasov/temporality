@@ -496,7 +496,7 @@ func TestChannelInboundTeamAskMatchesAnyMember(t *testing.T) {
 	// Only the QA member replies, from their own room: the question never went
 	// to resolved_user's chat in this scenario's sync, yet the team ask must
 	// match — that is the fan-out contract.
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!rqa:hs", []any{
 		map[string]any{"type": "m.room.message", "sender": "@bot:hs", "origin_server_ts": askedAt.Add(-2 * time.Minute).UnixMilli(), "content": map[string]any{"msgtype": "m.text", "body": "Temporality: an agent is waiting"}},
 		matrixTextEvent("$q1", "!rqa:hs", "@qa:hs", "approved by qa"),
@@ -643,14 +643,52 @@ func matrixTextEvent(eventID, room, sender, body string) map[string]any {
 	}
 }
 
+// testSink collects strings written by the fake server's handler goroutine
+// and read by the test goroutine: every access goes through the mutex, so
+// the race detector stays clean without pacing the polls.
+type testSink struct {
+	mu    sync.Mutex
+	items []string
+}
+
+func (s *testSink) add(item string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items = append(s.items, item)
+}
+
+func (s *testSink) len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.items)
+}
+
+func (s *testSink) item(i int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.items[i]
+}
+
+func (s *testSink) join(sep string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.Join(s.items, sep)
+}
+
+func (s *testSink) all() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.items...)
+}
+
 // matrixIntakeHomeServer fakes whoami + a sync that replays the same room
 // events on every poll (the redelivery model) and records notices sent through
 // the room message route. The optional receipts sink records m.read receipt
 // posts (the dialog's read mark).
-func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *[]string, receipts ...*[]string) *httptest.Server {
+func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *testSink, receipts ...*testSink) *httptest.Server {
 	t.Helper()
 	batch := 0
-	var receiptSink *[]string
+	var receiptSink *testSink
 	if len(receipts) > 0 {
 		receiptSink = receipts[0]
 	}
@@ -668,7 +706,7 @@ func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *[]str
 			})
 		case strings.Contains(r.URL.Path, "/receipt/"):
 			if receiptSink != nil {
-				*receiptSink = append(*receiptSink, r.URL.Path)
+				receiptSink.add(r.URL.Path)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{})
 		case strings.Contains(r.URL.Path, "/send/"):
@@ -676,7 +714,9 @@ func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *[]str
 				Body string `json:"body"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&payload)
-			*sent = append(*sent, payload.Body)
+			if sent != nil {
+				sent.add(payload.Body)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"event_id": "$notice"})
 		default:
 			http.NotFound(w, r)
@@ -691,7 +731,7 @@ func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *[]str
 // journals intake.rejected(unknown_sender) and answers with one polite notice
 // pointing at the app. No run starts.
 func TestChannelInboundIntakeRejectsUnknownSenderInRegisteredRoom(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
 		matrixTextEvent("$m1", "!r1:hs", "@stranger:hs", "подготовь смету на разработку"),
 	}, &sent)
@@ -730,8 +770,8 @@ func TestChannelInboundIntakeRejectsUnknownSenderInRegisteredRoom(t *testing.T) 
 	if emit.count() != 1 || emit.types[0] != "intake.rejected" || emit.rawData[0]["reason"] != "unknown_sender" {
 		t.Fatalf("unexpected events: %v %+v", emit.types, emit.rawData)
 	}
-	if len(sent) != 1 || !strings.Contains(sent[0], "Temporality") {
-		t.Fatalf("expected one rejection notice, got %v", sent)
+	if sent.len() != 1 || !strings.Contains(sent.item(0), "Temporality") {
+		t.Fatalf("expected one rejection notice, got %v", sent.all())
 	}
 }
 
@@ -740,7 +780,7 @@ func TestChannelInboundIntakeRejectsUnknownSenderInRegisteredRoom(t *testing.T) 
 // unregistered_room — and never answered, so the bot does not spam every room
 // it sits in.
 func TestChannelInboundIntakeRejectsUnregisteredRoomSilently(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r2:hs", []any{
 		matrixTextEvent("$m2", "!r2:hs", "@human:hs", "сделай отчёт по проекту"),
 	}, &sent)
@@ -772,8 +812,8 @@ func TestChannelInboundIntakeRejectsUnregisteredRoomSilently(t *testing.T) {
 	if emit.count() != 1 || emit.rawData[0]["reason"] != "unregistered_room" {
 		t.Fatalf("unexpected events: %v %+v", emit.types, emit.rawData)
 	}
-	if len(sent) != 0 {
-		t.Fatalf("unregistered room must stay silent, sent %v", sent)
+	if sent.len() != 0 {
+		t.Fatalf("unregistered room must stay silent, sent %v", sent.all())
 	}
 }
 
@@ -781,7 +821,7 @@ func TestChannelInboundIntakeRejectsUnregisteredRoomSilently(t *testing.T) {
 // registered sender identity of the room owner identifies the user, journals
 // intake.received, starts the intake run and records its id on the row.
 func TestChannelInboundIntakeStartsRunForKnownSender(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
 		matrixTextEvent("$m3", "!r1:hs", "@human:hs", "Подготовь проект документа «Смета на разработку»"),
 	}, &sent)
@@ -814,8 +854,8 @@ func TestChannelInboundIntakeStartsRunForKnownSender(t *testing.T) {
 	if emit.count() != 1 || emit.types[0] != "intake.received" || emit.senders[0] != "u1" {
 		t.Fatalf("unexpected events: %v %v", emit.types, emit.senders)
 	}
-	if len(sent) != 0 {
-		t.Fatalf("known sender must not get a rejection notice, sent %v", sent)
+	if sent.len() != 0 {
+		t.Fatalf("known sender must not get a rejection notice, sent %v", sent.all())
 	}
 }
 
@@ -823,7 +863,7 @@ func TestChannelInboundIntakeStartsRunForKnownSender(t *testing.T) {
 // intake pipeline posts an m.read receipt for the sender's event (the
 // dialog's read mark arrives before the answer, not with it).
 func TestChannelInboundIntakeMarksMessageRead(t *testing.T) {
-	var sent, receipts []string
+	var sent, receipts testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
 		matrixTextEvent("$m12", "!r1:hs", "@human:hs", "Подготовь смету"),
 	}, &sent, &receipts)
@@ -840,12 +880,12 @@ func TestChannelInboundIntakeMarksMessageRead(t *testing.T) {
 	if _, err := loop.cycle(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(receipts) != 1 || !strings.Contains(receipts[0], "/receipt/m.read/") || !strings.Contains(receipts[0], "!r1:hs") {
-		t.Fatalf("read receipt not posted: %v", receipts)
+	if receipts.len() != 1 || !strings.Contains(receipts.item(0), "/receipt/m.read/") || !strings.Contains(receipts.item(0), "!r1:hs") {
+		t.Fatalf("read receipt not posted: %v", receipts.all())
 	}
 	// The event id survives the path escape ($ is path-safe in Go).
-	if !strings.Contains(receipts[0], "$m12") {
-		t.Fatalf("receipt lost the event id: %v", receipts)
+	if !strings.Contains(receipts.item(0), "$m12") {
+		t.Fatalf("receipt lost the event id: %v", receipts.all())
 	}
 }
 
@@ -853,7 +893,7 @@ func TestChannelInboundIntakeMarksMessageRead(t *testing.T) {
 // the same event on every poll (the crash-redelivery model); only the first
 // delivery starts an intake run.
 func TestChannelInboundIntakeDeduplicatesRedelivery(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
 		matrixTextEvent("$m4", "!r1:hs", "@human:hs", "отчёт ещё раз"),
 	}, &sent)
@@ -893,7 +933,7 @@ func TestChannelInboundIntakeDeduplicatesRedelivery(t *testing.T) {
 // terminal status (the production bug: every intake verdict silently expired
 // in the 30-minute give-up loop).
 func TestChannelWatcherDeliversResolvedAnswer(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", nil, &sent)
 	store := &fakeInboundStore{
 		users: []workspace.User{{
@@ -917,8 +957,8 @@ func TestChannelWatcherDeliversResolvedAnswer(t *testing.T) {
 		Status: workspace.InboundStatusClassified, IntakeRunID: "intake-m9",
 	}
 	loop.watchRunAnswer(context.Background(), row, "intake-m9", true)
-	if len(sent) != 1 || !strings.HasPrefix(sent[0], "Ответ из базы знаний") {
-		t.Fatalf("answer not delivered: %v", sent)
+	if sent.len() != 1 || !strings.HasPrefix(sent.item(0), "Ответ из базы знаний") {
+		t.Fatalf("answer not delivered: %v", sent.all())
 	}
 	if latest, _ := store.lastUpdate(row.ID); latest.Status != workspace.InboundStatusAnswered {
 		t.Fatalf("row not marked answered: %+v", latest)
@@ -930,7 +970,7 @@ func TestChannelWatcherDeliversResolvedAnswer(t *testing.T) {
 // resolver (the workflow id needs it) and keeps the row's routed status (the
 // answered mark stays for intake verdicts).
 func TestChannelWatcherTargetRunResolvesByRowProject(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", nil, &sent)
 	store := &fakeInboundStore{
 		users: []workspace.User{{
@@ -956,9 +996,9 @@ func TestChannelWatcherTargetRunResolvesByRowProject(t *testing.T) {
 		Status: workspace.InboundStatusRouted, ProjectID: "omni", TargetRunID: "target-1",
 	}
 	loop.WatchTargetRun(row, "target-1")
-	waitFor(t, 2*time.Second, func() bool { return len(sent) == 1 })
-	if len(sent) != 1 || !strings.HasPrefix(sent[0], "Целевой ответ") {
-		t.Fatalf("target answer not delivered: %v", sent)
+	waitFor(t, 2*time.Second, func() bool { return sent.len() == 1 })
+	if sent.len() != 1 || !strings.HasPrefix(sent.item(0), "Целевой ответ") {
+		t.Fatalf("target answer not delivered: %v", sent.all())
 	}
 	if latest, _ := store.lastUpdate(row.ID); latest.Status == workspace.InboundStatusAnswered {
 		t.Fatal("routed row must keep its status")
@@ -970,7 +1010,7 @@ func TestChannelWatcherTargetRunResolvesByRowProject(t *testing.T) {
 // competing intake classification. The chat hears a confirmation, the row is
 // attached to the target run, and no new intake run starts.
 func TestChannelInboundFollowUpSteersRunningRun(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
 		matrixTextEvent("$m14", "!r1:hs", "@human:hs", "и ещё проверь кэш"),
 	}, &sent)
@@ -1020,8 +1060,8 @@ func TestChannelInboundFollowUpSteersRunningRun(t *testing.T) {
 	if intake.count() != 0 {
 		t.Fatalf("a live run must not spawn a classification run, got %d", intake.count())
 	}
-	if len(sent) != 1 || !strings.Contains(sent[0], "Добавил к текущей задаче") {
-		t.Fatalf("confirmation not delivered: %v", sent)
+	if sent.len() != 1 || !strings.Contains(sent.item(0), "Добавил к текущей задаче") {
+		t.Fatalf("confirmation not delivered: %v", sent.all())
 	}
 	// The message row is attached to the target run (the audit trail).
 	row, ok := store.inboundRow("$m14")
@@ -1038,7 +1078,7 @@ func TestChannelInboundFollowUpSteersRunningRun(t *testing.T) {
 // run the same message goes through the intake pipeline as before — a dead
 // run (or a failed note signal) must not eat the message.
 func TestChannelInboundFollowUpFallsBackToClassification(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
 		matrixTextEvent("$m15", "!r1:hs", "@human:hs", "новая задача: смета"),
 	}, &sent)
@@ -1071,8 +1111,8 @@ func TestChannelInboundFollowUpFallsBackToClassification(t *testing.T) {
 	if intake.count() != 1 {
 		t.Fatalf("message must fall back to classification, got %d intake runs", intake.count())
 	}
-	if len(sent) != 0 {
-		t.Fatalf("no confirmation expected: %v", sent)
+	if sent.len() != 0 {
+		t.Fatalf("no confirmation expected: %v", sent.all())
 	}
 }
 
@@ -1093,7 +1133,7 @@ func waitFor(t *testing.T, within time.Duration, cond func() bool) {
 // then one line per distinct tool phase, paced, without the reply hint. The
 // final answer stays the watcher's last word.
 func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", nil, &sent)
 	store := &fakeInboundStore{
 		users: []workspace.User{{
@@ -1145,23 +1185,23 @@ func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
 	waitFor(t, 17*time.Second, func() bool {
 		store.mu.Lock()
 		defer store.mu.Unlock()
-		return len(sent) >= 3
+		return sent.len() >= 3
 	})
 	cancel()
 	<-watchDone
 
-	if len(sent) == 0 || !strings.HasPrefix(sent[0], "Принято — работаю над вашим сообщением") {
-		t.Fatalf("opening progress line missing: %v", sent)
+	if sent.len() == 0 || !strings.HasPrefix(sent.item(0), "Принято — работаю над вашим сообщением") {
+		t.Fatalf("opening progress line missing: %v", sent.all())
 	}
-	joined := strings.Join(sent, "\n")
+	joined := sent.join("\n")
 	if !strings.Contains(joined, "Ищу в базе знаний проекта") {
-		t.Fatalf("phase line missing: %v", sent)
+		t.Fatalf("phase line missing: %v", sent.all())
 	}
 	if !strings.Contains(joined, "💬 «Смотрю таблицу цен в проекте»") {
-		t.Fatalf("interim model line missing: %v", sent)
+		t.Fatalf("interim model line missing: %v", sent.all())
 	}
 	if strings.Contains(joined, "длинный ответ") {
-		t.Fatalf("long turn text must not be voiced: %v", sent)
+		t.Fatalf("long turn text must not be voiced: %v", sent.all())
 	}
 }
 
@@ -1171,7 +1211,7 @@ func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
 // another intake run. The pre-populated rows stand for messages already routed
 // in the past hour; the loop under test carries ratePerHour = 2.
 func TestChannelInboundIntakeRateLimitsFloodingSender(t *testing.T) {
-	var sent []string
+	var sent testSink
 	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
 		matrixTextEvent("$m5", "!r1:hs", "@human:hs", "и ещё одна задача"),
 	}, &sent)
@@ -1214,8 +1254,8 @@ func TestChannelInboundIntakeRateLimitsFloodingSender(t *testing.T) {
 	if len(store.audits) != 1 || store.audits[0] != workspace.AuditIntakeRejected {
 		t.Fatalf("expected one rejection audit, got %v", store.audits)
 	}
-	if len(sent) != 1 || !strings.Contains(sent[0], "лимит сообщений") {
-		t.Fatalf("expected one rate-limit notice, got %v", sent)
+	if sent.len() != 1 || !strings.Contains(sent.item(0), "лимит сообщений") {
+		t.Fatalf("expected one rate-limit notice, got %v", sent.all())
 	}
 	if intake.count() != 0 {
 		t.Fatalf("intake must not run, got %d calls", intake.count())

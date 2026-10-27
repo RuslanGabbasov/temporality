@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -177,6 +178,115 @@ func TestNewDefaultsStreamIdleTimeout(t *testing.T) {
 	client := New(Config{BaseURL: "http://localhost:1", Model: "m"})
 	if client.cfg.StreamIdleTimeout != 90*time.Second {
 		t.Fatalf("StreamIdleTimeout = %v, want the 90s default", client.cfg.StreamIdleTimeout)
+	}
+}
+
+// Tool calls accumulate into a map keyed by delta index; the workflow
+// executes them in completion order, so index 1 arriving before index 0
+// must still come out as [0, 1].
+func TestStreamCompleteToolCallsSortedByIndex(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call-b\",\"function\":{\"name\":\"second\",\"arguments\":\"{}\"}}]}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-a\",\"function\":{\"name\":\"first\",\"arguments\":\"{\\\"x\\\":1}\"}}]}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	completion, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("StreamComplete: %v", err)
+	}
+	if len(completion.ToolCalls) != 2 {
+		t.Fatalf("tool calls = %d, want 2", len(completion.ToolCalls))
+	}
+	if completion.ToolCalls[0].ID != "call-a" || completion.ToolCalls[0].Name != "first" {
+		t.Fatalf("first tool call = %s/%s, want call-a/first (index 0)", completion.ToolCalls[0].ID, completion.ToolCalls[0].Name)
+	}
+	if completion.ToolCalls[1].ID != "call-b" || completion.ToolCalls[1].Name != "second" {
+		t.Fatalf("second tool call = %s/%s, want call-b/second (index 1)", completion.ToolCalls[1].ID, completion.ToolCalls[1].Name)
+	}
+	if completion.ToolCalls[0].Args["x"].(float64) != 1 {
+		t.Fatalf("index-0 args = %v", completion.ToolCalls[0].Args)
+	}
+}
+
+// A single SSE data line larger than the old 64 KiB scanner cap must not
+// kill the stream: bufio.Scanner used to fail with "token too long"
+// mid-generation, and the caller replayed the whole turn. 128 KiB now parses
+// as one ordinary delta.
+func TestStreamCompleteHandlesLargeSSELine(t *testing.T) {
+	big := strings.Repeat("x", 128*1024)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": big}, "finish_reason": "stop"}}})
+		fmt.Fprintf(w, "data: %s\n\n", body)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	completion, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("StreamComplete: %v", err)
+	}
+	if len(completion.Content) != 128*1024 {
+		t.Fatalf("content length = %d, want %d", len(completion.Content), 128*1024)
+	}
+}
+
+// The streaming path never retries a status error, but the parsed
+// Retry-After must still ride the error for messages and observability.
+func TestStreamComplete429CarriesRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"slow down"}}`))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	_, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, nil)
+	var statusErr *statusError
+	if !errors.As(err, &statusErr) || statusErr.code != http.StatusTooManyRequests {
+		t.Fatalf("want a 429 status error, got: %v", err)
+	}
+	if statusErr.retryAfter != 5*time.Second {
+		t.Fatalf("retry_after = %s, want 5s", statusErr.retryAfter)
+	}
+	if !strings.Contains(statusErr.Error(), "retry-after 5s") {
+		t.Fatalf("error message should surface the hint: %v", statusErr)
+	}
+}
+
+// The streaming request carries all four fields the 400-degradation ladder
+// can strip — reasoning (config), prompt_cache_key (option), the parallel
+// toggle (tools) and stream_options (StreamComplete adds it on every non-
+// Anthropic host). StreamComplete itself performs a single attempt — the
+// ladder lives in Complete only — so this pins the precondition: all four
+// ride the wire together when asked.
+func TestStreamCompleteCarriesAllStrippableFields(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second, Reasoning: "high"})
+	tools := []ToolDef{{Name: "echo", Description: "echo", Parameters: map[string]any{"type": "object"}}}
+	_, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, tools, nil, WithPromptCacheKey("cache-1"))
+	if err != nil {
+		t.Fatalf("StreamComplete: %v", err)
+	}
+	for _, field := range []string{"reasoning", "prompt_cache_key", "parallel_tool_calls", "stream_options"} {
+		if _, present := body[field]; !present {
+			t.Fatalf("%s missing from the streaming request, want all four strippable fields present", field)
+		}
 	}
 }
 

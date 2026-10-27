@@ -11,9 +11,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/temporality-project/temporality/kernel/llm"
@@ -22,23 +26,98 @@ import (
 const prefix = "mcp__"
 const maxResultBytes = 64 << 10
 
-// Client adapts one MCP server. A client is stateless between calls: every
-// Call (and every Refresh) opens a fresh session — stdio spawns the process,
-// remote transports dial the endpoint — so a server restart is transparent.
+// Client adapts one MCP server. Sessions are persistent: Call and Refresh
+// reuse one connected session and only redial when the transport is detected
+// broken, so a stdio server is not respawned (and remote endpoints do not redo
+// TCP+TLS) on every tool call. The stdio process living between calls is the
+// intended MCP lifecycle — if the server dies, the first Call detects the dead
+// transport, redials once and retries the call once. Close tears the session
+// down explicitly, but a Client may simply live for the process lifetime.
 type Client struct {
 	cfg     ServerConfig
 	tools   map[string]string // model-facing name -> bare MCP tool name
 	defs    []llm.ToolDef
 	approve map[string]bool
+
+	// mu guards the persistent session and its lazy dependencies. The RPCs
+	// themselves (CallTool, ListTools) run OUTSIDE mu: per go-sdk mcp v1.8.0
+	// a ClientSession is safe for concurrent use — jsonrpc2.Connection.Call
+	// allocates request IDs with an atomic counter and tracks in-flight calls
+	// under a mutex (internal/jsonrpc2/conn.go), and the stdio transport
+	// serializes frame writes under ioConn.writeMu ("guards Write, which must
+	// be concurrency safe", mcp/transport.go). Only ensureSession/redial —
+	// i.e. connect and teardown — are serialized.
+	mu      sync.Mutex
+	session *mcp.ClientSession
+	http    *http.Client // shared keep-alive client for sse/http transports
+
+	// connectFn is the transport seam used by tests to stand up in-memory
+	// servers; production clients always use (*Client).connect.
+	connectFn func(ctx context.Context) (*mcp.ClientSession, error)
 }
 
 // NewClient builds an unconnected client. Call Refresh to discover tools.
 func NewClient(cfg ServerConfig) *Client {
-	return &Client{
+	c := &Client{
 		cfg:     cfg,
 		tools:   map[string]string{},
 		approve: map[string]bool{},
 	}
+	c.connectFn = c.connect
+	return c
+}
+
+// ensureSession returns the persistent session, connecting lazily on first use
+// and after a redial. The connection outlives any single call, so it is
+// detached from the caller's cancellation: a per-request context must not kill
+// the shared stdio server process (exec.CommandContext) or remote stream. A
+// genuinely dead server is recovered by redial on the next Call.
+func (c *Client) ensureSession(ctx context.Context) (*mcp.ClientSession, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.session != nil {
+		return c.session, nil
+	}
+	session, err := c.connectFn(context.WithoutCancel(ctx))
+	if err != nil {
+		return nil, err
+	}
+	c.session = session
+	return session, nil
+}
+
+// redial replaces a session whose transport was detected broken. If another
+// goroutine already reconnected, its fresh session is reused instead of
+// dialing again — and never closed by the loser of the race.
+func (c *Client) redial(ctx context.Context, dead *mcp.ClientSession) (*mcp.ClientSession, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.session != nil && c.session != dead {
+		return c.session, nil
+	}
+	if dead != nil {
+		_ = dead.Close()
+	}
+	c.session = nil
+	session, err := c.connectFn(context.WithoutCancel(ctx))
+	if err != nil {
+		return nil, err
+	}
+	c.session = session
+	return session, nil
+}
+
+// Close tears down the persistent session, if any. Idempotent, and nobody is
+// required to call it: Clients typically live as long as the process.
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.session == nil {
+		return nil
+	}
+	session := c.session
+	c.session = nil
+	return session.Close()
 }
 
 // modelName maps a bare MCP tool name to the kernel-facing tool name. The
@@ -51,14 +130,21 @@ func (c *Client) modelName(bare string) string {
 	return prefix + c.cfg.ID + "__" + bare
 }
 
-// Refresh connects, lists tools and rebuilds the allowlisted tool set.
+// Refresh lists tools over the persistent session (redialing once if the
+// transport broke since the last use) and rebuilds the allowlisted tool set.
+// The session is left alive for subsequent calls.
 func (c *Client) Refresh(ctx context.Context) error {
-	session, err := c.connect(ctx)
+	session, err := c.ensureSession(ctx)
 	if err != nil {
 		return err
 	}
-	defer session.Close()
 	result, err := session.ListTools(ctx, nil)
+	if isBrokenTransport(err) {
+		session, err = c.redial(ctx, session)
+		if err == nil {
+			result, err = session.ListTools(ctx, nil)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("list MCP tools: %w", err)
 	}
@@ -209,16 +295,22 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any, ide
 	if !ok {
 		return "", fmt.Errorf("MCP tool %q is not allowed", name)
 	}
-	session, err := c.connect(ctx)
+	session, err := c.ensureSession(ctx)
 	if err != nil {
 		return "", err
 	}
-	defer session.Close()
-	params := &mcp.CallToolParams{Name: actual, Arguments: args}
-	if idempotencyKey != "" {
-		params.Meta = mcp.Meta{"idempotency_key": idempotencyKey}
+	result, err := callTool(ctx, session, actual, args, idempotencyKey)
+	if isBrokenTransport(err) {
+		// The session died between calls (server restart, idle teardown,
+		// network loss). Redial once and retry the call exactly once; the
+		// idempotency key lets servers that track it deduplicate an operation
+		// executed before the transport broke. A second failure is returned
+		// as is.
+		session, err = c.redial(ctx, session)
+		if err == nil {
+			result, err = callTool(ctx, session, actual, args, idempotencyKey)
+		}
 	}
-	result, err := session.CallTool(ctx, params)
 	if err != nil {
 		return "", err
 	}
@@ -228,14 +320,70 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any, ide
 	return contentText(result.Content), nil
 }
 
+func callTool(ctx context.Context, session *mcp.ClientSession, name string, args map[string]any, idempotencyKey string) (*mcp.CallToolResult, error) {
+	params := &mcp.CallToolParams{Name: name, Arguments: args}
+	if idempotencyKey != "" {
+		params.Meta = mcp.Meta{"idempotency_key": idempotencyKey}
+	}
+	return session.CallTool(ctx, params)
+}
+
+// isBrokenTransport reports whether err means the session's transport is dead
+// and a redial can help: closed connections, EOF from a exited peer, websocket
+// close frames. Context cancellation and deadlines are not transport damage —
+// the session may still be perfectly healthy. mcp.ErrConnectionClosed is the
+// go-sdk v1.8.0 sentinel for calls on a connection the peer (or we) closed;
+// the textual markers cover transports whose dead-connection errors are not
+// wrapped in that sentinel.
+func isBrokenTransport(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, mcp.ErrConnectionClosed) || errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, os.ErrClosed) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"connection closed",
+		"session closed",
+		"use of closed network connection",
+		"broken pipe",
+		"connection reset",
+		"websocket: close",
+		"client is closing", // go-sdk jsonrpc2 text for a broken/closed connection
+		"server is closing",
+		"eof",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// sharedHTTPClient returns the one keep-alive HTTP client for this server, so
+// TCP connections and TLS sessions survive reconnects. Only called with c.mu
+// held (from connect, i.e. ensureSession/redial).
+func (c *Client) sharedHTTPClient() *http.Client {
+	if c.http == nil {
+		c.http = headerClient(&http.Client{Timeout: 30 * time.Second}, c.cfg.Headers)
+	}
+	return c.http
+}
+
 func (c *Client) connect(ctx context.Context) (*mcp.ClientSession, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "temporality-agent-kernel", Version: "0.1.0"}, nil)
 	var transport mcp.Transport
 	switch c.cfg.Type {
 	case TypeSSE:
-		transport = &mcp.SSEClientTransport{Endpoint: c.cfg.URL, HTTPClient: headerClient(c.cfg.Headers)}
+		transport = &mcp.SSEClientTransport{Endpoint: c.cfg.URL, HTTPClient: c.sharedHTTPClient()}
 	case TypeHTTP:
-		transport = &mcp.StreamableClientTransport{Endpoint: c.cfg.URL, HTTPClient: headerClient(c.cfg.Headers)}
+		transport = &mcp.StreamableClientTransport{Endpoint: c.cfg.URL, HTTPClient: c.sharedHTTPClient()}
 	default: // stdio
 		cmd := exec.CommandContext(ctx, c.cfg.Command, c.cfg.Args...)
 		cmd.Stderr = os.Stderr // surface server panics/errors in kernel logs

@@ -193,6 +193,80 @@ func TestCompleteRetriesTransientStatus(t *testing.T) {
 	}
 }
 
+func TestParseRetryAfterHeader(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	if got := parseRetryAfterHeader("5", now); got != 5*time.Second {
+		t.Fatalf("delay-seconds = %s, want 5s", got)
+	}
+	if got := parseRetryAfterHeader(" 3 ", now); got != 3*time.Second {
+		t.Fatalf("padded delay-seconds = %s, want 3s", got)
+	}
+	for _, value := range []string{"", "0", "-2", "soon", "2.5"} {
+		if got := parseRetryAfterHeader(value, now); got != 0 {
+			t.Fatalf("header %q = %s, want 0 (keep the own backoff)", value, got)
+		}
+	}
+	// HTTP-date form: in the future → the delta, in the past → 0.
+	if got := parseRetryAfterHeader(now.Add(30*time.Second).UTC().Format(http.TimeFormat), now); got != 30*time.Second {
+		t.Fatalf("future http-date = %s, want 30s", got)
+	}
+	if got := parseRetryAfterHeader(now.Add(-time.Hour).UTC().Format(http.TimeFormat), now); got != 0 {
+		t.Fatalf("past http-date = %s, want 0", got)
+	}
+}
+
+// The effective wait is max(backoff, Retry-After), capped: the provider's
+// hint wins when it asks for more patience than the own ladder has, but no
+// header may park the call for minutes.
+func TestRetryDelayHonorsRetryAfterCap(t *testing.T) {
+	if got := retryDelayFor(4*time.Second, 0); got != 4*time.Second {
+		t.Fatalf("no hint = %s, want the plain backoff", got)
+	}
+	if got := retryDelayFor(4*time.Second, 2*time.Second); got != 4*time.Second {
+		t.Fatalf("small hint = %s, want the longer backoff", got)
+	}
+	if got := retryDelayFor(4*time.Second, 5*time.Second); got != 5*time.Second {
+		t.Fatalf("bigger hint = %s, want 5s", got)
+	}
+	if got := retryDelayFor(time.Second, 10*time.Minute); got != maxRetryAfterWait {
+		t.Fatalf("huge hint = %s, want the %s cap", got, maxRetryAfterWait)
+	}
+}
+
+// A 429 that names Retry-After: 5 must hold the retry at least those five
+// seconds even though the own attempt-2 backoff (4s + jitter) is shorter.
+func TestCompleteWaitsForRetryAfter429(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"message":"slow down"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(okResponse))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	started := time.Now()
+	completion, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("provider calls = %d, want 2", calls)
+	}
+	if elapsed := time.Since(started); elapsed < 5*time.Second {
+		t.Errorf("elapsed = %s, want >= the 5s Retry-After", elapsed)
+	}
+	if completion.Attempts != 2 {
+		t.Errorf("attempts = %d, want 2", completion.Attempts)
+	}
+}
+
 func TestCompleteFailsFastOnAuthError(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -441,21 +515,23 @@ func TestSystemlessConversationUntouchedByNormalization(t *testing.T) {
 // A strict gateway (xiaomi-style) rejects optional envelope fields with a
 // generic 400. The completion ladder strips them one at a time and retries —
 // the answer survives, and the completion records how many fields were
-// dropped so the trace shows the degradation.
+// dropped so the trace shows the degradation. With tools in play the
+// strippable set is reasoning, prompt_cache_key and parallel_tool_calls:
+// stream_options never rides a blocking request at all.
 func TestCompleteStripsOptionalFieldsOnBadRequest(t *testing.T) {
 	var bodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		bodies = append(bodies, body)
-		if len(bodies) < 3 {
+		if len(bodies) < 4 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "400", "message": "Invalid request parameters", "type": "BadRequestError"}})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(json.RawMessage(okResponse))
+		w.Write([]byte(okResponse))
 	}))
 	defer server.Close()
 
@@ -463,36 +539,38 @@ func TestCompleteStripsOptionalFieldsOnBadRequest(t *testing.T) {
 		BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second,
 		Reasoning: "high",
 	})
-	completion, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, WithPromptCacheKey("cache-1"))
+	tools := []ToolDef{{Name: "echo", Description: "echo", Parameters: map[string]any{"type": "object"}}}
+	completion, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, tools, WithPromptCacheKey("cache-1"))
 	if err != nil {
 		t.Fatalf("Complete with the strip ladder: %v", err)
 	}
-	if completion.StrippedFields != 2 {
-		t.Fatalf("stripped_fields = %d, want 2 (reasoning, prompt cache key)", completion.StrippedFields)
+	if completion.StrippedFields != 3 {
+		t.Fatalf("stripped_fields = %d, want 3 (reasoning, prompt_cache_key, parallel_tool_calls)", completion.StrippedFields)
 	}
+	if len(bodies) != 4 {
+		t.Fatalf("provider calls = %d, want 4 (three strips, then success)", len(bodies))
+	}
+	// Requests BEFORE a strip legitimately carry the field; every request
+	// AFTER the field was dropped must be clean: reasoning goes after request
+	// 1, the cache key after request 2, the parallel toggle after request 3.
 	for i, body := range bodies {
-		_ = i
-		for _, field := range []string{"reasoning", "prompt_cache_key", "parallel_tool_calls", "stream_options"} {
-			// Requests BEFORE the strip legitimately carry the field; every
-			// request AFTER the field was dropped must be clean. With two 400s
-			// the ladder drops reasoning after request 1 and the cache key after
-			// request 2 — requests 1+2 (0-based) must not carry them.
-			if i >= 1 && field == "reasoning" {
-				if _, present := body[field]; present {
-					t.Fatalf("reasoning present in request #%d after being stripped", i)
-				}
+		if i >= 1 {
+			if _, present := body["reasoning"]; present {
+				t.Fatalf("reasoning present in request #%d after being stripped", i)
 			}
-			if i >= 2 && field == "prompt_cache_key" {
-				if _, present := body[field]; present {
-					t.Fatalf("prompt_cache_key present in request #%d after being stripped", i)
-				}
+		}
+		if i >= 2 {
+			if _, present := body["prompt_cache_key"]; present {
+				t.Fatalf("prompt_cache_key present in request #%d after being stripped", i)
+			}
+		}
+		if i >= 3 {
+			if _, present := body["parallel_tool_calls"]; present {
+				t.Fatalf("parallel_tool_calls present in request #%d after being stripped", i)
 			}
 		}
 	}
-	last := bodies[len(bodies)-1]
-	for _, field := range []string{"reasoning", "prompt_cache_key", "parallel_tool_calls", "stream_options"} {
-		if _, present := last[field]; present {
-			t.Fatalf("%s still present in the final request", field)
-		}
+	if _, present := bodies[0]["stream_options"]; present {
+		t.Fatal("stream_options must not ride a blocking request at all")
 	}
 }

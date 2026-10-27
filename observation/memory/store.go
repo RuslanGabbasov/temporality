@@ -55,6 +55,19 @@ func (s *Store) AppendObservation(_ context.Context, event observation.Event) (b
 	return true, nil
 }
 
+// AppendObservationBatch appends a group of events in one call. The memory
+// store has no round trips to save, but the journal API checks for the batch
+// capability and the memory store backs it, so tests exercise the same
+// batched telemetry framing production uses.
+func (s *Store) AppendObservationBatch(ctx context.Context, events []observation.Event) error {
+	for _, event := range events {
+		if _, err := s.AppendObservation(ctx, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) GetObservation(_ context.Context, sourceID, eventID string) (observation.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

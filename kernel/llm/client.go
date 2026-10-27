@@ -16,10 +16,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -253,12 +254,14 @@ func OptionalConfigFromEnv() (Config, error) {
 	return cfg, nil
 }
 
-// Client talks to one OpenAI-compatible endpoint.
+// Client talks to one OpenAI-compatible endpoint. Safe for concurrent use:
+// retry jitter comes from the package-global math/rand/v2 source — a per-
+// client *rand.Rand raced when several goroutines retried off one shared
+// client at once.
 type Client struct {
 	cfg          Config
 	http         *http.Client
 	streamHTTP   *http.Client
-	jitter       *rand.Rand
 	providerHost string
 }
 
@@ -282,7 +285,6 @@ func New(cfg Config) *Client {
 		cfg:          cfg,
 		http:         &http.Client{Timeout: cfg.Timeout},
 		streamHTTP:   &http.Client{},
-		jitter:       rand.New(rand.NewSource(time.Now().UnixNano())),
 		providerHost: host,
 	}
 }
@@ -297,9 +299,6 @@ func anthropicCompatHost(host string) bool {
 	return strings.EqualFold(host, "api.anthropic.com")
 }
 
-// compatSanitize drops envelope fields the configured provider does not
-// speak. Today that is only the Anthropic compatibility layer; OpenAI-
-// proper and the gateways tolerate all of these.
 // compatSanitize drops envelope fields the configured provider does not
 // implement when the host is known-incompatible. Unknown gateways (xiaomi,
 // one-api relays, …) surface incompatibilities as 400s instead — the ladder
@@ -608,15 +607,24 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 	started := time.Now()
 	var lastErr error
 	stripped := 0
+	degraded := false // the next iteration retries a field drop: no backoff
 	for attempt := 1; attempt <= 3 || stripped < maxBadRequestStrips; attempt++ {
-		if attempt > 1 {
-			delay := time.Duration(1<<uint(attempt))*time.Second + time.Duration(c.jitter.Int63n(1500))*time.Millisecond
+		if attempt > 1 && !degraded {
+			delay := time.Duration(1<<uint(attempt))*time.Second + time.Duration(rand.Int64N(1500))*time.Millisecond
+			// A Retry-After hint (429 mostly) outranks our own backoff — the
+			// provider knows its queue better — capped so no header can park
+			// the call for minutes.
+			var prior *statusError
+			if errors.As(lastErr, &prior) {
+				delay = retryDelayFor(delay, prior.retryAfter)
+			}
 			select {
 			case <-ctx.Done():
 				return Completion{}, ctx.Err()
 			case <-time.After(delay):
 			}
 		}
+		degraded = false
 		completion, err := c.once(ctx, payload)
 		if err == nil {
 			completion.LatencyMs = time.Since(started).Milliseconds()
@@ -639,6 +647,7 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 				if err != nil {
 					return Completion{}, err
 				}
+				degraded = true // dropping the field must not pay the backoff
 				continue
 			}
 		}
@@ -656,7 +665,8 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 					if err != nil {
 						return Completion{}, err
 					}
-					attempt-- // a degradation retry is not a provider retry
+					degraded = true // a degradation retry is not a provider retry
+					attempt--
 					continue
 				}
 			}
@@ -811,12 +821,22 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<20))
-		return Completion{}, &statusError{code: response.StatusCode, body: truncate(string(body), 400)}
+		// StreamComplete does not retry status errors — the caller decides —
+		// but the parsed Retry-After still rides the error for the message.
+		return Completion{}, &statusError{
+			code:       response.StatusCode,
+			body:       truncate(string(body), 400),
+			retryAfter: parseRetryAfterHeader(response.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 
 	// Parse SSE stream
 	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	// A single data line can legitimately exceed 64 KiB (one huge tool-call
+	// delta from a chatty provider). A Scanner overflow reads as a transport
+	// error here — the caller replays the whole turn — so the ceiling is 1
+	// MiB; growth starts small so ordinary streams stay cheap.
+	scanner.Buffer(make([]byte, 64*1024), 1<<20)
 	var accumulated strings.Builder
 	var reasoning strings.Builder
 	toolCallAccum := make(map[int]*ToolCall)
@@ -926,7 +946,16 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		Deltas:       deltas,
 		FirstTokenMs: firstTokenAt.Sub(started).Milliseconds(),
 	}
-	for _, tc := range toolCallAccum {
+	// Map iteration order is random, but the workflow executes tool calls in
+	// completion order — the assembled calls must come out by delta index,
+	// the only order the provider contract guarantees.
+	indexes := make([]int, 0, len(toolCallAccum))
+	for index := range toolCallAccum {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		tc := toolCallAccum[index]
 		args := map[string]any{}
 		argsError := ""
 		if strings.TrimSpace(tc.ArgsRaw) != "" {
@@ -978,10 +1007,58 @@ func (e *transportError) Unwrap() error { return e.err }
 type statusError struct {
 	code int
 	body string
+	// retryAfter is the provider's Retry-After hint parsed at construction
+	// (a 429 mostly): Complete folds it into the retry delay, StreamComplete
+	// does not retry status errors and only carries it for the message.
+	retryAfter time.Duration
 }
 
 func (e *statusError) Error() string {
+	if e.retryAfter > 0 {
+		return fmt.Sprintf("provider status %d (retry-after %s): %s", e.code, e.retryAfter, e.body)
+	}
 	return fmt.Sprintf("provider status %d: %s", e.code, e.body)
+}
+
+// maxRetryAfterWait caps how long a provider's Retry-After may hold a retry:
+// the provider knows its queue better than our backoff ladder does, but a
+// hostile or buggy header must not park a model call for minutes.
+const maxRetryAfterWait = 60 * time.Second
+
+// retryDelayFor merges the client's exponential backoff with a Retry-After
+// hint: the longer of the two wins, the hint capped at maxRetryAfterWait.
+func retryDelayFor(backoff, retryAfter time.Duration) time.Duration {
+	if retryAfter > maxRetryAfterWait {
+		retryAfter = maxRetryAfterWait
+	}
+	if retryAfter > backoff {
+		return retryAfter
+	}
+	return backoff
+}
+
+// parseRetryAfterHeader reads the Retry-After header in either wire form —
+// delay-seconds or an HTTP-date. Absent, unparsable or already-expired
+// values return 0: the caller keeps its own backoff.
+func parseRetryAfterHeader(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		delay := when.Sub(now)
+		if delay <= 0 {
+			return 0
+		}
+		return delay
+	}
+	return 0
 }
 
 // watchdogError marks a stream canceled by one of the silence budgets (idle,
@@ -1080,7 +1157,11 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 		return Completion{}, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return Completion{}, &statusError{code: response.StatusCode, body: truncate(string(body), 400)}
+		return Completion{}, &statusError{
+			code:       response.StatusCode,
+			body:       truncate(string(body), 400),
+			retryAfter: parseRetryAfterHeader(response.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 	var decoded chatResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
