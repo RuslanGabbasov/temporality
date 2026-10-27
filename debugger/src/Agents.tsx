@@ -478,6 +478,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setPromptPreview(null)
     setForm({ ...agent, definition: agent.definition ? { ...agent.definition } : {} })
     setEgressLevelOverride(null)
+    syncEgressDraft(agent.egress_allowlist)
     setShowForm(true)
   }
 
@@ -498,7 +499,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             ...(override !== '' ? { prompt_override: override } : {}),
           }
         : undefined
-      const payload: Partial<Agent> & { prompt_source?: string } = { ...form, definition }
+      // The egress textarea lives in a draft: fold the parsed lines into the
+      // payload (empty lines and blanks already dropped by the parser).
+      const withEgress = { ...form, egress_allowlist: parseEgressDraft() }
+      const payload: Partial<Agent> & { prompt_source?: string } = { ...withEgress, definition }
       if (fromWizard && !editing) payload.prompt_source = 'ai'
       if (editing) {
         await workspaceApi.updateAgent(editing.id, payload)
@@ -1005,6 +1009,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // "off", which would make the level unselectable exactly when the user
   // needs to start typing entries into it. Reset whenever a fresh form loads.
   const [egressLevelOverride, setEgressLevelOverride] = useState<string | null>(null)
+  // The allowlist textarea keeps its own DRAFT text: filtering empty lines on
+  // every keystroke fought the Enter key (a new empty line was removed before
+  // the user could type into it). The draft parses back into the form on blur
+  // and on save.
+  const [egressDraft, setEgressDraft] = useState('')
+  const syncEgressDraft = (list: string[] | undefined) => setEgressDraft((list ?? []).join('\n'))
+  const parseEgressDraft = (): string[] =>
+    egressDraft.split('\n').map((line) => line.trim()).filter(Boolean)
   const egressLevel = egressLevelOverride
     ?? (form.network_access ? 'public' : (form.egress_allowlist ?? []).length > 0 ? 'allowlist' : 'off')
 
@@ -1902,8 +1914,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
                         const level = e.target.value
                         setEgressLevelOverride(level)
-                        if (level === 'off') setForm({ ...form, network_access: false, egress_allowlist: [] })
-                        else if (level === 'allowlist') setForm({ ...form, network_access: false, egress_allowlist: form.egress_allowlist && form.egress_allowlist.length > 0 ? form.egress_allowlist : [] })
+                        if (level === 'off') { setForm({ ...form, network_access: false, egress_allowlist: [] }); syncEgressDraft([]) }
+                        else if (level === 'allowlist') { setForm({ ...form, network_access: false, egress_allowlist: form.egress_allowlist && form.egress_allowlist.length > 0 ? form.egress_allowlist : [] }); syncEgressDraft(form.egress_allowlist) }
                         else setForm({ ...form, network_access: true })
                       }}
                       helperText={egressLevel === 'off'
@@ -1922,8 +1934,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       <TextArea
                         id="agent-egress"
                         labelText={t('agents.egress_allowlist') ?? 'Allowed addresses'}
-                        value={(form.egress_allowlist ?? []).join('\n')}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, egress_allowlist: e.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
+                        value={egressDraft}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEgressDraft(e.target.value)}
+                        onBlur={() => setForm({ ...form, egress_allowlist: parseEgressDraft() })}
                         rows={3}
                         placeholder={t('agents.egress_allowlist_hint') ?? 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port.'}
                       />
