@@ -44,6 +44,7 @@ type contactCard struct {
 	UserID      string   `json:"user_id"`
 	Name        string   `json:"name"`
 	Role        string   `json:"role"`
+	JobTitle    string   `json:"job_title,omitempty"`
 	OrgUnitID   string   `json:"org_unit_id,omitempty"`
 	OrgUnit     string   `json:"org_unit,omitempty"`
 	Channels    []string `json:"channels"`
@@ -58,6 +59,7 @@ func (a *Activities) handleHumanContacts(ctx context.Context, request ToolReques
 	query, _ := request.Arguments["query"].(string)
 	role, _ := request.Arguments["role"].(string)
 	unitID, _ := request.Arguments["org_unit_id"].(string)
+	jobTitle, _ := request.Arguments["job_title"].(string)
 	escalateFor, _ := request.Arguments["escalate_for"].(string)
 
 	users, ok := a.fetchWorkspaceUsers(ctx)
@@ -75,7 +77,7 @@ func (a *Activities) handleHumanContacts(ctx context.Context, request ToolReques
 		}
 		return ToolResult{Content: renderEscalation(users, units, escalateFor)}, nil
 	}
-	return ToolResult{Content: renderContacts(users, units, query, role, unitID)}, nil
+	return ToolResult{Content: renderContacts(users, units, query, role, unitID, jobTitle)}, nil
 }
 
 // fetchOrgUnits pulls the org tree once per call. A missing tree degrades
@@ -96,14 +98,16 @@ func (a *Activities) fetchOrgUnits(ctx context.Context) ([]orgUnitLite, bool) {
 	return list.Units, true
 }
 
-// renderContacts filters the active directory by query (name/id substring,
-// case-insensitive), role and org unit, then emits cards. The list is capped
-// so a large installation cannot flood the agent's context.
-func renderContacts(users []WorkspaceUser, units []orgUnitLite, query, role, unitID string) string {
+// renderContacts filters the active directory by query (name/id/job-title
+// substring, case-insensitive), role, job title and org unit, then emits
+// cards. The list is capped so a large installation cannot flood the agent's
+// context.
+func renderContacts(users []WorkspaceUser, units []orgUnitLite, query, role, unitID, jobTitle string) string {
 	names := unitNames(units)
 	query = strings.ToLower(strings.TrimSpace(query))
 	role = strings.TrimSpace(role)
 	unitID = strings.TrimSpace(unitID)
+	jobTitle = strings.ToLower(strings.TrimSpace(jobTitle))
 
 	const limit = 50
 	matches := make([]WorkspaceUser, 0, len(users))
@@ -117,15 +121,19 @@ func renderContacts(users []WorkspaceUser, units []orgUnitLite, query, role, uni
 		if unitID != "" && u.OrgUnitID != unitID {
 			continue
 		}
+		if jobTitle != "" && !strings.Contains(strings.ToLower(u.JobTitle), jobTitle) {
+			continue
+		}
 		if query != "" &&
 			!strings.Contains(strings.ToLower(u.Name), query) &&
-			!strings.Contains(strings.ToLower(u.ID), query) {
+			!strings.Contains(strings.ToLower(u.ID), query) &&
+			!strings.Contains(strings.ToLower(u.JobTitle), query) {
 			continue
 		}
 		matches = append(matches, u)
 	}
 
-	hint := "pass user_id (or the exact name) as ask_human's recipient"
+	hint := "pass user_id (or the exact name) as ask_human's recipient; `title:<job title>` fans out to everyone matching"
 	if len(matches) == 0 {
 		hint = "no active users match; drop filters or escalate via escalate_for"
 	}
@@ -339,6 +347,7 @@ func contactCardFor(u WorkspaceUser, unitNames map[string]string) contactCard {
 		UserID:      u.ID,
 		Name:        u.Name,
 		Role:        u.Role,
+		JobTitle:    u.JobTitle,
 		Channels:    channels,
 		ViaWebInbox: true,
 	}

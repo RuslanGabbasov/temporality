@@ -555,7 +555,12 @@ type User struct {
 	// Org position (docs/org-structure.md §3.3): the single unit the user
 	// belongs to; empty = unassigned, sees everything (transition semantics).
 	OrgUnitID string `json:"org_unit_id,omitempty"`
-	Active    bool   `json:"active"`
+	// JobTitle is the employee's function — "QA engineer", "разработчик".
+	// The platform Role is about system permissions; the job title is about
+	// who the person is, and it is the natural group address: `title:qa`
+	// fans an ask out to everyone whose title matches.
+	JobTitle string `json:"job_title,omitempty"`
+	Active   bool   `json:"active"`
 	// Federation identity (docs/auth-federation.md §6): the (issuer, external_id)
 	// pair links the user to its IdP identity — the JIT key. sourced is "local"
 	// for manually created users and "federated" for JIT-provisioned ones.
@@ -754,6 +759,7 @@ type CreateUserRequest struct {
 	Token            string        `json:"token,omitempty"`       // auto-generated if empty
 	Password         *string       `json:"password,omitempty"`    // optional; set/replace the bcrypt password login
 	OrgUnitID        *string       `json:"org_unit_id,omitempty"` // nil on update = keep; "" = unassign
+	JobTitle         *string       `json:"job_title,omitempty"`   // nil on update = keep; the employee's function, the title: group address
 	Active           *bool         `json:"active,omitempty"`
 	Channels         []UserChannel `json:"channels,omitempty"`
 	PreferredChannel string        `json:"preferred_channel,omitempty"`

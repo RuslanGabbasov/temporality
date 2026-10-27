@@ -1022,6 +1022,7 @@ export interface User {
   password?: string // create/update only: set or replace the password login
   has_password?: boolean // responses: whether password login is configured
   org_unit_id?: string // primary unit; empty = unassigned (sees everything, transition)
+  job_title?: string // employee's function — the natural group address (title:<substring>)
   active: boolean
   channels?: UserChannel[]
   preferred_channel?: string // '' / 'web', or an enabled channel type

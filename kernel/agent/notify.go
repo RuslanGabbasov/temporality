@@ -162,6 +162,13 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	if strings.HasPrefix(request.Recipient, "org:") {
 		return a.deliverToUnit(ctx, request, users, strings.TrimSpace(strings.TrimPrefix(request.Recipient, "org:")))
 	}
+	// Job-title fan-out (docs/org-structure.md §3.3): `title:qa` reaches every
+	// active user whose job title matches the substring (case-insensitive) —
+	// the natural address for «позови всех тестировщиков» without a unit that
+	// mirrors the function.
+	if strings.HasPrefix(request.Recipient, "title:") {
+		return a.deliverToJobTitle(ctx, request, users, strings.TrimSpace(strings.TrimPrefix(request.Recipient, "title:")))
+	}
 	target, found := ResolveRecipient(request.Recipient, request.ActorID, users)
 	if !found {
 		return denied("recipient could not be resolved to a workspace user")
@@ -214,6 +221,79 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 		detail = fmt.Sprintf("preferred channel %s unavailable, fell back to web inbox", target.Preferred)
 	}
 	return NotificationDelivery{Recipient: target.ID, Channel: "web", Status: "delivered", Detail: detail}
+}
+
+// deliverToJobTitle fans one ask out to every active user whose job title
+// matches the substring (case-insensitive) — the group address for functions
+// that cross-cut org units («позови всех тестировщиков»). Deterministic order:
+// role seniority, then name.
+func (a *Activities) deliverToJobTitle(ctx context.Context, request NotifyChannelRequest, users []WorkspaceUser, title string) NotificationDelivery {
+	if title == "" {
+		return NotificationDelivery{Recipient: "title:", Channel: "web", Status: "rejected", Detail: "empty job title in recipient"}
+	}
+	settings := a.transports(ctx)
+	needle := strings.ToLower(title)
+	members := make([]WorkspaceUser, 0, 4)
+	for _, u := range users {
+		if u.Active && strings.Contains(strings.ToLower(u.JobTitle), needle) {
+			members = append(members, u)
+		}
+	}
+	if len(members) == 0 {
+		return NotificationDelivery{Recipient: "title:" + title, Channel: "web", Status: "rejected", Detail: fmt.Sprintf("no active user carries job title matching %q", title)}
+	}
+	sort.SliceStable(members, func(i, j int) bool {
+		pi, pj := rolePriority(members[i].Role), rolePriority(members[j].Role)
+		if pi != pj {
+			return pi < pj
+		}
+		return members[i].Name < members[j].Name
+	})
+	targets := make([]DeliveryTarget, 0, len(members))
+	delivered := 0
+	for _, member := range members {
+		if request.ExecutionIdentityID != "" {
+			allowed, detail := a.identityAllowsHuman(ctx, request.ExecutionIdentityID, member.ID)
+			if !allowed {
+				targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: "web", Status: "skipped", Detail: detail})
+				continue
+			}
+		}
+		channel, mode := pickChannel(recipientChannels{Channels: member.Channels, Preferred: member.Preferred}, settings.Configured)
+		if mode == "web" {
+			targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: "web", Status: "delivered", Detail: "web inbox"})
+			delivered++
+			continue
+		}
+		deliveryAddress := channel.Address
+		if strings.TrimSpace(deliveryAddress) == "" {
+			resolved, rErr := a.resolveChannelAddress(ctx, channel.Type, "", channel.SenderID)
+			if rErr != nil {
+				targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "failed", Detail: truncate(rErr.Error(), 300)})
+				continue
+			}
+			deliveryAddress = resolved
+		}
+		thread := a.channelThread(ctx, channel.Type, request, member.ID)
+		postedID, sendErr := a.sendToChannel(ctx, channel.Type, deliveryAddress, request, settings, thread)
+		if sendErr != nil {
+			targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "failed", Detail: truncate(sendErr.Error(), 300)})
+			continue
+		}
+		targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(thread, postedID)})
+		delivered++
+	}
+	status := "failed"
+	if delivered > 0 {
+		status = "delivered"
+	}
+	return NotificationDelivery{
+		Recipient:   "title:" + title,
+		Channel:     "multi",
+		Status:      status,
+		Detail:      fmt.Sprintf("%d/%d users with job title ~%q reached", delivered, len(members), title),
+		DeliveredTo: targets,
+	}
 }
 
 // deliverToUnit fans one ask_human out to every active member of the unit
@@ -395,6 +475,7 @@ type WorkspaceUser struct {
 	Role      string             `json:"role"`
 	Active    bool               `json:"active"`
 	OrgUnitID string             `json:"org_unit_id"`
+	JobTitle  string             `json:"job_title"`
 	Channels  []recipientChannel `json:"channels"`
 	Preferred string             `json:"preferred_channel"`
 }

@@ -67,7 +67,7 @@ export default function Users() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const visibleUsers = users.filter((u) => {
-    if (!matchesFilter(filter, u.name, u.email, u.role, u.id)) return false
+    if (!matchesFilter(filter, u.name, u.email, u.role, u.id, u.job_title ?? '')) return false
     if (selectedUnit === '') return true
     if (selectedUnit === '__none__') return !u.org_unit_id
     return u.org_unit_id ? unitSubtreeIDs(org.units, selectedUnit).has(u.org_unit_id) : false
@@ -88,7 +88,7 @@ export default function Users() {
     setEditing(null)
     // The org tree selection seeds the form: filling a branch means every
     // new user lands in that branch by default.
-    setForm({ name: '', email: '', role: 'viewer', active: true, org_unit_id: selectedUnit !== '' && selectedUnit !== '__none__' ? selectedUnit : '', password: '' })
+    setForm({ name: '', email: '', role: 'viewer', active: true, org_unit_id: selectedUnit !== '' && selectedUnit !== '__none__' ? selectedUnit : '', job_title: '', password: '' })
     setShowForm(true)
   }
 
@@ -263,6 +263,7 @@ export default function Users() {
                 						{u.org_unit_id ? <OrgBadge orgUnitID={u.org_unit_id} org={org} /> : (org.units.length > 0 && <Tag type="gray" size="sm">{t('org.unassigned_badge') ?? 'no unit'}</Tag>)}
                 					</div>
                 					{u.email && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{u.email}</p>}
+					{u.job_title && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.15rem' }}>{u.job_title}</p>}
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type={ROLE_COLORS[u.role] || 'gray'} size="sm">{u.role}</Tag>
                     <Tag type={u.active ? 'green' : 'red'} size="sm">{u.active ? (t('users.active') ?? 'active') : (t('users.inactive') ?? 'inactive')}</Tag>
@@ -295,6 +296,7 @@ export default function Users() {
             <Stack gap={3}>
               <TextInput id="user-name" labelText={t('users.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="John Doe" autoFocus />
               <TextInput id="user-email" labelText={t('users.email_label') ?? 'Email'} value={form.email ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, email: e.target.value })} placeholder="john@example.com" />
+              <TextInput id="user-job-title" labelText={t('users.job_title_label') ?? 'Job title'} value={form.job_title ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, job_title: e.target.value })} placeholder={t('users.job_title_placeholder') ?? 'QA engineer, разработчик — the group address for asks'} helperText={t('users.job_title_helper') ?? 'The natural way to address a group: ask the agent to invite every QA engineer or notify all developers.'} />
               <Select id="user-role" labelText={t('users.role_label') ?? 'Role'} value={form.role ?? 'viewer'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, role: e.target.value })}>
                 <SelectItem value="viewer" text={t('users.role_viewer') ?? 'Viewer (read-only)'} />
                 <SelectItem value="operator" text={t('users.role_operator') ?? 'Operator (run + reconcile)'} />

@@ -7041,6 +7041,10 @@ func main() {
 		if req.OrgUnitID != nil {
 			orgUnitID = *req.OrgUnitID
 		}
+		jobTitle := ""
+		if req.JobTitle != nil {
+			jobTitle = strings.TrimSpace(*req.JobTitle)
+		}
 		// Optional password login: hashed before the insert, never stored raw.
 		passwordHash := ""
 		if req.Password != nil && *req.Password != "" {
@@ -7055,7 +7059,7 @@ func main() {
 			}
 			passwordHash = hash
 		}
-		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, PasswordHash: passwordHash, OrgUnitID: orgUnitID, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
+		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, PasswordHash: passwordHash, OrgUnitID: orgUnitID, JobTitle: jobTitle, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
 		if err := ws.CreateUser(r.Context(), user); err != nil {
 			writeError(w, 500, err)
 			return
@@ -7090,7 +7094,13 @@ func main() {
 		if req.OrgUnitID != nil {
 			orgUnitID = *req.OrgUnitID
 		}
-		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, OrgUnitID: orgUnitID, Active: active, Channels: existing.Channels, PreferredChannel: existing.PreferredChannel}
+		// nil job_title keeps the current one: a role/name edit must not wipe
+		// the group address.
+		jobTitle := existing.JobTitle
+		if req.JobTitle != nil {
+			jobTitle = strings.TrimSpace(*req.JobTitle)
+		}
+		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, OrgUnitID: orgUnitID, JobTitle: jobTitle, Active: active, Channels: existing.Channels, PreferredChannel: existing.PreferredChannel}
 		if err := ws.UpdateUser(r.Context(), user); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)

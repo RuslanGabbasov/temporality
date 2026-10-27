@@ -1347,9 +1347,9 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 		u.Sourced = "local"
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_user (id, name, email, role, token, password_hash, org_unit_id, active, channels, preferred_channel, external_issuer, external_id, sourced, last_login_at, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-		u.ID, u.Name, u.Email, u.Role, u.Token, u.PasswordHash, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.ExternalIssuer, u.ExternalID, u.Sourced, nullTime(u.LastLoginAt), u.CreatedAt, u.UpdatedAt)
+		`INSERT INTO workspace_user (id, name, email, role, token, password_hash, org_unit_id, job_title, active, channels, preferred_channel, external_issuer, external_id, sourced, last_login_at, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		u.ID, u.Name, u.Email, u.Role, u.Token, u.PasswordHash, nullString(u.OrgUnitID), u.JobTitle, u.Active, channels, u.PreferredChannel, u.ExternalIssuer, u.ExternalID, u.Sourced, nullTime(u.LastLoginAt), u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
@@ -1372,9 +1372,9 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 	var channels []byte
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, email, role, COALESCE(token, ''), (password_hash <> '') AS has_password, org_unit_id, active, channels, preferred_channel, created_at, updated_at
+		`SELECT id, name, email, role, COALESCE(token, ''), (password_hash <> '') AS has_password, org_unit_id, job_title, active, channels, preferred_channel, created_at, updated_at
 		 FROM workspace_user WHERE id = $1`, id).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &u.HasPassword, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &u.HasPassword, &orgUnitID, &u.JobTitle, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -1389,7 +1389,7 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 // ListUsers returns users for API responses: the token value is never
 // included, only HasToken reporting whether one exists.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, (token <> '') AS has_token, (password_hash <> '') AS has_password, org_unit_id, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, (token <> '') AS has_token, (password_hash <> '') AS has_password, org_unit_id, job_title, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -1399,7 +1399,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 		var u User
 		var channels []byte
 		var orgUnitID *string
-		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.HasToken, &u.HasPassword, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.HasToken, &u.HasPassword, &orgUnitID, &u.JobTitle, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		u.OrgUnitID = derefPtr(orgUnitID)
@@ -1413,7 +1413,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 // gate: it returns the raw bearer tokens. Its results must never be
 // serialized to API clients.
 func (s *Store) ListUsersWithTokens(ctx context.Context) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, token, org_unit_id, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, token, org_unit_id, job_title, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -1423,7 +1423,7 @@ func (s *Store) ListUsersWithTokens(ctx context.Context) ([]User, error) {
 		var u User
 		var channels []byte
 		var orgUnitID *string
-		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &orgUnitID, &u.JobTitle, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		u.OrgUnitID = derefPtr(orgUnitID)
@@ -1489,8 +1489,8 @@ func (s *Store) UpdateUser(ctx context.Context, u User) error {
 	u.UpdatedAt = time.Now().UTC()
 	channels, _ := json.Marshal(channelList(u.Channels))
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_user SET name=$2, email=$3, role=$4, org_unit_id=$5, active=$6, channels=$7, preferred_channel=$8, updated_at=$9 WHERE id=$1`,
-		u.ID, u.Name, u.Email, u.Role, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.UpdatedAt)
+		`UPDATE workspace_user SET name=$2, email=$3, role=$4, org_unit_id=$5, job_title=$6, active=$7, channels=$8, preferred_channel=$9, updated_at=$10 WHERE id=$1`,
+		u.ID, u.Name, u.Email, u.Role, nullString(u.OrgUnitID), u.JobTitle, u.Active, channels, u.PreferredChannel, u.UpdatedAt)
 	if err != nil {
 		return err
 	}
