@@ -540,8 +540,8 @@ func (a *Activities) browserClick(ctx context.Context, request ToolRequest) (Too
 	if _, err := a.browserEngine().call(ctx, "Input.dispatchMouseEvent", release, tab.sessionID); err != nil {
 		return ToolResult{}, fmt.Errorf("click release: %w", err)
 	}
-	// Give inline handlers / SPA routers a beat, then report where we landed.
-	time.Sleep(300 * time.Millisecond)
+	// Report where we landed: browserWaitReady polls until the load settles
+	// (a click may trigger navigation or only inline handlers).
 	title, href := a.browserWaitReady(ctx, tab)
 	return ToolResult{Content: fmt.Sprintf("clicked %s; page: %s (%s)", selector, href, title)}, nil
 }
@@ -597,17 +597,18 @@ func (a *Activities) browserContent(ctx context.Context, request ToolRequest) (T
 	if strings.TrimSpace(html) == "" {
 		return ToolResult{}, temporal.NewNonRetryableApplicationError("no rendered content — open a page first", "NoContent", nil)
 	}
-	title, markdown, extractErr := extractHTML([]byte(html), currentTabURL(a, tab))
+	pageURL := currentTabURL(ctx, a, tab)
+	title, markdown, extractErr := extractHTML([]byte(html), pageURL)
 	if extractErr != nil {
 		return ToolResult{Content: truncateForModel(html, browserEvalCap)}, nil
 	}
-	return ToolResult{Content: fmt.Sprintf("title: %s\nurl: %s\n\n%s", title, currentTabURL(a, tab), truncateForModel(string(markdown), browserEvalCap))}, nil
+	return ToolResult{Content: fmt.Sprintf("title: %s\nurl: %s\n\n%s", title, pageURL, truncateForModel(string(markdown), browserEvalCap))}, nil
 }
 
 // currentTabURL reports the tab's location for content headers and link
 // rewriting; empty when evaluation fails (about:blank never got opened).
-func currentTabURL(a *Activities, tab *browserTab) string {
-	return a.browserEvalString(context.Background(), tab, "location.href")
+func currentTabURL(ctx context.Context, a *Activities, tab *browserTab) string {
+	return a.browserEvalString(ctx, tab, "location.href")
 }
 
 func (a *Activities) browserScreenshot(ctx context.Context, request ToolRequest) (ToolResult, error) {

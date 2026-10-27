@@ -233,19 +233,9 @@ func (a *Activities) handleFetchImage(ctx context.Context, request ToolRequest) 
 		return ToolResult{}, temporal.NewNonRetryableApplicationError("url must be an absolute http(s) URL", "InvalidToolArguments", nil)
 	}
 
-	transport := webTransport()
+	client := webHTTPClient
 	if a.WebFetchAllowPrivate {
-		transport = &http.Transport{}
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   webFetchTimeout,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("fetch_image: too many redirects")
-			}
-			return nil
-		},
+		client = webHTTPPrivateClient
 	}
 	ctx, cancel := context.WithTimeout(ctx, webFetchTimeout)
 	defer cancel()

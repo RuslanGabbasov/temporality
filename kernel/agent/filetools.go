@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -244,17 +245,26 @@ func (a *Activities) handleReadFile(request ToolRequest) (ToolResult, error) {
 	if info.IsDir() {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q is a directory; list it with run_command instead", cleanPath(pathArg)))
 	}
-	data, err := os.ReadFile(abs)
+	file, err := os.Open(abs)
 	if err != nil {
 		return ToolResult{}, fileToolFailure(fmt.Errorf("read %q: %w", cleanPath(pathArg), err))
 	}
+	defer file.Close()
+	// Stream through a limiting reader: the extra byte is the truncation
+	// signal, so an oversized file never loads into memory past the cap.
+	data, err := io.ReadAll(io.LimitReader(file, maxFileReadBytes+1))
+	if err != nil {
+		return ToolResult{}, fileToolFailure(fmt.Errorf("read %q: %w", cleanPath(pathArg), err))
+	}
+	// Binary detection only needs the leading sample — isProbablyBinary scans
+	// at most the first ~8 KiB, never the whole payload.
 	if isProbablyBinary(data) {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q looks like a binary file; read_file only supports text", cleanPath(pathArg)))
 	}
 	content := string(data)
 	if len(data) > maxFileReadBytes {
 		content = string(data[:maxFileReadBytes]) +
-			fmt.Sprintf("\n[truncated by Agent Kernel: file is %d bytes, returned the first %d]", len(data), maxFileReadBytes)
+			fmt.Sprintf("\n[truncated by Agent Kernel: file is %d bytes, returned the first %d]", info.Size(), maxFileReadBytes)
 	}
 	return ToolResult{Content: content}, nil
 }
