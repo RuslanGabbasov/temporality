@@ -56,6 +56,17 @@ func (telegramDriver) SendText(ctx context.Context, client *http.Client, setting
 	}
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
 	payload := map[string]any{"chat_id": chatID, "text": msg.Body, "disable_web_page_preview": true}
+	// A schema ask carries the hosted form (docs/interactive-HITL.md §6.2):
+	// one inline URL button under the message — the form opens in the
+	// browser, no bot-side callbacks needed. The plain URL also stays in the
+	// body for clients that render keyboards poorly.
+	if msg.FormURL != "" {
+		payload["reply_markup"] = map[string]any{
+			"inline_keyboard": [][]map[string]string{{
+				{"text": ChannelText(msg.Lang, "ask_form_button"), "url": msg.FormURL},
+			}},
+		}
+	}
 	body, status, err := postJSON(ctx, client, http.MethodPost, endpoint, payload, nil)
 	if err != nil {
 		return err
