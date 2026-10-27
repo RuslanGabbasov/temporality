@@ -2580,6 +2580,70 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"versions": versions})
 	})
+	// Rollback to a previous definition snapshot (docs/evaluable-agent.md §14):
+	// the snapshot's definition and purpose come back as a NEW version —
+	// history is append-only, so a rollback is itself auditable and revertible.
+	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/versions/{version}/rollback", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		agentID := r.PathValue("agentID")
+		version, err := strconv.Atoi(r.PathValue("version"))
+		if err != nil || version <= 0 {
+			writeError(w, 400, errors.New("invalid version"))
+			return
+		}
+		a, err := ws.GetAgent(r.Context(), agentID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		if version == a.DefinitionVersion {
+			writeError(w, 409, errors.New("agent is already on this version"))
+			return
+		}
+		snapshot, err := ws.GetAgentVersion(r.Context(), agentID, version)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("version snapshot not found"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		definition := snapshot.Definition
+		next := a
+		next.Description = snapshot.Description
+		next.Definition = &definition
+		if agentSemanticsChanged(a, next) {
+			next.DefinitionVersion++
+		}
+		newSnapshot := agentVersionSnapshot(next, requestSubject(r)+" (rollback to v"+strconv.Itoa(version)+")", "rollback", "")
+		if err := ws.InsertAgentVersion(r.Context(), newSnapshot); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.UpdateAgent(r.Context(), next); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestSubject(r), workspace.AuditAgentRollback, "agent", agentID, map[string]any{
+			"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion, "rolled_back_to": version,
+		})
+		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.rollback", a, workspace.AgentProposal{
+			AgentID: agentID, BaseVersion: a.DefinitionVersion,
+			Description: next.Description, Definition: definition,
+		}, actorFromRequest(r), map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion, "rolled_back_to": version})
+		writeJSON(w, 200, next)
+	})
 	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/runs", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return

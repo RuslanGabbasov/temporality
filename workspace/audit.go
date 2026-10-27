@@ -78,6 +78,7 @@ const (
 	AuditIntakeCancelled         = "intake.cancelled"
 	AuditEvalGateOverridden      = "agent.evaluation.gate.overridden"
 	AuditEvalGateSkipped         = "agent.evaluation.gate.skipped"
+	AuditAgentRollback           = "agent.definition.rollback"
 	AuditAuthLoginSucceeded      = "auth.login.succeeded"
 	AuditAuthLoginFailed         = "auth.login.failed"
 	AuditAuthLogout              = "auth.logout"
