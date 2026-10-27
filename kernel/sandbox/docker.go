@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -132,6 +133,14 @@ type Docker struct {
 	ScratchSize string
 	TmpSize     string
 	Network     string // "none" (default) or "bridge" for network access
+
+	// networkMu guards networkChecked: the networks whose presence (and, for
+	// the internal variant, --internal flag) ensureNetwork has already
+	// verified in this process. Keyed by resolved network name; a failed run
+	// forgets its entry so the next command re-verifies — a compose rebuild
+	// can delete the network under a live kernel.
+	networkMu      sync.Mutex
+	networkChecked map[string]bool
 }
 
 func NewFromEnv() (*Docker, error) {
@@ -354,7 +363,8 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 			return Result{}, fmt.Errorf("run scratch directory: %w", err)
 		}
 	}
-	if err := d.ensureNetwork(d.effectiveNetwork(request)); err != nil {
+	network := d.effectiveNetwork(request)
+	if err := d.ensureNetwork(network); err != nil {
 		return Result{}, err
 	}
 	defer func() {
@@ -369,6 +379,11 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 	cmd := exec.CommandContext(ctx, d.Binary, args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
+	if err != nil {
+		// The failed run may be the network's fault (deleted under a live
+		// kernel) — drop the memoized state so the next command re-verifies.
+		d.forgetNetwork(network)
+	}
 	result = Result{Duration: time.Since(started)}
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
@@ -437,10 +452,31 @@ func socketMountArgs(path string, info os.FileInfo) ([]string, error) {
 // «none» and explicit operator overrides pass through untouched. A real
 // failure fails the run loudly: a missing network would otherwise surface
 // as a baffling per-command network error.
+//
+// The docker CLI inspection is memoized per network for the process lifetime:
+// the first network-needing command pays for it, the rest skip straight to
+// `docker run` (every poll-cycle command used to run one — two for the
+// egress network — before even starting). The cache forgets an entry when a
+// run fails (forgetNetwork), so a network deleted under a live kernel is
+// re-created on the next command instead of failing forever.
 func (d *Docker) ensureNetwork(network string) error {
 	if network != SandboxNetworkName && network != SandboxInternalNetworkName {
 		return nil
 	}
+	if d.verifiedNetwork(network) {
+		return nil
+	}
+	if err := d.inspectOrCreateNetwork(network); err != nil {
+		return err
+	}
+	d.rememberNetwork(network)
+	return nil
+}
+
+// inspectOrCreateNetwork is ensureNetwork's uncached body: one `docker
+// network inspect` presence probe (plus the Internal-flag verification for
+// the egress variant — once per process thanks to the memoization above).
+func (d *Docker) inspectOrCreateNetwork(network string) error {
 	inspect := exec.Command(d.Binary, "network", "inspect", network)
 	if err := inspect.Run(); err != nil {
 		// Absent (or broken) — create. The internal variant MUST be --internal:
@@ -474,6 +510,35 @@ func (d *Docker) ensureNetwork(network string) error {
 		}
 	}
 	return nil
+}
+
+// verifiedNetwork reports whether ensureNetwork already materialized this
+// network in the current process.
+func (d *Docker) verifiedNetwork(network string) bool {
+	d.networkMu.Lock()
+	defer d.networkMu.Unlock()
+	return d.networkChecked[network]
+}
+
+func (d *Docker) rememberNetwork(network string) {
+	d.networkMu.Lock()
+	defer d.networkMu.Unlock()
+	if d.networkChecked == nil {
+		d.networkChecked = make(map[string]bool)
+	}
+	d.networkChecked[network] = true
+}
+
+// forgetNetwork drops the memoized state for one network: the run that just
+// failed may have failed because of it (a stack rebuild deletes the network
+// under a live kernel), so the next command must re-inspect instead of
+// failing forever. Over-invalidating — any run error clears the entry — is
+// deliberate and cheap: one extra `docker network inspect` per failed
+// command.
+func (d *Docker) forgetNetwork(network string) {
+	d.networkMu.Lock()
+	defer d.networkMu.Unlock()
+	delete(d.networkChecked, network)
 }
 
 // effectiveNetwork resolves the run's network: the request override, the

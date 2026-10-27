@@ -736,6 +736,36 @@ type StreamEvent struct {
 	Data       json.RawMessage `json:"data"`
 }
 
+// StreamCursor is the full pagination tuple (occurred_at, event_id) marking
+// the last journal event a stream consumer has already seen. Row-wise
+// comparison on both columns keeps pagination deterministic when events share
+// a timestamp — and lets Postgres seek the index instead of re-resolving the
+// timestamp by event_id (a seq-scan of observation_events per poll). The zero
+// cursor starts from the beginning of the run's journal; an event_id-only
+// cursor (legacy callers) still works through the historical subquery path —
+// correct, just slower.
+type StreamCursor struct {
+	OccurredAt time.Time
+	EventID    string
+}
+
+// ParseStreamCursor decodes a client-supplied cursor. The tuple format is
+// "<occurred_at>|<event_id>" (RFC3339Nano, as StreamRunEvents hands out);
+// anything else — notably a bare event id, the historical wire format — is
+// treated as the legacy event_id-only cursor.
+func ParseStreamCursor(raw string) StreamCursor {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return StreamCursor{}
+	}
+	if at, id, ok := strings.Cut(raw, "|"); ok {
+		if parsed, err := time.Parse(time.RFC3339Nano, at); err == nil {
+			return StreamCursor{OccurredAt: parsed, EventID: id}
+		}
+	}
+	return StreamCursor{EventID: raw}
+}
+
 // RunProjectID resolves a run's project from its journal events. Delegated
 // child runs never get a workspace_run row (only API/trigger/intake starts
 // do), so journal-derived project is the universal fallback; ErrNotFound
@@ -802,50 +832,64 @@ func (s *Store) ListStartedRuns(ctx context.Context, limit int) ([]Run, error) {
 }
 
 // StreamRunEvents fetches observation events for a run, optionally starting
-// after a cursor (event_id). Returns events ordered by occurred_at.
-func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCursor string, limit int) ([]StreamEvent, string, error) {
+// after a cursor (the last event already delivered). Returns events ordered
+// by occurred_at plus the cursor to continue from — zero when the run has no
+// (further) events.
+func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID string, after StreamCursor, limit int) ([]StreamEvent, StreamCursor, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	var rows pgx.Rows
-	var err error
-	if afterCursor == "" {
-		rows, err = s.pool.Query(ctx,
-			`SELECT event_id, type, occurred_at, data FROM observation_events
-			 WHERE project_id = $1 AND run_id = $2
-			 ORDER BY occurred_at, event_id LIMIT $3`, projectID, runID, limit)
-	} else {
-		// Row-wise (occurred_at, event_id) comparison keeps pagination
-		// deterministic when events share a timestamp — a plain occurred_at >
-		// bound silently skipped same-second events at batch boundaries.
-		rows, err = s.pool.Query(ctx,
-			`SELECT event_id, type, occurred_at, data FROM observation_events
-			 WHERE project_id = $1 AND run_id = $2
-			 AND (occurred_at, event_id) > ((SELECT occurred_at FROM observation_events WHERE event_id = $3 LIMIT 1), $3)
-			 ORDER BY occurred_at, event_id LIMIT $4`, projectID, runID, afterCursor, limit)
-	}
+	pageSQL, args := streamRunEventsQuery(projectID, runID, after, limit)
+	rows, err := s.pool.Query(ctx, pageSQL, args...)
 	if err != nil {
-		return nil, "", err
+		return nil, StreamCursor{}, err
 	}
 	defer rows.Close()
 	var events []StreamEvent
-	var lastID string
+	var cursor StreamCursor
 	for rows.Next() {
 		var ev StreamEvent
 		var at time.Time
 		if err := rows.Scan(&ev.EventID, &ev.Type, &at, &ev.Data); err != nil {
-			return nil, "", err
+			return nil, StreamCursor{}, err
 		}
 		if ev.Data == nil {
 			ev.Data = json.RawMessage("{}")
 		}
-		_ = at
-		// Use event_id as cursor instead of timestamp to avoid precision issues.
-		lastID = ev.EventID
+		cursor = StreamCursor{OccurredAt: at, EventID: ev.EventID}
 		ev.OccurredAt = at.UTC().Format(time.RFC3339Nano)
 		events = append(events, ev)
 	}
-	return events, lastID, rows.Err()
+	return events, cursor, rows.Err()
+}
+
+// streamRunEventsQuery builds the page query for a run's journal. Three
+// cursor shapes:
+//   - zero cursor: the whole journal from the start;
+//   - event_id only (legacy): the historical subquery resolving the cursor
+//     row's occurred_at first — correct, but the subquery probes
+//     observation_events by event_id alone on every poll;
+//   - timestamp present (full tuple, or a partial one with an empty id —
+//     event ids are never empty, so (ts, ”) positions after the whole
+//     timestamp): row-wise (occurred_at, event_id) comparison — an index
+//     seek, no probe.
+func streamRunEventsQuery(projectID, runID string, after StreamCursor, limit int) (string, []any) {
+	switch {
+	case after.EventID == "" && after.OccurredAt.IsZero():
+		return `SELECT event_id, type, occurred_at, data FROM observation_events
+			 WHERE project_id = $1 AND run_id = $2
+			 ORDER BY occurred_at, event_id LIMIT $3`, []any{projectID, runID, limit}
+	case after.OccurredAt.IsZero():
+		return `SELECT event_id, type, occurred_at, data FROM observation_events
+			 WHERE project_id = $1 AND run_id = $2
+			 AND (occurred_at, event_id) > ((SELECT occurred_at FROM observation_events WHERE event_id = $3 LIMIT 1), $3)
+			 ORDER BY occurred_at, event_id LIMIT $4`, []any{projectID, runID, after.EventID, limit}
+	default:
+		return `SELECT event_id, type, occurred_at, data FROM observation_events
+		 WHERE project_id = $1 AND run_id = $2
+		 AND (occurred_at, event_id) > ($3, $4)
+		 ORDER BY occurred_at, event_id LIMIT $5`, []any{projectID, runID, after.OccurredAt, after.EventID, limit}
+	}
 }
 
 // StreamRunEventsTail returns the most recent limit events of a run in
@@ -854,7 +898,7 @@ func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCurs
 // recent activity and — for a run that finished while the client was away —
 // its terminal event) without replaying the entire journal: a long run's full
 // replay storms the chat with hundreds of stale updates before it catches up.
-func (s *Store) StreamRunEventsTail(ctx context.Context, projectID, runID string, limit int) ([]StreamEvent, string, error) {
+func (s *Store) StreamRunEventsTail(ctx context.Context, projectID, runID string, limit int) ([]StreamEvent, StreamCursor, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -863,32 +907,36 @@ func (s *Store) StreamRunEventsTail(ctx context.Context, projectID, runID string
 		 WHERE project_id = $1 AND run_id = $2
 		 ORDER BY occurred_at DESC, event_id DESC LIMIT $3`, projectID, runID, limit)
 	if err != nil {
-		return nil, "", err
+		return nil, StreamCursor{}, err
 	}
 	defer rows.Close()
 	var events []StreamEvent
+	var cursor StreamCursor
 	for rows.Next() {
 		var ev StreamEvent
 		var at time.Time
 		if err := rows.Scan(&ev.EventID, &ev.Type, &at, &ev.Data); err != nil {
-			return nil, "", err
+			return nil, StreamCursor{}, err
 		}
 		if ev.Data == nil {
 			ev.Data = json.RawMessage("{}")
 		}
+		cursor = StreamCursor{OccurredAt: at, EventID: ev.EventID}
 		ev.OccurredAt = at.UTC().Format(time.RFC3339Nano)
 		events = append(events, ev)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, "", err
+		return nil, StreamCursor{}, err
 	}
 	if len(events) == 0 {
-		return nil, "", nil
+		return nil, StreamCursor{}, nil
 	}
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
 	}
-	return events, events[len(events)-1].EventID, nil
+	// Rows scanned DESC: the last scanned row is the tail's chronological end,
+	// the position a live loop resumes from.
+	return events, cursor, nil
 }
 
 // RunTerminalStatuses maps run ids to their latest terminal journal event

@@ -527,3 +527,127 @@ func mustStat(t *testing.T, path string) os.FileInfo {
 	}
 	return info
 }
+
+// ensureNetwork used to shell out to `docker network inspect` before every
+// single run. The memoization must keep the verification one-time per network
+// per process — while a failed run forgets its entry so the next command
+// re-verifies (a stack rebuild deletes the network under a live kernel).
+func TestEnsureNetworkMemoizesInspectionAndResetsOnRunError(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "repo")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	failFile := filepath.Join(t.TempDir(), "fail-next-run")
+	binary := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SANDBOX_TEST_LOG\"\ncase \"$1\" in\nnetwork) exit 0;;\nrun) if [ -f \"$SANDBOX_FAIL_FILE\" ]; then echo 'Error response from daemon: network temporality-sandbox not found'; exit 125; fi; exit 0;;\nrm) exit 0;;\nesac\nexit 0\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SANDBOX_TEST_LOG", logPath)
+	t.Setenv("SANDBOX_FAIL_FILE", failFile)
+	runner := &Docker{Root: root, Image: "sandbox@sha256:" + strings.Repeat("a", 64), Binary: binary, Memory: "1g", CPUs: "2", PIDs: 128, UID: os.Getuid(), GID: os.Getgid()}
+	request := Request{Workspace: workspace, Command: []string{"printf", "ok"}, Network: "bridge"}
+	inspectCount := func() int {
+		t.Helper()
+		raw, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.HasPrefix(line, "network inspect ") {
+				count++
+			}
+		}
+		return count
+	}
+	runCount := func() int {
+		raw, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.HasPrefix(line, "run ") {
+				count++
+			}
+		}
+		return count
+	}
+	// First command of the process life inspects; the second reuses the verdict.
+	for i := 0; i < 2; i++ {
+		if _, err := runner.Execute(context.Background(), request); err != nil {
+			t.Fatalf("execute #%d: %v", i+1, err)
+		}
+	}
+	if got := inspectCount(); got != 1 {
+		t.Fatalf("network inspect calls after two runs = %d, want 1 (memoized)", got)
+	}
+	// A failed run (the daemon lost the network — exit 125) forgets the cache
+	// entry: the next command must re-inspect and succeed again.
+	if err := os.WriteFile(failFile, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Execute(context.Background(), request)
+	if err != nil {
+		t.Fatalf("execute with daemon failure must surface as a failed command, not an error: %v", err)
+	}
+	if result.ExitCode != 125 {
+		t.Fatalf("daemon failure exit code = %d, want 125", result.ExitCode)
+	}
+	if got := inspectCount(); got != 1 {
+		t.Fatalf("failed run must not re-inspect within the same Execute, got %d", got)
+	}
+	if err := os.Remove(failFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Execute(context.Background(), request); err != nil {
+		t.Fatalf("execute after reset: %v", err)
+	}
+	if got := inspectCount(); got != 2 {
+		t.Fatalf("network inspect calls after run failure = %d, want 2 (cache reset)", got)
+	}
+	if got := runCount(); got != 4 {
+		t.Fatalf("docker run invocations = %d, want 4", got)
+	}
+}
+
+// The egress variant pays a second inspection (the Internal-flag check) on
+// its first ensureNetwork — also exactly once per process.
+func TestEnsureNetworkMemoizesInternalVerification(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "repo")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	binary := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SANDBOX_TEST_LOG\"\ncase \"$1\" in\nnetwork) if [ \"$4\" = \"--format\" ]; then echo true; fi; exit 0;;\nrun) exit 0;;\nrm) exit 0;;\nesac\nexit 0\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SANDBOX_TEST_LOG", logPath)
+	runner := &Docker{Root: root, Image: "sandbox@sha256:" + strings.Repeat("a", 64), Binary: binary, Memory: "1g", CPUs: "2", PIDs: 128, UID: os.Getuid(), GID: os.Getgid()}
+	request := Request{Workspace: workspace, Command: []string{"printf", "ok"}, Network: SandboxInternalNetworkName}
+	for i := 0; i < 2; i++ {
+		if _, err := runner.Execute(context.Background(), request); err != nil {
+			t.Fatalf("execute #%d: %v", i+1, err)
+		}
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspects := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "network inspect ") {
+			inspects++
+		}
+	}
+	// Presence probe + Internal verification on the first run, nothing after.
+	if inspects != 2 {
+		t.Fatalf("network inspect calls after two egress runs = %d, want 2 (memoized)", inspects)
+	}
+}
