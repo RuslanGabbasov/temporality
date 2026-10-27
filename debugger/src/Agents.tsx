@@ -55,6 +55,55 @@ import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
+/** Override panel for a gated-apply refusal: the operator read the proposal
+ * and decides the gate's objection (empty suite, stale golden cases) is not a
+ * blocker. The justification is mandatory — the audit trail and the
+ * override-rate metric exist to keep this path honest, not to shame anyone. */
+function OverrideApplyPanel({ busy, cause, onCancel, onOverride }: {
+  busy: boolean
+  cause: string
+  onCancel: () => void
+  onOverride: (justification: string) => void
+}) {
+  const t = useT()
+  const [justification, setJustification] = useState('')
+  return (
+    <div style={{ marginBottom: '0.75rem', border: '1px solid var(--tm-amber)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
+      <div style={{ fontSize: '0.8rem', marginBottom: '0.35rem' }}>
+        {t('agents.gate_override_title') ?? 'Apply with override?'}
+      </div>
+      <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', margin: '0 0 0.4rem' }}>
+        {t('agents.gate_override_body', { cause }) ?? `The gate objection (${cause}) does not have to block a human decision. Write why you are overriding — the justification is recorded in the audit log.`}
+      </p>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+        <TextArea
+          id="gate-override-justification"
+          labelText=""
+          hideLabel
+          rows={2}
+          value={justification}
+          disabled={busy}
+          placeholder={t('agents.gate_override_placeholder') ?? 'Why is this proposal safe to apply without a green evaluation?'}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setJustification(e.target.value)}
+          style={{ flex: 1, resize: 'vertical' }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem' }}>
+        <Button
+          size="sm"
+          disabled={busy || justification.trim().length < 4}
+          onClick={() => onOverride(justification.trim())}
+        >
+          {t('agents.gate_override_action') ?? 'Apply with override (audited)'}
+        </Button>
+        <Button size="sm" kind="secondary" disabled={busy} onClick={onCancel}>
+          {t('action.cancel') ?? 'Cancel'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 const CAP_KEYS = ['read_files', 'modify_files', 'run_commands', 'network', 'skills', 'knowledge'] as const
 type CapKey = (typeof CAP_KEYS)[number]
 
@@ -222,6 +271,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // Offered only when the gate cannot decide at all (suite_not_ready): the
   // audited gate:false escape hatch, after an explicit confirmation.
   const [skipGateProposal, setSkipGateProposal] = useState<AgentProposal | null>(null)
+  // Override path: a red or unready gate (empty suite, stale golden cases, no
+  // judge) does not deadlock a human decision — the operator may push the
+  // proposal through with a written justification, which the audit trail and
+  // the override-rate metric keep visible.
+  const [overrideProposal, setOverrideProposal] = useState<AgentProposal | null>(null)
+  const [overrideCause, setOverrideCause] = useState<string>('')
   const selectedIdRef = useRef(selectedId)
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
   const polledRunsRef = useRef<Set<number>>(new Set())
@@ -653,6 +708,20 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // Human-readable story for a gated-apply refusal: the server answers with
   // machine codes (gate_blocked, suite_stale, …) and details; the locale owns
   // the framing, the details ride in as params.
+  // Rollback: bring a previous definition snapshot back as a NEW version
+  // (history is append-only; the rollback itself is audited and revertible).
+  const rollbackToVersion = async (version: number) => {
+    if (!selectedId) return
+    setProposalBusy(true); setError('')
+    try {
+      await workspaceApi.rollbackAgentVersion(selectedId, version)
+      setProposalNotice({ kind: 'success', text: t('agents.rollback_done', { version: String(version) }) ?? `Rolled back to v${version} as a new version.` })
+      await refreshEvolution(selectedId)
+      await load()
+    } catch (f) { setError(message(f)) }
+    finally { setProposalBusy(false) }
+  }
+
   const applyGateErrorText = (err: unknown): string => {
     if (err instanceof ApiError) {
       const view = applyGateErrorView(err)
@@ -723,7 +792,18 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       setProposalNotice({ kind: 'error', text })
       // The gate cannot decide at all: offer the audited gate:false path so an
       // agent without a ready suite can still evolve — never silently.
-      if (f instanceof ApiError && f.code === 'suite_not_ready') setSkipGateProposal(proposal)
+      if (f instanceof ApiError && f.code === 'suite_not_ready') {
+        setSkipGateProposal(proposal)
+        // A red/unready gate also accepts an OVERRIDE with a written
+        // justification — the human already read the proposal; their verdict
+        // plus the audit trail is the release decision. surface both paths.
+        setOverrideProposal(proposal)
+        setOverrideCause((f.body as Record<string, unknown> | undefined)?.cause ? String((f.body as Record<string, unknown>).cause) : 'suite_not_ready')
+      }
+      if (f instanceof ApiError && f.code === 'suite_stale') {
+        setOverrideProposal(proposal)
+        setOverrideCause('suite_stale')
+      }
     } finally { setProposalBusy(false) }
   }
 
@@ -1088,9 +1168,23 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                         kind={proposalNotice.kind === 'error' ? 'error' : proposalNotice.kind === 'success' ? 'success' : 'info'}
                         title={proposalNotice.kind === 'error' ? (t('action.error') ?? 'Error') : proposalNotice.kind === 'success' ? (t('agents.proposal_applied_ok') ?? 'Proposal applied.') : (t('agents.gate_title') ?? 'Eval gate')}
                         subtitle={proposalNotice.text}
-                        onClose={() => { setProposalNotice(null); setSkipGateProposal(null) }}
+                        onClose={() => { setProposalNotice(null); setSkipGateProposal(null); setOverrideProposal(null) }}
                         lowContrast
                         style={{ marginBottom: '0.75rem' }}
+                      />
+                    )}
+                    {overrideProposal && (
+                      <OverrideApplyPanel
+                        busy={proposalBusy}
+                        cause={overrideCause}
+                        onCancel={() => { setOverrideProposal(null); setOverrideCause('') }}
+                        onOverride={(justification) => {
+                          void (async () => {
+                            await applyProposal(overrideProposal, { override: true, justification })
+                            setOverrideProposal(null)
+                            setOverrideCause('')
+                          })()
+                        }}
                       />
                     )}
                     {skipGateProposal && (
@@ -1233,6 +1327,26 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                           {stats && <> · {t('agents.runs_completed') ?? 'completed'}: {stats.completed} · {t('agents.runs_failed') ?? 'failed'}: {stats.failed}</>}
                           {stats?.avgTurns != null && <> · {t('agents.avg_turns') ?? 'avg turns'}: {stats.avgTurns.toFixed(1)}</>}
                         </p>
+                        {!isCurrent && (
+                          <div style={{ marginTop: '0.4rem' }}>
+                            <Button
+                              size="sm"
+                              kind="secondary"
+                              disabled={proposalBusy}
+                              onClick={() => {
+                                void (async () => {
+                                  if (await confirmDialog({
+                                    title: t('agents.rollback_title', { version: String(v.version) }) ?? `Roll back to v${v.version}?`,
+                                    body: t('agents.rollback_body', { version: String(v.version) }) ?? 'The snapshot\'s definition and purpose return as a NEW version — history stays append-only and the rollback itself is revertible.',
+                                    confirmLabel: t('agents.rollback_action') ?? 'Roll back',
+                                  })) void rollbackToVersion(v.version)
+                                })()
+                              }}
+                            >
+                              {t('agents.rollback_action') ?? 'Roll back to this version'}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -1727,7 +1841,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                         value={(form.egress_allowlist ?? []).join('\n')}
                         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, egress_allowlist: e.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
                         rows={3}
-                        helperText={t('agents.egress_allowlist_hint') ?? 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port. Your local network stays closed unless you list an address from it.'}
+                        placeholder={t('agents.egress_allowlist_hint') ?? 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port.'}
                       />
                     </div>
                   )}

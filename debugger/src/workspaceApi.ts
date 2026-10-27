@@ -1159,6 +1159,8 @@ export const workspaceApi = {
     request<{ deleted: boolean }>(`/v1/workspace/agents/${id}`, { method: 'DELETE' }),
   listAgentVersions: (id: string) =>
     request<{ versions: AgentVersion[] }>(`/v1/workspace/agents/${id}/versions`),
+  rollbackAgentVersion: (id: string, version: number) =>
+    request<Agent>(`/v1/workspace/agents/${id}/versions/${version}/rollback`, { method: 'POST' }),
   listAgentRuns: (id: string) =>
     request<{ runs: Run[] }>(`/v1/workspace/agents/${id}/runs`),
   getAgentPrompt: (id: string) =>
@@ -1217,9 +1219,18 @@ export const workspaceApi = {
   // Gated apply (docs/agent-quality-loop.md §7.1): the answer is one of two
   // shapes — the applied proposal (200) or the accepted-for-evaluation gate
   // run (202) that a repeat apply waits on. `gate:false` skips the gate and is
-  // audited server-side; override paths stay API-only for now.
-  applyAgentProposal: async (id: string, proposalId: number, opts?: { gate?: boolean }): Promise<ApplyProposalResult> => {
-    const init = opts?.gate === false ? { method: 'POST' as const, body: JSON.stringify({ gate: false }) } : { method: 'POST' as const }
+  // audited server-side; `override` + justification pushes an agent-authored
+  // change through a red/unready gate — the override lands in the audit trail
+  // with the justification, so the bypass is never silent.
+  applyAgentProposal: async (id: string, proposalId: number, opts?: { gate?: boolean; override?: boolean; justification?: string }): Promise<ApplyProposalResult> => {
+    const body: Record<string, unknown> = {}
+    if (opts?.gate === false) body.gate = false
+    if (opts?.override) {
+      body.override = true
+      body.justification = opts.justification ?? ''
+    }
+    const hasBody = Object.keys(body).length > 0
+    const init = hasBody ? { method: 'POST' as const, body: JSON.stringify(body) } : { method: 'POST' as const }
     const result = await request<any>(`/v1/workspace/agents/${id}/proposals/${proposalId}/apply`, init)
     if (result && typeof result.evaluation_run_id === 'number' && !result.proposal) {
       return { kind: 'evaluating', evaluation_run_id: result.evaluation_run_id, status: result.status ?? 'running' }
