@@ -152,10 +152,10 @@ func scripted(tools, askAfter int) (toolName, args, content string) {
 	switch {
 	case tools == 0:
 		toolCalls.Add(1)
-		return "run_command", fmt.Sprintf(`{"command":"%s 1"}`, *toolCommand), ""
+		return "run_command", fmt.Sprintf(`{"command":["sh","-c","%s 1"]}`, *toolCommand), ""
 	case tools == 1:
 		toolCalls.Add(1)
-		return "run_command", fmt.Sprintf(`{"command":"%s 2"}`, *toolCommand), ""
+		return "run_command", fmt.Sprintf(`{"command":["sh","-c","%s 2"]}`, *toolCommand), ""
 	default:
 		finalAnswers.Add(1)
 		return "", "", "Load run complete: the scripted coding loop finished successfully."
