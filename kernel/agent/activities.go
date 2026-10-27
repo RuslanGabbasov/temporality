@@ -2098,7 +2098,11 @@ func (a *Activities) handleAgentPropose(ctx context.Context, request ToolRequest
 		return ToolResult{Content: "error: problem and change are required"}, nil
 	}
 	effect, _ := request.Arguments["effect"].(string)
-	description, _ := request.Arguments["description"].(string)
+	// Deliberately no "description" passthrough: the old tool contract let the
+	// model replace the agent's full purpose with a one-line change summary,
+	// and an applied proposal wiped the responsibility text (2026-10-26).
+	// Purpose changes are a human edit in the Agents UI; proposals change
+	// constraints and completion only — additively, defaulting to current.
 
 	// Verify the target agent so the failure names the real problem.
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/agents/%s", a.WorkspaceURL, agentID), nil)
@@ -2133,11 +2137,8 @@ func (a *Activities) handleAgentPropose(ctx context.Context, request ToolRequest
 		"evidence": evidence,
 		"author":   author,
 	}
-	if description != "" {
-		payload["description"] = description
-	}
 	// The server copies capabilities from the current definition; the proposal
-	// may only restate constraints, completion and the purpose text.
+	// may only restate constraints, completion — never the purpose text.
 	definition := map[string]any{}
 	if constraints := stringList(request.Arguments["constraints"]); constraints != nil {
 		definition["constraints"] = constraints

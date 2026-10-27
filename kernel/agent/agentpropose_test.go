@@ -96,6 +96,37 @@ func TestAgentProposeLandsPendingWithProvenance(t *testing.T) {
 	}
 }
 
+// The tool never forwards a purpose text: a model-supplied one-liner used to
+// replace the agent's full responsibility on apply (2026-10-26). Purpose
+// changes are a human edit in the Agents UI.
+func TestAgentProposeNeverForwardsDescription(t *testing.T) {
+	server, recorder := agentProposeWorkspaceStub(t, agentProposeTarget)
+	activities := &Activities{
+		HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal",
+	}
+
+	_, err := activities.RunTool(context.Background(), ToolRequest{
+		RunID: "run-9", OperationID: "run-9/turn/03/call-5", Project: "demo",
+		Name: "agent_propose",
+		Arguments: map[string]any{
+			"agent_id":    "qa",
+			"problem":     "keeps declaring done without running the suite",
+			"change":      "require a green test run before declaring done",
+			"effect":      "fewer false completions",
+			"description": "Аддитивное ужесточение правил анализа ТЗ",
+		},
+	})
+	if err != nil {
+		t.Fatalf("agent_propose: %v", err)
+	}
+	recorder.mu.Lock()
+	proposed := recorder.proposed
+	recorder.mu.Unlock()
+	if _, has := proposed["description"]; has {
+		t.Fatalf("description must never ride the proposal payload (got %v)", proposed["description"])
+	}
+}
+
 // The proposed definition may replace constraints and completion only.
 func TestAgentProposeReplacesConstraintsAndCompletion(t *testing.T) {
 	server, recorder := agentProposeWorkspaceStub(t, agentProposeTarget)
