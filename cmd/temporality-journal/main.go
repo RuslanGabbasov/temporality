@@ -51,6 +51,16 @@ func main() {
 		log.Error("migrate journal schema", "error", err)
 		os.Exit(1)
 	}
+	// Retention: TEMPORALITY_JOURNAL_RETENTION_INTERVAL (default 6h, "off"
+	// disables) and TEMPORALITY_JOURNAL_RETENTION_AGE (default 90d, "off"
+	// disables). This process owns the only observation postgres.Store, so the
+	// sweeper here covers the whole installation.
+	if retention := retentionConfigFromEnv(os.Getenv); retention.Enabled {
+		log.Info("observation retention sweeper on", "interval", retention.Interval, "age", retention.Age)
+		runRetentionSweeper(log, store, retention)
+	} else {
+		log.Info("observation retention sweeper off", retentionIntervalEnv, os.Getenv(retentionIntervalEnv), retentionAgeEnv, os.Getenv(retentionAgeEnv))
+	}
 
 	address := os.Getenv("HTTP_ADDR")
 	if address == "" {

@@ -25,6 +25,20 @@ var observationEventsSchema string
 //go:embed migrations/observation_events_indexes.up.sql
 var observationEventsIndexes string
 
+//go:embed migrations/observation_events_retention.up.sql
+var observationEventsRetention string
+
+// journalMigrations lists the boot-time migrations in application order. The
+// retention file must come after the baseline: it CREATE OR REPLACEs the
+// trigger function the baseline creates. All are idempotent and re-run on
+// every boot (plain multi-statement Exec — PostgreSQL wraps each file in an
+// implicit transaction).
+var journalMigrations = []string{
+	observationEventsSchema,
+	observationEventsIndexes,
+	observationEventsRetention,
+}
+
 type Store struct{ pool *pgxpool.Pool }
 
 func Open(ctx context.Context, url string) (*Store, error) {
@@ -45,13 +59,82 @@ func (s *Store) Close() { s.pool.Close() }
 // everywhere, so it is safe on databases that already ran the historical
 // FRP migration chain (which created the same table as 000018).
 func (s *Store) Migrate(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, observationEventsSchema); err != nil {
-		return err
+	for i, migration := range journalMigrations {
+		if _, err := s.pool.Exec(ctx, migration); err != nil {
+			return fmt.Errorf("journal migration %d: %w", i, err)
+		}
 	}
-	// Additive index migrations ride their own file so the baseline stays
-	// verbatim; both are idempotent and re-run on every boot.
-	_, err := s.pool.Exec(ctx, observationEventsIndexes)
-	return err
+	return nil
+}
+
+// retentionSweepGUC is the session-scoped custom GUC that marks one connection
+// as the retention sweeper: the append-only trigger
+// (migrations/observation_events_retention.up.sql) permits DELETE only while
+// it reads 'on' on that session. Custom GUCs are settable by any role.
+const retentionSweepGUC = "temporality.retention_sweep"
+
+const (
+	retentionSweepSetSQL   = `SET ` + retentionSweepGUC + ` = 'on'`
+	retentionSweepResetSQL = `RESET ` + retentionSweepGUC
+)
+
+// retentionSweepSQL deletes one bounded batch of expired events. PostgreSQL
+// has no DELETE ... LIMIT, so the batch is picked by ctid first; the outer
+// delete then hits exactly those rows. now() - $1::interval keeps the cutoff
+// on the database clock, so sweepers on skewed app servers cannot over-retain.
+const retentionSweepSQL = `DELETE FROM observation_events
+	WHERE ctid IN (
+		SELECT ctid FROM observation_events
+		WHERE occurred_at <= now() - $1::interval
+		LIMIT $2
+	)`
+
+const retentionSweepDefaultBatchSize = 5000
+
+// RetentionSweep deletes observation events older than olderThan in
+// batchSize chunks and returns the total rows removed. batchSize <= 0 falls
+// back to retentionSweepDefaultBatchSize. While it runs, the GUC
+// temporality.retention_sweep lifts the append-only trigger for this one
+// connection — DELETE only, UPDATE stays rejected. The GUC is RESET before
+// the connection returns to the pool: pgxpool hands the same connection to
+// the next borrower with its session state intact, so a leaked 'on' would
+// poke a permanent hole in the append-only guarantee for ordinary clients.
+func (s *Store) RetentionSweep(ctx context.Context, olderThan time.Duration, batchSize int) (int64, error) {
+	if olderThan <= 0 {
+		return 0, fmt.Errorf("retention sweep: olderThan must be positive, got %s", olderThan)
+	}
+	if batchSize <= 0 {
+		batchSize = retentionSweepDefaultBatchSize
+	}
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return 0, err
+	}
+	// The RESET deliberately runs on a context that survives caller
+	// cancellation: a cancelled sweep must still clear the session before the
+	// connection re-enters the pool.
+	defer func() {
+		_, _ = conn.Exec(context.WithoutCancel(ctx), retentionSweepResetSQL)
+		conn.Release()
+	}()
+	if _, err := conn.Exec(ctx, retentionSweepSetSQL); err != nil {
+		return 0, fmt.Errorf("enable %s: %w", retentionSweepGUC, err)
+	}
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		tag, err := conn.Exec(ctx, retentionSweepSQL, olderThan, batchSize)
+		if err != nil {
+			return total, fmt.Errorf("retention sweep batch: %w", err)
+		}
+		deleted := tag.RowsAffected()
+		total += deleted
+		if deleted == 0 {
+			return total, nil
+		}
+	}
 }
 
 // appendObservationSQL is the single-row insert shared by the one-event and
@@ -78,6 +161,15 @@ func encodeObservationEvent(event observation.Event) (data, evidence []byte, rec
 	return data, evidence, receivedAt, nil
 }
 
+const notifyEventsChangedSQL = `SELECT pg_notify('observation_events_changed', $1)`
+
+// notifyEventsChanged wakes LISTEN/NOTIFY subscribers (the SSE wake path)
+// after a successful append. Best effort by design: a dropped notification
+// costs one 1.5s polling fallback, never an ingest failure.
+func (s *Store) notifyEventsChanged(ctx context.Context, project string) {
+	_, _ = s.pool.Exec(ctx, notifyEventsChangedSQL, project)
+}
+
 func (s *Store) AppendObservation(ctx context.Context, event observation.Event) (bool, error) {
 	if err := event.Validate(); err != nil {
 		return false, err
@@ -95,6 +187,7 @@ func (s *Store) AppendObservation(ctx context.Context, event observation.Event) 
 		return false, err
 	}
 	if result.RowsAffected() == 1 {
+		s.notifyEventsChanged(ctx, event.Context.Project)
 		return true, nil
 	}
 	previous, err := s.GetObservation(ctx, event.Source.ID, event.EventID)
@@ -106,6 +199,22 @@ func (s *Store) AppendObservation(ctx context.Context, event observation.Event) 
 		return false, nil
 	}
 	return false, observation.ErrConflict
+}
+
+// distinctProjects returns the unique, order-stable project ids of a batch:
+// one pg_notify per project wakes exactly the watchers that can see them.
+func distinctProjects(events []observation.Event) []string {
+	seen := make(map[string]struct{}, len(events))
+	projects := make([]string, 0, 1)
+	for _, event := range events {
+		project := event.Context.Project
+		if _, ok := seen[project]; ok {
+			continue
+		}
+		seen[project] = struct{}{}
+		projects = append(projects, project)
+	}
+	return projects
 }
 
 // AppendObservationBatch appends a group of events in one round trip (pgx
@@ -134,6 +243,13 @@ func (s *Store) AppendObservationBatch(ctx context.Context, events []observation
 	if batch.Len() == 0 {
 		return nil
 	}
+	// Wake subscribers after the inserts: one notification per project, even
+	// when the batch itself failed partially — a spurious wake is a harmless
+	// extra poll, and its own error must never mask the insert result.
+	notifyProjects := distinctProjects(events)
+	for _, project := range notifyProjects {
+		batch.Queue(notifyEventsChangedSQL, project)
+	}
 	br := s.pool.SendBatch(ctx, batch)
 	defer br.Close()
 	var firstErr error
@@ -141,6 +257,9 @@ func (s *Store) AppendObservationBatch(ctx context.Context, events []observation
 		if _, err := br.Exec(); err != nil && firstErr == nil {
 			firstErr = err
 		}
+	}
+	for range notifyProjects {
+		_, _ = br.Exec()
 	}
 	return firstErr
 }
