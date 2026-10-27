@@ -30,6 +30,7 @@ const (
 	CaseSkillCandidate         = "skill_candidate"         // C4
 	CaseKnowledgeConflict      = "knowledge_conflict"      // C5
 	CaseBehaviorSuspicion      = "behavior_suspicion"      // behavior guard (docs/agent-behavior-monitoring.md)
+	CaseEvalWarmup             = "eval_warmup"             // warm-start of an agent's eval suite (docs/agent-quality-loop.md §6)
 	CaseVerificationGap        = "verification_gap"        // claimed checks without evidence
 )
 
@@ -654,6 +655,51 @@ type ContractDraft struct {
 // DraftContractProposal words the proposal for one failure cluster: the
 // failing run ids, the failure summaries, and the closed proposal contract
 // (capabilities are never proposable).
+// EvalCaseDraft is one supervisor-generated warm-start case: a representative
+// task for the agent with the boundaries of a correct answer, for a suite the
+// gate can actually gate on.
+type EvalCaseDraft struct {
+	Name           string `json:"name"`
+	Input          string `json:"input"`
+	ExpectedOutput string `json:"expected_output"`
+}
+
+// DraftEvalCases warm-starts an agent's evaluation suite (docs/
+// agent-quality-loop.md §6, warm-start): an agent with no cases cannot pass
+// the apply gate, and hand-writing cases is the chore that kills the loop.
+// The supervisor drafts representative cases from the agent's purpose and the
+// recent successful runs — human review still happens (batch accept), and the
+// suite's stale_after keeps the drafts honest.
+func DraftEvalCases(ctx context.Context, model *llm.Client, agentID, purpose string, recentRuns []string) ([]EvalCaseDraft, error) {
+	if model == nil {
+		return nil, fmt.Errorf("model client is not configured")
+	}
+	var drafts []EvalCaseDraft
+	_, err := completeParsed(ctx, model, []llm.Message{
+		{Role: "system", Content: "You draft evaluation cases for an agent's quality suite. You answer with JSON only."},
+		{Role: "user", Content: "An agent needs 3 representative evaluation cases so its evolution proposals can be gated on them. Each case: a self-contained task the agent should handle (grounded in its purpose and the recent runs), and the boundaries of a correct answer (what must and must not be there — no exact wording)." +
+			"\n\nRespond with one JSON object:\n{\"cases\":[{\"name\":\"<short slug>\",\"input\":\"<the task, phrased as the user would phrase it>\",\"expected_output\":\"<boundaries of a correct answer>\"}]}\n\nAgent: " + agentID + "\nPurpose: " + purpose + "\nRecent successful runs (inputs and answers, trimmed): " + strings.Join(recentRuns, " | ")},
+	}, func(content string) ([]EvalCaseDraft, error) {
+		var parsed struct {
+			Cases []EvalCaseDraft `json:"cases"`
+		}
+		if err := parseCaseReply(content, &parsed); err != nil {
+			return nil, err
+		}
+		kept := parsed.Cases[:0]
+		for _, c := range parsed.Cases {
+			if strings.TrimSpace(c.Input) != "" && strings.TrimSpace(c.ExpectedOutput) != "" {
+				kept = append(kept, c)
+			}
+		}
+		if len(kept) == 0 {
+			return nil, fmt.Errorf("model returned no usable cases")
+		}
+		return kept, nil
+	})
+	return drafts, err
+}
+
 func DraftContractProposal(ctx context.Context, model *llm.Client, agentID string, runIDs []string, failureSummary string) (ContractDraft, error) {
 	var draft ContractDraft
 	if model == nil {

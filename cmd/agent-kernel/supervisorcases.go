@@ -44,6 +44,9 @@ type supervisorCaseStore interface {
 	ListSkillsVisible(ctx context.Context, units []string) ([]workspace.Skill, error)
 	CreateAgentProposal(ctx context.Context, p *workspace.AgentProposal) error
 	ListAgentEvaluationRuns(ctx context.Context, agentID string, limit int) ([]workspace.AgentEvaluationRun, error)
+	ListRunsByAgent(ctx context.Context, agentID string, limit int) ([]workspace.Run, error)
+	GetAgentEvaluationSuite(ctx context.Context, agentID string) (workspace.AgentEvaluationSuite, error)
+	SaveAgentEvaluationSuite(ctx context.Context, agentID string, cases []workspace.EvaluationCase) error
 }
 
 func supervisorCasesEnabled() bool {
@@ -76,6 +79,7 @@ func runSupervisorCasesPass(ctx context.Context, log *slog.Logger, activities *a
 	narrateAgentDevelopment(ctx, log, activities, ws, client, done)
 	monitorTurns(ctx, log, activities, observationURL, journalToken, client, done)
 	verifyCompletionClaims(ctx, log, activities, observationURL, journalToken, client, done)
+	warmupEvalCases(ctx, log, ws, client, done)
 }
 
 // verificationClaimPhrases: the success claims a final answer makes about
@@ -1070,4 +1074,103 @@ func reviewedIndex(ctx context.Context, observationURL, journalToken string) map
 		}
 	}
 	return set
+}
+
+// ── Warm-start: supervisor-drafted eval cases for agents the gate cannot gate ──
+
+// evalGateMinCases mirrors the gate's suite_not_ready minimum (§7.1): a suite
+// below this cannot decide an apply, so it is the warm-start trigger.
+const evalGateMinCases = 3
+
+// warmupCaseStore is the store face the warm-start pass needs.
+type warmupCaseStore interface {
+	ListAllAgents(ctx context.Context) ([]workspace.Agent, error)
+	ListRunsByAgent(ctx context.Context, agentID string, limit int) ([]workspace.Run, error)
+	GetAgentEvaluationSuite(ctx context.Context, agentID string) (workspace.AgentEvaluationSuite, error)
+	SaveAgentEvaluationSuite(ctx context.Context, agentID string, cases []workspace.EvaluationCase) error
+}
+
+// warmupEvalCases closes the cold-start gap of the quality loop: an agent
+// whose suite holds fewer cases than the gate's minimum cannot pass an apply,
+// and hand-writing cases is the chore that kills the loop. The supervisor
+// drafts up to three representative cases from the agent's purpose and recent
+// successful runs and APPENDS them to the suite (author 'supervisor
+// warm-start' via the case name prefix) — a floor the human reviews and
+// prunes, never a full suite. Suites that already gate are left alone, and
+// one pass touches at most two agents (the pass cap shared by the siblings).
+func warmupEvalCases(ctx context.Context, log *slog.Logger, ws warmupCaseStore, client *llm.Client, done map[string]time.Time) {
+	if ws == nil || client == nil {
+		return
+	}
+	agents, err := ws.ListAllAgents(ctx)
+	if err != nil {
+		log.Warn("eval warmup: list agents", "error", err.Error())
+		return
+	}
+	touched := 0
+	for _, a := range agents {
+		if touched >= supervisorCasePassCap {
+			break
+		}
+		if a.Description == "" || a.Definition == nil {
+			continue
+		}
+		suite, err := ws.GetAgentEvaluationSuite(ctx, a.ID)
+		if err != nil {
+			log.Warn("eval warmup: suite", "agent", a.ID, "error", err.Error())
+			continue
+		}
+		if len(suite.Cases) >= evalGateMinCases {
+			continue // the suite already gates
+		}
+		subject := "eval-warmup:" + a.ID
+		if !caseDue(done, agent.CaseEvalWarmup, subject) {
+			continue
+		}
+		runs, err := ws.ListRunsByAgent(ctx, a.ID, 5)
+		if err != nil {
+			log.Warn("eval warmup: runs", "agent", a.ID, "error", err.Error())
+			continue
+		}
+		var runDigests []string
+		for _, run := range runs {
+			if run.Status != "completed" || strings.TrimSpace(run.Answer) == "" {
+				continue
+			}
+			digest := "task answer: " + run.Answer
+			if len(digest) > 400 {
+				digest = digest[:400]
+			}
+			runDigests = append(runDigests, digest)
+		}
+		drafts, err := agent.DraftEvalCases(ctx, client, a.ID, a.Description, runDigests)
+		if err != nil {
+			log.Warn("eval warmup: draft", "agent", a.ID, "error", err.Error())
+			continue
+		}
+		if len(drafts) > evalGateMinCases-len(suite.Cases) {
+			drafts = drafts[:evalGateMinCases-len(suite.Cases)]
+		}
+		cases := make([]workspace.EvaluationCase, 0, len(drafts))
+		for i, draft := range drafts {
+			name := strings.TrimSpace(draft.Name)
+			if name == "" {
+				name = fmt.Sprintf("warmup-%d", i+1)
+			}
+			cases = append(cases, workspace.EvaluationCase{
+				Name:           "warmup/" + name,
+				Input:          draft.Input,
+				ExpectedOutput: draft.ExpectedOutput,
+			})
+		}
+		if err := ws.SaveAgentEvaluationSuite(ctx, a.ID, append(suite.Cases, cases...)); err != nil {
+			log.Warn("eval warmup: save suite", "agent", a.ID, "error", err.Error())
+			continue
+		}
+		summary := fmt.Sprintf("Сьют агента %s не дотягивал до гейта (%d кейсов) — супервайзер добавил %d черновых кейсов из purpose и свежих ранов, всего теперь %d. Ревью и удаление — во вкладке «Эволюция».",
+			a.ID, len(suite.Cases), len(cases), len(suite.Cases)+len(cases))
+		log.Info("eval warmup: summary", "agent", a.ID, "summary", summary)
+		log.Info("eval warmup: appended supervisor cases", "agent", a.ID, "cases", len(cases))
+		touched++
+	}
 }
