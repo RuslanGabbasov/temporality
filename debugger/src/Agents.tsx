@@ -34,6 +34,7 @@ import {
   type AgentEvaluationCase,
   type AgentEvaluationRun,
   type AgentProposal,
+  type EvalCaseCandidate,
   type BuiltinAgentSpec,
   type Provider,
   type Skill,
@@ -49,7 +50,7 @@ import {
   type TransferReport,
   type TransferResultItem,
 } from './workspaceApi'
-import { applyGateErrorView, detectRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
+import { applyGateErrorView, detectRegressions, detectTurnsRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
 import { useT } from './i18n'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
@@ -277,6 +278,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // the override-rate metric keep visible.
   const [overrideProposal, setOverrideProposal] = useState<AgentProposal | null>(null)
   const [overrideCause, setOverrideCause] = useState<string>('')
+  // Golden-candidate review queue (docs/agent-quality-loop.md §6): harvested
+  // production runs waiting for a human accept/reject.
+  const [candidates, setCandidates] = useState<EvalCaseCandidate[]>([])
+  const [candidatesBusy, setCandidatesBusy] = useState(false)
   const selectedIdRef = useRef(selectedId)
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
   const polledRunsRef = useRef<Set<number>>(new Set())
@@ -654,6 +659,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         setSuiteUpdatedAt(sData.updated_at)
         setEvalRuns(eData.runs ?? [])
         applyProposals(selectedId, pData.proposals ?? [])
+        workspaceApi.listEvalCaseCandidates(selectedId)
+          .then((page) => setCandidates(page.candidates ?? []))
+          .catch(() => setCandidates([]))
       } catch (f) { setError(message(f)) }
     })()
   }, [detailTab, selectedId, evoLoadedFor])
@@ -680,6 +688,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   }
 
   const runsByVersion = aggregateRunsByVersion(agentRuns)
+  const turnsRegressions = detectTurnsRegressions(agentRuns)
+  const turnsRegressionByVersion = new Map(turnsRegressions.map((r) => [r.version, r]))
   const latestEval = latestEvalByVersion(evalRuns)
   const regressions = detectRegressions(evalRuns, suiteUpdatedAt)
   const regressionBy = new Map(regressions.map((reg) => [reg.version, reg]))
@@ -816,6 +826,36 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       applyProposals(selectedId, pData.proposals ?? [])
     } catch (f) { setError(message(f)) }
     finally { setProposalBusy(false) }
+  }
+
+  // Accept/reject a harvested golden candidate; 'accept all' batch-accepts
+  // pending candidates in one call — warm-start reaches the gate's minimum in
+  // a single click instead of N per-candidate reviews.
+  const decideCandidate = async (candidate: EvalCaseCandidate, accept: boolean) => {
+    if (!selectedId) return
+    setCandidatesBusy(true)
+    try {
+      if (accept) await workspaceApi.acceptEvalCaseCandidate(selectedId, candidate.id)
+      else await workspaceApi.rejectEvalCaseCandidate(selectedId, candidate.id)
+      const page = await workspaceApi.listEvalCaseCandidates(selectedId)
+      setCandidates(page.candidates ?? [])
+      await refreshEvolution(selectedId)
+    } catch (f) { setError(message(f)) }
+    finally { setCandidatesBusy(false) }
+  }
+
+  const acceptAllCandidates = async () => {
+    if (!selectedId) return
+    setCandidatesBusy(true)
+    try {
+      const result = await workspaceApi.acceptAllEvalCaseCandidates(selectedId)
+      const page = await workspaceApi.listEvalCaseCandidates(selectedId)
+      setCandidates(page.candidates ?? [])
+      await refreshEvolution(selectedId)
+      const skippedNote = result.skip_reasons?.length ? ` (${t('agents.candidates_skipped', { count: String(result.skip_reasons.length) }) ?? String(result.skip_reasons.length) + ' skipped'})` : ''
+      setProposalNotice({ kind: 'success', text: (t('agents.candidates_accepted', { count: String(result.accepted_n) }) ?? `Accepted ${result.accepted_n} candidates.`) + skippedNote })
+    } catch (f) { setError(message(f)) }
+    finally { setCandidatesBusy(false) }
   }
 
   const openProposalModal = () => {
@@ -1277,9 +1317,41 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                         })}
                       </div>
                     )}
-                  </div>
+                				  </div>
 
-                  {versions.length === 0 && (
+                				  {/* Golden-candidate review queue (docs/agent-quality-loop.md §6):
+                				      production runs waiting for a human accept/reject; the batch
+                				      accept reaches the gate's minimum in one click. */}
+                				  {candidates.filter((c) => c.verdict === 'pending').length > 0 && (
+                				    <div style={{ border: '1px solid var(--tm-amber)', borderRadius: '6px', padding: '0.6rem 0.75rem', marginBottom: '1rem' }}>
+                				      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
+                				        <div className="skill-subheading" style={{ margin: 0 }}>
+                				          {t('agents.candidates_title') ?? 'Golden-case candidates'}{' '}
+                				          <Tag size="sm" type="purple">{candidates.filter((c) => c.verdict === 'pending').length}</Tag>
+                				        </div>
+                				        <Button size="sm" disabled={candidatesBusy} onClick={() => void acceptAllCandidates()}>
+                				          {t('agents.candidates_accept_all') ?? 'Accept all'}
+                				        </Button>
+                				      </div>
+                				      {candidates.filter((c) => c.verdict === 'pending').map((c) => (
+                				        <div key={c.id} style={{ borderTop: '1px solid var(--tm-border)', paddingTop: '0.4rem', marginTop: '0.4rem' }}>
+                				          <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.15rem' }}>
+                				            {c.source} · {c.project_id || '—'} · {new Date(c.created_at).toLocaleString()}
+                				          </div>
+                				          <div style={{ fontSize: '0.78rem' }}><strong>→</strong> {c.input.slice(0, 160)}</div>
+                				          <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', marginTop: '0.15rem', whiteSpace: 'pre-wrap' }}>
+                				            {c.expected_output.slice(0, 220)}{c.expected_output.length > 220 ? '…' : ''}
+                				          </div>
+                				          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.3rem' }}>
+                				            <Button size="sm" disabled={candidatesBusy} onClick={() => void decideCandidate(c, true)}>{t('agents.candidate_accept') ?? 'Accept'}</Button>
+                				            <Button size="sm" kind="secondary" disabled={candidatesBusy} onClick={() => void decideCandidate(c, false)}>{t('agents.candidate_reject') ?? 'Reject'}</Button>
+                				          </div>
+                				        </div>
+                				      ))}
+                				    </div>
+                				  )}
+
+                				  {versions.length === 0 && (
                     <p style={{ color: 'var(--tm-text-3)' }}>
                       {t('agents.evolution_empty') ?? 'No definition versions yet. Versions appear when you edit the agent’s definition.'}
                     </p>
@@ -1307,6 +1379,18 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                           {regression && (
                             <Tag size="sm" type="red" title={`${Math.round(regression.from * 100)}% → ${Math.round(regression.to * 100)}%`}>
                               {t('agents.eval_regressed', { prev: String(regression.previousVersion) }) ?? `regression vs v${regression.previousVersion}`}
+                            </Tag>
+                          )}
+                          {turnsRegressionByVersion.get(v.version) && (
+                            <Tag
+                              size="sm"
+                              type="warm-gray"
+                              title={t('agents.turns_regressed_hint', {
+                                from: turnsRegressionByVersion.get(v.version)!.from.toFixed(1),
+                                to: turnsRegressionByVersion.get(v.version)!.to.toFixed(1),
+                              }) ?? undefined}
+                            >
+                              {t('agents.turns_regressed', { prev: String(turnsRegressionByVersion.get(v.version)!.previousVersion) }) ?? `more turns vs v${turnsRegressionByVersion.get(v.version)!.previousVersion}`}
                             </Tag>
                           )}
                           <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>

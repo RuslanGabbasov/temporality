@@ -212,6 +212,24 @@ export interface AgentVersion {
   created_at: string
 }
 
+export interface EvalCaseCandidate {
+  id: number
+  agent_id: string
+  run_id: string
+  task_id?: string
+  project_id?: string
+  agent_version?: number
+  input: string
+  expected_output: string
+  source: string
+  verdict: 'pending' | 'accepted' | 'rejected' | string
+  redaction_applied?: boolean
+  redactions?: number
+  reviewed_by?: string
+  reviewed_at?: string
+  created_at: string
+}
+
 export interface AgentEvaluationCase {
   name: string
   input: string
@@ -1161,6 +1179,14 @@ export const workspaceApi = {
     request<{ versions: AgentVersion[] }>(`/v1/workspace/agents/${id}/versions`),
   rollbackAgentVersion: (id: string, version: number) =>
     request<Agent>(`/v1/workspace/agents/${id}/versions/${version}/rollback`, { method: 'POST' }),
+  listEvalCaseCandidates: (id: string) =>
+    request<{ candidates: EvalCaseCandidate[]; count: number }>(`/v1/workspace/agents/${id}/eval-case-candidates`),
+  acceptEvalCaseCandidate: (id: string, candidateId: number) =>
+    request<{ case: unknown; suite_size: number }>(`/v1/workspace/agents/${id}/eval-case-candidates/${candidateId}/accept`, { method: 'POST' }),
+  rejectEvalCaseCandidate: (id: string, candidateId: number) =>
+    request<{ candidate_id: number; verdict: string }>(`/v1/workspace/agents/${id}/eval-case-candidates/${candidateId}/reject`, { method: 'POST' }),
+  acceptAllEvalCaseCandidates: (id: string) =>
+    request<{ accepted: EvalCaseCandidate[]; accepted_n: number; skipped: EvalCaseCandidate[]; skip_reasons: string[] }>(`/v1/workspace/agents/${id}/eval-case-candidates/accept-all`, { method: 'POST' }),
   listAgentRuns: (id: string) =>
     request<{ runs: Run[] }>(`/v1/workspace/agents/${id}/runs`),
   getAgentPrompt: (id: string) =>
