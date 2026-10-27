@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -108,5 +109,47 @@ func TestMalformedArgumentsSalvage(t *testing.T) {
 	}
 	if result.ToolCalls[1].Args["x"].(float64) != 1 {
 		t.Fatalf("second call args = %v", result.ToolCalls[1].Args)
+	}
+}
+
+// Complete from one shared client must be safe under concurrency: the retry
+// backoff used to draw jitter from a per-client *rand.Rand, which raced when
+// several goroutines retried at once. The server 503s everything in the
+// first 100ms, so every goroutine eats one transient failure and retries —
+// under -race this is exactly the interleaving that used to trip the
+// detector; the retries themselves bound the run to the usual ~4s backoff.
+func TestCompleteConcurrentTransientRetries(t *testing.T) {
+	startedAt := time.Now()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if time.Since(startedAt) < 100*time.Millisecond {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":{"message":"overloaded"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(okResponse))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	const goroutines = 8
+	var wg sync.WaitGroup
+	completions := make([]Completion, goroutines)
+	errs := make([]error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			completions[i], errs[i] = client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+		}(i)
+	}
+	wg.Wait()
+	for i := range errs {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: Complete: %v", i, errs[i])
+		}
+		if completions[i].Content != "ok" {
+			t.Fatalf("goroutine %d: content = %q", i, completions[i].Content)
+		}
 	}
 }
