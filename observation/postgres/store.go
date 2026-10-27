@@ -22,6 +22,9 @@ import (
 //go:embed migrations/observation_events.up.sql
 var observationEventsSchema string
 
+//go:embed migrations/observation_events_indexes.up.sql
+var observationEventsIndexes string
+
 type Store struct{ pool *pgxpool.Pool }
 
 func Open(ctx context.Context, url string) (*Store, error) {
@@ -42,30 +45,48 @@ func (s *Store) Close() { s.pool.Close() }
 // everywhere, so it is safe on databases that already ran the historical
 // FRP migration chain (which created the same table as 000018).
 func (s *Store) Migrate(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, observationEventsSchema)
+	if _, err := s.pool.Exec(ctx, observationEventsSchema); err != nil {
+		return err
+	}
+	// Additive index migrations ride their own file so the baseline stays
+	// verbatim; both are idempotent and re-run on every boot.
+	_, err := s.pool.Exec(ctx, observationEventsIndexes)
 	return err
+}
+
+// appendObservationSQL is the single-row insert shared by the one-event and
+// batch append paths, so the two cannot drift apart.
+const appendObservationSQL = `INSERT INTO observation_events
+	(source_id,event_id,schema,occurred_at,received_at,integration,source_version,project_id,run_id,task_id,actor_id,actor_type,parent_event_id,type,data,evidence)
+	VALUES ($1,$2,$3,$4,COALESCE($5::timestamptz,clock_timestamp()),$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+	ON CONFLICT (source_id,event_id) DO NOTHING`
+
+// encodeObservationEvent marshals the JSONB columns and normalizes the
+// received_at bind (NULL = let the database clock stamp it).
+func encodeObservationEvent(event observation.Event) (data, evidence []byte, receivedAt any, err error) {
+	data, err = json.Marshal(event.Data)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("encode event data: %w", err)
+	}
+	evidence, err = json.Marshal(event.Evidence)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("encode event evidence: %w", err)
+	}
+	if !event.ReceivedAt.IsZero() {
+		receivedAt = event.ReceivedAt
+	}
+	return data, evidence, receivedAt, nil
 }
 
 func (s *Store) AppendObservation(ctx context.Context, event observation.Event) (bool, error) {
 	if err := event.Validate(); err != nil {
 		return false, err
 	}
-	data, err := json.Marshal(event.Data)
+	data, evidence, receivedAt, err := encodeObservationEvent(event)
 	if err != nil {
 		return false, err
 	}
-	evidence, err := json.Marshal(event.Evidence)
-	if err != nil {
-		return false, err
-	}
-	var receivedAt any
-	if !event.ReceivedAt.IsZero() {
-		receivedAt = event.ReceivedAt
-	}
-	result, err := s.pool.Exec(ctx, `INSERT INTO observation_events
-		(source_id,event_id,schema,occurred_at,received_at,integration,source_version,project_id,run_id,task_id,actor_id,actor_type,parent_event_id,type,data,evidence)
-		VALUES ($1,$2,$3,$4,COALESCE($5::timestamptz,clock_timestamp()),$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-		ON CONFLICT (source_id,event_id) DO NOTHING`,
+	result, err := s.pool.Exec(ctx, appendObservationSQL,
 		event.Source.ID, event.EventID, event.Schema, event.OccurredAt, receivedAt,
 		event.Source.Integration, event.Source.Version, event.Context.Project, event.Context.Run,
 		event.Context.Task, event.Context.Actor.ID, event.Context.Actor.Type,
@@ -85,6 +106,43 @@ func (s *Store) AppendObservation(ctx context.Context, event observation.Event) 
 		return false, nil
 	}
 	return false, observation.ErrConflict
+}
+
+// AppendObservationBatch appends a group of events in one round trip (pgx
+// Batch, same framing as UpsertKnowledgeEmbeddings). Hint activation telemetry
+// (hint.query + one hint.offered per offer) is the caller that pays per-event
+// inserts today. Every event is validated and encoded up front — a rejected
+// event aborts the batch before anything is written. SQL failures do not stop
+// the drain: every queued statement still executes, the first error is
+// returned, so a partial batch is visible to the caller.
+func (s *Store) AppendObservationBatch(ctx context.Context, events []observation.Event) error {
+	batch := &pgx.Batch{}
+	for _, event := range events {
+		if err := event.Validate(); err != nil {
+			return err
+		}
+		data, evidence, receivedAt, err := encodeObservationEvent(event)
+		if err != nil {
+			return err
+		}
+		batch.Queue(appendObservationSQL,
+			event.Source.ID, event.EventID, event.Schema, event.OccurredAt, receivedAt,
+			event.Source.Integration, event.Source.Version, event.Context.Project, event.Context.Run,
+			event.Context.Task, event.Context.Actor.ID, event.Context.Actor.Type,
+			event.Context.ParentEventID, event.Type, data, evidence)
+	}
+	if batch.Len() == 0 {
+		return nil
+	}
+	br := s.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	var firstErr error
+	for range events {
+		if _, err := br.Exec(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func sameObservation(a, b observation.Event) bool {
@@ -299,30 +357,77 @@ func (s *Store) UpsertKnowledgeEmbeddings(ctx context.Context, model string, ite
 	return nil
 }
 
-// ListKnowledgeEmbeddings returns every vector stored for the model, keyed by
-// knowledge id. Volumes are per-project bounded; the hint matcher consumes
-// them in-process.
-func (s *Store) ListKnowledgeEmbeddings(ctx context.Context, model string) (map[string][]float32, error) {
-	where, args := "model = $1", []any{model}
-	if strings.TrimSpace(model) == "" {
-		// Empty model = the installation's single embedding space: accept any
-		// stored model so UI consumers (related-knowledge lookups) work without
-		// knowing the operator's embedding choice.
-		where = "model <> ''"
-		args = nil
+// ListKnowledgeEmbeddings returns vectors stored for the model, keyed by
+// knowledge id. When knowledgeIDs is non-empty the listing is filtered to
+// those ids (AND knowledge_id = ANY($N)) — the hints path passes its
+// project's projected visible knowledge, so one hints call no longer loads
+// every project's vectors. The id list is chunked in
+// knowledgeEmbeddingIDChunk-sized ANY(...) arrays: chunking keeps the query
+// plan and array bind small for very large corpora while preserving exact
+// semantics (the documented alternative — dropping the filter above the cap —
+// would reintroduce the cross-project load this filter exists to prevent).
+// An empty model = the installation's single embedding space: accept any
+// stored model so UI consumers (related-knowledge lookups) work without
+// knowing the operator's embedding choice.
+const knowledgeEmbeddingIDChunk = 5000
+
+// knowledgeEmbeddingSelect builds the WHERE clause and arguments for one
+// chunk of the vector listing. Pure so the SQL/argument framing is testable
+// without a database.
+func knowledgeEmbeddingSelect(model string, knowledgeIDs []string) (string, []any) {
+	const base = `SELECT knowledge_id, dim, embedding FROM observation_knowledge_embedding WHERE `
+	hasModel := strings.TrimSpace(model) != ""
+	switch {
+	case hasModel && len(knowledgeIDs) > 0:
+		return base + `model = $1 AND knowledge_id = ANY($2)`, []any{model, knowledgeIDs}
+	case hasModel:
+		return base + `model = $1`, []any{model}
+	case len(knowledgeIDs) > 0:
+		return base + `model <> '' AND knowledge_id = ANY($1)`, []any{knowledgeIDs}
+	default:
+		return base + `model <> ''`, nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT knowledge_id, dim, embedding FROM observation_knowledge_embedding WHERE `+where, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+}
+
+func (s *Store) ListKnowledgeEmbeddings(ctx context.Context, model string, knowledgeIDs []string) (map[string][]float32, error) {
 	out := map[string][]float32{}
+	chunks := [][]string{nil} // empty filter = one unfiltered query (legacy shape)
+	if len(knowledgeIDs) > 0 {
+		chunks = knowledgeEmbeddingChunks(knowledgeIDs)
+	}
+	for _, chunk := range chunks {
+		query, args := knowledgeEmbeddingSelect(model, chunk)
+		rows, err := s.pool.Query(ctx, query, args...)
+		if err != nil {
+			return nil, err
+		}
+		if err := scanKnowledgeEmbeddings(rows, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// knowledgeEmbeddingChunks splits an id filter into ANY(...) array binds of at
+// most knowledgeEmbeddingIDChunk ids, so the cap degrades to chunked queries
+// instead of dropping the filter. Pure; tested without a database.
+func knowledgeEmbeddingChunks(knowledgeIDs []string) [][]string {
+	chunks := make([][]string, 0, (len(knowledgeIDs)+knowledgeEmbeddingIDChunk-1)/knowledgeEmbeddingIDChunk)
+	for start := 0; start < len(knowledgeIDs); start += knowledgeEmbeddingIDChunk {
+		end := min(start+knowledgeEmbeddingIDChunk, len(knowledgeIDs))
+		chunks = append(chunks, knowledgeIDs[start:end])
+	}
+	return chunks
+}
+
+func scanKnowledgeEmbeddings(rows pgx.Rows, out map[string][]float32) error {
+	defer rows.Close()
 	for rows.Next() {
 		var id string
 		var dim int
 		var raw []byte
 		if err := rows.Scan(&id, &dim, &raw); err != nil {
-			return nil, err
+			return err
 		}
 		vector := make([]float32, 0, dim)
 		if err := json.Unmarshal(raw, &vector); err != nil {
@@ -330,7 +435,7 @@ func (s *Store) ListKnowledgeEmbeddings(ctx context.Context, model string) (map[
 		}
 		out[id] = vector
 	}
-	return out, rows.Err()
+	return rows.Err()
 }
 
 // KnowledgeProjects enumerates the projects that carry knowledge events —

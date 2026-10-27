@@ -122,9 +122,10 @@ func (s *Server) getKnowledgeEmbeddingGaps(w http.ResponseWriter, r *http.Reques
 var _ = observation.KnowledgeEmbeddingGap{}
 
 // mapStore is the capability set behind the semantic map endpoint: vectors
-// plus the per-project knowledge projection to join them with.
+// plus the per-project knowledge projection to join them with. A nil/empty
+// knowledgeIDs filter lists every stored vector for the model.
 type mapStore interface {
-	ListKnowledgeEmbeddings(ctx context.Context, model string) (map[string][]float32, error)
+	ListKnowledgeEmbeddings(ctx context.Context, model string, knowledgeIDs []string) (map[string][]float32, error)
 }
 
 // knowledgeProjectLister enumerates the projects that carry knowledge events;
@@ -172,11 +173,6 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 		writeError(w, 501, errors.New("this journal store does not support knowledge embeddings"))
 		return
 	}
-	vectors, err := store.ListKnowledgeEmbeddings(r.Context(), model)
-	if err != nil {
-		writeError(w, 500, err)
-		return
-	}
 	type mapItem struct {
 		ID          string    `json:"id"`
 		Project     string    `json:"project"`
@@ -189,7 +185,15 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 		UpdatedAt   string    `json:"updated_at,omitempty"`
 		Vector      []float32 `json:"vector"`
 	}
-	items := []mapItem{}
+	// Collect the projections first, then load only the vectors they name:
+	// the id filter keeps the store from reading every project's vectors for a
+	// single-project map, and in the global view the union is exactly the set
+	// the map can render.
+	type pendingItem struct {
+		item    observation.Knowledge
+		project string
+	}
+	pending := []pendingItem{}
 	seen := map[string]bool{}
 	collect := func(project string) error {
 		knowledge, _, err := s.cachedKnowledge(r.Context(), project, nil, nil)
@@ -197,17 +201,11 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 			return err
 		}
 		for _, item := range knowledge {
-			vector, ok := vectors[item.ID]
-			if !ok || seen[item.ID] {
+			if seen[item.ID] {
 				continue
 			}
 			seen[item.ID] = true
-			items = append(items, mapItem{
-				ID: item.ID, Project: project, Proposition: item.Proposition,
-				State: item.State, Kind: item.Kind, Topics: item.Topics,
-				ScopeKind: item.ScopeKind, ScopeID: item.ScopeID,
-				UpdatedAt: item.UpdatedAt.Format(time.RFC3339), Vector: vector,
-			})
+			pending = append(pending, pendingItem{item: item, project: project})
 		}
 		return nil
 	}
@@ -239,6 +237,33 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+	vectors := map[string][]float32{}
+	if len(pending) > 0 {
+		ids := make([]string, 0, len(pending))
+		for _, candidate := range pending {
+			ids = append(ids, candidate.item.ID)
+		}
+		loaded, err := store.ListKnowledgeEmbeddings(r.Context(), model, ids)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		vectors = loaded
+	}
+	items := []mapItem{}
+	for _, candidate := range pending {
+		vector, ok := vectors[candidate.item.ID]
+		if !ok {
+			continue
+		}
+		item := candidate.item
+		items = append(items, mapItem{
+			ID: item.ID, Project: candidate.project, Proposition: item.Proposition,
+			State: item.State, Kind: item.Kind, Topics: item.Topics,
+			ScopeKind: item.ScopeKind, ScopeID: item.ScopeID,
+			UpdatedAt: item.UpdatedAt.Format(time.RFC3339), Vector: vector,
+		})
+	}
 	// Newest first, bounded by the requested limit.
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
 	if len(items) > limit {
@@ -248,8 +273,11 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 }
 
 // neighborStore is the vector-listing capability behind the neighbors lookup.
+// A nil/empty knowledgeIDs filter lists every stored vector for the model —
+// neighbors are intentionally cross-project (a conflict candidate may live in
+// another project's knowledge).
 type neighborStore interface {
-	ListKnowledgeEmbeddings(ctx context.Context, model string) (map[string][]float32, error)
+	ListKnowledgeEmbeddings(ctx context.Context, model string, knowledgeIDs []string) (map[string][]float32, error)
 }
 
 // getKnowledgeEmbeddingNeighbors returns the nearest stored vectors for one
@@ -281,7 +309,7 @@ func (s *Server) getKnowledgeEmbeddingNeighbors(w http.ResponseWriter, r *http.R
 		writeError(w, 501, errors.New("this journal store does not support knowledge embeddings"))
 		return
 	}
-	vectors, err := store.ListKnowledgeEmbeddings(r.Context(), model)
+	vectors, err := store.ListKnowledgeEmbeddings(r.Context(), model, nil)
 	if err != nil {
 		writeError(w, 500, err)
 		return
