@@ -1628,8 +1628,6 @@ export const en: Record<string, string> = {
     'users.job_title_label': 'Job title',
     'users.job_title_placeholder': 'QA engineer, разработчик…',
     'users.job_title_helper': 'The employee\'s function. The natural group address: the agent can invite every QA engineer or notify all developers (title:<job title>).',
-    'users.job_title_placeholder': 'QA engineer, разработчик…',
-    'users.job_title_helper': 'The employee\'s function. The natural group address: the agent can invite every QA engineer or notify all developers (title:<job title>).',
     'users.role_label': 'Role',
     'users.role_viewer': 'Viewer (read-only)',
     'users.role_operator': 'Operator (run + reconcile)',

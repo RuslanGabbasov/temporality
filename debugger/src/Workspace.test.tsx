@@ -128,6 +128,6 @@ describe('sendFileChip', () => {
     expect(sendFileChip({ tool: 'run_command', arguments: '{"path":"/x"}' })).toBeNull()
     expect(sendFileChip({ tool: 'send_file', arguments: '{broken' })).toBeNull()
     expect(sendFileChip({ tool: 'send_file', arguments: '{"note":"no path"}' })).toBeNull()
-    expect(sendFileChip({}, {})).toBeNull()
+    expect(sendFileChip({})).toBeNull()
   })
 })
