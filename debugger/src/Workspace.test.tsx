@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatStreamEvent, normalizeRunStatus } from './Workspace'
+import { sendFileChip, formatStreamEvent, normalizeRunStatus } from './Workspace'
 import { pluralT } from './i18n'
 import { en } from './locales/en'
 import { ru } from './locales/ru'
@@ -115,5 +115,19 @@ describe('normalizeRunStatus', () => {
     expect(normalizeRunStatus('cancelled')).toBe('cancelled')
     expect(normalizeRunStatus('completed')).toBe('completed')
     expect(normalizeRunStatus(undefined)).toBe('')
+  })
+})
+
+describe('sendFileChip', () => {
+  it('extracts path and name from a send_file completion', () => {
+    expect(sendFileChip({ tool: 'send_file', arguments: JSON.stringify({ path: '/workspace/27.1/oneslide/preview.png', note: 'x' }) }))
+      .toEqual({ path: '/workspace/27.1/oneslide/preview.png', name: 'preview.png' })
+  })
+
+  it('returns null for other tools and unparseable shapes', () => {
+    expect(sendFileChip({ tool: 'run_command', arguments: '{"path":"/x"}' })).toBeNull()
+    expect(sendFileChip({ tool: 'send_file', arguments: '{broken' })).toBeNull()
+    expect(sendFileChip({ tool: 'send_file', arguments: '{"note":"no path"}' })).toBeNull()
+    expect(sendFileChip({}, {})).toBeNull()
   })
 })

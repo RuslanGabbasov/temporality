@@ -86,6 +86,9 @@ interface ChatMessage {
   /** Tool the model is streaming arguments for right now (no answer text this
    * turn) — transient, cleared when the model moves on to text. */
   liveTool?: string
+  /** Files the run delivered with send_file — download chips under the
+   * answer. Sourced from the journaled tool.completed events. */
+  files?: { path: string; name: string }[]
   /** User addenda sent into a RUNNING run: they augment this original task
    *  message (reply-style, timestamped) instead of dangling at the chat
    *  bottom after the model's answer. */
@@ -238,6 +241,22 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
 			// the story, counts are noise in a compact trace.
 			return null
 	}
+}
+
+/** Extract the download chip from a send_file tool.completed event: the
+ * arguments JSON carries the workspace path. Null for any other tool or an
+ * unparseable shape — pure, unit-testable. */
+export function sendFileChip(d: { tool?: unknown; arguments?: unknown }): { path: string; name: string } | null {
+  if (d.tool !== 'send_file') return null
+  try {
+    const args = typeof d.arguments === 'string' ? JSON.parse(d.arguments) : {}
+    const path = String(args.path ?? '')
+    if (!path) return null
+    const name = path.split('/').filter(Boolean).pop() || path
+    return { path, name }
+  } catch {
+    return null
+  }
 }
 
 /** One-line question preview for the activity feed — newlines squashed, so a
@@ -830,6 +849,25 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       } catch { /* ignore */ }
     })
     es.addEventListener('model.started', () => { /* pacing marker; the completed line carries the numbers */ })
+    // send_file completions attach the file chip to the bubble: the run
+    // workspace serves the download, so the chat gets the file even when the
+    // model's reply forgets to mention the path.
+    es.addEventListener('tool.completed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const chip = sendFileChip(outer.data ?? outer)
+        if (!chip) return
+        const { path, name } = chip
+        setConversations((prev) => prev.map((c) => c.id !== convId ? c : ({
+          ...c,
+          messages: c.messages.map((m) => m.runId !== runId ? m : ({
+            ...m,
+            files: [...(m.files ?? []).filter((f) => f.path !== path), { path, name }],
+          })),
+        })))
+      } catch { /* ignore */ }
+    })
+
     es.addEventListener('model.completed', (e) => {
       try {
         const outer = JSON.parse(e.data)
@@ -1529,6 +1567,22 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}
+
+                    {/* send_file chips: the run delivered a file — download it
+                        straight from the chat bubble. */}
+                    {msg.role === 'assistant' && (msg.files ?? []).length > 0 && (
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                        {(msg.files ?? []).map((f) => (
+                          <button
+                            key={f.path}
+                            className="chat-attachment-chip"
+                            onClick={() => void onFileLink(f.path)}
+                            title={f.path}
+                            style={{ cursor: 'pointer', border: '1px solid var(--tm-teal)', background: 'var(--tm-elevated)', borderRadius: '6px', color: 'var(--tm-teal)', fontSize: '0.72rem', padding: '0.25rem 0.6rem' }}
+                          >📎 {f.name}</button>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Mid-run addenda trail the original message (reply-style):
                         the first line is the text, everything amended later

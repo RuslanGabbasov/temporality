@@ -110,6 +110,14 @@ func (a *Activities) handleSendFile(ctx context.Context, request ToolRequest) (T
 		"recipient": recipient.ID,
 		"delivered": deliveries,
 	}
+	// The file always stays in the run workspace — web-inbox users (built-in
+	// chat) get it through the path link in the answer. When no channel
+	// carried an attachment, tell the model to mention the path, so the chat
+	// user gets the click-to-download link instead of a silent no-op.
+	if len(deliveries) == 0 {
+		summary["file_available_at"] = summary["path"]
+		summary["hint"] = "no transport delivered this file — mention the path in your reply so the user gets the download link"
+	}
 	encoded, err := json.Marshal(summary)
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("file %s delivered to %s", name, recipient.ID)}, nil
