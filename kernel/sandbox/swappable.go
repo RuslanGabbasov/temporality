@@ -57,6 +57,15 @@ func (s *Swappable) Image() string {
 	return ""
 }
 
+// TeardownRun stops the backing runner's reusable container for the run key.
+// Best-effort and optional: a runner without container reuse (or none at
+// all) makes this a no-op.
+func (s *Swappable) TeardownRun(key string) {
+	if d, ok := s.Current().(*Docker); ok && d != nil {
+		d.TeardownRun(key)
+	}
+}
+
 func (s *Swappable) SandboxRoot() string {
 	if current := s.Current(); current != nil {
 		return current.SandboxRoot()
