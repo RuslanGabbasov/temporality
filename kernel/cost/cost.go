@@ -368,6 +368,25 @@ func (a *CostAPI) RunCostHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, cost)
 }
 
+// VersionEffortHandler returns the per-definition-version effort rollup
+// (tokens/turns/cost averaged over completed runs) — the «стало ли дороже»
+// signal next to the pass-rate regression in the evolution view.
+func (a *CostAPI) VersionEffortHandler(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		writeError(w, 400, "project is required")
+		return
+	}
+	events, err := a.queryEventsFilteredCtx(r.Context(), project, "", "",
+		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed")
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	effort := AggregateVersionEffort(events, map[string]float64{})
+	writeJSON(w, 200, map[string]any{"versions": effort, "count": len(effort)})
+}
+
 // ProjectCostHandler returns cost for all runs in a project.
 func (a *CostAPI) ProjectCostHandler(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")

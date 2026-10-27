@@ -1498,6 +1498,13 @@ func main() {
 		}
 		costAPI.ProjectCostHandler(w, r)
 	})
+	mux.HandleFunc("GET /v1/agent/cost/versions", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		costAPI.VersionEffortHandler(w, r)
+	})
 	mux.HandleFunc("GET /v1/agent/cost/task", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		if !gate.Allow(w, r, controlplane.RoleReader, project) {

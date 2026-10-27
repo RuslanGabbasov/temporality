@@ -247,6 +247,22 @@ export function taskCost(project: string, taskID: string): Promise<TaskCost> {
   return request(`/v1/agent/cost/task?project=${encodeURIComponent(project)}&task=${encodeURIComponent(taskID)}`)
 }
 
+/** Effort profile per agent definition version: tokens and turns averaged
+ * over the version's completed runs (docs/agent-quality-loop.md, effort
+ * signal) — «стало ли дороже» рядом с pass-rate регрессией. */
+export interface VersionEffort {
+  agent_version: number
+  runs: number
+  total_tokens: number
+  avg_tokens: number
+  avg_turns: number
+  total_cost_usd?: number
+}
+
+export function versionEffort(project: string): Promise<{ versions: VersionEffort[]; count: number }> {
+  return request(`/v1/agent/cost/versions?project=${encodeURIComponent(project)}`)
+}
+
 // Human-approval budget of a scope: decisions asked of people, how they
 // resolved and how long the work waited on them.
 export interface ApprovalStats {

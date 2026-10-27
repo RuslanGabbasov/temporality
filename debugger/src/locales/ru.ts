@@ -1003,6 +1003,8 @@ export const ru: Record<string, string> = {
     'agents.eval_regressed': 'регрессия против v{{prev}}',
     'agents.turns_regressed': 'дороже по ходам против v{{prev}}',
     'agents.turns_regressed_hint': 'Завершённые раны теперь в среднем {{to}} ходов против {{from}} на v{{prev}} — та же работа стоит больше шагов (прокси на токены/стоимость).',
+    'agents.tokens_regressed': '+{{growth}}% токенов против v{{prev}}',
+    'agents.tokens_regressed_hint': 'Завершённые раны теперь в среднем {{to}} токенов против {{from}} на v{{prev}} — та же работа стоит дороже (регрессия трудоёмкости).',
     'agents.avg_turns': 'средне ходов',
     'agents.proposals': 'Предложения',
     'agents.proposals_new': 'Предложить изменение',

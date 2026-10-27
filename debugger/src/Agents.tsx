@@ -20,6 +20,7 @@ import {
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Copy, Star, Renew, Settings } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
+import { versionEffort, type VersionEffort } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -244,6 +245,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
   // Evolution (§15): versions × runs grouped by definition version.
   const [versions, setVersions] = useState<AgentVersion[]>([])
+  // Effort profile per version (tokens averaged over completed runs) — the
+  // «стало ли дороже» signal next to the pass-rate regression.
+  const [effortByVersion, setEffortByVersion] = useState<Map<number, VersionEffort>>(new Map())
   const [agentRuns, setAgentRuns] = useState<Run[]>([])
   const [evoLoadedFor, setEvoLoadedFor] = useState('')
 
@@ -659,6 +663,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         ])
         setVersions(vData.versions ?? [])
         setAgentRuns(rData.runs ?? [])
+        versionEffort(project).then((page: { versions?: VersionEffort[] }) => {
+          setEffortByVersion(new Map((page.versions ?? []).map((v) => [v.agent_version, v])))
+        }).catch(() => setEffortByVersion(new Map()))
         setEvalSuite(sData.cases ?? [])
         setSuiteUpdatedAt(sData.updated_at)
         setEvalRuns(eData.runs ?? [])
@@ -1405,6 +1412,29 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                               {t('agents.turns_regressed', { prev: String(turnsRegressionByVersion.get(v.version)!.previousVersion) }) ?? `more turns vs v${turnsRegressionByVersion.get(v.version)!.previousVersion}`}
                             </Tag>
                           )}
+                          {(() => {
+                            // Token-effort flag: the version's completed runs
+                            // average meaningfully more tokens than the previous
+                            // version's (same thresholds as turns: +50% and thin
+                            // samples stay quiet).
+                            const effort = effortByVersion.get(v.version)
+                            const prev = effortByVersion.get(v.version - 1)
+                            if (!effort || !prev || effort.avg_tokens <= 0 || prev.avg_tokens <= 0) return null
+                            if (effort.avg_tokens < prev.avg_tokens * 1.5 || effort.avg_tokens < prev.avg_tokens + 500) return null
+                            const growth = Math.round((effort.avg_tokens / prev.avg_tokens - 1) * 100)
+                            return (
+                              <Tag
+                                size="sm"
+                                type="warm-gray"
+                                title={t('agents.tokens_regressed_hint', {
+                                  from: String(Math.round(prev.avg_tokens)),
+                                  to: String(Math.round(effort.avg_tokens)),
+                                }) ?? undefined}
+                              >
+                                {t('agents.tokens_regressed', { prev: String(v.version - 1), growth: String(growth) }) ?? `more tokens vs v${v.version - 1}`}
+                              </Tag>
+                            )
+                          })()}
                           <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>
                             {new Date(v.created_at).toLocaleString()}{v.author ? ` · ${v.author}` : ''}
                           </span>

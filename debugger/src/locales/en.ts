@@ -1003,6 +1003,8 @@ export const en: Record<string, string> = {
     'agents.eval_regressed': 'regression vs v{{prev}}',
     'agents.turns_regressed': 'more turns vs v{{prev}}',
     'agents.turns_regressed_hint': 'Completed runs now average {{to}} turns vs {{from}} on v{{prev}} — the same work takes more steps (token/cost proxy).',
+    'agents.tokens_regressed': '+{{growth}}% tokens vs v{{prev}}',
+    'agents.tokens_regressed_hint': 'Completed runs now average {{to}} tokens vs {{from}} on v{{prev}} — the same work costs more (effort regression).',
     'agents.avg_turns': 'avg turns',
     'agents.proposals': 'Proposals',
     'agents.proposals_new': 'Propose change',

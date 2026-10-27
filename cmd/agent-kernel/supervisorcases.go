@@ -350,6 +350,25 @@ func proposeContractsFromClusters(ctx context.Context, log *slog.Logger, activit
 			log.Warn("supervisor cases: contract file", "agent", c.agent, "error", err.Error())
 			continue
 		}
+		// Close the loop (docs/agent-quality-loop.md §6 + warm-start): the same
+		// failure cluster drafts ONE regression case into the agent's suite —
+		// if the proposal is applied, the gate now has a case that catches the
+		// exact failure that motivated it. The case name marks it as
+		// supervisor-authored; the human prunes it like any warmup draft.
+		if len(c.runs) > 0 {
+			if suite, sErr := ws.GetAgentEvaluationSuite(ctx, c.agent); sErr == nil {
+				caseInput := fmt.Sprintf("Повторяющийся сбой (раны %s): %s. Выполни задачу так, чтобы этой ошибки не было.", strings.Join(c.runs, ", "), c.summary)
+				expected := fmt.Sprintf("Решение учитывает правило из эволюции: %s", draft.Change)
+				suite.Cases = append(suite.Cases, workspace.EvaluationCase{
+					Name:           "supervisor/contract-" + patternHash(key)[:8],
+					Input:          caseInput,
+					ExpectedOutput: expected,
+				})
+				if saveErr := ws.SaveAgentEvaluationSuite(ctx, c.agent, suite.Cases); saveErr != nil {
+					log.Warn("supervisor cases: eval case append", "agent", c.agent, "error", saveErr.Error())
+				}
+			}
+		}
 		summary := fmt.Sprintf("%d однотипных сбоев агента %s оформлены предложением развития #%d: %s", len(c.runs), c.agent, proposal.ID, draft.Change)
 		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseContractProposal, subject, "", summary, "Примите или отклоните предложение в карточке агента.", map[string]any{
 			"agent": c.agent, "proposal_id": proposal.ID, "runs": c.runs,
