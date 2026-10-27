@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="How agents propose changes to their own configuration, how the evaluation gate verifies the effect, how to roll a version back — and where evaluation cases come from without hand-writing them.">
+<title>Evolution & quality — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../evolution.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/evolution.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<div class="docs-nav-section">Integrations</div>
+<a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Reference</div>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="hitl-forms.html">Forms & approvals</a>
+<a class="docs-nav-row" href="files.html">Files</a>
+<a class="docs-nav-row active" href="evolution.html">Evolution & quality</a>
+<a class="docs-nav-row" href="job-titles.html">Job titles & groups</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Working with the agent</div>
+<h1>Evolution & quality</h1>
+<p class="docs-lead">How agents propose changes to their own configuration, how the evaluation gate verifies the effect, how to roll a version back — and where evaluation cases come from without hand-writing them.</p>
+<p>Agents observe their own friction and propose changes to their configuration (rules, completion checklists) via <code>agent_propose</code>. A proposal changes nothing by itself — a human reads it and decides. Around that decision there is a measurable loop: the <strong>evaluation gate</strong> verifies the change does not break behaviour, <strong>versions</strong> make every decision revertible, and <strong>effort regressions</strong> show whether the work got cheaper or more expensive.</p>
+<h2 id="proposals-and-the-gate"><a class="anchor" href="#proposals-and-the-gate" aria-label="Section link">#</a>Proposals and the gate</h2><p>Applying an agent&#39;s proposal requires a fresh green evaluation run on the proposal&#39;s base version. An evaluation run is a suite of cases: the model gets typical tasks and its answers are checked (exact substrings or an LLM judge with calibration).</p>
+<p><img src="../assets/guide/agents-gate-override.png" alt="The gate override"></p>
+<p>Three honest outcomes:</p>
+<ul>
+<li><strong>Green</strong> — a fresh green run: the proposal is applied, the version increments, a snapshot is stored.</li>
+<li><strong>Red / suite not ready</strong> — applied <strong>with an override</strong>: you write a justification, it lands in the audit log next to the apply. You have read the proposal and take the decision; the system requires the trail.</li>
+<li><strong>Stale base</strong> — the proposal needs rebasing (the agent will do it on request).</li>
+</ul>
+<h2 id="rolling-versions-back"><a class="anchor" href="#rolling-versions-back" aria-label="Section link">#</a>Rolling versions back</h2><p>Every definition change is a new immutable snapshot with the fully compiled prompt. Any previous version can be restored with one click: the snapshot returns <strong>as a new version</strong> — history is append-only, and the rollback itself is revertible the same way.</p>
+<p><img src="../assets/guide/agents-evolution-versions.png" alt="Versions and rollback"></p>
+<h2 id="where-cases-come-from"><a class="anchor" href="#where-cases-come-from" aria-label="Section link">#</a>Where cases come from</h2><p>Nobody hand-writes cases:</p>
+<ol>
+<li><strong>Production harvest.</strong> Completed runs automatically become evaluation-case candidates (the task is the input, the answer or the human&#39;s correction is the reference). Candidates go through review: accept one by one or the whole batch with «Accept all».</li>
+<li><strong>Supervisor warm-start.</strong> If an agent&#39;s suite holds fewer cases than the gate&#39;s minimum, the supervisor drafts three representative cases from the agent&#39;s purpose and recent successful runs — accept them, edit them, or delete them.</li>
+<li><strong>From proposal to case.</strong> An evolution proposal ships with a draft regression case — if it is applied, the gate already checks the exact failure that motivated the proposal.</li>
+</ol>
+<p><img src="../assets/guide/agents-candidates.png" alt="Case candidates"></p>
+<h2 id="effort-is-a-quality-signal-too"><a class="anchor" href="#effort-is-a-quality-signal-too" aria-label="Section link">#</a>Effort is a quality signal too</h2><p>An answer can get better while the work gets more expensive. Per definition version the system tracks average turns and tokens of completed runs; a meaningful growth is flagged as an effort regression («more turns / +N% tokens vs vN»). Evolution must justify the cost, not just the quality.</p>
+<h2 id="overrides-are-honest"><a class="anchor" href="#overrides-are-honest" aria-label="Section link">#</a>Overrides are honest</h2><p>Bypassing the gate is not a loophole but a documented decision: every apply without a green run is recorded in the audit with the author and justification, and the override share is visible in the quality report. The loop is fail-closed by design — a traceless bypass is technically impossible.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="files.html"><small>← Previous</small><strong>Files</strong></a>
+    <a class="pager-next" href="job-titles.html"><small>Next →</small><strong>Job titles & groups</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

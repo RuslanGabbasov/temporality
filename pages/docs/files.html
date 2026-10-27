@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Как агент передаёт человеку файлы — в чат, в мессенджер — и где их забрать.">
+<title>Файлы — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/files.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/files.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Справка</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="hitl-forms.html">Формы и подтверждения</a>
+<a class="docs-nav-row active" href="files.html">Файлы</a>
+<a class="docs-nav-row" href="evolution.html">Эволюция и качество</a>
+<a class="docs-nav-row" href="job-titles.html">Должности и группы</a>
+<div class="docs-nav-section">—</div>
+<a class="docs-nav-row" href="screenshots-checklist.html">screenshots-checklist.md</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Работа с агентом</div>
+<h1>Файлы</h1>
+<p class="docs-lead">Как агент передаёт человеку файлы — в чат, в мессенджер — и где их забрать.</p>
+<p>Агент производит файлы — отчёты, презентации, архивы, превью — и передаёт их человеку инструментом <code>send_file</code>. Файл всегда остаётся в рабочем каталоге задачи, а доставляется туда, где человеку удобно.</p>
+<h2 id="в-чате"><a class="anchor" href="#в-чате" aria-label="Section link">#</a>В чате</h2><p>После <code>send_file</code> под ответом появляется <strong>chip файла</strong> — «📎 preview.png». Клик скачивает файл из рабочего каталога. Чип появляется сразу при отправке, даже если модель забыла упомянуть файл в тексте ответа.</p>
+<p><img src="../assets/guide/chat-file-chip.png" alt="Файл в чате"></p>
+<p>Если агент работает с мессенджером, файл уходит туда вложением: в Matrix как документ, в Telegram как файл с подписью.</p>
+<h2 id="в-мессенджерах"><a class="anchor" href="#в-мессенджерах" aria-label="Section link">#</a>В мессенджерах</h2><p><img src="../assets/guide/telegram-sendfile.png" alt="Файл в Telegram"></p>
+<p>Доставка идёт во все подключённые каналы получателя, способные нести вложения. Если ни один канал не настроен, файл остаётся в рабочем каталоге — а агент обязан упомянуть путь в ответе, и в чате путь превращается в ссылку скачивания.</p>
+<h2 id="ограничения"><a class="anchor" href="#ограничения" aria-label="Section link">#</a>Ограничения</h2><ul>
+<li>Размер вложения — до 50 МБ (ограничение хранилищ мессенджеров).</li>
+<li>Файл не покидает систему, пока не доставлен: «отправил» означает «есть в рабочем каталоге и/или доставлен в канал» — результат инструмента всегда это показывает.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="hitl-forms.html"><small>← Назад</small><strong>Формы и подтверждения</strong></a>
+    <a class="pager-next" href="evolution.html"><small>Далее →</small><strong>Эволюция и качество</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

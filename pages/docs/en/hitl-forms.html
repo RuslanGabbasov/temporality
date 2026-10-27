@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="How the agent asks a human structured questions — cards in the chat, a button in your messenger, a browser form behind a one-time link — with server-side validation.">
+<title>Forms & approvals — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../hitl-forms.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/hitl-forms.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<div class="docs-nav-section">Integrations</div>
+<a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Reference</div>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row active" href="hitl-forms.html">Forms & approvals</a>
+<a class="docs-nav-row" href="files.html">Files</a>
+<a class="docs-nav-row" href="evolution.html">Evolution & quality</a>
+<a class="docs-nav-row" href="job-titles.html">Job titles & groups</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Working with the agent</div>
+<h1>Forms & approvals</h1>
+<p class="docs-lead">How the agent asks a human structured questions — cards in the chat, a button in your messenger, a browser form behind a one-time link — with server-side validation.</p>
+<p>When the agent lacks data or needs a consequential action confirmed, it asks via <code>ask_human</code>. The question reaches you where you are: as a card in the chat, a button in your messenger, or a text message with a link.</p>
+<h2 id="where-forms-come-from"><a class="anchor" href="#where-forms-come-from" aria-label="Section link">#</a>Where forms come from</h2><p>The agent describes the question declaratively — a JSON schema of fields:</p>
+<pre><code class="language-json">{
+  &quot;question&quot;: &quot;Release parameters for billing-service?&quot;,
+  &quot;schema&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+      &quot;channel&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;canary&quot;, &quot;stable&quot;], &quot;title&quot;: &quot;Channel&quot; },
+      &quot;version&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;minLength&quot;: 5, &quot;title&quot;: &quot;Version&quot; },
+      &quot;confirm&quot;: { &quot;type&quot;: &quot;boolean&quot;, &quot;title&quot;: &quot;Confirm the rollout&quot; }
+    },
+    &quot;required&quot;: [&quot;channel&quot;, &quot;version&quot;, &quot;confirm&quot;]
+  }
+}
+</code></pre>
+<p>Supported: strings (with choices, lengths, regex patterns), integers and numbers with bounds, booleans, arrays (multi-select and date ranges), date/time/email/URL formats and masked input. Limits: 20 fields, 8 KB per schema — a form is a question to a human, not a database.</p>
+<p>The server validates the answer against the same schema <strong>before</strong> resuming the run: an invalid value does not resume anything, it returns to the agent as an error.</p>
+<h2 id="where-you-see-the-form"><a class="anchor" href="#where-you-see-the-form" aria-label="Section link">#</a>Where you see the form</h2><p><strong>In the built-in chat</strong> — a card right in the conversation: choices as buttons, free-form answer, and full field sets for forms. It appears the moment the question is asked and closes itself when answered.</p>
+<p><img src="../assets/guide/chat-hitl-form.png" alt="Form in the chat"></p>
+<p><strong>In Matrix</strong> — an HTML card: a field table with formats and required marks; answer in the room as <code>field: value</code> lines, or tap «fill the form».</p>
+<p><strong>In Telegram</strong> — the question plus an inline «Open form» button; a tap opens the form in your browser.</p>
+<p><strong>The universal path</strong> — from any messenger, the button opens a <strong>hosted form</strong>: a standalone minimalist page behind a one-time scoped link. No harness account needed — the link is the access, to exactly one question, for a limited time. Fill it in, submit, close the tab.</p>
+<p><img src="../assets/guide/hosted-form-desktop.png" alt="Hosted form"></p>
+<p>Links expire and die with the question: answered, cancelled or expired — the form stops accepting. One question, one submission.</p>
+<h2 id="what-happens-after-you-answer"><a class="anchor" href="#what-happens-after-you-answer" aria-label="Section link">#</a>What happens after you answer</h2><p>The server validates the answer, folds it into canonical JSON and hands it to the agent as the tool result. The run continues with your data. The whole chain — question, answer, who answered and when — stays in the journal.</p>
+<p>For consequential questions (rollouts, external letters) the agent must request a separate human approval — same mechanics.</p>
+<h2 id="if-the-evaluation-suite-is-not-ready"><a class="anchor" href="#if-the-evaluation-suite-is-not-ready" aria-label="Section link">#</a>If the evaluation suite is not ready</h2><p>Applying an agent&#39;s evolution proposal is guarded by the evaluation gate (see <a href="evolution.html">Evolution &amp; quality</a>). If the agent has no evaluation cases yet, you can still apply with a written justification — the bypass is recorded in the audit log. A deliberate balance: you have read the proposal and take the decision; the system only requires the trail.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="operations.html"><small>← Previous</small><strong>Harness Operations</strong></a>
+    <a class="pager-next" href="files.html"><small>Next →</small><strong>Files</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

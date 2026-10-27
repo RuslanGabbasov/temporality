@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="A job title is the natural group address — invite every QA engineer to a call, or send the new instructions to all developers.">
+<title>Job titles & groups — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../job-titles.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/job-titles.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<div class="docs-nav-section">Integrations</div>
+<a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Reference</div>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="hitl-forms.html">Forms & approvals</a>
+<a class="docs-nav-row" href="files.html">Files</a>
+<a class="docs-nav-row" href="evolution.html">Evolution & quality</a>
+<a class="docs-nav-row active" href="job-titles.html">Job titles & groups</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Working with the agent</div>
+<h1>Job titles & groups</h1>
+<p class="docs-lead">A job title is the natural group address — invite every QA engineer to a call, or send the new instructions to all developers.</p>
+<p>Every user profile carries a <strong>job title</strong> — the person&#39;s function in the company («QA engineer», «Developer»). The platform role (admin/operator/viewer) is about system permissions; the job title is what the person does. That is the natural address when you need a function, not a named individual.</p>
+<h2 id="group-asks"><a class="anchor" href="#group-asks" aria-label="Section link">#</a>Group asks</h2><p>Fill the titles in the profiles (Users → the person&#39;s card → «Job title») — and the agent can:</p>
+<ul>
+<li>«Invite all QA engineers to a call» → everyone with «QA» in the title gets the question;</li>
+<li>«Send the new instructions to the developers» → it reaches everyone with «developer» in theirs;</li>
+<li>«Have someone from QA approve the rollout» → whoever answers first.</li>
+</ul>
+<h2 id="how-it-works"><a class="anchor" href="#how-it-works" aria-label="Section link">#</a>How it works</h2><p>The agent addresses the question to <code>title:&lt;substring&gt;</code> — delivery fans out to every active user whose job title matches (case-insensitive). Each person gets their own copy of the question in their own channel; <strong>the first answer closes the question</strong> — the rest see that it has been answered. Delivery order is predictable: seniority first, then name. If an execution identity forbids addressing someone, that copy is skipped with a note while the rest of the group still gets asked.</p>
+<h2 id="finding-people"><a class="anchor" href="#finding-people" aria-label="Section link">#</a>Finding people</h2><p>The agent finds people with <code>human_contacts</code>: by name, role, unit and <strong>job title</strong> — the contact cards show who would get the question and how (channel addresses are never exposed, delivery is automatic).</p>
+<h2 id="relation-to-the-org-tree"><a class="anchor" href="#relation-to-the-org-tree" aria-label="Section link">#</a>Relation to the org tree</h2><p>The job title complements units, not replaces them: <code>org:&lt;unit&gt;</code> addresses a team (every member of the unit), <code>title:&lt;job title&gt;</code> addresses a function across the whole org scope. Testers usually cut across teams — that is exactly what the title is for.</p>
+<h2 id="filling-it-in"><a class="anchor" href="#filling-it-in" aria-label="Section link">#</a>Filling it in</h2><p>Users → the person&#39;s card → «Job title». A single free-form field — the important part is naming the same function the same way for different people: «QA engineer» and «tester» are two different groups.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="evolution.html"><small>← Previous</small><strong>Evolution & quality</strong></a>
+    
+  </nav>
+</article>
+</main>
+</body>
+</html>

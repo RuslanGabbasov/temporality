@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Как агент задаёт человеку структурированные вопросы: карточки в чате, кнопка в мессенджере, форма в браузере по одноразовой ссылке — и как всё это валидируется.">
+<title>Формы и подтверждения — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/hitl-forms.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/hitl-forms.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Справка</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row active" href="hitl-forms.html">Формы и подтверждения</a>
+<a class="docs-nav-row" href="files.html">Файлы</a>
+<a class="docs-nav-row" href="evolution.html">Эволюция и качество</a>
+<a class="docs-nav-row" href="job-titles.html">Должности и группы</a>
+<div class="docs-nav-section">—</div>
+<a class="docs-nav-row" href="screenshots-checklist.html">screenshots-checklist.md</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Работа с агентом</div>
+<h1>Формы и подтверждения</h1>
+<p class="docs-lead">Как агент задаёт человеку структурированные вопросы: карточки в чате, кнопка в мессенджере, форма в браузере по одноразовой ссылке — и как всё это валидируется.</p>
+<p>Когда агенту не хватает данных или нужно подтверждение значимого действия, он задаёт вопрос человеку (<code>ask_human</code>). Вопрос доезжает туда, где человеку удобно: в чат карточкой с полями, в мессенджер кнопкой, в крайнем случае — текстом со ссылкой.</p>
+<h2 id="откуда-берутся-формы"><a class="anchor" href="#откуда-берутся-формы" aria-label="Section link">#</a>Откуда берутся формы</h2><p>Агент описывает вопрос декларативно — JSON-схемой полей:</p>
+<pre><code class="language-json">{
+  &quot;question&quot;: &quot;Параметры релиза billing-service?&quot;,
+  &quot;schema&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+      &quot;channel&quot;:  { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;canary&quot;, &quot;stable&quot;], &quot;title&quot;: &quot;Канал&quot; },
+      &quot;version&quot;:  { &quot;type&quot;: &quot;string&quot;, &quot;minLength&quot;: 5, &quot;title&quot;: &quot;Версия&quot; },
+      &quot;window&quot;:   { &quot;type&quot;: &quot;array&quot;, &quot;minItems&quot;: 2, &quot;maxItems&quot;: 2,
+                    &quot;items&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;format&quot;: &quot;date&quot; }, &quot;title&quot;: &quot;Окно&quot; },
+      &quot;confirm&quot;:  { &quot;type&quot;: &quot;boolean&quot;, &quot;title&quot;: &quot;Подтверждаю выкат&quot; }
+    },
+    &quot;required&quot;: [&quot;channel&quot;, &quot;version&quot;, &quot;confirm&quot;]
+  }
+}
+</code></pre>
+<p>Поддерживаются: строки (с перечнем вариантов, длиной, регуляркой), целые и дробные числа с границами, булевы флаги, массивы (мультивыбор и диапазоны дат), форматы даты/времени/почты/ссылки и маскированный ввод. Лимиты — 20 полей и 8 КБ на схему: форма — это вопрос человеку, а не база данных.</p>
+<p>Сервер проверяет ответ по той же схеме <strong>до</strong> возобновления задачи — некорректное значение не возобновит работу, а вернётся агенту как ошибка.</p>
+<h2 id="где-человек-видит-форму"><a class="anchor" href="#где-человек-видит-форму" aria-label="Section link">#</a>Где человек видит форму</h2><p><strong>Во встроенном чате</strong> — карточка прямо в диалоге: варианты кнопками, свободный ответ, полный набор полей для форм. Появляется в момент вопроса, закрывается автоматически при ответе.</p>
+<p><img src="../assets/guide/chat-hitl-form.png" alt="Форма в чате"></p>
+<p><strong>В Matrix</strong> — HTML-карточка: таблица полей с форматами и обязательностью, ответ текстом в комнате по шаблону <code>поле: значение</code>, либо кнопка «Заполнить форму».</p>
+<p><strong>В Telegram</strong> — вопрос и inline-кнопка «Заполнить форму»: тап открывает форму в браузере.</p>
+<p><strong>Универсальный путь</strong> — по кнопке из любого мессенджера открывается <strong>хостед-форма</strong>: отдельная минималистичная страница по одноразовой ссылке. Ей не нужен аккаунт в системе — ссылка и есть доступ, ровно к одному вопросу, на ограниченный срок. Заполнил, отправил, закрыл.</p>
+<p><img src="../assets/guide/hosted-form-desktop.png" alt="Хостед-форма"></p>
+<p>Ссылки выдаются с сроком жизни и умирают вместе с вопросом: отвечено, отменено или истекло — форма больше не принимает. Один вопрос — одна отправка.</p>
+<h2 id="что-происходит-после-ответа"><a class="anchor" href="#что-происходит-после-ответа" aria-label="Section link">#</a>Что происходит после ответа</h2><p>Ответ валидируется сервером, сворачивается в JSON и передаётся агенту как результат вопроса. Агент продолжает работу с этими данными. Вся цепочка — вопрос, ответ, кто и когда ответил — остаётся в журнале.</p>
+<p>Если вопрос важный (выкатка, внешнее письмо), агент обязан запросить отдельное подтверждение — и получит его той же механикой.</p>
+<h2 id="если-оценочный-контур-не-готов"><a class="anchor" href="#если-оценочный-контур-не-готов" aria-label="Section link">#</a>Если оценочный контур не готов</h2><p>Применение предложений эволюции агента охраняется оценочным гейтом (см. <a href="evolution.html">Эволюция и качество</a>). Если у агента ещё нет оценочных кейсов, применить можно с письменным обоснованием — обход фиксируется в журнале аудита. Это осознанный баланс: человек прочитал предложение и берёт решение на себя, система лишь требует оставить след.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="operations.html"><small>← Назад</small><strong>Эксплуатация харнеса</strong></a>
+    <a class="pager-next" href="files.html"><small>Далее →</small><strong>Файлы</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

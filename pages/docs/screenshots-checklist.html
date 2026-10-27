@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>screenshots-checklist.md — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/screenshots-checklist.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/screenshots-checklist.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Справка</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="hitl-forms.html">Формы и подтверждения</a>
+<a class="docs-nav-row" href="files.html">Файлы</a>
+<a class="docs-nav-row" href="evolution.html">Эволюция и качество</a>
+<a class="docs-nav-row" href="job-titles.html">Должности и группы</a>
+<div class="docs-nav-section">—</div>
+<a class="docs-nav-row active" href="screenshots-checklist.html">screenshots-checklist.md</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">—</div>
+<h1>screenshots-checklist.md</h1>
+
+<p>Куда класть: <code>pages/assets/guide/&lt;имя-файла&gt;</code> (создай папку <code>guide</code> внутри
+<code>pages/assets</code>). Формат — PNG, ширина 1280–1600px ( retina ×2, если можно),
+тема — та, что выглядит лучше (светлая сейчас дефолт). Данные на скринах —
+не боевые: тестовый проект, вымышленные имена.</p>
+<p>Имена файлов фиксированные — гайд уже ссылается на них.</p>
+<h2 id="основной-набор-минимум-для-запуска-гайда"><a class="anchor" href="#основной-набор-минимум-для-запуска-гайда" aria-label="Section link">#</a>Основной набор (минимум для запуска гайда)</h2><table>
+<thead>
+<tr>
+<th>Файл</th>
+<th>Что снять</th>
+<th>Состояние интерфейса</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>dashboard.png</code></td>
+<td>Главная (Dashboard)</td>
+<td>обычный вид, 2–3 проекта в списке</td>
+</tr>
+<tr>
+<td><code>chat-run.png</code></td>
+<td>Встроенный чат, ход выполнения</td>
+<td>бабл с лентой активности: строки ходов с 💭/токенами, <code>⚙ tool: …</code>, стрим «⚙ write_file ▹ …»</td>
+</tr>
+<tr>
+<td><code>chat-hitl-options.png</code></td>
+<td>Карточка вопроса с кнопками</td>
+<td>ask_human с options: «❓ Агент спрашивает», кнопки вариантов, свободный ответ</td>
+</tr>
+<tr>
+<td><code>chat-hitl-form.png</code></td>
+<td>Карточка вопроса-формы</td>
+<td>schema-форма: несколько типов полей (enum, дата, чекбокс, число), кнопка отправки</td>
+</tr>
+<tr>
+<td><code>chat-file-chip.png</code></td>
+<td>Чип файла в бабле</td>
+<td>«📎 report.md» после send_file</td>
+</tr>
+<tr>
+<td><code>matrix-card.png</code></td>
+<td>Сообщение в Element</td>
+<td>HTML-карточка вопроса: таблица полей, «fill the form» кнопка</td>
+</tr>
+<tr>
+<td><code>telegram-form-button.png</code></td>
+<td>Сообщение в Telegram</td>
+<td>вопрос + inline-кнопка «Заполнить форму»</td>
+</tr>
+<tr>
+<td><code>hosted-form-desktop.png</code></td>
+<td>Страница <code>/kernel-api/forms/&lt;token&gt;</code></td>
+<td>форма целиком, desktop-ширина</td>
+</tr>
+<tr>
+<td><code>hosted-form-mobile.png</code></td>
+<td>Та же страница</td>
+<td>ширина ~390px (мобильная), открыто из Telegram</td>
+</tr>
+<tr>
+<td><code>hosted-form-answered.png</code></td>
+<td>Страница после отправки</td>
+<td>«Answer recorded — thank you»</td>
+</tr>
+<tr>
+<td><code>users-card.png</code></td>
+<td>Список пользователей</td>
+<td>карточка с должностью, email, бейджами каналов</td>
+</tr>
+<tr>
+<td><code>users-job-title.png</code></td>
+<td>Форма пользователя</td>
+<td>поле «Должность» заполнено</td>
+</tr>
+<tr>
+<td><code>agents-evolution-versions.png</code></td>
+<td>Вкладка «Эволюция»</td>
+<td>версии с тегами регрессий (tokens/turns/pass rate)</td>
+</tr>
+<tr>
+<td><code>agents-gate-override.png</code></td>
+<td>Панель override</td>
+<td>«Применить с оверрайдом» + поле обоснования</td>
+</tr>
+<tr>
+<td><code>agents-candidates.png</code></td>
+<td>Очередь golden-кандидатов</td>
+<td>2–3 кандидата + кнопка «Accept all»</td>
+</tr>
+<tr>
+<td><code>skills-files-tab.png</code></td>
+<td>Скил, вкладка «Файлы»</td>
+<td>список файлов с 🔴/🟡 и просмотр кода</td>
+</tr>
+<tr>
+<td><code>skills-import.png</code></td>
+<td>Диалог импорта скила</td>
+<td>выбор архива/папки</td>
+</tr>
+<tr>
+<td><code>trace-full.png</code></td>
+<td>Runs → Трассировка</td>
+<td>развёрнутый ход с деталями вызова</td>
+</tr>
+<tr>
+<td><code>org-policy-egress.png</code></td>
+<td>Политика оргструктуры</td>
+<td>поле «Базовый egress-список» заполнено</td>
+</tr>
+</tbody></table>
+<h2 id="дополнительные-для-лендинга-и-насыщенных-разделов"><a class="anchor" href="#дополнительные-для-лендинга-и-насыщенных-разделов" aria-label="Section link">#</a>Дополнительные (для лендинга и насыщенных разделов)</h2><table>
+<thead>
+<tr>
+<th>Файл</th>
+<th>Что снять</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>landing-hero.png</code></td>
+<td>Первый экран сайта (если нужен скрин самого себя)</td>
+</tr>
+<tr>
+<td><code>agent-form-network.png</code></td>
+<td>Форма агента: блок «Network access» с уровнями и списком адресов</td>
+</tr>
+<tr>
+<td><code>agents-list.png</code></td>
+<td>Список агентов с бейджами</td>
+</tr>
+<tr>
+<td><code>knowledge-map.png</code></td>
+<td>Карта знаний</td>
+</tr>
+<tr>
+<td><code>observability-trace.png</code></td>
+<td>Общая наблюдаемость (супервайзер/журнал)</td>
+</tr>
+<tr>
+<td><code>matrix-sendfile.png</code></td>
+<td>Файл, пришедший в Matrix от бота</td>
+</tr>
+<tr>
+<td><code>telegram-sendfile.png</code></td>
+<td>Файл, пришедший в Telegram</td>
+</tr>
+</tbody></table>
+<h2 id="как-снимать-аккуратно"><a class="anchor" href="#как-снимать-аккуратно" aria-label="Section link">#</a>Как снимать аккуратно</h2><ol>
+<li>Тестовые данные: проект «demo», вымышленный клиент, файл <code>report.md</code>.</li>
+<li>Перед скрином закрыть тултипы/уведомления (или наоборот — если они и есть
+объект, как у override-панели).</li>
+<li>Браузер без лишних вкладок в кадре; масштаб 100%.</li>
+<li>Для мобильной ширины — DevTools → device toolbar → iPhone 14.</li>
+<li>Не кадрировать слишком плотно: оставь контекст (заголовок страницы).</li>
+</ol>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="job-titles.html"><small>← Назад</small><strong>Должности и группы</strong></a>
+    
+  </nav>
+</article>
+</main>
+</body>
+</html>

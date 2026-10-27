@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="How the agent hands files to a human — into the chat, into your messenger — and where to pick them up.">
+<title>Files — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../files.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/files.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<div class="docs-nav-section">Integrations</div>
+<a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Reference</div>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="hitl-forms.html">Forms & approvals</a>
+<a class="docs-nav-row active" href="files.html">Files</a>
+<a class="docs-nav-row" href="evolution.html">Evolution & quality</a>
+<a class="docs-nav-row" href="job-titles.html">Job titles & groups</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Working with the agent</div>
+<h1>Files</h1>
+<p class="docs-lead">How the agent hands files to a human — into the chat, into your messenger — and where to pick them up.</p>
+<p>Agents produce files — reports, decks, archives, previews — and hand them over with <code>send_file</code>. The file always stays in the run workspace; delivery goes wherever it is convenient for you.</p>
+<h2 id="in-the-chat"><a class="anchor" href="#in-the-chat" aria-label="Section link">#</a>In the chat</h2><p>After <code>send_file</code>, a <strong>file chip</strong> appears under the answer — «📎 preview.png». Clicking it downloads the file from the run workspace. The chip appears the moment the send starts, even if the model&#39;s reply forgets to mention the file.</p>
+<p><img src="../assets/guide/chat-file-chip.png" alt="File in the chat"></p>
+<p>If the agent works with a messenger, the file is delivered there as an attachment: a document in Matrix, a file with a caption in Telegram.</p>
+<h2 id="in-messengers"><a class="anchor" href="#in-messengers" aria-label="Section link">#</a>In messengers</h2><p><img src="../assets/guide/telegram-sendfile.png" alt="File in Telegram"></p>
+<p>Delivery goes to every connected channel of the recipient that can carry attachments. If no channel is configured, the file stays in the run workspace — and the agent is instructed to mention the path in its reply, which the chat turns into a download link.</p>
+<h2 id="limits"><a class="anchor" href="#limits" aria-label="Section link">#</a>Limits</h2><ul>
+<li>Attachment size — up to 50 MB (messenger storage caps).</li>
+<li>The file never leaves the system until delivered: «sent» means «in the run workspace and/or delivered to a channel» — the tool result always shows which.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="hitl-forms.html"><small>← Previous</small><strong>Forms & approvals</strong></a>
+    <a class="pager-next" href="evolution.html"><small>Next →</small><strong>Evolution & quality</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

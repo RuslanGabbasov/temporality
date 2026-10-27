@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Как агенты предлагают изменения своей конфигурации, как оценочный гейт проверяет их эффект, как откатить версию — и откуда берутся оценочные кейсы.">
+<title>Эволюция и качество — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/evolution.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/evolution.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Справка</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="hitl-forms.html">Формы и подтверждения</a>
+<a class="docs-nav-row" href="files.html">Файлы</a>
+<a class="docs-nav-row active" href="evolution.html">Эволюция и качество</a>
+<a class="docs-nav-row" href="job-titles.html">Должности и группы</a>
+<div class="docs-nav-section">—</div>
+<a class="docs-nav-row" href="screenshots-checklist.html">screenshots-checklist.md</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Работа с агентом</div>
+<h1>Эволюция и качество</h1>
+<p class="docs-lead">Как агенты предлагают изменения своей конфигурации, как оценочный гейт проверяет их эффект, как откатить версию — и откуда берутся оценочные кейсы.</p>
+<p>Агенты наблюдают собственное трение и предлагают изменения своей конфигурации (правила, чек-листы завершения) через <code>agent_propose</code>. Предложение меняет ничего само — человек читает его и решает. Вокруг этого решения построен измеримый контур: <strong>оценочный гейт</strong> проверяет, что изменение не ломает поведение, <strong>версии</strong> позволяют откатить любое решение, а <strong>регрессии по трудоёмкости</strong> показывают, стало ли дешевле.</p>
+<h2 id="предложения-и-гейт"><a class="anchor" href="#предложения-и-гейт" aria-label="Section link">#</a>Предложения и гейт</h2><p>Применение предложения агента допускается только поверх свежего зелёного оценочного прогона на его базовой версии. Оценочный прогон — это сьют кейсов: модели дают типовые задачи и проверяют ответы (точные подстроки или LLM-судья с калибровкой).</p>
+<p><img src="../assets/guide/agents-gate-override.png" alt="Оценочный гейт"></p>
+<p>У гейта три честных исхода:</p>
+<ul>
+<li><strong>Зелёный</strong> — свежий зелёный прогон: предложение применяется, версия инкрементируется, снапшот сохраняется.</li>
+<li><strong>Красный / сьют не готов</strong> — применяется <strong>с оверрайдом</strong>: вы пишете обоснование, оно фиксируется в журнале аудита вместе с применением. Человек, прочитавший предложение, решает; система лишь требует оставить след.</li>
+<li><strong>База устарела</strong> — предложение нужно перебазировать (агент сделает это по запросу).</li>
+</ul>
+<h2 id="откат-версий"><a class="anchor" href="#откат-версий" aria-label="Section link">#</a>Откат версий</h2><p>Каждое изменение определения — новый неизменяемый снапшот с полным скомпилированным промптом. Любую предыдущую версию можно вернуть одной кнопкой: снапшот возвращается <strong>как новая версия</strong> — история только растёт, а сам откат откатывается тем же способом.</p>
+<p><img src="../assets/guide/agents-evolution-versions.png" alt="Версии и откат"></p>
+<h2 id="откуда-берутся-кейсы"><a class="anchor" href="#откуда-берутся-кейсы" aria-label="Section link">#</a>Откуда берутся кейсы</h2><p>Руками писать кейсы не нужно:</p>
+<ol>
+<li><strong>Харвест из продакшна.</strong> Завершённые задачи автоматически становятся кандидатами в оценочные кейсы (вопрос = задача, эталон = ответ или исправление человека). Кандидаты проходят ревью: принять по одному или пакетом кнопкой «Accept all».</li>
+<li><strong>Warm-start от супервайзера.</strong> Если у агента кейсов меньше минимума гейта, супервайзер сам составит три представительных кейса из назначения агента и свежих успешных задач — можно принять, отредактировать или удалить.</li>
+<li><strong>От предложения к кейсу.</strong> Эволюционное предложение агента сопровождается черновиком регрессионного кейса — если предложение применят, гейт уже проверяет именно тот сбой, из-за которого оно появилось.</li>
+</ol>
+<p><img src="../assets/guide/agents-candidates.png" alt="Кандидаты в кейсы"></p>
+<h2 id="трудоёмкость-как-сигнал-качества"><a class="anchor" href="#трудоёмкость-как-сигнал-качества" aria-label="Section link">#</a>Трудоёмкость как сигнал качества</h2><p>Ответ может стать лучше, а работа — дороже. По каждой версии считаются средние ходы и токены завершённых задач; заметный рост помечается тегом «дороже по ходам/токенам против vN». Эволюция должна оправдывать не только качество, но и цену.</p>
+<h2 id="overrides-честны"><a class="anchor" href="#overrides-честны" aria-label="Section link">#</a>Overrides честны</h2><p>Обход гейта и оверрайды — не лазейка, а задокументированное решение: каждое применение без зелёного прогона записано в аудит с автором и обоснованием, и доля таких обходов видна в отчёте качества. Контур спроектирован fail-closed: обход без следа невозможен технически.</p>
+<h2 id="регрессии-по-трудоёмкости"><a class="anchor" href="#регрессии-по-трудоёмкости" aria-label="Section link">#</a>Регрессии по трудоёмкости</h2><p>Сравнение версий считает не только точность ответов, но и цену: средние ходы и токены на завершённую задачу. Заметный рост помечается как регрессия трудоёмкости — эволюция должна оправдывать не только качество, но и стоимость.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="files.html"><small>← Назад</small><strong>Файлы</strong></a>
+    <a class="pager-next" href="job-titles.html"><small>Далее →</small><strong>Должности и группы</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

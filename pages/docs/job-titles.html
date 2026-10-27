@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Должность сотрудника — естественный адрес для групповых вопросов: позови всех тестировщиков, отправь разработчикам инструкцию.">
+<title>Должности и группы — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/job-titles.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/job-titles.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Справка</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="hitl-forms.html">Формы и подтверждения</a>
+<a class="docs-nav-row" href="files.html">Файлы</a>
+<a class="docs-nav-row" href="evolution.html">Эволюция и качество</a>
+<a class="docs-nav-row active" href="job-titles.html">Должности и группы</a>
+<div class="docs-nav-section">—</div>
+<a class="docs-nav-row" href="screenshots-checklist.html">screenshots-checklist.md</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Работа с агентом</div>
+<h1>Должности и группы</h1>
+<p class="docs-lead">Должность сотрудника — естественный адрес для групповых вопросов: позови всех тестировщиков, отправь разработчикам инструкцию.</p>
+<p>У каждого сотрудника в профиле есть <strong>должность</strong> — его функция в компании («Инженер тестирования», «Разработчик»). Платформенная роль (admin/operator/viewer) означает права в системе; должность — чем человек занимается. Именно должность — естественный адрес, когда нужно обратиться к функции, а не к человеку по имени.</p>
+<h2 id="групповые-вопросы"><a class="anchor" href="#групповые-вопросы" aria-label="Section link">#</a>Групповые вопросы</h2><p>Заполните должности в профилях (Users → карточка сотрудника → «Должность») — и агент сможет:</p>
+<ul>
+<li>«Позови всех тестировщиков на созвон» → вопрос получит каждый, у кого в должности «тестировщик»;</li>
+<li>«Отправь разработчикам новую инструкцию» → инструкция уйдёт всем с «разработчик» в должности;</li>
+<li>«Согласуй выкат с кем-то из QA» → вопрос тому, кто первым ответит.</li>
+</ul>
+<h2 id="как-это-устроено"><a class="anchor" href="#как-это-устроено" aria-label="Section link">#</a>Как это устроено</h2><p>Агент адресует вопрос получателем <code>title:&lt;должность&gt;</code> — доставка расходится всем подходящим активным сотрудникам (регистронезависимо, по вхождению). Каждый получает свой экземпляр вопроса в своём канале; <strong>первый ответ закрывает вопрос</strong> — остальным уходит пометка, что ответ уже дан. Кто не успел — видит это в истории.</p>
+<p>Порядок доставки предсказуем: старше ролью — раньше. Если сотрудник запрещён политикой исполнения, его копия пропускается с пометкой, остальные получают вопрос.</p>
+<h2 id="поиск-людей"><a class="anchor" href="#поиск-людей" aria-label="Section link">#</a>Поиск людей</h2><p>Агент находит людей инструментом <code>human_contacts</code>: по имени, роли, подразделению и <strong>должности</strong> — карточки показывают, кому и как вопрос дойдёт (адреса каналов не раскрываются, доставка автоматическая).</p>
+<h2 id="связь-с-оргструктурой"><a class="anchor" href="#связь-с-оргструктурой" aria-label="Section link">#</a>Связь с оргструктурой</h2><p>Должность дополняет подразделения, а не заменяет их: <code>org:&lt;unit&gt;</code> адресует команду (всем членам юнита), <code>title:&lt;должность&gt;</code> — функцию через весь оргскоп. «Тестировщики» обычно пересекают команды — для этого и нужна должность.</p>
+<h2 id="заполнение"><a class="anchor" href="#заполнение" aria-label="Section link">#</a>Заполнение</h2><p>Users → карточка сотрудника → «Должность». Однострочное поле, свободный формат — главное, чтобы одинаково именовать одну и ту же функцию у разных людей: «Инженер тестирования» и «тестировщик» найдутся одинаково, а вот «QA» и «тестировщик» — разные группы.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="evolution.html"><small>← Назад</small><strong>Эволюция и качество</strong></a>
+    <a class="pager-next" href="screenshots-checklist.html"><small>Далее →</small><strong>screenshots-checklist.md</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
