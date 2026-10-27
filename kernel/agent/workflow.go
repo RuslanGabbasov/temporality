@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -361,6 +362,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	noteSteering := workflow.GetVersion(ctx, "delegation-note-steering", workflow.DefaultVersion, 1)
 	modelSchedStart := workflow.GetVersion(ctx, "model-schedule-to-start", workflow.DefaultVersion, 1)
 	titleParallel := workflow.GetVersion(ctx, "run-title-parallel", workflow.DefaultVersion, 1)
+	// Journal transport gate: version 1 records every emit event through a
+	// local activity (RecordEventLocal) instead of a queued activity task.
+	recordLocal := workflow.GetVersion(ctx, recordEventLocalChangeID, workflow.DefaultVersion, recordEventLocalVersion)
 	// The team root seeds the shared context handle: every child run of the
 	// program (slots, reviewers, delegates below them) inherits it so scratch
 	// paths and run-scoped hints stay addressable across the tree.
@@ -379,7 +383,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		ScheduleToCloseTimeout: 5 * time.Minute,
 		RetryPolicy:            &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3},
 	})
-	state := &eventState{run: input, sequence: 0, eventScope: eventScope(input.SourceID, input.Project, input.RunID), parentFrame: input.ParentFrameID, previousEventID: input.ParentEventID}
+	state := &eventState{run: input, sequence: 0, eventScope: eventScope(input.SourceID, input.Project, input.RunID), parentFrame: input.ParentFrameID, previousEventID: input.ParentEventID, recordLocal: recordLocal}
 	var frames []string
 	defer func() {
 		if errors.Is(ctx.Err(), workflow.ErrCanceled) {
@@ -3104,6 +3108,36 @@ func dropUserNotes(ctx workflow.Context, activityCtx workflow.Context, state *ev
 	return nil
 }
 
+// recordEventLocalChangeID is the GetVersion change id gating emit's event
+// transport (docs/failure-model.md replay rules): version 1 journals runtime
+// events through a local activity running inside the workflow task process —
+// RecordEvent is a fast outbox insert with no heartbeat, so N events collapse
+// into the workflow tasks that already exist instead of costing one server
+// round-trip per event. Both AgentRun and KnowledgeExtractionWorkflow call
+// GetVersion with this id; the change id is shared, the gate position is
+// fixed per workflow.
+const recordEventLocalChangeID = "record-event-local"
+
+// recordEventLocalVersion is the newest gate version; it only ever grows.
+const recordEventLocalVersion workflow.Version = 1
+
+// RecordEventLocal carries the RecordEvent implementation into the workflow
+// package: the Activities instance is built at worker start with its outbox
+// dependency, so workflow code cannot reference the method value directly.
+// Local activities execute in-process against this function and need no
+// registration. Nil keeps the queued ExecuteActivity transport.
+var RecordEventLocal func(ctx context.Context, item observation.Event) error
+
+// SetRecordEventLocal wires the production transport. Call it in the worker
+// bootstrap next to RegisterActivityWithOptions(activities.RecordEvent, ...)
+// with the same Activities instance, before the worker starts serving. The
+// wiring must be unconditional and permanent: a history recorded through the
+// local path replayed on a binary without the hook would take the
+// ExecuteActivity fallback and fail the determinism check.
+func SetRecordEventLocal(f func(context.Context, observation.Event) error) {
+	RecordEventLocal = f
+}
+
 type eventState struct {
 	run             RunInput
 	frame           string
@@ -3111,6 +3145,7 @@ type eventState struct {
 	sequence        int
 	eventScope      string
 	previousEventID string
+	recordLocal     workflow.Version
 }
 
 func emit(ctx workflow.Context, state *eventState, kind string, data map[string]any) error {
@@ -3134,7 +3169,19 @@ func emit(ctx workflow.Context, state *eventState, kind string, data map[string]
 		Context: observation.Context{Project: state.run.Project, Run: state.run.RunID, Task: state.run.TaskID, Actor: observation.Actor{ID: state.run.ActorID, Type: "agent"}, ParentEventID: state.previousEventID},
 		Type:    kind, Data: data,
 	}
-	if err := workflow.ExecuteActivity(ctx, ActivityRecordEvent, item).Get(ctx, nil); err != nil {
+	// Version 1 of the record-event-local gate journals through a local
+	// activity when the worker injected the RecordEvent implementation; a nil
+	// hook (or an older gated history) keeps the queued activity transport.
+	// The whole deterministic bookkeeping above runs before either transport.
+	if state.recordLocal == recordEventLocalVersion && RecordEventLocal != nil {
+		localCtx := workflow.WithLocalActivityOptions(ctx, workflow.LocalActivityOptions{
+			ScheduleToCloseTimeout: 2 * time.Minute,
+			RetryPolicy:            &temporal.RetryPolicy{InitialInterval: 500 * time.Millisecond, BackoffCoefficient: 2, MaximumInterval: 5 * time.Second, MaximumAttempts: 3},
+		})
+		if err := workflow.ExecuteLocalActivity(localCtx, RecordEventLocal, item).Get(ctx, nil); err != nil {
+			return err
+		}
+	} else if err := workflow.ExecuteActivity(ctx, ActivityRecordEvent, item).Get(ctx, nil); err != nil {
 		return err
 	}
 	state.previousEventID = eventID
@@ -3254,6 +3301,11 @@ func startKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context
 // only produces best-effort knowledge events; every failure is contained and
 // recorded as knowledge.extraction.failed.
 func KnowledgeExtractionWorkflow(ctx workflow.Context, input KnowledgeExtractionInput) error {
+	// Same record-event-local gate as AgentRun and always the first command of
+	// this workflow: the extraction journals its summary and failure events
+	// through emit, so its histories need the transport gate in a fixed
+	// position before anything else can branch on run configuration.
+	recordLocal := workflow.GetVersion(ctx, recordEventLocalChangeID, workflow.DefaultVersion, recordEventLocalVersion)
 	if input.Run.SkipKnowledge {
 		return nil
 	}
@@ -3274,6 +3326,7 @@ func KnowledgeExtractionWorkflow(ctx workflow.Context, input KnowledgeExtraction
 		sequence:        input.Sequence,
 		eventScope:      input.Scope,
 		previousEventID: input.PreviousEventID,
+		recordLocal:     recordLocal,
 	}
 	runKnowledgeExtraction(ctx, activityCtx, state, input.Run)
 	return nil
