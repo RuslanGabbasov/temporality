@@ -119,7 +119,7 @@ describe('normalizeRunStatus', () => {
 })
 
 describe('sendFileChip', () => {
-  it('extracts path and name from a send_file completion', () => {
+  it('extracts path and name from a send_file start (the started event carries arguments)', () => {
     expect(sendFileChip({ tool: 'send_file', arguments: JSON.stringify({ path: '/workspace/27.1/oneslide/preview.png', note: 'x' }) }))
       .toEqual({ path: '/workspace/27.1/oneslide/preview.png', name: 'preview.png' })
   })

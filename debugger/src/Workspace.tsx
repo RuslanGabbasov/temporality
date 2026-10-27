@@ -849,10 +849,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       } catch { /* ignore */ }
     })
     es.addEventListener('model.started', () => { /* pacing marker; the completed line carries the numbers */ })
-    // send_file completions attach the file chip to the bubble: the run
-    // workspace serves the download, so the chat gets the file even when the
-    // model's reply forgets to mention the path.
-    es.addEventListener('tool.completed', (e) => {
+    // send_file starts attach the file chip to the bubble immediately: the
+    // journaled tool.started carries the workspace path (tool.completed does
+    // NOT — it ships only the delivery summary). The run workspace serves the
+    // download, so the chat gets the file even when the model's reply forgets
+    // to mention the path.
+    es.addEventListener('tool.started', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const chip = sendFileChip(outer.data ?? outer)

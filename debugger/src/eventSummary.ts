@@ -294,7 +294,15 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       const failed = d.exit_code !== undefined && d.exit_code !== 0
       const exit = d.exit_code !== undefined ? `exit ${d.exit_code}` : ''
       const ms = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
-      const output = typeof d.output === 'string' ? unwrapJsonString(d.output).slice(0, 80).replace(/\n/g, ' ') : ''
+      let output = typeof d.output === 'string' ? unwrapJsonString(d.output).slice(0, 80).replace(/\n/g, ' ') : ''
+      // send_file's delivery summary («delivered: []») says nothing a human
+      // can act on — the workspace path is the actionable part.
+      if (d.tool === 'send_file') {
+        try {
+          const summary = JSON.parse(unwrapJsonString(d.output))
+          if (summary.path) output = String(summary.path)
+        } catch { /* keep the raw excerpt */ }
+      }
       return { icon: failed ? '✗' : '✓', label: pseudoToolLabel(d.tool, t), detail: [exit, ms, output].filter(Boolean).join(' · '), color: failed ? '#f7768e' : '#9ece6a' }
     }
     case 'tool.failed': {
