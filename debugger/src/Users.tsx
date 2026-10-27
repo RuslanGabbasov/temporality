@@ -257,12 +257,12 @@ export default function Users() {
           <Column key={u.id} sm={4} md={4} lg={4}>
             <Tile style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
-                    <strong>{u.name}</strong>
-                    {u.org_unit_id ? <OrgBadge orgUnitID={u.org_unit_id} org={org} /> : (org.units.length > 0 && <Tag type="gray" size="sm">{t('org.unassigned_badge') ?? 'no unit'}</Tag>)}
-                  </div>
-                  {u.email && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{u.email}</p>}
+                				<div style={{ minWidth: 0, flex: 1 }}>
+                					<div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                						<strong>{u.name}</strong>
+                						{u.org_unit_id ? <OrgBadge orgUnitID={u.org_unit_id} org={org} /> : (org.units.length > 0 && <Tag type="gray" size="sm">{t('org.unassigned_badge') ?? 'no unit'}</Tag>)}
+                					</div>
+                					{u.email && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{u.email}</p>}
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type={ROLE_COLORS[u.role] || 'gray'} size="sm">{u.role}</Tag>
                     <Tag type={u.active ? 'green' : 'red'} size="sm">{u.active ? (t('users.active') ?? 'active') : (t('users.inactive') ?? 'inactive')}</Tag>
