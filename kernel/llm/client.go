@@ -106,6 +106,11 @@ type Completion struct {
 	// stream, but the wall clock carries a dead attempt the latency number
 	// hides. StreamMs holds the wasted first attempt's duration.
 	StreamRetried bool `json:"stream_retried,omitempty"`
+	// StrippedFields counts the optional envelope fields dropped in-flight
+	// because the provider rejected the request as a bad one (400): reasoning,
+	// prompt cache key, parallel-tool toggle, stream options. Observability
+	// only — the answer itself is complete.
+	StrippedFields int `json:"stripped_fields,omitempty"`
 }
 
 // Truncated reports whether the provider cut the completion off at the token
@@ -295,6 +300,10 @@ func anthropicCompatHost(host string) bool {
 // compatSanitize drops envelope fields the configured provider does not
 // speak. Today that is only the Anthropic compatibility layer; OpenAI-
 // proper and the gateways tolerate all of these.
+// compatSanitize drops envelope fields the configured provider does not
+// implement when the host is known-incompatible. Unknown gateways (xiaomi,
+// one-api relays, …) surface incompatibilities as 400s instead — the ladder
+// below degrades in-flight.
 func (c *Client) compatSanitize(req *chatRequest) {
 	if !anthropicCompatHost(c.providerHost) {
 		return
@@ -304,8 +313,37 @@ func (c *Client) compatSanitize(req *chatRequest) {
 	req.PromptCacheKey = ""
 }
 
+// maxBadRequestStrips bounds the 400-degradation ladder: four optional
+// fields, one dropped per round.
+const maxBadRequestStrips = 4
+
 // Model identifies the configured model in reports.
 func (c *Client) Model() string { return c.cfg.Model }
+
+// badRequestStrip drops the next optional envelope field from a request the
+// provider rejected as a bad one (HTTP 400 with a generic body). Priority:
+// reasoning effort, prompt cache key, parallel-tool toggle, stream options —
+// the fields OpenAI-compatible gateways most often do not implement. Returns
+// the dropped field name and true when something was dropped.
+func badRequestStrip(req *chatRequest) (string, bool) {
+	if req.Reasoning != nil {
+		req.Reasoning = nil
+		return "reasoning", true
+	}
+	if req.PromptCacheKey != "" {
+		req.PromptCacheKey = ""
+		return "prompt_cache_key", true
+	}
+	if req.ParallelToolCalls != nil {
+		req.ParallelToolCalls = nil
+		return "parallel_tool_calls", true
+	}
+	if req.StreamOptions != nil {
+		req.StreamOptions = nil
+		return "stream_options", true
+	}
+	return "", false
+}
 
 // Provider identifies the configured endpoint host in reports.
 func (c *Client) Provider() string { return c.providerHost }
@@ -569,7 +607,8 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 
 	started := time.Now()
 	var lastErr error
-	for attempt := 1; attempt <= 3; attempt++ {
+	stripped := 0
+	for attempt := 1; attempt <= 3 || stripped < maxBadRequestStrips; attempt++ {
 		if attempt > 1 {
 			delay := time.Duration(1<<uint(attempt))*time.Second + time.Duration(c.jitter.Int63n(1500))*time.Millisecond
 			select {
@@ -583,6 +622,9 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 			completion.LatencyMs = time.Since(started).Milliseconds()
 			completion.Attempts = attempt
 			completion.Transport = "blocking"
+			if stripped > 0 {
+				completion.StrippedFields = stripped
+			}
 			return completion, nil
 		}
 		lastErr = err
@@ -598,6 +640,25 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 					return Completion{}, err
 				}
 				continue
+			}
+		}
+		// A 400 with a generic body («Invalid request parameters») is usually a
+		// provider choking on one of the optional envelope fields it does not
+		// implement (reasoning, prompt cache key, parallel-tool toggle, stream
+		// options). Strip them one at a time and retry — the same degradation
+		// philosophy as the response_format drop above.
+		var statusErr *statusError
+		if errors.As(err, &statusErr) && statusErr.code == http.StatusBadRequest {
+			if stripped < maxBadRequestStrips {
+				if _, ok := badRequestStrip(&req); ok {
+					stripped++
+					payload, err = json.Marshal(req)
+					if err != nil {
+						return Completion{}, err
+					}
+					attempt-- // a degradation retry is not a provider retry
+					continue
+				}
 			}
 		}
 		if ctx.Err() != nil || !transient(err) {

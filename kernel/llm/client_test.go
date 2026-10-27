@@ -437,3 +437,62 @@ func TestSystemlessConversationUntouchedByNormalization(t *testing.T) {
 		t.Fatalf("systemless input changed: %+v", got)
 	}
 }
+
+// A strict gateway (xiaomi-style) rejects optional envelope fields with a
+// generic 400. The completion ladder strips them one at a time and retries —
+// the answer survives, and the completion records how many fields were
+// dropped so the trace shows the degradation.
+func TestCompleteStripsOptionalFieldsOnBadRequest(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		if len(bodies) < 3 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "400", "message": "Invalid request parameters", "type": "BadRequestError"}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(json.RawMessage(okResponse))
+	}))
+	defer server.Close()
+
+	client := New(Config{
+		BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second,
+		Reasoning: "high",
+	})
+	completion, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, WithPromptCacheKey("cache-1"))
+	if err != nil {
+		t.Fatalf("Complete with the strip ladder: %v", err)
+	}
+	if completion.StrippedFields != 2 {
+		t.Fatalf("stripped_fields = %d, want 2 (reasoning, prompt cache key)", completion.StrippedFields)
+	}
+	for i, body := range bodies {
+		_ = i
+		for _, field := range []string{"reasoning", "prompt_cache_key", "parallel_tool_calls", "stream_options"} {
+			// Requests BEFORE the strip legitimately carry the field; every
+			// request AFTER the field was dropped must be clean. With two 400s
+			// the ladder drops reasoning after request 1 and the cache key after
+			// request 2 — requests 1+2 (0-based) must not carry them.
+			if i >= 1 && field == "reasoning" {
+				if _, present := body[field]; present {
+					t.Fatalf("reasoning present in request #%d after being stripped", i)
+				}
+			}
+			if i >= 2 && field == "prompt_cache_key" {
+				if _, present := body[field]; present {
+					t.Fatalf("prompt_cache_key present in request #%d after being stripped", i)
+				}
+			}
+		}
+	}
+	last := bodies[len(bodies)-1]
+	for _, field := range []string{"reasoning", "prompt_cache_key", "parallel_tool_calls", "stream_options"} {
+		if _, present := last[field]; present {
+			t.Fatalf("%s still present in the final request", field)
+		}
+	}
+}
