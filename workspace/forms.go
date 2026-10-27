@@ -220,7 +220,7 @@ func validateStringPattern(name, pattern, s string) error {
 	if err != nil {
 		return fmt.Errorf("%s: invalid schema pattern: %v", name, err)
 	}
-	if (!re.MatchString(s)) {
+	if !re.MatchString(s) {
 		return fmt.Errorf("%s: does not match the required pattern %q", name, pattern)
 	}
 	return nil
