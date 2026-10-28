@@ -91,6 +91,24 @@ export default function Artifacts() {
   // the revision state — edit/review actions target the revision.
   const [revision, setRevision] = useState<ArtifactVersion | null>(null)
 
+  // Deep link (/artifacts?project=…&id=…): the linked artifact opens even
+  // when the server page does not include it. Applied once, after the first
+  // list lands; afterwards the selection syncs back into the URL so any
+  // opened artifact is shareable.
+  const deepLinkRef = useRef(new URLSearchParams(window.location.search).get('id') ?? '')
+  const applyDeepLink = useCallback(async () => {
+    const id = deepLinkRef.current
+    deepLinkRef.current = ''
+    if (!id) return
+    setSelectedId(id)
+    if (artifacts.some((a) => a.id === id)) return
+    try {
+      const page = await workspaceApi.getArtifact(id)
+      const full = page.artifact
+      setArtifacts((current) => (current.some((a) => a.id === id) ? current : [{ ...full, content: '' }, ...current]))
+    } catch { /* gone or inaccessible — the empty selection pane says so */ }
+  }, [artifacts])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -115,6 +133,22 @@ export default function Artifacts() {
   }, [statusFilter, providerFilter, orgFilter, serverQuery, tagFilter, limit])
 
   useEffect(() => { void load() }, [load])
+
+  const firstLoadRef = useRef(true)
+  useEffect(() => {
+    if (loading || firstLoadRef.current === false) return
+    firstLoadRef.current = false
+    void applyDeepLink()
+  }, [loading, applyDeepLink])
+
+  // Selection → URL: replaceState keeps the back button on the list page.
+  useEffect(() => {
+    if (!selectedId) return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('id') === selectedId) return
+    params.set('id', selectedId)
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+  }, [selectedId])
 
   // Distinct tags for the filter chips, most-used first. Reloaded when the
   // org context changes; failures leave the row empty (filtering is
