@@ -32,6 +32,10 @@ type Secret struct {
 	// artifact payloads is a confirmed exfiltration signal, zero false
 	// positives by construction.
 	Canary bool `json:"canary,omitempty"`
+	// Enabled is the uniform on/off switch (the trigger pattern): a disabled
+	// secret stops resolving to values — runs degrade without it, the stored
+	// value and metadata stay untouched.
+	Enabled bool `json:"enabled"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -124,11 +128,11 @@ func (s *Store) GetSecret(ctx context.Context, id string) (Secret, error) {
 	var secret Secret
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, provider, external_ref, description, org_unit_id, created_at, updated_at,
+		`SELECT id, name, provider, external_ref, description, enabled, org_unit_id, created_at, updated_at,
 		        EXISTS (SELECT 1 FROM workspace_secret_value v WHERE v.secret_id = workspace_secret.id)
 		 FROM workspace_secret WHERE id = $1`, id).
 		Scan(&secret.ID, &secret.Name, &secret.Provider, &secret.ExternalRef, &secret.Description,
-			&orgUnitID, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue)
+			&secret.Enabled, &orgUnitID, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return secret, ErrNotFound
 	}
@@ -144,11 +148,11 @@ func (s *Store) GetSecretByName(ctx context.Context, name string) (Secret, error
 	var secret Secret
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, provider, external_ref, description, canary, org_unit_id, created_at, updated_at,
+		`SELECT id, name, provider, external_ref, description, canary, enabled, org_unit_id, created_at, updated_at,
 		        EXISTS (SELECT 1 FROM workspace_secret_value v WHERE v.secret_id = workspace_secret.id)
 		 FROM workspace_secret WHERE name = $1`, name).
 		Scan(&secret.ID, &secret.Name, &secret.Provider, &secret.ExternalRef, &secret.Description,
-			&secret.Canary, &orgUnitID, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue)
+			&secret.Canary, &secret.Enabled, &orgUnitID, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return secret, ErrNotFound
 	}
@@ -161,7 +165,7 @@ func (s *Store) GetSecretByName(ctx context.Context, name string) (Secret, error
 
 func (s *Store) ListAllSecrets(ctx context.Context) ([]Secret, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, provider, external_ref, description, org_unit_id, created_at, updated_at,
+		`SELECT id, name, provider, external_ref, description, enabled, org_unit_id, created_at, updated_at,
 		        EXISTS (SELECT 1 FROM workspace_secret_value v WHERE v.secret_id = workspace_secret.id)
 		 FROM workspace_secret ORDER BY name`)
 	if err != nil {
@@ -178,7 +182,7 @@ func (s *Store) ListSecretsVisible(ctx context.Context, units []string) ([]Secre
 		return s.ListAllSecrets(ctx)
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, provider, external_ref, description, org_unit_id, created_at, updated_at,
+		`SELECT id, name, provider, external_ref, description, enabled, org_unit_id, created_at, updated_at,
 		        EXISTS (SELECT 1 FROM workspace_secret_value v WHERE v.secret_id = workspace_secret.id)
 		 FROM workspace_secret WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY name`, units)
 	if err != nil {
@@ -198,6 +202,21 @@ func (s *Store) UpdateSecret(ctx context.Context, secret Secret) error {
 		 SET name=$2, provider=$3, external_ref=$4, description=$5, canary=$6, updated_at=$7
 		 WHERE id=$1`,
 		secret.ID, secret.Name, secret.Provider, secret.ExternalRef, secret.Description, secret.Canary, secret.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetSecretEnabled flips the uniform on/off switch without touching the
+// stored value: a disabled secret stops resolving — runs degrade without it,
+// exactly like disabled skills.
+func (s *Store) SetSecretEnabled(ctx context.Context, id string, enabled bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_secret SET enabled=$2, updated_at=now() WHERE id=$1`, id, enabled)
 	if err != nil {
 		return err
 	}
@@ -252,7 +271,7 @@ func scanSecrets(rows pgx.Rows) ([]Secret, error) {
 		var secret Secret
 		var orgUnitID *string
 		if err := rows.Scan(&secret.ID, &secret.Name, &secret.Provider, &secret.ExternalRef, &secret.Description,
-			&orgUnitID, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue); err != nil {
+			&orgUnitID, &secret.Enabled, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue); err != nil {
 			return nil, err
 		}
 		secret.OrgUnitID = derefPtr(orgUnitID)

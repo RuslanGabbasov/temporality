@@ -11,6 +11,7 @@ import {
   Stack,
   Heading,
   Checkbox,
+  Toggle,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Renew, Play, MagicWand } from '@carbon/icons-react'
@@ -214,6 +215,9 @@ export default function Teams({ project }: { project: string }) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Team | null>(null)
   const [form, setForm] = useState<TeamFormState | null>(null)
+  // The edit dialog's copy of the uniform switch: applied through the
+  // /enabled endpoint after the save (the PUT never carries it).
+  const [formEnabled, setFormEnabled] = useState(true)
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [launchFor, setLaunchFor] = useState<Team | null>(null)
@@ -240,6 +244,21 @@ export default function Teams({ project }: { project: string }) {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // The uniform switch (the trigger pattern): a disabled team cannot be
+  // launched. Optimistic flip, rollback on failure.
+  const toggleTeamEnabled = async (team: Team) => {
+    const next = team.enabled === false
+    setTeams((prev) => prev.map((x) => (x.id === team.id ? { ...x, enabled: next } : x)))
+    try {
+      const updated = await workspaceApi.setTeamEnabled(team.id, next)
+      setTeams((prev) => prev.map((x) => (x.id === team.id ? updated : x)))
+      setSelected((current) => (current?.id === updated.id ? updated : current))
+    } catch (f) {
+      setTeams((prev) => prev.map((x) => (x.id === team.id ? { ...x, enabled: team.enabled } : x)))
+      setError(message(f))
+    }
+  }
 
   // Reference data for the form selects and the launch dialog roster.
   useEffect(() => {
@@ -375,6 +394,7 @@ export default function Teams({ project }: { project: string }) {
 
   const startCreate = () => {
     setEditing(null)
+    setFormEnabled(true)
     setFormError('')
     setBuilderProvenance({})
     setLastDraftForm(null)
@@ -388,6 +408,7 @@ export default function Teams({ project }: { project: string }) {
 
   const startEdit = (team: Team) => {
     setEditing(team)
+    setFormEnabled(team.enabled !== false)
     setFormError('')
     setBuilderProvenance({})
     setLastDraftForm(null)
@@ -416,6 +437,9 @@ export default function Teams({ project }: { project: string }) {
         const updated = await workspaceApi.updateTeam(editing.id, {
           name: form.name.trim(), description: form.description, version: form.version.trim() || editing.version, manifest,
         })
+        if (formEnabled !== (editing.enabled !== false)) {
+          await workspaceApi.setTeamEnabled(editing.id, formEnabled)
+        }
         setShowForm(false)
         await openTeam(updated)
       } else {
@@ -423,6 +447,9 @@ export default function Teams({ project }: { project: string }) {
           id: form.id.trim() || undefined, name: form.name.trim(), description: form.description,
           version: form.version.trim() || undefined, manifest, org_unit_id: form.org_unit_id || undefined,
         })
+        if (!formEnabled) {
+          await workspaceApi.setTeamEnabled(created.id, false)
+        }
         setShowForm(false)
         await openTeam(created)
       }
@@ -526,6 +553,7 @@ export default function Teams({ project }: { project: string }) {
                 style={{
                   marginBottom: '0.5rem', cursor: 'pointer', padding: '0.75rem',
                   outline: selected?.id === team.id ? '1px solid var(--tm-amber)' : 'none',
+                  opacity: team.enabled === false ? 0.5 : 1,
                 }}
                 onClick={() => { if (selected?.id !== team.id) void openTeam(team) }}
               >
@@ -539,6 +567,17 @@ export default function Teams({ project }: { project: string }) {
                 </div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
                   {protocolLabel(team.manifest?.protocol?.kind ?? '', t)} · {t('teams.slots_count', { count: String(team.manifest?.slots?.length ?? 0) }) ?? `${team.manifest?.slots?.length ?? 0} slots`}
+                </div>
+                {/* The uniform switch, bottom-right of the mini-card: a
+                    disabled team cannot be launched. */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.3rem' }} title={t('teams.enabled_hint') ?? 'Disabled teams cannot be launched'} onClick={(e) => e.stopPropagation()}>
+                  <Toggle
+                    id={`team-enabled-${team.id}`}
+                    labelText=""
+                    toggled={team.enabled !== false}
+                    onToggle={() => void toggleTeamEnabled(team)}
+                    size="sm"
+                  />
                 </div>
               </Tile>
             ))}
@@ -624,6 +663,8 @@ export default function Teams({ project }: { project: string }) {
           form={form}
           setForm={setForm}
           editing={editing}
+          formEnabled={formEnabled}
+          setFormEnabled={setFormEnabled}
           agents={agents}
           skills={skills}
           org={org}
@@ -1045,10 +1086,12 @@ function TeamEvolutionTab({ team, versions, metrics, project, detecting, detectN
 
 /** Structured team editor — protocol select, slot cards, requirements as
  *  capability checkboxes + free-form skill ids, bindings as selects. */
-function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, provenance, canRegenerate, onRegenerate, onSave, onClose }: {
+function TeamForm({ form, setForm, editing, formEnabled, setFormEnabled, agents, skills, org, error, saving, provenance, canRegenerate, onRegenerate, onSave, onClose }: {
   form: TeamFormState
   setForm: (form: TeamFormState) => void
   editing: Team | null
+  formEnabled: boolean
+  setFormEnabled: (v: boolean) => void
   agents: Agent[]
   skills: Skill[]
   org: ReturnType<typeof useOrgUnits>
@@ -1232,7 +1275,11 @@ function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, 
         </div>
       </Stack>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem', marginTop: '1.25rem' }}>
+        {/* The uniform switch at the bottom-left of the button block. */}
+        <span style={{ marginRight: 'auto' }} title={t('teams.enabled_hint') ?? 'Disabled teams cannot be launched'}>
+          <Toggle id="team-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+        </span>
         {canRegenerate && (
           <Button kind="secondary" renderIcon={MagicWand} style={{ marginRight: 'auto' }} onClick={onRegenerate}>
             {t('teams.regenerate') ?? 'Rebuild'}

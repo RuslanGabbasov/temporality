@@ -57,8 +57,12 @@ type SandboxProfile struct {
 	// this profile (Docker-out-of-Docker, §5.3). The socket is host-root-
 	// equivalent, so this is an explicit operator decision, custom profiles
 	// only, and it never travels through the model-driven profile builder.
-	DockerSocket bool      `json:"docker_socket,omitempty"`
-	Builtin      bool      `json:"builtin"`
+	DockerSocket bool `json:"docker_socket,omitempty"`
+	// Enabled is the uniform on/off switch (the trigger pattern): a disabled
+	// profile cannot be resolved for new runs; agents bound to it fail loudly
+	// at start instead of silently landing in another image.
+	Enabled   bool `json:"enabled"`
+	Builtin   bool `json:"builtin"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -634,12 +638,12 @@ func isValidResourceValue(field, value string) bool {
 	return digits != "" && strings.Trim(digits, "0123456789") == ""
 }
 
-const sandboxProfileColumns = `id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, docker_socket, dockerfile_override, builtin, created_at, updated_at`
+const sandboxProfileColumns = `id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, docker_socket, dockerfile_override, enabled, builtin, created_at, updated_at`
 
 func scanSandboxProfile(row interface{ Scan(dest ...any) error }) (SandboxProfile, error) {
 	var p SandboxProfile
 	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Image, &p.Base, &p.Packages, &p.Toolchains,
-		&p.Memory, &p.CPUs, &p.ScratchSize, &p.TmpSize, &p.CacheEnv, &p.DockerSocket, &p.DockerfileOverride, &p.Builtin, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Memory, &p.CPUs, &p.ScratchSize, &p.TmpSize, &p.CacheEnv, &p.DockerSocket, &p.DockerfileOverride, &p.Enabled, &p.Builtin, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return p, ErrNotFound
 		}
@@ -651,6 +655,21 @@ func scanSandboxProfile(row interface{ Scan(dest ...any) error }) (SandboxProfil
 // SeedSandboxProfiles inserts the builtin catalog rows that are missing.
 // ON CONFLICT DO NOTHING keeps an admin-built image and any local tweaks —
 // seeding never overwrites.
+// SetSandboxProfileEnabled flips the uniform on/off switch: a disabled
+// profile cannot be resolved for new runs. The profile builders and saves
+// never carry the flag, so rebuilding an image cannot disable it.
+func (s *Store) SetSandboxProfileEnabled(ctx context.Context, id string, enabled bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_sandbox_profile SET enabled=$2, updated_at=now() WHERE id=$1`, id, enabled)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) SeedSandboxProfiles(ctx context.Context) error {
 	for _, p := range BuiltinSandboxProfiles() {
 		now := time.Now().UTC()

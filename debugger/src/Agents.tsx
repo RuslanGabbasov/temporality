@@ -167,6 +167,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [agents, setAgents] = useState<Agent[]>([])
+  // The edit dialog's copy of the uniform switch: the config PUT never
+  // carries enabled, so a changed toggle lands through the /enabled endpoint
+  // right after the save.
+  const [formEnabled, setFormEnabled] = useState(true)
   const [providers, setProviders] = useState<Provider[]>([])
   const [builtins, setBuiltins] = useState<BuiltinAgentSpec[]>([])
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
@@ -418,6 +422,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
   const startManual = () => {
     setEditing(null)
+    setFormEnabled(true)
     setFormTab('general')
     setFromWizard(false)
     setProvenance({})
@@ -489,6 +494,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
   const startEdit = (agent: Agent) => {
     setEditing(agent)
+    setFormEnabled(agent.enabled !== false)
     setFormTab('general')
     setFromWizard(false)
     setProvenance({})
@@ -529,8 +535,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
           await workspaceApi.setResourceBinding('agent', editing.id, form.org_unit_id ?? '')
         }
+        if (formEnabled !== (editing.enabled !== false)) {
+          await workspaceApi.setAgentEnabled(editing.id, formEnabled)
+        }
       } else {
-        await workspaceApi.createAgent(payload as Agent & { name: string })
+        const created = await workspaceApi.createAgent(payload as Agent & { name: string })
+        if (!formEnabled) {
+          await workspaceApi.setAgentEnabled(created.id, false)
+        }
       }
       setShowForm(false); setEditing(null); setFromWizard(false)
       void load()
@@ -2143,6 +2155,11 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             )}
             </div>
             <div className="form-actions" style={{ marginTop: 0 }}>
+              {/* The uniform switch lives at the bottom-left of the button
+                  block: visible without hunting, hard to hit by accident. */}
+              <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('agents.enabled_hint') ?? 'Disabled agents cannot start new runs'}>
+                <Toggle id="agent-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+              </div>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null); setPromptPreview(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={() => void saveAgent()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
             </div>

@@ -13,6 +13,7 @@ import {
   Tile,
   Stack,
   Heading,
+  Toggle,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, TrashCan, Renew, Edit, Download, MagicWand } from '@carbon/icons-react'
@@ -47,6 +48,9 @@ export default function Sandbox({ project }: { project?: string }) {
   const [notice, setNotice] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<ProfileForm>(emptyForm)
+  // The edit dialog's copy of the uniform switch: applied through the
+  // /enabled endpoint after the save (the profile PUT never carries it).
+  const [formEnabled, setFormEnabled] = useState(true)
   const [filter, setFilter] = useState('')
   const [building, setBuilding] = useState('')
   const [editing, setEditing] = useState<SandboxProfile | null>(null)
@@ -85,6 +89,20 @@ export default function Sandbox({ project }: { project?: string }) {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // The uniform switch (the trigger pattern): a disabled profile fails runs
+  // that reference it with an explicit error. Optimistic flip, rollback.
+  const toggleSandboxEnabled = async (p: SandboxProfile) => {
+    const next = p.enabled === false
+    setProfiles((prev) => prev.map((x) => (x.id === p.id ? { ...x, enabled: next } : x)))
+    try {
+      const updated = await workspaceApi.setSandboxProfileEnabled(p.id, next)
+      setProfiles((prev) => prev.map((x) => (x.id === p.id ? updated : x)))
+    } catch (f) {
+      setProfiles((prev) => prev.map((x) => (x.id === p.id ? { ...x, enabled: p.enabled } : x)))
+      setError(message(f))
+    }
+  }
 
   const build = async (p: SandboxProfile) => {
     setBuilding(p.id); setError(''); setNotice('')
@@ -205,6 +223,7 @@ export default function Sandbox({ project }: { project?: string }) {
 
   const startEdit = (p: SandboxProfile) => {
     setEditing(p)
+    setFormEnabled(p.enabled !== false)
     const mode = recipeModeFor(p)
     setRecipeMode(mode)
     setDockerfileError('')
@@ -239,10 +258,17 @@ export default function Sandbox({ project }: { project?: string }) {
     try {
       if (editing) {
         await workspaceApi.updateSandboxProfile(editing.id, payload)
+        if (formEnabled !== (editing.enabled !== false)) {
+          await workspaceApi.setSandboxProfileEnabled(editing.id, formEnabled)
+        }
         setEditing(null)
       } else {
-        await workspaceApi.createSandboxProfile(payload)
+        const created = await workspaceApi.createSandboxProfile(payload)
+        if (!formEnabled) {
+          await workspaceApi.setSandboxProfileEnabled(created.id, false)
+        }
       }
+      setFormEnabled(true)
       setShowForm(false)
       setForm(emptyForm)
       setRecipeMode('base')
@@ -313,7 +339,7 @@ export default function Sandbox({ project }: { project?: string }) {
       {loading ? <PageLoading /> : (
         <Stack gap={4}>
           {visible.map((p) => (
-            <Tile key={p.id}>
+            <Tile key={p.id} style={{ opacity: p.enabled === false ? 0.5 : 1, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
                 <div style={{ opacity: p.image ? 1 : 0.55 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
@@ -360,6 +386,11 @@ export default function Sandbox({ project }: { project?: string }) {
                   : <Tag type="gray" size="sm">{t('sandbox.not_built')}</Tag>}
                 {p.memory && <Tag type="gray" size="sm">mem {p.memory}</Tag>}
                 {p.scratch_size && <Tag type="gray" size="sm">scratch {p.scratch_size}</Tag>}
+                {/* The uniform switch rides at the right end of the tag row:
+                    bottom-right of the card, clear of the action buttons. */}
+                <span style={{ marginLeft: 'auto' }} title={t('sandbox.enabled_hint') ?? 'Disabled profiles fail runs that reference them'}>
+                  <Toggle id={`sandbox-enabled-${p.id}`} labelText="" toggled={p.enabled !== false} onToggle={() => void toggleSandboxEnabled(p)} size="sm" />
+                </span>
               </div>
               {p.image && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', marginTop: '0.35rem', wordBreak: 'break-all' }}>{p.image}</p>}
               {historyFor === p.id && (
@@ -507,7 +538,11 @@ export default function Sandbox({ project }: { project?: string }) {
                     ? t('sandbox.recipe_hint')
                     : t('sandbox.custom_hint')}
             </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem' }}>
+              {/* The uniform switch at the bottom-left of the button block. */}
+              <span style={{ marginRight: 'auto' }} title={t('sandbox.enabled_hint') ?? 'Disabled profiles fail runs that reference them'}>
+                <Toggle id="sandbox-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+              </span>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null); setDraftRationale('') }}>{t('action.cancel')}</Button>
               <Button
                 onClick={() => void saveCustom()}

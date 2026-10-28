@@ -56,6 +56,20 @@ export default function Mcp() {
 
   useEffect(() => { void load() }, [load])
 
+  // The uniform switch (the trigger pattern): the registry refresher applies
+  // it on its next pass — a disabled server's tools drop out of every run.
+  const toggleMCPServerEnabled = async (s: MCPServer) => {
+    const next = !s.enabled
+    setServers((prev) => prev.map((x) => (x.id === s.id ? { ...x, enabled: next } : x)))
+    try {
+      const updated = await workspaceApi.setMCPServerEnabled(s.id, next)
+      setServers((prev) => prev.map((x) => (x.id === s.id ? updated : x)))
+    } catch (f) {
+      setServers((prev) => prev.map((x) => (x.id === s.id ? { ...x, enabled: s.enabled } : x)))
+      setError(message(f))
+    }
+  }
+
   const startCreate = () => {
     setEditing(null)
     setDiscovered([])
@@ -64,8 +78,13 @@ export default function Mcp() {
     setShowForm(true)
   }
 
+    // The edit dialog's copy of the uniform switch: applied through the
+  // /enabled endpoint after the config save (the PUT never carries it).
+  const [formEnabled, setFormEnabled] = useState(true)
+
   const startEdit = (s: MCPServer) => {
     setEditing(s)
+    setFormEnabled(s.enabled)
     setDiscovered([])
     setDiscoverError('')
     setForm({ ...s, envText: (s.env ?? []).join('\n'), headersText: Object.entries(s.headers ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n') })
@@ -117,8 +136,14 @@ export default function Mcp() {
         if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
           await workspaceApi.setResourceBinding('mcp-server', editing.id, form.org_unit_id ?? '')
         }
+        if (formEnabled !== editing.enabled) {
+          await workspaceApi.setMCPServerEnabled(editing.id, formEnabled)
+        }
       } else {
-        await workspaceApi.createMCPServer(toPayload())
+        const created = await workspaceApi.createMCPServer(toPayload())
+        if (!formEnabled) {
+          await workspaceApi.setMCPServerEnabled(created.id, false)
+        }
       }
       setShowForm(false); setEditing(null)
       void load()
@@ -197,8 +222,8 @@ export default function Mcp() {
       <Grid>
         {visibleServers.map((s) => (
           <Column key={s.id} sm={4} md={4} lg={4}>
-            <Tile style={{ marginBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <Tile style={{ marginBottom: '0.75rem', opacity: s.enabled ? 1 : 0.5, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flex: 1 }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
                     <strong>{s.name}</strong>
@@ -220,6 +245,11 @@ export default function Mcp() {
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(s)} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(s)} />
                 </Stack>
+              </div>
+              {/* The uniform switch, bottom-right of the mini-card: a disabled
+                  server's tools drop out of every run. */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem', paddingTop: '0.4rem', borderTop: '1px solid var(--tm-border)' }} title={t('mcp.enabled_hint') ?? 'Disabled servers are not connected — their tools are unavailable'}>
+                <Toggle id={`mcp-enabled-${s.id}`} labelText="" toggled={s.enabled} onToggle={() => void toggleMCPServerEnabled(s)} size="sm" />
               </div>
             </Tile>
           </Column>
@@ -343,6 +373,10 @@ export default function Mcp() {
               )}
 
               <div className="form-actions">
+                {/* The uniform switch at the bottom-left of the button block. */}
+                <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('mcp.enabled_hint') ?? 'Disabled servers are not connected'}>
+                  <Toggle id="mcp-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+                </div>
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>

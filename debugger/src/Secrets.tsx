@@ -12,6 +12,7 @@ import {
   Heading,
   Select,
   SelectItem,
+  Toggle,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
@@ -51,14 +52,33 @@ export default function Secrets() {
 
   useEffect(() => { void load() }, [load])
 
+  // The uniform switch (the trigger pattern): a disabled secret stops
+  // resolving. Optimistic flip, rollback on failure.
+  const toggleSecretEnabled = async (s: Secret) => {
+    const next = s.enabled === false
+    setSecrets((prev) => prev.map((x) => (x.id === s.id ? { ...x, enabled: next } : x)))
+    try {
+      const updated = await workspaceApi.setSecretEnabled(s.id, next)
+      setSecrets((prev) => prev.map((x) => (x.id === s.id ? updated : x)))
+    } catch (f) {
+      setSecrets((prev) => prev.map((x) => (x.id === s.id ? { ...x, enabled: s.enabled } : x)))
+      setError(message(f))
+    }
+  }
+
   const startCreate = () => {
     setEditing(null)
     setForm({ name: '', provider: 'builtin', description: '', value: '' })
     setShowForm(true)
   }
 
+  // The edit dialog's copy of the uniform switch: applied through the
+  // /enabled endpoint after the metadata save (the PUT never carries it).
+  const [formEnabled, setFormEnabled] = useState(true)
+
   const startEdit = (s: Secret) => {
     setEditing(s)
+    setFormEnabled(s.enabled !== false)
     setForm({ ...s, value: '' })
     setShowForm(true)
   }
@@ -77,12 +97,18 @@ export default function Secrets() {
         if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
           await workspaceApi.setResourceBinding('secret', editing.id, form.org_unit_id ?? '')
         }
+        if (formEnabled !== (editing.enabled !== false)) {
+          await workspaceApi.setSecretEnabled(editing.id, formEnabled)
+        }
       } else {
-        await workspaceApi.createSecret({
+        const created = await workspaceApi.createSecret({
           name: form.name, provider: form.provider ?? 'builtin',
           description: form.description, org_unit_id: form.org_unit_id,
           ...(form.provider !== 'env' && form.value ? { value: form.value } : {}),
         })
+        if (!formEnabled) {
+          await workspaceApi.setSecretEnabled(created.id, false)
+        }
       }
       setShowForm(false); setEditing(null)
       void load()
@@ -125,8 +151,8 @@ export default function Secrets() {
       <Grid>
         {visibleSecrets.map((s) => (
           <Column key={s.id} sm={4} md={4} lg={4}>
-            <Tile style={{ marginBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <Tile style={{ marginBottom: '0.75rem', opacity: s.enabled === false ? 0.5 : 1, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flex: 1 }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
                     <strong>{s.name}</strong>
@@ -151,6 +177,11 @@ export default function Secrets() {
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(s)} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(s)} />
                 </Stack>
+              </div>
+              {/* The uniform switch, bottom-right of the mini-card: a disabled
+                  secret stops resolving — runs degrade without it. */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem', paddingTop: '0.4rem', borderTop: '1px solid var(--tm-border)' }} title={t('secrets.enabled_hint') ?? 'Disabled secrets stop resolving'}>
+                <Toggle id={`secret-enabled-${s.id}`} labelText="" toggled={s.enabled !== false} onToggle={() => void toggleSecretEnabled(s)} size="sm" />
               </div>
             </Tile>
           </Column>
@@ -208,6 +239,10 @@ export default function Secrets() {
               />
             )}
             <div className="form-actions">
+              {/* The uniform switch at the bottom-left of the button block. */}
+              <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('secrets.enabled_hint') ?? 'Disabled secrets stop resolving'}>
+                <Toggle id="secret-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+              </div>
               <Button onClick={() => void save()} disabled={!form.name?.trim()}>{t('action.save') ?? 'Save'}</Button>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>

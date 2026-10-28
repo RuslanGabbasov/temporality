@@ -127,6 +127,21 @@ func (s *Store) UpdateMCPServer(ctx context.Context, m *MCPServer) error {
 	return nil
 }
 
+// SetMCPServerEnabled flips the uniform on/off switch without touching the
+// connection config: the registry refresher applies it on its next pass —
+// a disabled server's tools drop out of every run.
+func (s *Store) SetMCPServerEnabled(ctx context.Context, id string, enabled bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_mcp_server SET enabled=$2, updated_at=now() WHERE id=$1`, id, enabled)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) DeleteMCPServer(ctx context.Context, id string) error {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM workspace_mcp_server WHERE id = $1`, id)
 	if err != nil {

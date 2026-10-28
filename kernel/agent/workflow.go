@@ -286,6 +286,10 @@ type ToolRequest struct {
 type SandboxSpec struct {
 	Profile     string   `json:"profile,omitempty"` // profile id, for events and trace
 	Image       string   `json:"image,omitempty"`   // digest-pinned image reference
+	// Disabled marks the uniform switch (the trigger pattern): the profile
+	// exists but was turned off. run_command fails with an explicit error
+	// instead of falling back to another toolchain.
+	Disabled    bool     `json:"disabled,omitempty"`
 	Memory      string   `json:"memory,omitempty"`
 	CPUs        string   `json:"cpus,omitempty"`
 	ScratchSize string   `json:"scratch_size,omitempty"`

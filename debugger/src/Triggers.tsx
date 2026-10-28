@@ -303,7 +303,7 @@ export default function Triggers({ project }: { project: string }) {
           const cfg = typeof trigger.config === 'string' ? JSON.parse(trigger.config) : trigger.config
           return (
             <Column key={trigger.id} sm={4} md={4} lg={4}>
-              <Tile style={{ marginBottom: '0.75rem', opacity: trigger.enabled ? 1 : 0.5 }}>
+              <Tile style={{ marginBottom: '0.75rem', opacity: trigger.enabled ? 1 : 0.5, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -339,7 +339,9 @@ export default function Triggers({ project }: { project: string }) {
                     <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(trigger)} />
                   </Stack>
                 </div>
-                <div style={{ marginTop: '0.5rem' }}>
+                {/* The uniform switch, bottom-right of the mini-card: far from
+                    the edit/delete buttons so it cannot be hit by accident. */}
+                <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
                   <Toggle id={`toggle-${trigger.id}`} labelText="" toggled={trigger.enabled} onToggle={() => void toggleEnabled(trigger)} size="sm" />
                 </div>
               </Tile>

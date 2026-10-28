@@ -56,6 +56,10 @@ type Team struct {
 	Description string          `json:"description"`
 	Version     string          `json:"version"`
 	Manifest    json.RawMessage `json:"manifest"`
+	// Enabled is the uniform on/off switch (the trigger pattern): a disabled
+	// team cannot be launched. Toggled through the dedicated /enabled
+	// endpoint, never by a content PUT.
+	Enabled bool `json:"enabled"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string `json:"org_unit_id,omitempty"`
 	// VersionStatus is the lifecycle status of the current version row:
@@ -372,10 +376,10 @@ func (s *Store) GetTeam(ctx context.Context, id string) (Team, error) {
 	var manifest []byte
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT t.id, t.name, t.description, t.version, t.manifest, t.org_unit_id, t.created_at, t.updated_at, COALESCE(cv.status, '')
+		`SELECT t.id, t.name, t.description, t.version, t.manifest, t.org_unit_id, t.created_at, t.updated_at, t.enabled, COALESCE(cv.status, '')
 		 FROM workspace_team t LEFT JOIN workspace_team_version cv ON cv.team_id = t.id AND cv.version = t.version
 		 WHERE t.id = $1`, id).
-		Scan(&team.ID, &team.Name, &team.Description, &team.Version, &manifest, &orgUnitID, &team.CreatedAt, &team.UpdatedAt, &team.VersionStatus)
+		Scan(&team.ID, &team.Name, &team.Description, &team.Version, &manifest, &orgUnitID, &team.CreatedAt, &team.UpdatedAt, &team.Enabled, &team.VersionStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return team, ErrNotFound
 	}
@@ -389,7 +393,7 @@ func (s *Store) GetTeam(ctx context.Context, id string) (Team, error) {
 
 func (s *Store) ListAllTeams(ctx context.Context) ([]Team, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT t.id, t.name, t.description, t.version, t.manifest, t.org_unit_id, t.created_at, t.updated_at, COALESCE(cv.status, '')
+		`SELECT t.id, t.name, t.description, t.version, t.manifest, t.org_unit_id, t.created_at, t.updated_at, t.enabled, COALESCE(cv.status, '')
 		 FROM workspace_team t LEFT JOIN workspace_team_version cv ON cv.team_id = t.id AND cv.version = t.version
 		 ORDER BY t.created_at`)
 	if err != nil {
@@ -407,7 +411,7 @@ func (s *Store) ListTeamsVisible(ctx context.Context, units []string) ([]Team, e
 		return s.ListAllTeams(ctx)
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT t.id, t.name, t.description, t.version, t.manifest, t.org_unit_id, t.created_at, t.updated_at, COALESCE(cv.status, '')
+		`SELECT t.id, t.name, t.description, t.version, t.manifest, t.org_unit_id, t.created_at, t.updated_at, t.enabled, COALESCE(cv.status, '')
 		 FROM workspace_team t LEFT JOIN workspace_team_version cv ON cv.team_id = t.id AND cv.version = t.version
 		 WHERE t.org_unit_id IS NULL OR t.org_unit_id = ANY($1) ORDER BY t.created_at`, units)
 	if err != nil {
@@ -423,7 +427,7 @@ func scanTeams(rows pgx.Rows) ([]Team, error) {
 		var team Team
 		var manifest []byte
 		var orgUnitID *string
-		if err := rows.Scan(&team.ID, &team.Name, &team.Description, &team.Version, &manifest, &orgUnitID, &team.CreatedAt, &team.UpdatedAt, &team.VersionStatus); err != nil {
+		if err := rows.Scan(&team.ID, &team.Name, &team.Description, &team.Version, &manifest, &orgUnitID, &team.CreatedAt, &team.UpdatedAt, &team.Enabled, &team.VersionStatus); err != nil {
 			return nil, err
 		}
 		team.OrgUnitID = derefPtr(orgUnitID)
@@ -436,6 +440,21 @@ func scanTeams(rows pgx.Rows) ([]Team, error) {
 // UpdateTeam updates the current revision and records a new immutable version
 // row (refreshed in place when the version string is unchanged — a human save
 // is itself the approval, mirroring skills).
+// SetTeamEnabled flips the uniform on/off switch without touching the
+// manifest: the content PUT never carries enabled, so editing a team cannot
+// disable it by omission.
+func (s *Store) SetTeamEnabled(ctx context.Context, id string, enabled bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_team SET enabled=$2, updated_at=now() WHERE id=$1`, id, enabled)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) UpdateTeam(ctx context.Context, team *Team) error {
 	team.UpdatedAt = time.Now().UTC()
 	team.VersionStatus = TeamVersionActive

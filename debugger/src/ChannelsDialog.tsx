@@ -158,7 +158,7 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
             {channels.map((channel, index) => {
               const spec = specOf(channel.type)
               return (
-              <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.75rem', marginBottom: '0.75rem', background: 'var(--tm-surface-2)', borderRadius: 'var(--tm-radius-sm)' }}>
+              <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.75rem', marginBottom: '0.75rem', background: 'var(--tm-surface-2)', border: '1px solid var(--tm-border)', borderRadius: '12px' }}>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <Select
                     id={`channel-type-${index}`}
@@ -174,13 +174,6 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
                         <SelectItem key={s.type} value={s.type} text={s.label} />
                       ))}
                   </Select>
-                  <Toggle
-                    id={`channel-enabled-${index}`}
-                    labelText={t('channels.enabled') ?? 'Enabled'}
-                    toggled={channel.enabled}
-                    onToggle={(checked: boolean) => updateChannel(index, { enabled: checked })}
-                    size="sm"
-                  />
                   <Button
                     kind="ghost"
                     size="sm"
@@ -216,6 +209,17 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
                     {spec.not_configured_hint && <code style={{ fontSize: '0.68rem' }}>{spec.not_configured_hint}</code>}
                   </div>
                 )}
+                {/* The uniform switch, bottom-right of the card like every
+                    other entity's mini-card. */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.25rem', paddingTop: '0.4rem', borderTop: '1px solid var(--tm-border)' }}>
+                  <Toggle
+                    id={`channel-enabled-${index}`}
+                    labelText=""
+                    toggled={channel.enabled}
+                    onToggle={(checked: boolean) => updateChannel(index, { enabled: checked })}
+                    size="sm"
+                  />
+                </div>
               </div>
               )
             })}

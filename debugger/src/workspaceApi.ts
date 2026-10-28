@@ -180,6 +180,8 @@ export interface SandboxProfile {
   id: string
   name: string
   description?: string
+  /** the uniform on/off switch: a disabled profile fails runs that reference it */
+  enabled?: boolean
   image?: string
   /** Build recipe: the known base the custom profile composes on; the built
    *  digest lands in image. Empty for external-image and builtin rows. */
@@ -609,6 +611,8 @@ export interface Team {
   description: string
   version: string
   manifest: TeamManifest
+  /** the uniform on/off switch: a disabled team cannot be launched */
+  enabled?: boolean
   org_unit_id?: string
   /** Lifecycle status of the current version row: "draft" awaits a human
    *  apply and is never launched; empty when no version row matches. */
@@ -747,6 +751,8 @@ export interface Secret {
   external_ref?: string
   description?: string
   has_value: boolean
+  /** the uniform on/off switch: a disabled secret stops resolving */
+  enabled?: boolean
   org_unit_id?: string
   created_at: string
   updated_at: string
@@ -1302,6 +1308,8 @@ export const workspaceApi = {
     request<SandboxProfile>('/v1/workspace/sandbox-profiles', { method: 'POST', body: JSON.stringify(data) }),
   updateSandboxProfile: (id: string, data: Partial<SandboxProfile>) =>
     request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  setSandboxProfileEnabled: (id: string, enabled: boolean) =>
+    request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   deleteSandboxProfile: (id: string) =>
     request<{ deleted: string }>(`/v1/workspace/sandbox-profiles/${id}`, { method: 'DELETE' }),
   draftAgent: (description: string, final?: boolean) =>
@@ -1492,6 +1500,8 @@ export const workspaceApi = {
     request<Team>('/v1/workspace/teams', { method: 'POST', body: JSON.stringify(data) }),
   updateTeam: (id: string, data: { name: string; description?: string; version?: string; manifest: TeamManifest }) =>
     request<Team>(`/v1/workspace/teams/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  setTeamEnabled: (id: string, enabled: boolean) =>
+    request<Team>(`/v1/workspace/teams/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   deleteTeam: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/teams/${id}`, { method: 'DELETE' }),
   listTeamVersions: (id: string) =>
@@ -1540,6 +1550,8 @@ export const workspaceApi = {
     request<MCPServer>('/v1/workspace/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
   updateMCPServer: (id: string, data: Partial<MCPServer>) =>
     request<MCPServer>(`/v1/workspace/mcp-servers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  setMCPServerEnabled: (id: string, enabled: boolean) =>
+    request<MCPServer>(`/v1/workspace/mcp-servers/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   deleteMCPServer: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/mcp-servers/${id}`, { method: 'DELETE' }),
   discoverMCPServer: (data: Partial<MCPServer>) =>
@@ -1554,6 +1566,8 @@ export const workspaceApi = {
     request<Secret>('/v1/workspace/secrets', { method: 'POST', body: JSON.stringify(data) }),
   updateSecret: (id: string, data: Partial<Secret> & { value?: string }) =>
     request<Secret>(`/v1/workspace/secrets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  setSecretEnabled: (id: string, enabled: boolean) =>
+    request<Secret>(`/v1/workspace/secrets/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   deleteSecret: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/secrets/${id}`, { method: 'DELETE' }),
   setSecretValue: (id: string, value: string) =>

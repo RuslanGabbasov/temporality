@@ -130,6 +130,9 @@ export default function Skills() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Skill | null>(null)
   const [form, setForm] = useState<SkillFormState>({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST })
+  // The edit dialog's copy of the uniform switch: applied through the
+  // /enabled endpoint after the content save (the PUT never carries it).
+  const [formEnabled, setFormEnabled] = useState(true)
   const [validation, setValidation] = useState<SkillValidationIssue[] | null>(null)
   const [openVersion, setOpenVersion] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<ManifestSuggestions>({})
@@ -224,6 +227,7 @@ export default function Skills() {
         description: draft.description ?? '',
         markdown: draft.markdown ?? f.markdown,
       }))
+      setFormEnabled(true)
       setShowForm(true)
     } catch { /* malformed handoff — ignore */ }
   }, [])
@@ -317,6 +321,7 @@ export default function Skills() {
       org_unit_id: '',
     })
     setEditing(null)
+    setFormEnabled(true)
     setShowForm(true)
   }
 
@@ -351,6 +356,7 @@ export default function Skills() {
     setProvenance({})
     setImportWarnings([])
     setForm({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST, org_unit_id: '' })
+    setFormEnabled(true)
     setShowForm(true)
   }
 
@@ -454,6 +460,9 @@ export default function Skills() {
         if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
           await workspaceApi.setResourceBinding('skill', editing.id, form.org_unit_id ?? '')
         }
+        if (formEnabled !== (editing.enabled !== false)) {
+          await workspaceApi.setSkillEnabled(editing.id, formEnabled)
+        }
         setShowForm(false); setEditing(null)
         void openSkill(updated)
       } else {
@@ -463,6 +472,9 @@ export default function Skills() {
           markdown: form.markdown, manifest_yaml: manifestYaml(),
           org_unit_id: form.org_unit_id || undefined,
         })
+        if (!formEnabled) {
+          await workspaceApi.setSkillEnabled(created.id, false)
+        }
         setShowForm(false); setEditing(null)
         void openSkill(created)
       }
@@ -688,6 +700,7 @@ export default function Skills() {
                 <Stack orientation="horizontal" gap={1}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => {
                     setEditing(selected)
+                    setFormEnabled(selected.enabled !== false)
                     setValidation(null)
                     setDraftQuestions([])
                     setProvenance({})
@@ -1119,6 +1132,8 @@ export default function Skills() {
               form={form}
               setForm={setForm}
               editing={editing}
+              formEnabled={formEnabled}
+              setFormEnabled={setFormEnabled}
               org={org}
               provenance={provenance}
               onTouch={touchSection}
@@ -1256,12 +1271,14 @@ function BundledFilesTab({ markdown }: { markdown: string }) {
 
 /** Shared CRUD fields: used by the create/edit modal (and available for inline editing). */
 function SkillFormFields({
-  form, setForm, editing, org, provenance, onTouch, suggestions, validation, onValidate, onSave, onCancel,
+  form, setForm, editing, formEnabled, setFormEnabled, org, provenance, onTouch, suggestions, validation, onValidate, onSave, onCancel,
   questions, answers, setAnswers, onSendAnswers, saving, banner,
 }: {
   form: SkillFormState
   setForm: React.Dispatch<React.SetStateAction<SkillFormState>>
   editing: Skill | null
+  formEnabled: boolean
+  setFormEnabled: (v: boolean) => void
   org?: OrgUnitsState
   provenance?: Record<string, SectionProvenance>
   onTouch: (section: string) => void
@@ -1372,6 +1389,10 @@ function SkillFormFields({
         </div>
       )}
       <div className="form-actions" style={{ marginTop: 0 }}>
+        {/* The uniform switch at the bottom-left of the button block. */}
+        <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('skills.enabled_hint') ?? 'Disabled skills are never served to agents'}>
+          <Toggle id="skill-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+        </div>
         <Button kind="secondary" onClick={onValidate}>{t('skills.validate') ?? 'Validate'}</Button>
         <Button kind="secondary" onClick={onCancel}>{t('action.cancel') ?? 'Cancel'}</Button>
         <Button onClick={onSave} disabled={saving}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>

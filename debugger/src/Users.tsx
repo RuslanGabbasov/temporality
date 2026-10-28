@@ -101,14 +101,20 @@ export default function Users() {
 
   const startCreate = () => {
     setEditing(null)
+    setFormEnabled(true)
     // The org tree selection seeds the form: filling a branch means every
     // new user lands in that branch by default.
     setForm({ name: '', email: '', role: 'viewer', active: true, org_unit_id: selectedUnit !== '' && selectedUnit !== '__none__' ? selectedUnit : '', job_title: '', password: '' })
     setShowForm(true)
   }
 
+  // The edit dialog's copy of the uniform switch: applied through the
+  // /enabled endpoint after the profile save (the PUT never carries it).
+  const [formEnabled, setFormEnabled] = useState(true)
+
   const startEdit = (u: User) => {
     setEditing(u)
+    setFormEnabled(u.active)
     setForm({ ...u, password: '' })
     setShowForm(true)
   }
@@ -124,8 +130,14 @@ export default function Users() {
       let result: User
       if (editing) {
         result = await workspaceApi.updateUser(editing.id, payload)
+        if (formEnabled !== editing.active) {
+          await workspaceApi.setUserEnabled(editing.id, formEnabled)
+        }
       } else {
         result = await workspaceApi.createUser(payload as User & { name: string; role: string })
+        if (!formEnabled) {
+          await workspaceApi.setUserEnabled(result.id, false)
+        }
       }
       setShowForm(false); setEditing(null)
       // Show token if created
@@ -270,8 +282,8 @@ export default function Users() {
           <Grid>
             {visibleUsers.map((u) => (
           <Column key={u.id} sm={4} md={4} lg={4}>
-            <Tile style={{ marginBottom: '0.75rem', opacity: u.active ? 1 : 0.5 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <Tile style={{ marginBottom: '0.75rem', opacity: u.active ? 1 : 0.5, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flex: 1 }}>
                 				<div style={{ minWidth: 0, flex: 1 }}>
                 					<div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
                 						<strong>{u.name}</strong>
@@ -285,18 +297,6 @@ export default function Users() {
                     {u.has_password && <Tag type="outline" size="sm">{t('users.has_password') ?? 'password login'}</Tag>}
                   </div>
                   <ChannelBadges user={u} />
-                  {/* The uniform switch, bottom-right of the mini-card (the
-                      trigger pattern): maps onto workspace_user.active — an
-                      inactive user cannot sign in. */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.4rem' }} title={t('users.enabled_hint') ?? 'Inactive users cannot sign in'}>
-                    <Toggle
-                      id={`user-enabled-${u.id}`}
-                      labelText=""
-                      toggled={u.active}
-                      onToggle={() => void toggleUserEnabled(u)}
-                      size="sm"
-                    />
-                  </div>
                 </div>
                 {/* Actions live in a right-hand column: four icon buttons in a
                     horizontal row overflew the card on narrow grids. */}
@@ -306,6 +306,18 @@ export default function Users() {
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(u)} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(u)} />
                 </Stack>
+              </div>
+              {/* The uniform switch sits on the card's own bottom edge — clear
+                  of the vertical action stack, so the two never fight for the
+                  same corner and the toggle never dances. */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem', paddingTop: '0.4rem', borderTop: '1px solid var(--tm-border)' }} title={t('users.enabled_hint') ?? 'Inactive users cannot sign in'}>
+                <Toggle
+                  id={`user-enabled-${u.id}`}
+                  labelText=""
+                  toggled={u.active}
+                  onToggle={() => void toggleUserEnabled(u)}
+                  size="sm"
+                />
               </div>
             </Tile>
           </Column>
@@ -351,6 +363,10 @@ export default function Users() {
                   : (t('users.password_hint_create') ?? 'Optional — lets the user sign in with name and password.')}
               />
               <div className="form-actions">
+                {/* The uniform switch at the bottom-left of the button block. */}
+                <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('users.enabled_hint') ?? 'Inactive users cannot sign in'}>
+                  <Toggle id="user-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+                </div>
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>

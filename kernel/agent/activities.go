@@ -892,6 +892,13 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		req.Env = append(req.Env, proxyEnv...)
 	}
 	if spec := request.Sandbox; spec != nil {
+		if spec.Disabled {
+			// The uniform switch (docs/sandbox-profiles.md §4.3 spirit): never
+			// silently substitute another image for an assigned but disabled
+			// profile — name the fix instead.
+			return sandbox.Request{}, temporal.NewNonRetryableApplicationError(
+				fmt.Sprintf("sandbox profile %q is disabled — enable it in Settings → Sandbox profiles", spec.Profile), "SandboxProfileDisabled", nil)
+		}
 		if spec.Image == "" {
 			// Never silently substitute the installation image for an assigned
 			// profile (docs/sandbox-profiles.md §4.3): a QA run needs Node, and a

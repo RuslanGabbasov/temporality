@@ -827,6 +827,13 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		// The uniform switch (the trigger pattern): a disabled team cannot be
+		// launched — the preview endpoint below stays open so the UI keeps
+		// working and shows what to re-enable.
+		if !team.Enabled {
+			writeError(w, 409, fmt.Errorf("team %q is disabled; enable it to launch runs", team.Name))
+			return
+		}
 		manifestRaw := team.Manifest
 		if strings.TrimSpace(req.Version) != "" && req.Version != team.Version {
 			version, vErr := ws.GetTeamVersion(r.Context(), team.ID, req.Version)
@@ -5952,6 +5959,12 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		// The uniform switch (the trigger pattern): a disabled secret stops
+		// resolving — the run degrades without it, the stored value stays.
+		if !secret.Enabled {
+			writeError(w, 404, fmt.Errorf("secret %q is disabled; enable it in Settings → Secrets", secret.Name))
+			return
+		}
 		var value string
 		switch secret.Provider {
 		case "env":
@@ -8708,14 +8721,24 @@ func resolveAgentSandbox(ctx context.Context, ws *workspace.Store, a *workspace.
 		return
 	}
 	spec := &agent.SandboxSpec{Profile: a.SandboxProfile}
-	if profile, err := ws.GetSandboxProfile(ctx, a.SandboxProfile); err == nil && profile.Image != "" {
-		spec.Image = profile.Image
-		spec.Memory = profile.Memory
-		spec.CPUs = profile.CPUs
-		spec.ScratchSize = profile.ScratchSize
-		spec.TmpSize = profile.TmpSize
-		spec.CacheEnv = profile.CacheEnv
-		spec.DockerSocket = profile.DockerSocket
+	if profile, err := ws.GetSandboxProfile(ctx, a.SandboxProfile); err == nil {
+		// The uniform switch: a disabled profile fails the run at its first
+		// command with an explicit disabled-profile error instead of landing
+		// in another toolchain (§4.3).
+		if !profile.Enabled {
+			spec.Disabled = true
+			input.Sandbox = spec
+			return
+		}
+		if profile.Image != "" {
+			spec.Image = profile.Image
+			spec.Memory = profile.Memory
+			spec.CPUs = profile.CPUs
+			spec.ScratchSize = profile.ScratchSize
+			spec.TmpSize = profile.TmpSize
+			spec.CacheEnv = profile.CacheEnv
+			spec.DockerSocket = profile.DockerSocket
+		}
 	}
 	input.Sandbox = spec
 }
