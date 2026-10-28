@@ -1,47 +1,45 @@
 # Чек-лист скриншотов для сайта и гайда
 
-Куда класть: `pages/assets/guide/<имя-файла>` (создай папку `guide` внутри
-`pages/assets`). Формат — PNG, ширина 1280–1600px ( retina ×2, если можно),
+Куда класть: `pages/assets/` (плоско, без подпапок). Формат — **webp**
+(`cwebp -q 82 in.png -o out.webp`), ширина 1280–1600px (retina ×2, если можно),
 тема — та, что выглядит лучше (светлая сейчас дефолт). Данные на скринах —
 не боевые: тестовый проект, вымышленные имена.
 
-Имена файлов фиксированные — гайд уже ссылается на них.
+Гайд (RU и EN) ссылается на имена из колонки «Файл» — `npm run build:docs`
+пересобирает `pages/docs/` из `docs/user/`.
 
-## Основной набор (минимум для запуска гайда)
+## Что уже есть и где используется
 
-| Файл | Что снять | Состояние интерфейса |
+| Файл | Что на скрине | Где виден |
 |---|---|---|
-| `dashboard.png` | Главная (Dashboard) | обычный вид, 2–3 проекта в списке |
-| `chat-run.png` | Встроенный чат, ход выполнения | бабл с лентой активности: строки ходов с 💭/токенами, `⚙ tool: …`, стрим «⚙ write_file ▹ …» |
-| `chat-hitl-options.png` | Карточка вопроса с кнопками | ask_human с options: «❓ Агент спрашивает», кнопки вариантов, свободный ответ |
-| `chat-hitl-form.png` | Карточка вопроса-формы | schema-форма: несколько типов полей (enum, дата, чекбокс, число), кнопка отправки |
-| `chat-file-chip.png` | Чип файла в бабле | «📎 report.md» после send_file |
-| `matrix-card.png` | Сообщение в Element | HTML-карточка вопроса: таблица полей, «fill the form» кнопка |
-| `telegram-form-button.png` | Сообщение в Telegram | вопрос + inline-кнопка «Заполнить форму» |
-| `hosted-form-desktop.png` | Страница `/kernel-api/forms/<token>` | форма целиком, desktop-ширина |
-| `hosted-form-mobile.png` | Та же страница | ширина ~390px (мобильная), открыто из Telegram |
-| `hosted-form-answered.png` | Страница после отправки | «Answer recorded — thank you» |
-| `users-card.png` | Список пользователей | карточка с должностью, email, бейджами каналов |
-| `users-job-title.png` | Форма пользователя | поле «Должность» заполнено |
-| `agents-evolution-versions.png` | Вкладка «Эволюция» | версии с тегами регрессий (tokens/turns/pass rate) |
-| `agents-gate-override.png` | Панель override | «Применить с оверрайдом» + поле обоснования |
-| `agents-candidates.png` | Очередь golden-кандидатов | 2–3 кандидата + кнопка «Accept all» |
-| `skills-files-tab.png` | Скил, вкладка «Файлы» | список файлов с 🔴/🟡 и просмотр кода |
-| `skills-import.png` | Диалог импорта скила | выбор архива/папки |
-| `trace-full.png` | Runs → Трассировка | развёрнутый ход с деталями вызова |
-| `org-policy-egress.png` | Политика оргструктуры | поле «Базовый egress-список» заполнено |
+| `timeline.webp` | Таймлайн опыта | герой главной, `operations` |
+| `dashboard.webp` | Дашборд | `intro` (RU+EN), `chat` (EN) |
+| `chat-run.webp` | Чат с живым ходом | главная, `chat`, `hitl-forms` |
+| `run.webp` | Трасса рана | главная, `chat`, `observability` |
+| `agent-edit.webp` | Карточка агента | `agents` |
+| `agent-evolution.webp` | Эволюция: гейт, версии | главная, `agents`, `evolution` |
+| `skill-edit.webp` | Редактор навыка | главная, `skills` |
+| `skill-evaluation.webp` | Оценки навыка | `skills` |
+| `knowledge.webp` | Карта знаний | `knowledge` |
+| `trigger.webp` | Триггеры | главная, `triggers` |
+| `team.webp` | Пользователи и роли | `administration` |
+| `storage.webp` | Хранилища | `administration` |
+| `sandbox.webp` | Песочницы | `administration` |
 
-## Дополнительные (для лендинга и насыщенных разделов)
+## Чего не хватает (места уже помечены комментариями в md)
 
-| Файл | Что снять |
-|---|---|
-| `landing-hero.png` | Первый экран сайта (если нужен скрин самого себя) |
-| `agent-form-network.png` | Форма агента: блок «Network access» с уровнями и списком адресов |
-| `agents-list.png` | Список агентов с бейджами |
-| `knowledge-map.png` | Карта знаний |
-| `observability-trace.png` | Общая наблюдаемость (супервайзер/журнал) |
-| `matrix-sendfile.png` | Файл, пришедший в Matrix от бота |
-| `telegram-sendfile.png` | Файл, пришедший в Telegram |
+| Файл | Что снять | Куда встанет |
+|---|---|---|
+| `chat-file-chip.webp` | чип «📎 report.md» после `send_file` | `files` (RU+EN, «В чате») |
+| `telegram-sendfile.webp` | файл, пришедший в Telegram | `files` (RU+EN, «В мессенджерах») |
+| `hosted-form-desktop.webp` | страница `/kernel-api/forms/<token>`, desktop-ширина | `hitl-forms` (RU+EN, «Универсальный путь») |
+| `agents-candidates.webp` | очередь golden-кандидатов + «Accept all» | `evolution` (RU+EN, «Откуда берутся кейсы») |
+
+Опционально для насыщенности (сейчас эти разделы без скринов):
+`matrix-card.webp` (HTML-карточка вопроса в Element), `telegram-form-button.webp`
+(inline-кнопка «Заполнить форму»), `hosted-form-mobile.webp` (форма на ~390px),
+`users-job-title.webp` (поле «Должность» в карточке пользователя), `job-titles`
+- любой список/карточку с должностями.
 
 ## Как снимать аккуратно
 

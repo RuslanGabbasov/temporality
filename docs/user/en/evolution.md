@@ -13,7 +13,7 @@ Agents observe their own friction and propose changes to their configuration (ru
 
 Applying an agent's proposal requires a fresh green evaluation run on the proposal's base version. An evaluation run is a suite of cases: the model gets typical tasks and its answers are checked (exact substrings or an LLM judge with calibration).
 
-![The gate override](../assets/guide/agents-gate-override.webp)
+![The evaluation gate](../assets/agent-evolution.webp)
 
 Three honest outcomes:
 
@@ -25,7 +25,7 @@ Three honest outcomes:
 
 Every definition change is a new immutable snapshot with the fully compiled prompt. Any previous version can be restored with one click: the snapshot returns **as a new version** — history is append-only, and the rollback itself is revertible the same way.
 
-![Versions and rollback](../assets/guide/agents-evolution-versions.webp)
+![Versions and rollback](../assets/agent-evolution.webp)
 
 ## Where cases come from
 
@@ -35,7 +35,7 @@ Nobody hand-writes cases:
 2. **Supervisor warm-start.** If an agent's suite holds fewer cases than the gate's minimum, the supervisor drafts three representative cases from the agent's purpose and recent successful runs — accept them, edit them, or delete them.
 3. **From proposal to case.** An evolution proposal ships with a draft regression case — if it is applied, the gate already checks the exact failure that motivated the proposal.
 
-![Case candidates](../assets/guide/agents-candidates.webp)
+<!-- Screenshot: agents-candidates.webp — add once captured (the candidate queue with «Accept all») -->
 
 ## Effort is a quality signal too
 

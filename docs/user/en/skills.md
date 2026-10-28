@@ -44,6 +44,8 @@ human decision.
 
 ## Quality evaluations
 
+![Quality evaluations](../assets/skill-evaluation.webp)
+
 Golden cases attach to a skill: input → expected answer. An evaluation run
 (manual or scheduled) checks answers with patterns and an LLM judge with
 agreement calibration. The result is visible in the skill's card and on the

@@ -8,6 +8,7 @@
 .real-hero-shot { min-width: 0; }
 .real-shot { position: relative; display: block; overflow: hidden; border: 1px solid rgba(237,232,223,.15); border-radius: 12px; background: #0a1715; box-shadow: 0 24px 70px rgba(0,0,0,.28); color: inherit; text-decoration: none; }
 .real-shot img { display: block; width: 100%; height: auto; transition: transform 240ms ease, filter 240ms ease; }
+.shot-link { display: block; }
 .real-shot:hover img { transform: scale(1.012); filter: brightness(1.05); }
 .hero-shot { max-height: 490px; }
 .hero-shot img { object-fit: contain; max-height: 490px; }
@@ -20,7 +21,8 @@
 .gallery-meta { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; padding: 15px 17px 16px; background: #142522; }
 .gallery-meta strong { color: #EDE8DF; font-size: 14px; font-weight: 600; }
 .gallery-meta span { color: #AAB5B0; font-size: 12px; line-height: 1.5; }
-.gallery-meta b { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #E09B5A; font-weight: 500; }
+.gallery-doc { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #E09B5A; font-weight: 500; font-size: 12px; text-decoration: none; white-space: nowrap; }
+.gallery-doc:hover { text-decoration: underline; }
 .gallery-note { margin: 16px 0 0; color: #8A96A3; font-size: 13px; line-height: 1.65; }
 .image-viewer { position: fixed; z-index: 1000; inset: 0; display: none; align-items: center; justify-content: center; padding: 48px 28px 28px; background: rgba(4,10,9,.94); backdrop-filter: blur(12px); }
 .image-viewer.open { display: flex; }

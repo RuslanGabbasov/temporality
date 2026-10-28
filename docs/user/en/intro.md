@@ -7,6 +7,8 @@ description: What Temporality is, who it is for and what it is made of — a ten
 
 # Introduction
 
+![The Temporality dashboard](../assets/dashboard.webp)
+
 **Temporality** is an open runtime and control plane for agent systems: it runs long-lived tasks, keeps an evidence-backed history of every action, governs permissions and oversight — and turns verified experience into knowledge and skills that work on the next tasks.
 
 A conventional chat bot forgets everything between sessions, and its "memory" is a junk drawer of notes stuffed into context. An autonomous agent working inside a team needs execution, control and learning at once: tasks must survive restarts, actions must leave evidence, permissions must match the org structure, and mistakes must become experience instead of repeating. Temporality covers all four layers with one self-hosted stack:

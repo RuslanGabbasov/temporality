@@ -46,151 +46,122 @@
 <div class="docs-eyebrow">—</div>
 <h1>screenshots-checklist.md</h1>
 
-<p>Куда класть: <code>pages/assets/guide/&lt;имя-файла&gt;</code> (создай папку <code>guide</code> внутри
-<code>pages/assets</code>). Формат — PNG, ширина 1280–1600px ( retina ×2, если можно),
+<p>Куда класть: <code>pages/assets/</code> (плоско, без подпапок). Формат — <strong>webp</strong>
+(<code>cwebp -q 82 in.png -o out.webp</code>), ширина 1280–1600px (retina ×2, если можно),
 тема — та, что выглядит лучше (светлая сейчас дефолт). Данные на скринах —
 не боевые: тестовый проект, вымышленные имена.</p>
-<p>Имена файлов фиксированные — гайд уже ссылается на них.</p>
-<h2 id="основной-набор-минимум-для-запуска-гайда"><a class="anchor" href="#основной-набор-минимум-для-запуска-гайда" aria-label="Section link">#</a>Основной набор (минимум для запуска гайда)</h2><table>
+<p>Гайд (RU и EN) ссылается на имена из колонки «Файл» — <code>npm run build:docs</code>
+пересобирает <code>pages/docs/</code> из <code>docs/user/</code>.</p>
+<h2 id="что-уже-есть-и-где-используется"><a class="anchor" href="#что-уже-есть-и-где-используется" aria-label="Section link">#</a>Что уже есть и где используется</h2><table>
 <thead>
 <tr>
 <th>Файл</th>
-<th>Что снять</th>
-<th>Состояние интерфейса</th>
+<th>Что на скрине</th>
+<th>Где виден</th>
 </tr>
 </thead>
 <tbody><tr>
-<td><code>dashboard.png</code></td>
-<td>Главная (Dashboard)</td>
-<td>обычный вид, 2–3 проекта в списке</td>
+<td><code>timeline.webp</code></td>
+<td>Таймлайн опыта</td>
+<td>герой главной, <code>operations</code></td>
 </tr>
 <tr>
-<td><code>chat-run.png</code></td>
-<td>Встроенный чат, ход выполнения</td>
-<td>бабл с лентой активности: строки ходов с 💭/токенами, <code>⚙ tool: …</code>, стрим «⚙ write_file ▹ …»</td>
+<td><code>dashboard.webp</code></td>
+<td>Дашборд</td>
+<td><code>intro</code> (RU+EN), <code>chat</code> (EN)</td>
 </tr>
 <tr>
-<td><code>chat-hitl-options.png</code></td>
-<td>Карточка вопроса с кнопками</td>
-<td>ask_human с options: «❓ Агент спрашивает», кнопки вариантов, свободный ответ</td>
+<td><code>chat-run.webp</code></td>
+<td>Чат с живым ходом</td>
+<td>главная, <code>chat</code>, <code>hitl-forms</code></td>
 </tr>
 <tr>
-<td><code>chat-hitl-form.png</code></td>
-<td>Карточка вопроса-формы</td>
-<td>schema-форма: несколько типов полей (enum, дата, чекбокс, число), кнопка отправки</td>
+<td><code>run.webp</code></td>
+<td>Трасса рана</td>
+<td>главная, <code>chat</code>, <code>observability</code></td>
 </tr>
 <tr>
-<td><code>chat-file-chip.png</code></td>
-<td>Чип файла в бабле</td>
-<td>«📎 report.md» после send_file</td>
+<td><code>agent-edit.webp</code></td>
+<td>Карточка агента</td>
+<td><code>agents</code></td>
 </tr>
 <tr>
-<td><code>matrix-card.png</code></td>
-<td>Сообщение в Element</td>
-<td>HTML-карточка вопроса: таблица полей, «fill the form» кнопка</td>
+<td><code>agent-evolution.webp</code></td>
+<td>Эволюция: гейт, версии</td>
+<td>главная, <code>agents</code>, <code>evolution</code></td>
 </tr>
 <tr>
-<td><code>telegram-form-button.png</code></td>
-<td>Сообщение в Telegram</td>
-<td>вопрос + inline-кнопка «Заполнить форму»</td>
+<td><code>skill-edit.webp</code></td>
+<td>Редактор навыка</td>
+<td>главная, <code>skills</code></td>
 </tr>
 <tr>
-<td><code>hosted-form-desktop.png</code></td>
-<td>Страница <code>/kernel-api/forms/&lt;token&gt;</code></td>
-<td>форма целиком, desktop-ширина</td>
+<td><code>skill-evaluation.webp</code></td>
+<td>Оценки навыка</td>
+<td><code>skills</code></td>
 </tr>
 <tr>
-<td><code>hosted-form-mobile.png</code></td>
-<td>Та же страница</td>
-<td>ширина ~390px (мобильная), открыто из Telegram</td>
-</tr>
-<tr>
-<td><code>hosted-form-answered.png</code></td>
-<td>Страница после отправки</td>
-<td>«Answer recorded — thank you»</td>
-</tr>
-<tr>
-<td><code>users-card.png</code></td>
-<td>Список пользователей</td>
-<td>карточка с должностью, email, бейджами каналов</td>
-</tr>
-<tr>
-<td><code>users-job-title.png</code></td>
-<td>Форма пользователя</td>
-<td>поле «Должность» заполнено</td>
-</tr>
-<tr>
-<td><code>agents-evolution-versions.png</code></td>
-<td>Вкладка «Эволюция»</td>
-<td>версии с тегами регрессий (tokens/turns/pass rate)</td>
-</tr>
-<tr>
-<td><code>agents-gate-override.png</code></td>
-<td>Панель override</td>
-<td>«Применить с оверрайдом» + поле обоснования</td>
-</tr>
-<tr>
-<td><code>agents-candidates.png</code></td>
-<td>Очередь golden-кандидатов</td>
-<td>2–3 кандидата + кнопка «Accept all»</td>
-</tr>
-<tr>
-<td><code>skills-files-tab.png</code></td>
-<td>Скил, вкладка «Файлы»</td>
-<td>список файлов с 🔴/🟡 и просмотр кода</td>
-</tr>
-<tr>
-<td><code>skills-import.png</code></td>
-<td>Диалог импорта скила</td>
-<td>выбор архива/папки</td>
-</tr>
-<tr>
-<td><code>trace-full.png</code></td>
-<td>Runs → Трассировка</td>
-<td>развёрнутый ход с деталями вызова</td>
-</tr>
-<tr>
-<td><code>org-policy-egress.png</code></td>
-<td>Политика оргструктуры</td>
-<td>поле «Базовый egress-список» заполнено</td>
-</tr>
-</tbody></table>
-<h2 id="дополнительные-для-лендинга-и-насыщенных-разделов"><a class="anchor" href="#дополнительные-для-лендинга-и-насыщенных-разделов" aria-label="Section link">#</a>Дополнительные (для лендинга и насыщенных разделов)</h2><table>
-<thead>
-<tr>
-<th>Файл</th>
-<th>Что снять</th>
-</tr>
-</thead>
-<tbody><tr>
-<td><code>landing-hero.png</code></td>
-<td>Первый экран сайта (если нужен скрин самого себя)</td>
-</tr>
-<tr>
-<td><code>agent-form-network.png</code></td>
-<td>Форма агента: блок «Network access» с уровнями и списком адресов</td>
-</tr>
-<tr>
-<td><code>agents-list.png</code></td>
-<td>Список агентов с бейджами</td>
-</tr>
-<tr>
-<td><code>knowledge-map.png</code></td>
+<td><code>knowledge.webp</code></td>
 <td>Карта знаний</td>
+<td><code>knowledge</code></td>
 </tr>
 <tr>
-<td><code>observability-trace.png</code></td>
-<td>Общая наблюдаемость (супервайзер/журнал)</td>
+<td><code>trigger.webp</code></td>
+<td>Триггеры</td>
+<td>главная, <code>triggers</code></td>
 </tr>
 <tr>
-<td><code>matrix-sendfile.png</code></td>
-<td>Файл, пришедший в Matrix от бота</td>
+<td><code>team.webp</code></td>
+<td>Пользователи и роли</td>
+<td><code>administration</code></td>
 </tr>
 <tr>
-<td><code>telegram-sendfile.png</code></td>
-<td>Файл, пришедший в Telegram</td>
+<td><code>storage.webp</code></td>
+<td>Хранилища</td>
+<td><code>administration</code></td>
+</tr>
+<tr>
+<td><code>sandbox.webp</code></td>
+<td>Песочницы</td>
+<td><code>administration</code></td>
 </tr>
 </tbody></table>
+<h2 id="чего-не-хватает-места-уже-помечены-комментариями-в-md"><a class="anchor" href="#чего-не-хватает-места-уже-помечены-комментариями-в-md" aria-label="Section link">#</a>Чего не хватает (места уже помечены комментариями в md)</h2><table>
+<thead>
+<tr>
+<th>Файл</th>
+<th>Что снять</th>
+<th>Куда встанет</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>chat-file-chip.webp</code></td>
+<td>чип «📎 report.md» после <code>send_file</code></td>
+<td><code>files</code> (RU+EN, «В чате»)</td>
+</tr>
+<tr>
+<td><code>telegram-sendfile.webp</code></td>
+<td>файл, пришедший в Telegram</td>
+<td><code>files</code> (RU+EN, «В мессенджерах»)</td>
+</tr>
+<tr>
+<td><code>hosted-form-desktop.webp</code></td>
+<td>страница <code>/kernel-api/forms/&lt;token&gt;</code>, desktop-ширина</td>
+<td><code>hitl-forms</code> (RU+EN, «Универсальный путь»)</td>
+</tr>
+<tr>
+<td><code>agents-candidates.webp</code></td>
+<td>очередь golden-кандидатов + «Accept all»</td>
+<td><code>evolution</code> (RU+EN, «Откуда берутся кейсы»)</td>
+</tr>
+</tbody></table>
+<p>Опционально для насыщенности (сейчас эти разделы без скринов):
+<code>matrix-card.webp</code> (HTML-карточка вопроса в Element), <code>telegram-form-button.webp</code>
+(inline-кнопка «Заполнить форму»), <code>hosted-form-mobile.webp</code> (форма на ~390px),
+<code>users-job-title.webp</code> (поле «Должность» в карточке пользователя), <code>job-titles</code></p>
+<ul>
+<li>любой список/карточку с должностями.</li>
+</ul>
 <h2 id="как-снимать-аккуратно"><a class="anchor" href="#как-снимать-аккуратно" aria-label="Section link">#</a>Как снимать аккуратно</h2><ol>
 <li>Тестовые данные: проект «demo», вымышленный клиент, файл <code>report.md</code>.</li>
 <li>Перед скрином закрыть тултипы/уведомления (или наоборот — если они и есть

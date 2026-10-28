@@ -9,6 +9,8 @@ description: Users and RBAC, the org structure, providers, secrets, sandboxes an
 
 ## Backup and restore
 
+![Storage](../assets/storage.webp)
+
 Three stores — three stories:
 
 | Store | Contents | Backup |

@@ -46,7 +46,7 @@
 <p class="docs-lead">How agents propose changes to their own configuration, how the evaluation gate verifies the effect, how to roll a version back — and where evaluation cases come from without hand-writing them.</p>
 <p>Agents observe their own friction and propose changes to their configuration (rules, completion checklists) via <code>agent_propose</code>. A proposal changes nothing by itself — a human reads it and decides. Around that decision there is a measurable loop: the <strong>evaluation gate</strong> verifies the change does not break behaviour, <strong>versions</strong> make every decision revertible, and <strong>effort regressions</strong> show whether the work got cheaper or more expensive.</p>
 <h2 id="proposals-and-the-gate"><a class="anchor" href="#proposals-and-the-gate" aria-label="Section link">#</a>Proposals and the gate</h2><p>Applying an agent&#39;s proposal requires a fresh green evaluation run on the proposal&#39;s base version. An evaluation run is a suite of cases: the model gets typical tasks and its answers are checked (exact substrings or an LLM judge with calibration).</p>
-<p><img src="../assets/guide/agents-gate-override.webp" alt="The gate override"></p>
+<p><img src="../assets/agent-evolution.webp" alt="The evaluation gate"></p>
 <p>Three honest outcomes:</p>
 <ul>
 <li><strong>Green</strong> — a fresh green run: the proposal is applied, the version increments, a snapshot is stored.</li>
@@ -54,15 +54,14 @@
 <li><strong>Stale base</strong> — the proposal needs rebasing (the agent will do it on request).</li>
 </ul>
 <h2 id="rolling-versions-back"><a class="anchor" href="#rolling-versions-back" aria-label="Section link">#</a>Rolling versions back</h2><p>Every definition change is a new immutable snapshot with the fully compiled prompt. Any previous version can be restored with one click: the snapshot returns <strong>as a new version</strong> — history is append-only, and the rollback itself is revertible the same way.</p>
-<p><img src="../assets/guide/agents-evolution-versions.webp" alt="Versions and rollback"></p>
+<p><img src="../assets/agent-evolution.webp" alt="Versions and rollback"></p>
 <h2 id="where-cases-come-from"><a class="anchor" href="#where-cases-come-from" aria-label="Section link">#</a>Where cases come from</h2><p>Nobody hand-writes cases:</p>
 <ol>
 <li><strong>Production harvest.</strong> Completed runs automatically become evaluation-case candidates (the task is the input, the answer or the human&#39;s correction is the reference). Candidates go through review: accept one by one or the whole batch with «Accept all».</li>
 <li><strong>Supervisor warm-start.</strong> If an agent&#39;s suite holds fewer cases than the gate&#39;s minimum, the supervisor drafts three representative cases from the agent&#39;s purpose and recent successful runs — accept them, edit them, or delete them.</li>
 <li><strong>From proposal to case.</strong> An evolution proposal ships with a draft regression case — if it is applied, the gate already checks the exact failure that motivated the proposal.</li>
 </ol>
-<p><img src="../assets/guide/agents-candidates.webp" alt="Case candidates"></p>
-<h2 id="effort-is-a-quality-signal-too"><a class="anchor" href="#effort-is-a-quality-signal-too" aria-label="Section link">#</a>Effort is a quality signal too</h2><p>An answer can get better while the work gets more expensive. Per definition version the system tracks average turns and tokens of completed runs; a meaningful growth is flagged as an effort regression («more turns / +N% tokens vs vN»). Evolution must justify the cost, not just the quality.</p>
+<!-- Screenshot: agents-candidates.webp — add once captured (the candidate queue with «Accept all») --><h2 id="effort-is-a-quality-signal-too"><a class="anchor" href="#effort-is-a-quality-signal-too" aria-label="Section link">#</a>Effort is a quality signal too</h2><p>An answer can get better while the work gets more expensive. Per definition version the system tracks average turns and tokens of completed runs; a meaningful growth is flagged as an effort regression («more turns / +N% tokens vs vN»). Evolution must justify the cost, not just the quality.</p>
 <h2 id="overrides-are-honest"><a class="anchor" href="#overrides-are-honest" aria-label="Section link">#</a>Overrides are honest</h2><p>Bypassing the gate is not a loophole but a documented decision: every apply without a green run is recorded in the audit with the author and justification, and the override share is visible in the quality report. The loop is fail-closed by design — a traceless bypass is technically impossible.</p>
 
 
