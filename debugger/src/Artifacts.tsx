@@ -19,6 +19,8 @@ import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
+import { ReviewerPicker } from './ReviewerPicker'
+import type { User } from './workspaceApi'
 import Markdown from './Markdown'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -67,6 +69,11 @@ export default function Artifacts() {
   const [reviews, setReviews] = useState<ArtifactReview[]>([])
   const [reviewsOpen, setReviewsOpen] = useState(false)
   const [submitOpen, setSubmitOpen] = useState(false)
+  // Reviewers as tokens (the exact ask_human syntax underneath); the picker
+  // resolves them to chips. The directory loads lazily — only when someone
+  // opens the submit dialog.
+  const [submitReviewerTokens, setSubmitReviewerTokens] = useState<string[]>([])
+  const [directory, setDirectory] = useState<User[]>([])
   const [submitReviewers, setSubmitReviewers] = useState('')
   const [submitNote, setSubmitNote] = useState('')
   const [decisionComment, setDecisionComment] = useState('')
@@ -282,12 +289,11 @@ export default function Artifacts() {
 
   const submit = async () => {
     if (!selected) return
-    const reviewers = submitReviewers.split(',').map((s) => s.trim()).filter(Boolean)
     setBusy(true)
     try {
-      await workspaceApi.submitArtifact(selected.id, { reviewers, note: submitNote })
+      await workspaceApi.submitArtifact(selected.id, { reviewers: submitReviewerTokens, note: submitNote })
       setSubmitOpen(false)
-      setSubmitReviewers('')
+      setSubmitReviewerTokens([])
       setSubmitNote('')
       await load()
     } catch (f) { setError(message(f)) }
@@ -422,7 +428,12 @@ export default function Artifacts() {
                   </div>
                   <Stack orientation="horizontal" gap={2}>
                     {(reviewable || (revisionOpen && revisionEditable)) && (
-                      <Button size="sm" onClick={() => { setSubmitReviewers(''); setSubmitNote(''); setSubmitOpen(true) }}>
+                      <Button size="sm" onClick={() => {
+                        setSubmitReviewerTokens([])
+                        setSubmitNote('')
+                        setSubmitOpen(true)
+                        void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
+                      }}>
                         {t('artifacts.submit_review') ?? 'Send to review'}
                       </Button>
                     )}
@@ -687,14 +698,16 @@ export default function Artifacts() {
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.85rem' }}>
               {selected.title} · v{selected.version ?? 1}
             </p>
-            <TextInput
-              id="artifact-submit-reviewers"
-              labelText={t('artifacts.submit_reviewers_label') ?? 'Reviewers'}
-              value={submitReviewers}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSubmitReviewers(e.target.value)}
-              placeholder="user:ivanov, project_owner"
-              helperText={t('artifacts.submit_reviewers_helper') ?? 'Comma-separated; same recipient syntax as ask_human: user:<id>, org:<unit>, role:<role>, project_owner'}
-            />
+            <div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('artifacts.submit_reviewers_label') ?? 'Reviewers'}</div>
+              <ReviewerPicker
+                value={submitReviewerTokens}
+                onChange={setSubmitReviewerTokens}
+                users={directory}
+                org={org}
+              />
+              <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>{t('artifacts.submit_reviewers_helper') ?? 'People by name or title, org units, roles — or type a raw id.'}</p>
+            </div>
             <TextArea
               id="artifact-submit-note"
               labelText={t('artifacts.submit_note_label') ?? 'Note'}
@@ -704,7 +717,7 @@ export default function Artifacts() {
               placeholder={t('artifacts.submit_note_placeholder') ?? 'Why this deserves approval now'}
             />
             <div className="form-actions">
-              <Button disabled={busy || submitReviewers.trim() === ''} onClick={() => void submit()}>{t('artifacts.submit_review') ?? 'Send to review'}</Button>
+              <Button disabled={busy || submitReviewerTokens.length === 0} onClick={() => void submit()}>{t('artifacts.submit_review') ?? 'Send to review'}</Button>
               <Button kind="secondary" onClick={() => setSubmitOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>
           </Stack>
