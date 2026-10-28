@@ -181,7 +181,7 @@ export default function Secrets() {
               {/* The uniform switch, bottom-right of the mini-card: a disabled
                   secret stops resolving — runs degrade without it. */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem', paddingTop: '0.4rem', borderTop: '1px solid var(--tm-border)' }} title={t('secrets.enabled_hint') ?? 'Disabled secrets stop resolving'}>
-                <Toggle id={`secret-enabled-${s.id}`} labelText="" toggled={s.enabled !== false} onToggle={() => void toggleSecretEnabled(s)} size="sm" />
+                <Toggle id={`secret-enabled-${s.id}`} labelText="" hideLabel aria-label={t('secrets.enabled_hint') ?? 'Toggle secret'} toggled={s.enabled !== false} onToggle={() => void toggleSecretEnabled(s)} size="sm" />
               </div>
             </Tile>
           </Column>
@@ -241,7 +241,7 @@ export default function Secrets() {
             <div className="form-actions">
               {/* The uniform switch at the bottom-left of the button block. */}
               <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('secrets.enabled_hint') ?? 'Disabled secrets stop resolving'}>
-                <Toggle id="secret-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+                <Toggle id="secret-form-enabled" labelText={t('secrets.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
               </div>
               <Button onClick={() => void save()} disabled={!form.name?.trim()}>{t('action.save') ?? 'Save'}</Button>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>

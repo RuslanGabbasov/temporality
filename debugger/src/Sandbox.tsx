@@ -389,7 +389,7 @@ export default function Sandbox({ project }: { project?: string }) {
                 {/* The uniform switch rides at the right end of the tag row:
                     bottom-right of the card, clear of the action buttons. */}
                 <span style={{ marginLeft: 'auto' }} title={t('sandbox.enabled_hint') ?? 'Disabled profiles fail runs that reference them'}>
-                  <Toggle id={`sandbox-enabled-${p.id}`} labelText="" toggled={p.enabled !== false} onToggle={() => void toggleSandboxEnabled(p)} size="sm" />
+                  <Toggle id={`sandbox-enabled-${p.id}`} labelText="" hideLabel aria-label={t('sandbox.enabled_hint') ?? 'Toggle profile'} toggled={p.enabled !== false} onToggle={() => void toggleSandboxEnabled(p)} size="sm" />
                 </span>
               </div>
               {p.image && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', marginTop: '0.35rem', wordBreak: 'break-all' }}>{p.image}</p>}
@@ -541,7 +541,7 @@ export default function Sandbox({ project }: { project?: string }) {
             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem' }}>
               {/* The uniform switch at the bottom-left of the button block. */}
               <span style={{ marginRight: 'auto' }} title={t('sandbox.enabled_hint') ?? 'Disabled profiles fail runs that reference them'}>
-                <Toggle id="sandbox-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+                <Toggle id="sandbox-form-enabled" labelText={t('sandbox.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
               </span>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null); setDraftRationale('') }}>{t('action.cancel')}</Button>
               <Button

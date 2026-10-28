@@ -314,6 +314,8 @@ export default function Users() {
                 <Toggle
                   id={`user-enabled-${u.id}`}
                   labelText=""
+                  hideLabel
+                  aria-label={t('users.enabled_hint') ?? 'Toggle user'}
                   toggled={u.active}
                   onToggle={() => void toggleUserEnabled(u)}
                   size="sm"
@@ -365,7 +367,7 @@ export default function Users() {
               <div className="form-actions">
                 {/* The uniform switch at the bottom-left of the button block. */}
                 <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('users.enabled_hint') ?? 'Inactive users cannot sign in'}>
-                  <Toggle id="user-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+                  <Toggle id="user-form-enabled" labelText={t('users.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
                 </div>
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>

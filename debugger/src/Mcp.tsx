@@ -249,7 +249,7 @@ export default function Mcp() {
               {/* The uniform switch, bottom-right of the mini-card: a disabled
                   server's tools drop out of every run. */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem', paddingTop: '0.4rem', borderTop: '1px solid var(--tm-border)' }} title={t('mcp.enabled_hint') ?? 'Disabled servers are not connected — their tools are unavailable'}>
-                <Toggle id={`mcp-enabled-${s.id}`} labelText="" toggled={s.enabled} onToggle={() => void toggleMCPServerEnabled(s)} size="sm" />
+                <Toggle id={`mcp-enabled-${s.id}`} labelText="" hideLabel aria-label={t('mcp.enabled_hint') ?? 'Toggle server'} toggled={s.enabled} onToggle={() => void toggleMCPServerEnabled(s)} size="sm" />
               </div>
             </Tile>
           </Column>
@@ -375,7 +375,7 @@ export default function Mcp() {
               <div className="form-actions">
                 {/* The uniform switch at the bottom-left of the button block. */}
                 <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('mcp.enabled_hint') ?? 'Disabled servers are not connected'}>
-                  <Toggle id="mcp-form-enabled" labelText="" toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+                  <Toggle id="mcp-form-enabled" labelText={t('mcp.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
                 </div>
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>

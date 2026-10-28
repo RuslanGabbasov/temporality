@@ -342,7 +342,7 @@ export default function Triggers({ project }: { project: string }) {
                 {/* The uniform switch, bottom-right of the mini-card: far from
                     the edit/delete buttons so it cannot be hit by accident. */}
                 <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
-                  <Toggle id={`toggle-${trigger.id}`} labelText="" toggled={trigger.enabled} onToggle={() => void toggleEnabled(trigger)} size="sm" />
+                  <Toggle id={`toggle-${trigger.id}`} labelText="" hideLabel aria-label={t('triggers.toggle_hint') ?? 'Toggle trigger'} toggled={trigger.enabled} onToggle={() => void toggleEnabled(trigger)} size="sm" />
                 </div>
               </Tile>
             </Column>

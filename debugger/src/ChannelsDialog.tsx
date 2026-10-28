@@ -215,6 +215,8 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
                   <Toggle
                     id={`channel-enabled-${index}`}
                     labelText=""
+                    hideLabel
+                    aria-label={t('channels.enabled') ?? 'Toggle channel'}
                     toggled={channel.enabled}
                     onToggle={(checked: boolean) => updateChannel(index, { enabled: checked })}
                     size="sm"
