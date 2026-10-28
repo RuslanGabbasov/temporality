@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -182,7 +183,9 @@ func matrixUnknownSince(err error) bool {
 }
 
 // matrixNormalized converts parsed matrix messages into the channel-neutral
-// model: the room becomes the chat, the single attachment becomes Files.
+// model: the room becomes the chat, the single attachment becomes Files. The
+// batch then passes through attachment coalescing — Element sends a multi-file
+// message as several protocol-independent events.
 func matrixNormalized(messages []MatrixInboundMessage) []InboundMessage {
 	normalized := make([]InboundMessage, 0, len(messages))
 	for _, message := range messages {
@@ -199,7 +202,116 @@ func matrixNormalized(messages []MatrixInboundMessage) []InboundMessage {
 		}
 		normalized = append(normalized, entry)
 	}
-	return normalized
+	return coalesceMatrixBatch(normalized)
+}
+
+// matrixMessageKind classifies one normalized message for batch coalescing.
+type matrixMessageKind int
+
+const (
+	matrixPlainMessage matrixMessageKind = iota // text without attachment
+	matrixCaptionedFile                         // attachment with its own caption
+	matrixBareFile                              // attachment whose body is just the file name
+)
+
+// matrixKind applies the caption convention of the spec: a file event carries
+// a caption only when the client stored an explicit filename distinct from
+// the body — otherwise the body is the file name itself.
+func matrixKind(message InboundMessage) matrixMessageKind {
+	if len(message.Files) == 0 {
+		return matrixPlainMessage
+	}
+	body := strings.TrimSpace(message.Text)
+	if name := message.Files[0].Name; name != "" && body != "" && body != name {
+		return matrixCaptionedFile
+	}
+	return matrixBareFile
+}
+
+// coalesceMatrixBatch merges bare-attachment events into a neighbouring
+// message of the same sender in the same room: without it a "three files plus
+// a caption" message would start three file-only intake runs plus a text run.
+// Deterministic: every bare file joins the nearest anchor by batch position
+// (ties to the earlier one); a group with no anchor at all collapses into its
+// first file event, with the file names as the body so classification still
+// sees what arrived. Captioned files and plain texts never merge.
+func coalesceMatrixBatch(messages []InboundMessage) []InboundMessage {
+	type slot struct{ anchors, bare []int }
+	groups := map[[2]string]*slot{}
+	for i, message := range messages {
+		key := [2]string{message.ChatID, message.Sender}
+		s := groups[key]
+		if s == nil {
+			s = &slot{}
+			groups[key] = s
+		}
+		switch matrixKind(message) {
+		case matrixBareFile:
+			s.bare = append(s.bare, i)
+		default:
+			s.anchors = append(s.anchors, i)
+		}
+	}
+	absorb := map[int][]int{}
+	var orphanBare []int
+	for _, s := range groups {
+		for _, bi := range s.bare {
+			target, best := -1, len(messages)+1
+			for _, ai := range s.anchors {
+				distance := ai - bi
+				if distance < 0 {
+					distance = -distance
+				}
+				if distance < best {
+					best, target = distance, ai
+				}
+			}
+			if target >= 0 {
+				absorb[target] = append(absorb[target], bi)
+			} else {
+				orphanBare = append(orphanBare, bi)
+			}
+		}
+	}
+	sort.Ints(orphanBare)
+	if len(orphanBare) > 1 {
+		absorb[orphanBare[0]] = append(absorb[orphanBare[0]], orphanBare[1:]...)
+	}
+	if len(absorb) == 0 {
+		return messages
+	}
+	merged := make([]bool, len(messages))
+	for _, sources := range absorb {
+		for _, si := range sources {
+			merged[si] = true
+		}
+	}
+	result := make([]InboundMessage, 0, len(messages))
+	for i := range messages {
+		if merged[i] {
+			continue
+		}
+		message := messages[i]
+		if sources, ok := absorb[i]; ok {
+			sort.Ints(sources)
+			for _, si := range sources {
+				message.Files = append(message.Files, messages[si].Files...)
+			}
+			if matrixKind(messages[i]) == matrixBareFile {
+				names := make([]string, 0, len(message.Files))
+				for _, file := range message.Files {
+					if file.Name != "" {
+						names = append(names, file.Name)
+					}
+				}
+				if len(names) > 0 {
+					message.Text = strings.Join(names, "\n")
+				}
+			}
+		}
+		result = append(result, message)
+	}
+	return result
 }
 
 // parseMxcURL splits mxc://<server>/<mediaID> into its parts.

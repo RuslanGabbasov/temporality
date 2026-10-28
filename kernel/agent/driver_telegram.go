@@ -21,7 +21,7 @@ type telegramDriver struct{}
 
 func (telegramDriver) Type() string { return "telegram" }
 
-func (telegramDriver) Poller() ChannelPoller { return telegramPoller{} }
+func (telegramDriver) Poller() ChannelPoller { return newTelegramPoller() }
 
 // Webhook: telegram inbound is pull — getUpdates long-poll (driver_telegram_inbound.go).
 func (telegramDriver) Webhook() ChannelWebhook { return nil }

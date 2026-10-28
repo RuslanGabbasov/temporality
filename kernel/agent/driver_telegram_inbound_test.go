@@ -162,7 +162,7 @@ func TestTelegramPollerPollSendsOffsetAndNormalizes(t *testing.T) {
 	var offset string
 	server := telegramBotAPI(t, []any{telegramUpdateBody(300, 777, 777, "вопрос по задаче", nil)}, &offset, "")
 	settings := map[string]string{"bot_token": "tok", "api_base": server.URL}
-	messages, next, err := telegramPoller{}.Poll(context.Background(), server.Client(), settings, "300")
+	messages, next, err := newTelegramPoller().Poll(context.Background(), server.Client(), settings, "300")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestTelegramPollerPollSendsOffsetAndNormalizes(t *testing.T) {
 
 func TestTelegramPollerSelf(t *testing.T) {
 	server := telegramBotAPI(t, nil, nil, "")
-	self, err := telegramPoller{}.Self(context.Background(), server.Client(), map[string]string{"bot_token": "tok", "api_base": server.URL})
+	self, err := newTelegramPoller().Self(context.Background(), server.Client(), map[string]string{"bot_token": "tok", "api_base": server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,13 +190,91 @@ func TestTelegramPollerSelf(t *testing.T) {
 
 func TestTelegramPollerFetchFile(t *testing.T) {
 	server := telegramBotAPI(t, nil, nil, "documents/report.txt")
-	payload, err := telegramPoller{}.FetchFile(context.Background(), server.Client(),
+	payload, err := newTelegramPoller().FetchFile(context.Background(), server.Client(),
 		map[string]string{"bot_token": "tok", "api_base": server.URL}, InboundFile{Ref: "f1", Name: "report.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(payload) != "file-bytes" {
 		t.Fatalf("payload = %q", payload)
+	}
+}
+
+// TestTelegramPollerCoalescesMediaGroup: an album arrives as separate
+// updates — here split across two getUpdates responses, with the first part
+// replayed in the second batch — and must reach the pipeline as one message
+// carrying every attachment. The text message routed in between is not held
+// back by the buffering album.
+func TestTelegramPollerCoalescesMediaGroup(t *testing.T) {
+	oldDelay, oldStep := telegramAlbumFlushDelay, telegramAlbumPollStep
+	telegramAlbumFlushDelay, telegramAlbumPollStep = 30*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() { telegramAlbumFlushDelay, telegramAlbumPollStep = oldDelay, oldStep })
+
+	photoUpdate := func(id int64, caption string) map[string]any {
+		extra := map[string]any{
+			"media_group_id": "group-1",
+			"photo": []any{
+				map[string]any{"file_id": fmt.Sprintf("thumb-%d", id), "file_size": 1000},
+				map[string]any{"file_id": fmt.Sprintf("large-%d", id), "file_size": 90000},
+			},
+		}
+		if caption != "" {
+			extra["caption"] = caption
+		}
+		return telegramUpdateBody(id, 777, 777, "", extra)
+	}
+	calls := 0
+	pages := [][]map[string]any{
+		{telegramUpdateBody(299, 777, 777, "проверь фото", nil), photoUpdate(300, "отчёт с фото")},
+		{photoUpdate(300, "отчёт с фото"), photoUpdate(301, ""), photoUpdate(302, "")},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			var updates []any
+			if calls < len(pages) {
+				for _, update := range pages[calls] {
+					updates = append(updates, update)
+				}
+			}
+			calls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": updates})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	poller := newTelegramPoller()
+	settings := map[string]string{"bot_token": "tok", "api_base": server.URL}
+	ctx := context.Background()
+
+	first, next, err := poller.Poll(ctx, server.Client(), settings, "299")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || first[0].ID != "299" || first[0].Text != "проверь фото" {
+		t.Fatalf("the plain text must route immediately, got %+v", first)
+	}
+	if next != "300" {
+		t.Fatalf("cursor must stay behind the buffered part, got %q", next)
+	}
+
+	second, next, err := poller.Poll(ctx, server.Client(), settings, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 1 {
+		t.Fatalf("album must arrive as one message, got %d: %+v", len(second), second)
+	}
+	album := second[0]
+	if album.ID != "300" || album.Text != "отчёт с фото" {
+		t.Fatalf("unexpected album: %+v", album)
+	}
+	if len(album.Files) != 3 || album.Files[0].Ref != "large-300" || album.Files[2].Ref != "large-302" {
+		t.Fatalf("attachments not merged: %+v", album.Files)
+	}
+	if next != "303" {
+		t.Fatalf("cursor after the flush = %q, want 303", next)
 	}
 }
 

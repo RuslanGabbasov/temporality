@@ -52,6 +52,15 @@ toggle and constrained by org policies, a per-sender limit
 (`KERNEL_INTAKE_MAX_PER_HOUR`) and body retention (`KERNEL_INTAKE_RETENTION_DAYS`).
 The audit trail "message → intake run → task run" is kept without message bodies.
 
+### Files and albums
+
+A message with several attachments arrives as **one task with all the files**,
+not a scatter of separate runs: in Matrix, several files plus a caption are
+several protocol-level events — the pipeline coalesces them into one message;
+in Telegram, an album ("media group") is collected whole with a short wait for
+its tail. Files sent while a task is already running land in that run's
+workspace and reach the agent as a note — no extra run is created.
+
 ## What the user sees
 
 The **Inbound** section lists messages with statuses (received → classified →

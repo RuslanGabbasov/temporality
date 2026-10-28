@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,22 +21,104 @@ import (
 // phase 3). Chat id is the identity: for private chats chat.id == from.id, so
 // the closed-world check matches the registered address and sender directly;
 // in groups the registered SenderID is the member's own telegram id.
-type telegramPoller struct{}
+// Media groups (albums) pass through an internal buffer: parts arrive as
+// separate updates and must reach the pipeline as one message.
+type telegramPoller struct {
+	albums *telegramAlbumBuffer
+}
+
+func newTelegramPoller() *telegramPoller {
+	return &telegramPoller{albums: newTelegramAlbumBuffer()}
+}
 
 // telegramPollTimeout is the server-side long-poll window of getUpdates:
 // shorter than the loop's cycle budget so one poll returns within it.
 const telegramPollTimeout = 25 * time.Second
 
-func (telegramPoller) Poll(ctx context.Context, client *http.Client, settings map[string]string, cursor string) ([]InboundMessage, string, error) {
+// telegramAlbumFlushDelay waits out the tail of a media group (album): its
+// parts trickle in as separate updates — often split across getUpdates
+// responses — and each part alone would start its own intake run. The buffer
+// releases the whole group as one message. Vars so tests can shrink them.
+var (
+	telegramAlbumFlushDelay = 2500 * time.Millisecond
+	telegramAlbumPollStep   = 200 * time.Millisecond
+)
+
+func (p *telegramPoller) Poll(ctx context.Context, client *http.Client, settings map[string]string, cursor string) ([]InboundMessage, string, error) {
 	base, token, err := telegramCredentials(settings)
 	if err != nil {
 		return nil, "", err
 	}
-	endpoint := fmt.Sprintf("%s/bot%s/getUpdates?timeout=%d", base, token, int(telegramPollTimeout.Seconds()))
-	if cursor != "" {
+	if p.albums == nil {
+		p.albums = newTelegramAlbumBuffer()
+	}
+	consumed := parseTelegramOffset(cursor)
+	for {
+		// While an album is buffering the long poll is replaced by short polls:
+		// the group must complete within the flush window, not after the next
+		// 25-second quiet poll.
+		timeout := int(telegramPollTimeout.Seconds())
+		if p.albums.pending() {
+			timeout = 0
+		}
+		updates, batchNext, err := p.fetchUpdates(ctx, client, base, token, cursor, timeout)
+		if err != nil {
+			return nil, "", err
+		}
+		now := time.Now()
+		var out []InboundMessage
+		for _, update := range updates {
+			if p.albums.contains(update.UpdateID) {
+				continue // replayed while buffering — the part is already parked
+			}
+			if update.MediaGroupID != "" && len(update.Files) > 0 {
+				p.albums.add(update, now)
+				continue
+			}
+			out = append(out, telegramNormalizedOne(update))
+		}
+		flushed, flushedMax := p.albums.flushDue(now)
+		out = append(out, flushed...)
+		// batchNext already moved past updates the parser skipped (stickers and
+		// other unsupported payloads) — the cursor may not stall on them.
+		if parsed := parseTelegramOffset(batchNext); parsed > consumed {
+			consumed = parsed
+		}
+		if flushedMax+1 > consumed {
+			consumed = flushedMax + 1
+		}
+		next := ""
+		if consumed > 0 {
+			next = strconv.FormatInt(consumed, 10)
+		}
+		// The cursor stays behind buffered parts on purpose: a crash must
+		// redeliver them (at-least-once), never silently drop an album.
+		if replay, ok := p.albums.replayID(); ok && replay < consumed {
+			next = strconv.FormatInt(replay, 10)
+		}
+		if len(out) > 0 {
+			return out, next, nil
+		}
+		if p.albums.pending() {
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			case <-time.After(telegramAlbumPollStep):
+			}
+			continue
+		}
+		return nil, next, nil
+	}
+}
+
+// fetchUpdates performs one getUpdates call and returns the parsed updates
+// plus the parser's next-offset candidate (max update_id + 1 vs the cursor).
+func (p *telegramPoller) fetchUpdates(ctx context.Context, client *http.Client, base, token string, offset string, timeoutSeconds int) ([]TelegramUpdate, string, error) {
+	endpoint := fmt.Sprintf("%s/bot%s/getUpdates?timeout=%d", base, token, timeoutSeconds)
+	if offset != "" {
 		// The offset acknowledges every update below it: a persisted cursor
 		// crossed with at-least-once redelivery cannot reprocess a message.
-		endpoint += "&offset=" + url.QueryEscape(cursor)
+		endpoint += "&offset=" + url.QueryEscape(offset)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -55,14 +138,10 @@ func (telegramPoller) Poll(ctx context.Context, client *http.Client, settings ma
 		// stream — both are admin-fixable, the surfaced error is the diagnosis.
 		return nil, "", fmt.Errorf("telegram getUpdates returned %d: %s", resp.StatusCode, truncate(string(body), 200))
 	}
-	updates, next, err := ParseTelegramUpdates(body, cursor)
-	if err != nil {
-		return nil, "", err
-	}
-	return telegramNormalized(updates), next, nil
+	return ParseTelegramUpdates(body, offset)
 }
 
-func (telegramPoller) Self(ctx context.Context, client *http.Client, settings map[string]string) (string, error) {
+func (p *telegramPoller) Self(ctx context.Context, client *http.Client, settings map[string]string) (string, error) {
 	base, token, err := telegramCredentials(settings)
 	if err != nil {
 		return "", err
@@ -176,12 +255,13 @@ func telegramCredentials(settings map[string]string) (base, token string, err er
 
 // TelegramUpdate is one message-bearing update in normalized form.
 type TelegramUpdate struct {
-	UpdateID  int64
-	ChatID    int64
-	SenderID  int64
-	Text      string
-	Files     []InboundFile
-	Timestamp time.Time
+	UpdateID     int64
+	ChatID       int64
+	SenderID     int64
+	Text         string
+	Files        []InboundFile
+	Timestamp    time.Time
+	MediaGroupID string // albums: parts share one media_group_id
 }
 
 // ParseTelegramUpdates extracts message updates from a getUpdates body and
@@ -204,6 +284,7 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 				} `json:"chat"`
 				Text     string `json:"text"`
 				Caption  string `json:"caption"`
+				MediaGroup string `json:"media_group_id"`
 				Document *struct {
 					FileID   string `json:"file_id"`
 					FileName string `json:"file_name"`
@@ -232,11 +313,12 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 			continue
 		}
 		entry := TelegramUpdate{
-			UpdateID:  result.UpdateID,
-			ChatID:    message.Chat.ID,
-			SenderID:  message.From.ID,
-			Text:      strings.TrimSpace(message.Text),
-			Timestamp: time.Unix(message.Date, 0).UTC(),
+			UpdateID:     result.UpdateID,
+			ChatID:       message.Chat.ID,
+			SenderID:     message.From.ID,
+			Text:         strings.TrimSpace(message.Text),
+			Timestamp:    time.Unix(message.Date, 0).UTC(),
+			MediaGroupID: strings.TrimSpace(message.MediaGroup),
 		}
 		if entry.Text == "" {
 			entry.Text = strings.TrimSpace(message.Caption)
@@ -278,15 +360,125 @@ func parseTelegramOffset(cursor string) int64 {
 func telegramNormalized(updates []TelegramUpdate) []InboundMessage {
 	normalized := make([]InboundMessage, 0, len(updates))
 	for _, update := range updates {
-		normalized = append(normalized, InboundMessage{
-			ID:        strconv.FormatInt(update.UpdateID, 10),
-			Channel:   "telegram",
-			ChatID:    strconv.FormatInt(update.ChatID, 10),
-			Sender:    strconv.FormatInt(update.SenderID, 10),
-			Text:      update.Text,
-			Files:     update.Files,
-			Timestamp: update.Timestamp,
-		})
+		normalized = append(normalized, telegramNormalizedOne(update))
 	}
 	return normalized
+}
+
+func telegramNormalizedOne(update TelegramUpdate) InboundMessage {
+	return InboundMessage{
+		ID:        strconv.FormatInt(update.UpdateID, 10),
+		Channel:   "telegram",
+		ChatID:    strconv.FormatInt(update.ChatID, 10),
+		Sender:    strconv.FormatInt(update.SenderID, 10),
+		Text:      update.Text,
+		Files:     update.Files,
+		Timestamp: update.Timestamp,
+	}
+}
+
+// telegramAlbumBuffer parks media-group parts between polls: an album's parts
+// arrive as separate updates (sometimes split across getUpdates responses),
+// and the pipeline must see one message, not one intake run per photo.
+type telegramAlbumBuffer struct {
+	mu     sync.Mutex
+	groups map[string]*telegramAlbum
+}
+
+type telegramAlbum struct {
+	parts []TelegramUpdate // ascending by UpdateID
+	first time.Time        // when the first part was buffered
+}
+
+func newTelegramAlbumBuffer() *telegramAlbumBuffer {
+	return &telegramAlbumBuffer{groups: map[string]*telegramAlbum{}}
+}
+
+func (b *telegramAlbumBuffer) key(update TelegramUpdate) string {
+	return strconv.FormatInt(update.ChatID, 10) + ":" + update.MediaGroupID
+}
+
+func (b *telegramAlbumBuffer) add(update TelegramUpdate, now time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := b.key(update)
+	album := b.groups[key]
+	if album == nil {
+		album = &telegramAlbum{first: now}
+		b.groups[key] = album
+	}
+	album.parts = append(album.parts, update)
+	sort.SliceStable(album.parts, func(i, j int) bool { return album.parts[i].UpdateID < album.parts[j].UpdateID })
+}
+
+func (b *telegramAlbumBuffer) contains(updateID int64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, album := range b.groups {
+		for _, part := range album.parts {
+			if part.UpdateID == updateID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (b *telegramAlbumBuffer) pending() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.groups) > 0
+}
+
+// replayID returns the smallest update_id still buffered: a cursor at or
+// below it makes Telegram redeliver every buffered part after a crash, so the
+// buffer never becomes a black hole (at-least-once).
+func (b *telegramAlbumBuffer) replayID() (int64, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	replay, found := int64(0), false
+	for _, album := range b.groups {
+		for _, part := range album.parts {
+			if !found || part.UpdateID < replay {
+				replay, found = part.UpdateID, true
+			}
+		}
+	}
+	return replay, found
+}
+
+// flushDue releases groups whose first part outlived the flush delay. Each
+// group becomes one message: id and timestamp of the first part, the caption
+// of whichever part carries one, every attachment in update order. Returns
+// the messages and the highest released update id (for the cursor).
+func (b *telegramAlbumBuffer) flushDue(now time.Time) ([]InboundMessage, int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var messages []InboundMessage
+	maxID := int64(0)
+	for key, album := range b.groups {
+		if now.Sub(album.first) < telegramAlbumFlushDelay {
+			continue
+		}
+		delete(b.groups, key)
+		first := album.parts[0]
+		entry := InboundMessage{
+			ID:        strconv.FormatInt(first.UpdateID, 10),
+			Channel:   "telegram",
+			ChatID:    strconv.FormatInt(first.ChatID, 10),
+			Sender:    strconv.FormatInt(first.SenderID, 10),
+			Timestamp: first.Timestamp,
+		}
+		for _, part := range album.parts {
+			if entry.Text == "" {
+				entry.Text = part.Text
+			}
+			entry.Files = append(entry.Files, part.Files...)
+			if part.UpdateID > maxID {
+				maxID = part.UpdateID
+			}
+		}
+		messages = append(messages, entry)
+	}
+	return messages, maxID
 }

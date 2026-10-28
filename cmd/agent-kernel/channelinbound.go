@@ -334,7 +334,7 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 	}
 	response := truncateForLog(reply.Message.Text, 4000)
 	if len(reply.Message.Files) > 0 {
-		saved, err := l.saveInboundFiles(ctx, reply)
+		saved, err := l.saveProjectFiles(ctx, reply.Ask.ProjectID, reply.Message.Files)
 		if err != nil {
 			l.log.Warn("channel inbound file", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "error", err)
 			response = "[File could not be received: " + err.Error() + "] " + response
@@ -476,6 +476,14 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	// The message is accepted into processing — the sender gets the read mark
 	// now, long before the answer lands.
 	l.markRead(ctx, channelSettings, message.ChatID, message.ID)
+	// A follow-up written while the sender's routed run is still live is a user
+	// note, not a new task: the workflow drains it at the nearest turn boundary
+	// and steers the working agent. Files ride along into the project's inbox.
+	// Only a message with no live run of one's own goes to classification —
+	// and only after that do its attachments need the intake staging area.
+	if l.deliverUserNote(ctx, channelSettings, message, senderUserID) {
+		return
+	}
 	// Attachments of an initiative message are saved before the intake run
 	// starts (docs/inbound-messages.md §12 phase 3): the staging paths land on
 	// the row, start_task copies them into the target project's inbox. A fetch
@@ -491,13 +499,6 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	}
 	if l.intake == nil || !l.intakeEnabled {
 		l.log.Info("intake recorded without processing (pipeline disabled)", "channel", l.driver.Type(), "message", message.ID)
-		return
-	}
-	// A follow-up written while the sender's routed run is still live is a
-	// user note, not a new task: the workflow drains it at the nearest turn
-	// boundary and steers the working agent (the same mechanism the UI uses).
-	// Only a message with no live run of one's own goes to classification.
-	if l.deliverUserNote(ctx, channelSettings, message, senderUserID) {
 		return
 	}
 	runID, err := l.intake(ctx, message, senderUserID)
@@ -809,8 +810,12 @@ func liveRunStatus(status string) bool {
 // live per the Temporal resolver, and the row keeps its routed status: the
 // watcher already follows it and will deliver the final answer.
 func (l *channelInboundLoop) deliverUserNote(ctx context.Context, channelSettings map[string]string, message agent.InboundMessage, senderUserID string) bool {
-	if l.note == nil || l.resolveRun == nil || strings.TrimSpace(message.Text) == "" {
+	if l.note == nil || l.resolveRun == nil {
 		return false
+	}
+	text := strings.TrimSpace(message.Text)
+	if text == "" && len(message.Files) == 0 {
+		return false // nothing to say and nothing to hand over
 	}
 	routed, err := l.store.ListRoutedInboundMessages(ctx, senderUserID, 20)
 	if err != nil {
@@ -825,8 +830,21 @@ func (l *channelInboundLoop) deliverUserNote(ctx context.Context, channelSetting
 		if err != nil || !liveRunStatus(run.Status) {
 			continue // finished or gone — the next routed row may still be live
 		}
+		noteText := text
+		if len(message.Files) > 0 {
+			// Attachments ride into the live run's project workspace: the
+			// agent reads them by path at the next turn boundary, same as
+			// file answers to a direct question.
+			saved, err := l.saveProjectFiles(ctx, row.ProjectID, message.Files)
+			if err != nil {
+				l.log.Warn("intake follow-up files", "channel", l.driver.Type(), "run", row.TargetRunID, "error", err)
+				noteText = strings.TrimSpace("[File could not be received: "+err.Error()+"] "+noteText)
+			} else {
+				noteText = strings.TrimSpace("[Attached file: "+saved+"] "+noteText)
+			}
+		}
 		workflowID := agent.WorkflowID(l.sourceID, row.ProjectID, row.TargetRunID)
-		note := agent.UserNote{Text: message.Text, ActorID: senderUserID}
+		note := agent.UserNote{Text: noteText, ActorID: senderUserID}
 		if nErr := l.note(ctx, workflowID, note); nErr != nil {
 			// A terminal run (finished between the lookup and the signal) falls
 			// back to classification; anything else is a real delivery failure.
@@ -870,13 +888,18 @@ func truncateForLog(s string, limit int) string {
 // container-side paths the run will see (/workspace/inbox/…). Multiple
 // attachments land as comma-joined paths; names are transliterated like chat
 // uploads, collisions get a timestamp prefix.
-func (l *channelInboundLoop) saveInboundFiles(ctx context.Context, reply agent.ChannelReply) (string, error) {
+// saveProjectFiles downloads attachments through the driver into the
+// project's persistent workspace inbox and returns the container-side paths
+// the run will see (/workspace/inbox/…). Multiple attachments land as
+// comma-joined paths; names are transliterated like chat uploads, collisions
+// get a timestamp prefix.
+func (l *channelInboundLoop) saveProjectFiles(ctx context.Context, projectID string, files []agent.InboundFile) (string, error) {
 	root, err := sandboxRoot()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(root, "projects", reply.Ask.ProjectID, "inbox")
-	saved, err := l.saveChannelFiles(ctx, reply.Message.Files, dir)
+	dir := filepath.Join(root, "projects", projectID, "inbox")
+	saved, err := l.saveChannelFiles(ctx, files, dir)
 	if err != nil {
 		return "", err
 	}

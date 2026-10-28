@@ -1387,7 +1387,67 @@ func TestChannelInboundIntakeSavesInitiativeAttachments(t *testing.T) {
 	if err != nil || string(payload) != "XLSXDATA" {
 		t.Fatalf("staged file wrong: %v %q", err, payload)
 	}
-	if !strings.Contains(latest.Attachments[0], filepath.Join("inbound")) {
-		t.Fatalf("staging path must live under the inbound dir: %q", latest.Attachments[0])
+		if !strings.Contains(latest.Attachments[0], filepath.Join("inbound")) {
+			t.Fatalf("staging path must live under the inbound dir: %q", latest.Attachments[0])
+		}
 	}
-}
+
+	// TestChannelInboundFollowUpDeliversFiles: a file-bearing message sent while
+	// the sender's routed run is still live lands the file in that run's project
+	// inbox and becomes a user note — not a competing file-only intake run.
+	func TestChannelInboundFollowUpDeliversFiles(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("KERNEL_SANDBOX_ROOT", root)
+		server := matrixFileHomeServer(t, "ZIPDATA")
+		store := &fakeInboundStore{
+			users: []workspace.User{{
+				ID: "u1", Name: "Human",
+				Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+			}},
+			inbound: []workspace.InboundMessage{{
+				ID: workspace.InboundMessageID("matrix", "$old"), Channel: "matrix", MessageID: "$old",
+				SenderUserID: "u1", Room: "!r1:hs", Status: workspace.InboundStatusRouted,
+				ProjectID: "omni", TargetRunID: "target-9",
+			}},
+		}
+		intake := &recordedIntake{runID: "intake-nope"}
+		notes := make(chan agent.UserNote, 4)
+		var notedWorkflow string
+		loop := newInboundLoop(t, server, store, &recordedSignal{})
+		loop.intake = intake.record
+		loop.intakeEnabled = true
+		loop.resolveRun = func(_ context.Context, project, runID string) (workspace.Run, error) {
+			return workspace.Run{ID: runID, Status: "running"}, nil
+		}
+		loop.note = func(_ context.Context, workflowID string, note agent.UserNote) error {
+			notedWorkflow = workflowID
+			notes <- note
+			return nil
+		}
+
+		if _, err := loop.cycle(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case note := <-notes:
+			want := "[Attached file: /workspace/inbox/navyki-qa.zip] вот экспорт"
+			if note.Text != want || note.ActorID != "u1" {
+				t.Fatalf("unexpected note: %+v, want %q", note, want)
+			}
+		default:
+			t.Fatal("file note not signaled")
+		}
+		if notedWorkflow != agent.WorkflowID("src", "omni", "target-9") {
+			t.Fatalf("note routed to the wrong workflow: %q", notedWorkflow)
+		}
+		if intake.count() != 0 {
+			t.Fatalf("a file follow-up must not spawn a classification run, got %d", intake.count())
+		}
+		saved := filepath.Join(root, "projects", "omni", "inbox", "navyki-qa.zip")
+		if _, err := os.Stat(saved); err != nil {
+			t.Fatalf("attachment not saved to the live run's inbox: %v", err)
+		}
+		if staging, err := os.ReadDir(filepath.Join(root, "inbound")); err == nil && len(staging) > 0 {
+			t.Fatalf("a noted message must skip the intake staging, got %d entries", len(staging))
+		}
+	}
