@@ -217,6 +217,9 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const [progress, setProgress] = useState<{ count: number; more: boolean } | null>(null)
   const [error, setError] = useState('')
   const [users, setUsers] = useState<User[]>([])
+  // Names beat ids everywhere a human reads the page: details panes resolve
+  // actor ids through the directory, the raw id stays the fallback.
+  const userNameOf = useCallback((id: string | undefined) => (id ? (users.find((u) => u.id === id)?.name ?? id) : ''), [users])
   const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','agent','day','theme','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
   const parseLens = (s: string | null): Lens => { if (!s) return DEFAULT_LENS; try { return { ...DEFAULT_LENS, ...JSON.parse(s) } } catch { return DEFAULT_LENS } }
   const [lens, setLens] = useState<Lens>(() => parseLens(params.get('lens')))
@@ -507,6 +510,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       return top
     })()
     const userById = new Map(users.map((u) => [u.id, u]))
+    const userName = (id: string | undefined) => (id ? (userById.get(id)?.name ?? id) : '')
     const unitName = new Map(org.units.map((u) => [u.id, u.name]))
     const groupOf = (root: RunInfo): { key: string; label: string; order: string } => {
       if (groupBy === 'none') return { key: 'all', label: t('timeline.group.all_runs'), order: '0' }
@@ -523,6 +527,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       const actor = root.actor
       const user = actor ? userById.get(actor) : undefined
       if (user?.org_unit_id) { const name = unitName.get(user.org_unit_id) ?? user.org_unit_id; return { key: user.org_unit_id, label: name, order: name } }
+      if (user) return { key: `actor:${actor}`, label: user.name, order: user.name }
       if (actor && !user) return { key: `actor:${actor}`, label: actor, order: `zz-${actor}` }
       return { key: 'unassigned', label: t('timeline.group.unassigned'), order: 'zzz-unassigned' }
     }
@@ -1239,7 +1244,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       </section>
       {selectedRow && <aside className="obs-panel experience-detail">
         <button className="detail-close" title={t('timeline.close_details')} onClick={() => setSelected('')} aria-label="Close details">×</button>
-        <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} project={project} />
+        <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} project={project} userNameOf={userNameOf} />
       </aside>}
     </main>
   </div>
@@ -1251,7 +1256,7 @@ function Header({ project, load, loading }: { project: string; load: (project: s
   return null
 }
 
-function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; onFocus: (at: string, eventId: string, label: string) => void; related: KnowledgeRow[]; project: string }) {
+function RowDetails({ row, lineage, forensic, onFocus, related, project, userNameOf }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; onFocus: (at: string, eventId: string, label: string) => void; related: KnowledgeRow[]; project: string; userNameOf: (id: string | undefined) => string }) {
   const t = useT()
   const counts = LIFECYCLE_KINDS.map((kind) => {
     const count = row.points.filter((point) => point.kind === kind).length
@@ -1282,7 +1287,7 @@ function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row
     <section>
       <h4>{t('timeline.forensics')}</h4>
       {forensic.formed && <div className="forensic-block">
-        <p className="forensic-head clickable" title={t('timeline.locate')} onClick={() => onFocus(forensic.formed!.at, row.points.find((point) => point.kind === 'appeared')?.eventId ?? '', `${t('timeline.formed')} · ${shortKnowledge(row.knowledgeId)}`)}>{t('timeline.formed')} <time>{clock(forensic.formed.at)}</time>{forensic.formed.run ? ` · ${shortRun(forensic.formed.run)}` : ''}{forensic.formed.role ? ` · ${forensic.formed.role}` : ''}{forensic.formed.actor ? ` · by ${forensic.formed.actor}` : ''}</p>
+        <p className="forensic-head clickable" title={t('timeline.locate')} onClick={() => onFocus(forensic.formed!.at, row.points.find((point) => point.kind === 'appeared')?.eventId ?? '', `${t('timeline.formed')} · ${shortKnowledge(row.knowledgeId)}`)}>{t('timeline.formed')} <time>{clock(forensic.formed.at)}</time>{forensic.formed.run ? ` · ${shortRun(forensic.formed.run)}` : ''}{forensic.formed.role ? ` · ${forensic.formed.role}` : ''}{forensic.formed.actor ? ` · by ${userNameOf(forensic.formed.actor)}` : ''}</p>
         {forensic.formed.evidence.length > 0 && <ul className="forensic-evidence">
           {forensic.formed.evidence.map((item, index) => <li key={index} className="clickable" title={t('timeline.locate')} onClick={() => onFocus(item.at, '', `evidence · ${item.ref}`)}>{item.ref}{item.run ? <small> · {shortRun(item.run)}</small> : null}</li>)}
         </ul>}
@@ -1305,7 +1310,7 @@ function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row
         </ul>
       </div>}
       {forensic.deaths.map((death) => <div className="forensic-block forensic-death" key={death.eventId}>
-        <p className="forensic-head clickable" title={t('timeline.locate')} onClick={() => onFocus(death.at, death.eventId, `${death.kind} · ${shortKnowledge(row.knowledgeId)}`)}>{death.kind} <time>{clock(death.at)}</time>{death.actor ? ` · by ${death.actor}` : ''}{death.run ? ` · ${shortRun(death.run)}` : ` · ${t('timeline.manual')}`}</p>
+        <p className="forensic-head clickable" title={t('timeline.locate')} onClick={() => onFocus(death.at, death.eventId, `${death.kind} · ${shortKnowledge(row.knowledgeId)}`)}>{death.kind} <time>{clock(death.at)}</time>{death.actor ? ` · by ${userNameOf(death.actor)}` : ''}{death.run ? ` · ${shortRun(death.run)}` : ` · ${t('timeline.manual')}`}</p>
         {death.reason && <p className="forensic-reason" title={death.reason}>{death.reason}</p>}
         {death.supersededBy.length > 0 && <p className="forensic-successor">{t('timeline.superseded_by')} → {death.supersededBy.map(shortKnowledge).join(', ')}</p>}
       </div>)}

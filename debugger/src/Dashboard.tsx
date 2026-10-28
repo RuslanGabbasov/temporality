@@ -136,6 +136,10 @@ export default function Dashboard({ project, setProject }: Props) {
   // Run id → title from run.started events: the sandbox digest shows the human
   // name of the run, not the opaque id. Best-effort — failures leave ids.
   const [runTitles, setRunTitles] = useState<Map<string, string>>(new Map())
+  // The same policy for actor and agent labels: users and agents load once per
+  // refresh so the digest shows names; ids stay the fallback.
+  const [userNames, setUserNames] = useState<Map<string, string>>(new Map())
+  const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map())
   const [quality, setQuality] = useState<QualitySummary | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -155,7 +159,7 @@ export default function Dashboard({ project, setProject }: Props) {
     setError('')
     const since = new Date(Date.now() - window_.ms).toISOString()
     try {
-      const [stats, projects, ops, storageSnap, syshealthSnap, startedPage, ready] = await Promise.all([
+      const [stats, projects, ops, storageSnap, syshealthSnap, startedPage, ready, usersPage, agentsPage] = await Promise.all([
         observationApi.healthStats(undefined, since),
         projectsOverview(window_.go),
         operations().catch(() => null),
@@ -163,6 +167,8 @@ export default function Dashboard({ project, setProject }: Props) {
         systemHealth().catch(() => null),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
         readiness().catch(() => null),
+        workspaceApi.listUsers().catch(() => ({ users: [] })),
+        workspaceApi.listAllAgents().catch(() => ({ agents: [] })),
       ])
       setHealth(stats)
       setOverview(projects)
@@ -177,6 +183,8 @@ export default function Dashboard({ project, setProject }: Props) {
         if (run && typeof title === 'string' && title.trim()) titles.set(run, title.trim())
       }
       setRunTitles(titles)
+      setUserNames(new Map((usersPage.users ?? []).map((u) => [u.id, u.name])))
+      setAgentNames(new Map((agentsPage.agents ?? []).map((a) => [a.id, a.name])))
       setUpdatedAt(new Date())
     } catch (failure) {
       setError(errorMessage(failure))
@@ -525,6 +533,8 @@ export default function Dashboard({ project, setProject }: Props) {
           {syshealth && syshealth.docker.available && (
             <SandboxBubbles
               containers={syshealth.sandboxes ?? []}
+              userNames={userNames}
+              agentNames={agentNames}
               runTitles={runTitles}
               onOpenRun={(run, sandboxProject) => navigate(`/agents?project=${encodeURIComponent(sandboxProject)}&run=${encodeURIComponent(run)}`)}
             />
@@ -915,9 +925,11 @@ function QualityTab({ quality, busy, t, navigate }: {
  *  size and color encode the integral resource load so the run hogging the
  *  host is visible at a glance. Hovering a ball swaps in a digest strip with
  *  the run identity; clicking it opens the run. */
-function SandboxBubbles({ containers, runTitles, onOpenRun }: {
+function SandboxBubbles({ containers, runTitles, userNames, agentNames, onOpenRun }: {
   containers: SandboxContainerInfo[]
   runTitles: Map<string, string>
+  userNames: Map<string, string>
+  agentNames: Map<string, string>
   onOpenRun: (run: string, project: string) => void
 }) {
   const { t } = useI18n()
@@ -928,6 +940,9 @@ function SandboxBubbles({ containers, runTitles, onOpenRun }: {
   const activeRun = active?.labels?.['temporality.run'] ?? ''
   const activeProject = active?.labels?.['temporality.project'] ?? ''
   const activeTitle = activeRun ? (runTitles.get(activeRun) ?? activeRun) : activeRun
+  // Labels carry ids; the digest shows the human name when one is known.
+  const agentName = (id: string | undefined) => (id ? (agentNames.get(id) ?? id) : '')
+  const actorName = (id: string | undefined) => (id ? (userNames.get(id) ?? id) : '')
 
   const digestRow = (label: string, value: ReactNode) => (
     <span style={{ display: 'inline-flex', gap: '0.3rem', whiteSpace: 'nowrap' }}>
@@ -950,8 +965,8 @@ function SandboxBubbles({ containers, runTitles, onOpenRun }: {
             const project = container.labels?.['temporality.project'] ?? ''
             const agent = container.labels?.['temporality.agent'] ?? ''
             const digest = [
-              `${t('dashboard.sandboxes_agent') ?? 'Agent'}: ${agent || '—'}`,
-              `${t('dashboard.sandboxes_actor') ?? 'Initiator'}: ${container.labels?.['temporality.actor'] || '—'}`,
+              `${t('dashboard.sandboxes_agent') ?? 'Agent'}: ${agentName(agent) || '—'}`,
+              `${t('dashboard.sandboxes_actor') ?? 'Initiator'}: ${actorName(container.labels?.['temporality.actor']) || '—'}`,
               `${t('dashboard.sandboxes_run') ?? 'Run'}: ${runTitles.get(run) || run || container.name}`,
               `CPU ${container.cpu_percent.toFixed(0)}% · ${t('dashboard.server_memory') ?? 'Memory'} ${fmtBytes(container.mem_used_bytes)}/${fmtBytes(container.mem_limit_bytes)} · ${t('dashboard.sandboxes_project') ?? 'Project'}: ${project || '—'}`,
             ].join('\n')
@@ -972,14 +987,14 @@ function SandboxBubbles({ containers, runTitles, onOpenRun }: {
                 }}
               >
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 0.3rem' }}>
-                  {size >= 44 && agent ? agent : ''}
+                  {size >= 44 ? agentName(agent) : ''}
                 </span>
               </button>
             )
           })}
           {rest.length > 0 && (
             <span
-              title={`${rest.length} · ${rest.map((c) => c.labels?.['temporality.agent'] || sandboxShortName(c.name)).join(', ')}`}
+              title={`${rest.length} · ${rest.map((c) => agentName(c.labels?.['temporality.agent']) || sandboxShortName(c.name)).join(', ')}`}
               style={{ border: '1px dashed var(--tm-border)', borderRadius: '999px', padding: '0.3rem 0.7rem', color: 'var(--tm-text-3)', fontSize: '0.72rem' }}
             >
               {(t('dashboard.sandboxes_more', { n: String(rest.length) }) ?? `+${rest.length} more`)}
@@ -992,8 +1007,8 @@ function SandboxBubbles({ containers, runTitles, onOpenRun }: {
         <div style={{ borderTop: '1px solid var(--tm-border)', marginTop: '0.7rem', paddingTop: '0.5rem', fontSize: '0.72rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', minHeight: '1.6rem' }}>
           {active ? (
             <>
-              {digestRow(t('dashboard.sandboxes_agent') ?? 'Agent', active.labels?.['temporality.agent'])}
-              {digestRow(t('dashboard.sandboxes_actor') ?? 'Initiator', active.labels?.['temporality.actor'])}
+              {digestRow(t('dashboard.sandboxes_agent') ?? 'Agent', agentName(active.labels?.['temporality.agent']))}
+              {digestRow(t('dashboard.sandboxes_actor') ?? 'Initiator', actorName(active.labels?.['temporality.actor']))}
               {digestRow(t('dashboard.sandboxes_run') ?? 'Run', activeTitle)}
               {digestRow(t('dashboard.sandboxes_project') ?? 'Project', activeProject)}
               {digestRow('CPU', `${active.cpu_percent.toFixed(0)}% · ${fmtBytes(active.mem_used_bytes)}/${fmtBytes(active.mem_limit_bytes)} · ↓${fmtBytes(active.net_in_bytes)} ↑${fmtBytes(active.net_out_bytes)}`)}
