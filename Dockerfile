@@ -53,6 +53,8 @@ COPY --from=build /out/test-mcp /usr/local/bin/test-mcp
 # The kernel applies the kernel event outbox migration (000019) from the
 # filesystem before serving traffic.
 COPY migrations ./migrations
+# Apache-2.0 §4(a): redistributed images must carry the license text.
+COPY LICENSE /usr/share/doc/temporality/LICENSE
 # The optional run_command sandbox shells out to the Docker CLI against the
 # host daemon socket, so the CLI must exist inside the image. The buildx
 # plugin rides along: without it `docker build` falls back to the deprecated

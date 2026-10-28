@@ -567,3 +567,7 @@ Dev-сервер debugger (`npm --prefix debugger run dev`) проксирует
 - Веб-исследования: [`docs/web-research.md`](docs/web-research.md)
 - Область активности: [`docs/activity-scoping.md`](docs/activity-scoping.md)
 - Роадмап: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+## Лицензия
+
+Проект распространяется под [Apache License 2.0](LICENSE).

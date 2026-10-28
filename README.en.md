@@ -509,3 +509,7 @@ The debugger dev server (`npm --prefix debugger run dev`) proxies `/api` to
 - Web research: [`docs/web-research.md`](docs/web-research.md)
 - Activity scoping: [`docs/activity-scoping.md`](docs/activity-scoping.md)
 - Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
