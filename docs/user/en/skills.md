@@ -14,7 +14,7 @@ page (`/skills`); details — `docs/living-skills.md`.
 
 ## The skill contract
 
-![The skill editor](../assets/skill-edit.png)
+![The skill editor](../assets/skill-edit.webp)
 
 The manifest (`SKILL.md` + metadata) describes:
 

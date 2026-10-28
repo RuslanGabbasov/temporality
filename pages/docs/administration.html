@@ -46,7 +46,7 @@
 <div class="docs-eyebrow">Администрирование</div>
 <h1>Администрирование</h1>
 <p class="docs-lead">Пользователи и RBAC, оргструктура, провайдеры, секреты, песочницы и настройки качества.</p>
-<h2 id="резервное-копирование"><a class="anchor" href="#резервное-копирование" aria-label="Section link">#</a>Резервное копирование</h2><p><img src="../assets/storage.png" alt="Хранилище"></p>
+<h2 id="резервное-копирование"><a class="anchor" href="#резервное-копирование" aria-label="Section link">#</a>Резервное копирование</h2><p><img src="../assets/storage.webp" alt="Хранилище"></p>
 <p>Три хранилища — три истории:</p>
 <table>
 <thead>
@@ -99,7 +99,7 @@ tar песочниц в <code>./backups</code>, хранит 14 последни
 на стенде так делать не стоит, иначе «последний релиз» перестанет указывать
 на опубликованную версию. Основной compose-файл не умеет собирать вовсе:
 деплой — только pull образов.</p>
-<h2 id="пользователи-и-rbac"><a class="anchor" href="#пользователи-и-rbac" aria-label="Section link">#</a>Пользователи и RBAC</h2><p><img src="../assets/team.png" alt="Пользователи и роли"></p>
+<h2 id="пользователи-и-rbac"><a class="anchor" href="#пользователи-и-rbac" aria-label="Section link">#</a>Пользователи и RBAC</h2><p><img src="../assets/team.webp" alt="Пользователи и роли"></p>
 <p>Страница <strong>Пользователи</strong> (<code>/users</code>): создание, роли, bearer-токены, каналы
 уведомлений. Роли упорядочены: <code>reader &lt; writer &lt; operator &lt; admin</code>.</p>
 <table>
@@ -154,7 +154,7 @@ API-токен», токен — вторичный режим для серви
 <code>run_command</code> как переменная <code>SECRET_&lt;ИМЯ&gt;</code> — модель видит имя, но не
 значение. Чтения журналируются (<code>secret.issued</code> / <code>secret.denied</code>), журнал
 дополнительно вымарывает известные паттерны токенов из событий.</p>
-<h2 id="песочницы"><a class="anchor" href="#песочницы" aria-label="Section link">#</a>Песочницы</h2><p><img src="../assets/sandbox.png" alt="Песочницы"></p>
+<h2 id="песочницы"><a class="anchor" href="#песочницы" aria-label="Section link">#</a>Песочницы</h2><p><img src="../assets/sandbox.webp" alt="Песочницы"></p>
 <p>Профили песочниц (Настройки → Песочницы): образ (встроенные Go/Node/Python
 рецепты или свой digest-pinned), память, CPU, лимиты tmpfs, кэш-переменные.
 Профиль назначается агенту; команды агента выполняются в контейнере без

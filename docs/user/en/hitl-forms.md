@@ -36,7 +36,7 @@ The server validates the answer against the same schema **before** resuming the 
 
 **In the built-in chat** — a card right in the conversation: choices as buttons, free-form answer, and full field sets for forms. It appears the moment the question is asked and closes itself when answered.
 
-![Form in the chat](../assets/guide/chat-hitl-form.png)
+![Form in the chat](../assets/guide/chat-hitl-form.webp)
 
 **In Matrix** — an HTML card: a field table with formats and required marks; answer in the room as `field: value` lines, or tap «fill the form».
 
@@ -44,7 +44,7 @@ The server validates the answer against the same schema **before** resuming the 
 
 **The universal path** — from any messenger, the button opens a **hosted form**: a standalone minimalist page behind a one-time scoped link. No harness account needed — the link is the access, to exactly one question, for a limited time. Fill it in, submit, close the tab.
 
-![Hosted form](../assets/guide/hosted-form-desktop.png)
+![Hosted form](../assets/guide/hosted-form-desktop.webp)
 
 Links expire and die with the question: answered, cancelled or expired — the form stops accepting. One question, one submission.
 

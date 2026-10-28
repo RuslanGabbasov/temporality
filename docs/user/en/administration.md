@@ -65,7 +65,7 @@ pull-only.
 
 ## Users and RBAC
 
-![Users and roles](../assets/team.png)
+![Users and roles](../assets/team.webp)
 
 The **Users** page (`/users`): creation, roles, bearer tokens, notification
 channels. Roles are ordered: `reader < writer < operator < admin`.
@@ -120,7 +120,7 @@ known token patterns from events as a second line of defense.
 
 ## Sandboxes
 
-![Sandbox profiles](../assets/sandbox.png)
+![Sandbox profiles](../assets/sandbox.webp)
 
 Sandbox profiles (Settings → Sandboxes): the image (built-in Go/Node/Python
 recipes or your own digest-pinned one), memory, CPU, tmpfs limits, cache

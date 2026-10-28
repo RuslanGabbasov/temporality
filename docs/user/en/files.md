@@ -13,13 +13,13 @@ Agents produce files — reports, decks, archives, previews — and hand them ov
 
 After `send_file`, a **file chip** appears under the answer — «📎 preview.png». Clicking it downloads the file from the run workspace. The chip appears the moment the send starts, even if the model's reply forgets to mention the file.
 
-![File in the chat](../assets/guide/chat-file-chip.png)
+![File in the chat](../assets/guide/chat-file-chip.webp)
 
 If the agent works with a messenger, the file is delivered there as an attachment: a document in Matrix, a file with a caption in Telegram.
 
 ## In messengers
 
-![File in Telegram](../assets/guide/telegram-sendfile.png)
+![File in Telegram](../assets/guide/telegram-sendfile.webp)
 
 Delivery goes to every connected channel of the recipient that can carry attachments. If no channel is configured, the file stays in the run workspace — and the agent is instructed to mention the path in its reply, which the chat turns into a download link.
 

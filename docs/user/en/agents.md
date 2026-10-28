@@ -13,7 +13,7 @@ the **Agents** page (`/agent-config`).
 
 ## Creating an agent
 
-![The agent card](../assets/agent-edit.png)
+![The agent card](../assets/agent-edit.webp)
 
 Three ways:
 
@@ -38,7 +38,7 @@ prompt and the result verification.
 
 ## Agent evolution
 
-![Evolution: versions, gate, regressions](../assets/agent-evolution.png)
+![Evolution: versions, gate, regressions](../assets/agent-evolution.webp)
 
 The agent can propose changes to its own configuration (the `agent_propose`
 tool): the problem with evidence (run ids), the change and the expected
