@@ -11,14 +11,23 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // matrixPoller adapts the Matrix client-server API to the ChannelPoller
 // contract: /sync long-poll with a since cursor, whoami for the bot's own
 // identity, and authenticated media downloads for file replies. The loop
-// owns the cursor; this adapter is stateless.
-type matrixPoller struct{}
+// owns the exposed cursor; this adapter keeps its own sync position ahead of
+// it while a message group is buffering.
+type matrixPoller struct {
+	buffer *matrixBatchBuffer
+	cursor string // internal /sync position, ahead of the exposed one while buffering
+}
+
+func newMatrixPoller() *matrixPoller {
+	return &matrixPoller{buffer: newMatrixBatchBuffer()}
+}
 
 // matrixSyncTimeout is the server-side long-poll window: shorter than the
 // loop's cycle budget so one poll returns within it.
@@ -28,22 +37,85 @@ const matrixSyncTimeout = 25 * time.Second
 // send_file cap; uploads and downloads share generous-but-bounded limits).
 const inboundFileCap = 100 << 20
 
-func (matrixPoller) Poll(ctx context.Context, client *http.Client, settings map[string]string, cursor string) ([]InboundMessage, string, error) {
+// Timing of the collection window. Element uploads attachments to the media
+// repo first and sends one room event per file as its upload finishes — the
+// events of one "two files plus a caption" message land in different sync
+// batches seconds apart, and each alone would start a file-only intake run.
+// The buffer holds a (chat, sender) group until the sender goes quiet (or
+// the wait cap trips), then releases it through batch coalescing. Vars so
+// tests can shrink them.
+var (
+	matrixBatchQuiet    = 2500 * time.Millisecond
+	matrixBatchMaxWait  = 8 * time.Second
+	matrixBatchPollStep = 200 * time.Millisecond
+)
+
+// SetMatrixBatchTimingForTests overrides the collection window; the
+// cmd-level test suite calls it from its TestMain to keep cycle-based tests
+// fast.
+func SetMatrixBatchTimingForTests(quiet, maxWait, step time.Duration) {
+	matrixBatchQuiet, matrixBatchMaxWait, matrixBatchPollStep = quiet, maxWait, step
+}
+
+func (p *matrixPoller) Poll(ctx context.Context, client *http.Client, settings map[string]string, cursor string) ([]InboundMessage, string, error) {
 	homeserver, token, err := matrixCredentials(settings)
 	if err != nil {
 		return nil, "", err
 	}
-	messages, next, err := matrixSync(ctx, client, homeserver, token, cursor)
-	if err != nil && cursor != "" && matrixUnknownSince(err) {
-		// The homeserver forgot the cursor (restart, retention): fall back to
-		// a bounded initial sync instead of erroring forever.
-		messages, next, err = matrixSync(ctx, client, homeserver, token, "")
+	if p.buffer == nil {
+		p.buffer = newMatrixBatchBuffer()
 	}
-	if err != nil {
-		return nil, "", err
+		if p.cursor == "" {
+			p.cursor = cursor
+		}
+		exposed := cursor
+		for {
+			// While a group is buffering the long poll is replaced by short polls:
+			// the release must happen within the quiet window, not after the next
+			// 25-second quiet sync.
+			timeout := int(matrixSyncTimeout.Seconds())
+			if p.buffer.pending() {
+				timeout = 0
+			}
+			messages, next, err := matrixSync(ctx, client, homeserver, token, p.cursor, timeout)
+			if err != nil && p.cursor != "" && matrixUnknownSince(err) {
+				// The homeserver forgot the cursor (restart, retention): fall back
+				// to a bounded initial sync instead of erroring forever.
+				messages, next, err = matrixSync(ctx, client, homeserver, token, "", timeout)
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			p.cursor = next
+			now := time.Now()
+			for _, message := range messages {
+				if p.buffer.contains(message.EventID) {
+					continue // replayed while buffering — already parked
+				}
+				p.buffer.add(message, now)
+			}
+			released := p.buffer.flushDue(now)
+			if !p.buffer.pending() {
+				// Everything seen so far has been released — the position is safe
+				// to expose. While any group still buffers, the exposed cursor
+				// stays behind: a crash redelivers those events instead of
+				// silently dropping a half-collected message.
+				exposed = p.cursor
+			}
+			if len(released) > 0 {
+				return released, exposed, nil
+			}
+			if p.buffer.pending() {
+				select {
+				case <-ctx.Done():
+					return nil, "", ctx.Err()
+				case <-time.After(matrixBatchPollStep):
+				}
+				continue
+			}
+			return nil, exposed, nil
+		}
 	}
-	return matrixNormalized(messages), next, nil
-}
 
 func (matrixPoller) Self(ctx context.Context, client *http.Client, settings map[string]string) (string, error) {
 	homeserver, token, err := matrixCredentials(settings)
@@ -141,8 +213,8 @@ func matrixCredentials(settings map[string]string) (homeserver, token string, er
 // history it asks for; replayed events are still constrained by the
 // ask-created-at rule, so replies that arrived while the kernel was down are
 // picked up without older chatter matching.
-func matrixSync(ctx context.Context, client *http.Client, homeserver, token, cursor string) ([]MatrixInboundMessage, string, error) {
-	endpoint := homeserver + "/_matrix/client/v3/sync?timeout=" + strconv.Itoa(int(matrixSyncTimeout.Seconds()))
+func matrixSync(ctx context.Context, client *http.Client, homeserver, token, cursor string, timeoutSeconds int) ([]MatrixInboundMessage, string, error) {
+	endpoint := homeserver + "/_matrix/client/v3/sync?timeout=" + strconv.Itoa(timeoutSeconds)
 	if cursor == "" {
 		endpoint += "&filter=" + url.QueryEscape(`{"room":{"timeline":{"limit":50}}}`)
 	} else {
@@ -321,4 +393,75 @@ func parseMxcURL(raw string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid matrix content URI %q", raw)
 	}
 	return parsed.Host, strings.Trim(parsed.Path, "/"), nil
+}
+
+// matrixBatchBuffer parks (chat, sender) groups between syncs: Element's
+// multi-file message is several independent room events, often split across
+// sync batches by upload times, and each alone would start its own intake
+// run. Groups release through batch coalescing once the sender goes quiet.
+type matrixBatchBuffer struct {
+	mu     sync.Mutex
+	groups map[string]*matrixBatch
+}
+
+type matrixBatch struct {
+	messages []MatrixInboundMessage
+	first    time.Time
+	last     time.Time
+}
+
+func newMatrixBatchBuffer() *matrixBatchBuffer {
+	return &matrixBatchBuffer{groups: map[string]*matrixBatch{}}
+}
+
+func (b *matrixBatchBuffer) add(message MatrixInboundMessage, now time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := message.RoomID + "\x00" + message.Sender
+	batch := b.groups[key]
+	if batch == nil {
+		batch = &matrixBatch{first: now}
+		b.groups[key] = batch
+	}
+	batch.messages = append(batch.messages, message)
+	batch.last = now
+}
+
+func (b *matrixBatchBuffer) contains(eventID string) bool {
+	if eventID == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, batch := range b.groups {
+		for _, message := range batch.messages {
+			if message.EventID == eventID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (b *matrixBatchBuffer) pending() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.groups) > 0
+}
+
+// flushDue releases groups whose sender went quiet (or whose wait cap
+// tripped) and runs each through batch coalescing — plain texts stay separate
+// messages, bare attachments join their nearest anchor.
+func (b *matrixBatchBuffer) flushDue(now time.Time) []InboundMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var released []InboundMessage
+	for key, batch := range b.groups {
+		if now.Sub(batch.last) < matrixBatchQuiet && now.Sub(batch.first) < matrixBatchMaxWait {
+			continue
+		}
+		delete(b.groups, key)
+		released = append(released, matrixNormalized(batch.messages)...)
+	}
+	return released
 }

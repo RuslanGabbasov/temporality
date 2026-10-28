@@ -55,10 +55,14 @@ The audit trail "message → intake run → task run" is kept without message bo
 ### Files and albums
 
 A message with several attachments arrives as **one task with all the files**,
-not a scatter of separate runs: in Matrix, several files plus a caption are
-several protocol-level events — the pipeline coalesces them into one message;
-in Telegram, an album ("media group") is collected whole with a short wait for
-its tail. Files sent while a task is already running land in that run's
+not a scatter of separate runs. In Matrix, several files plus a caption are
+several independent protocol events: the client sends each one after its
+upload finishes, so they land in separate portions. The pipeline collects a
+sender's messages in a room over a short window (a couple of seconds of
+silence) and merges the attachments with the text; in Telegram, an album
+("media group") is collected whole the same way. The window adds a couple of
+seconds of latency to every inbound message — the price of one task instead
+of three. Files sent while a task is already running land in that run's
 workspace and reach the agent as a note — no extra run is created.
 
 ## What the user sees

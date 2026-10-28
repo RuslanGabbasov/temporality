@@ -396,7 +396,10 @@ func TestChannelInboundCycleRoutesReplyIntoRun(t *testing.T) {
 	if len(store.audits) != 1 || store.audits[0] != workspace.AuditHumanAnswered {
 		t.Fatalf("audit missing: %+v", store.audits)
 	}
-	if loop.cursor != "batch-1" || loop.selfID != "@bot:hs" {
+	// The cycle syncs twice: the initial sync's events buffer for the
+	// collection window, the short sync closes it, and the flush exposes the
+	// internal position (batch-2) — safe to persist once everything released.
+	if loop.cursor != "batch-2" || loop.selfID != "@bot:hs" {
 		t.Fatalf("loop state: cursor=%q self=%q", loop.cursor, loop.selfID)
 	}
 
@@ -404,7 +407,7 @@ func TestChannelInboundCycleRoutesReplyIntoRun(t *testing.T) {
 	if _, err := loop.cycle(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if since != "batch-1" {
+	if since != "batch-2" {
 		t.Fatalf("incremental sync must send the cursor, got since=%q", since)
 	}
 	if sig.count() != 1 {

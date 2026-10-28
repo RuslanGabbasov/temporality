@@ -75,7 +75,7 @@ func (matrixDriver) Type() string { return "matrix" }
 
 // Poller: matrix is two-way — /sync long-poll with reply routing back into
 // paused runs (driver_matrix_inbound.go).
-func (matrixDriver) Poller() ChannelPoller { return matrixPoller{} }
+func (matrixDriver) Poller() ChannelPoller { return newMatrixPoller() }
 
 // Webhook: matrix inbound is pull — /sync long-poll (driver_matrix_inbound.go).
 func (matrixDriver) Webhook() ChannelWebhook { return nil }

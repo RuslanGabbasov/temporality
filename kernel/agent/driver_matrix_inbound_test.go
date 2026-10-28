@@ -1,6 +1,11 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,5 +106,98 @@ func TestMatrixPollerCoalescingKeepsDistinctMessages(t *testing.T) {
 		if normalized[i].ID != want {
 			t.Fatalf("message %d = %s, want %s", i, normalized[i].ID, want)
 		}
+	}
+}
+
+// TestMatrixPollerBuffersAcrossSyncBatches: Element sends one room event per
+// attachment as its upload finishes — each lands in its own sync batch, and
+// every batch alone would start a file-only intake run. The poller holds the
+// (chat, sender) group for the quiet window and releases it as one message;
+// the exposed cursor stays behind until everything has been released.
+func TestMatrixPollerBuffersAcrossSyncBatches(t *testing.T) {
+	oldQuiet, oldMax, oldStep := matrixBatchQuiet, matrixBatchMaxWait, matrixBatchPollStep
+	matrixBatchQuiet, matrixBatchMaxWait, matrixBatchPollStep = 40*time.Millisecond, 500*time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { matrixBatchQuiet, matrixBatchMaxWait, matrixBatchPollStep = oldQuiet, oldMax, oldStep })
+
+	// Position-based sync: each since points at exactly one new event.
+	event := func(id, body, url, filename string) map[string]any {
+		content := map[string]any{"msgtype": "m.text", "body": body}
+		if url != "" {
+			content["msgtype"] = "m.file"
+			content["url"] = url
+			content["filename"] = filename
+		}
+		return map[string]any{
+			"type": "m.room.message", "event_id": id, "sender": "@u:hs",
+			"origin_server_ts": time.Now().UnixMilli(), "content": content,
+		}
+	}
+	pages := map[string]struct {
+		events []map[string]any
+		next   string
+	}{
+		"":        {events: []map[string]any{event("$1", "otchet.zip", "mxc://hs/m1", "otchet.zip")}, next: "batch-1"},
+		"batch-1": {events: []map[string]any{event("$2", "photo.png", "mxc://hs/m2", "photo.png")}, next: "batch-2"},
+		"batch-2": {events: []map[string]any{event("$3", "вот материалы по задаче", "", "")}, next: "batch-3"},
+		"batch-3": {next: "batch-3"},
+	}
+	var sincies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/account/whoami"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"user_id": "@bot:hs"})
+		case strings.HasSuffix(r.URL.Path, "/sync"):
+			since := r.URL.Query().Get("since")
+			sincies = append(sincies, since)
+			page := pages[since]
+			var events []map[string]any
+			if len(page.events) > 0 {
+				events = page.events
+			}
+			room := map[string]any{"timeline": map[string]any{"events": events}}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"next_batch": page.next,
+				"rooms": map[string]any{"join": map[string]any{"!r:hs": room}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	poller := newMatrixPoller()
+	settings := map[string]string{"homeserver": server.URL, "access_token": "tok"}
+	ctx := context.Background()
+
+	// One Poll rides out the whole collection window: the events trickle in
+	// batch by batch, then the quiet window closes and the group releases as
+	// one message carrying every attachment.
+	messages, next, err := poller.Poll(ctx, server.Client(), settings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("the group must release as one message, got %d: %+v", len(messages), messages)
+	}
+	merged := messages[0]
+	if merged.ID != "$3" || merged.Text != "вот материалы по задаче" {
+		t.Fatalf("unexpected merged message: %+v", merged)
+	}
+	if len(merged.Files) != 2 || merged.Files[0].Ref != "mxc://hs/m1" || merged.Files[1].Ref != "mxc://hs/m2" {
+		t.Fatalf("attachments not merged: %+v", merged.Files)
+	}
+	if next != "batch-3" {
+		t.Fatalf("cursor after the release = %q, want batch-3", next)
+	}
+
+	// The next sync continues from the released position.
+	if _, next, err = poller.Poll(ctx, server.Client(), settings, next); err != nil {
+		t.Fatal(err)
+	}
+	if next != "batch-3" {
+		t.Fatalf("idle cursor = %q, want batch-3", next)
+	}
+	if sincies[len(sincies)-1] != "batch-3" {
+		t.Fatalf("last sync since=%q, want batch-3", sincies[len(sincies)-1])
 	}
 }

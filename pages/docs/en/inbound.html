@@ -130,10 +130,14 @@ toggle and constrained by org policies, a per-sender limit
 (<code>KERNEL_INTAKE_MAX_PER_HOUR</code>) and body retention (<code>KERNEL_INTAKE_RETENTION_DAYS</code>).
 The audit trail &quot;message → intake run → task run&quot; is kept without message bodies.</p>
 <h3 id="files-and-albums"><a class="anchor" href="#files-and-albums" aria-label="Section link">#</a>Files and albums</h3><p>A message with several attachments arrives as <strong>one task with all the files</strong>,
-not a scatter of separate runs: in Matrix, several files plus a caption are
-several protocol-level events — the pipeline coalesces them into one message;
-in Telegram, an album (&quot;media group&quot;) is collected whole with a short wait for
-its tail. Files sent while a task is already running land in that run&#39;s
+not a scatter of separate runs. In Matrix, several files plus a caption are
+several independent protocol events: the client sends each one after its
+upload finishes, so they land in separate portions. The pipeline collects a
+sender&#39;s messages in a room over a short window (a couple of seconds of
+silence) and merges the attachments with the text; in Telegram, an album
+(&quot;media group&quot;) is collected whole the same way. The window adds a couple of
+seconds of latency to every inbound message — the price of one task instead
+of three. Files sent while a task is already running land in that run&#39;s
 workspace and reach the agent as a note — no extra run is created.</p>
 <h2 id="what-the-user-sees"><a class="anchor" href="#what-the-user-sees" aria-label="Section link">#</a>What the user sees</h2><p>The <strong>Inbound</strong> section lists messages with statuses (received → classified →
 clarifying → routed → <strong>answered in chat</strong>) and outcomes. The intake agent&#39;s
