@@ -42,7 +42,7 @@ func (f *fakeAgentRefStore) FindAgentsByName(_ context.Context, name, _ string) 
 }
 
 func refFixture() *fakeAgentRefStore {
-	lead := workspace.Agent{ID: "lead-ai-agent", Name: "Lead"}
+	lead := workspace.Agent{ID: "lead-ai-agent", Name: "Lead", Enabled: true}
 	return &fakeAgentRefStore{
 		byID: map[string]workspace.Agent{
 			"lead-ai-agent": lead,
@@ -62,6 +62,16 @@ func TestResolveAgentRefExactIDSkipsNameFallback(t *testing.T) {
 	require.Equal(t, "lead-ai-agent", a.ID)
 	require.Equal(t, 1, store.idCalls)
 	require.Zero(t, store.nameCalls)
+}
+
+// The uniform switch: a disabled agent is not launchable, not even by exact
+// id from inside another run (delegation goes through the same resolver).
+func TestResolveAgentRefRejectsDisabledAgent(t *testing.T) {
+	store := refFixture()
+	store.byID["lead-ai-agent"] = workspace.Agent{ID: "lead-ai-agent", Name: "Lead", Enabled: false}
+	_, err := resolveAgentRef(context.Background(), store, "lead-ai-agent", "proj")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "disabled")
 }
 
 // A model-supplied display name resolves when the match is unique — the actual

@@ -325,6 +325,20 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
   useEffect(() => { void load() }, [load])
 
+  // The uniform switch (the trigger pattern): flip first, roll back the tile
+  // on failure — the list never waits for a reload to reflect the toggle.
+  const toggleAgentEnabled = async (a: Agent) => {
+    const next = a.enabled === false
+    setAgents((prev) => prev.map((x) => (x.id === a.id ? { ...x, enabled: next } : x)))
+    try {
+      const updated = await workspaceApi.setAgentEnabled(a.id, next)
+      setAgents((prev) => prev.map((x) => (x.id === a.id ? updated : x)))
+    } catch (f) {
+      setAgents((prev) => prev.map((x) => (x.id === a.id ? { ...x, enabled: a.enabled } : x)))
+      setError(message(f))
+    }
+  }
+
   // Quality settings are independent of the agent list: a failure here must
   // not break the page, and the panel just shows its own error.
   const loadQualitySettings = useCallback(async () => {
@@ -1096,7 +1110,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   key={a.id}
                   onClick={() => setSelectedId(a.id)}
                   className={`workspace-tile ${selectedId === a.id ? 'selected' : ''}`}
-                  style={{ padding: '0.5rem 0.75rem', cursor: 'pointer' }}
+                  style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', opacity: a.enabled === false ? 0.5 : 1 }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <span style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{a.name}</span>
@@ -1113,6 +1127,17 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     {a.provider && <span>· {providers.find((p) => p.id === a.provider)?.name ?? a.provider}</span>}
                     {a.labels?.builtin === 'true' && <span>· {t('agents.builtin_tag') ?? 'builtin'}</span>}
                     {!!a.definition_version && <span>· v{a.definition_version}</span>}
+                  </div>
+                  {/* The uniform switch, bottom-right of the mini-card (the
+                      trigger pattern): a disabled agent starts no new runs. */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.3rem' }} title={t('agents.enabled_hint') ?? 'Disabled agents cannot start new runs'} onClick={(e) => e.stopPropagation()}>
+                    <Toggle
+                      id={`agent-enabled-${a.id}`}
+                      labelText=""
+                      toggled={a.enabled !== false}
+                      onToggle={() => void toggleAgentEnabled(a)}
+                      size="sm"
+                    />
                   </div>
                 </Tile>
               ))}

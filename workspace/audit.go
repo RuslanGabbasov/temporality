@@ -79,6 +79,15 @@ const (
 	AuditEvalGateOverridden      = "agent.evaluation.gate.overridden"
 	AuditEvalGateSkipped         = "agent.evaluation.gate.skipped"
 	AuditAgentRollback           = "agent.definition.rollback"
+	// Uniform enable/disable switches (the trigger pattern) — agents, skills
+	// and users each record the flip explicitly so the audit filter can show
+	// exactly when an entity left or returned to service.
+	AuditAgentDisabled = "agent.disabled"
+	AuditAgentEnabled  = "agent.enabled"
+	AuditSkillDisabled = "skill.disabled"
+	AuditSkillEnabled  = "skill.enabled"
+	AuditUserDisabled  = "user.disabled"
+	AuditUserEnabled   = "user.enabled"
 	AuditAuthLoginSucceeded      = "auth.login.succeeded"
 	AuditAuthLoginFailed         = "auth.login.failed"
 	AuditAuthLogout              = "auth.logout"

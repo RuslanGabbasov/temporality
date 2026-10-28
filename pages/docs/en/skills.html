@@ -48,7 +48,10 @@
 which tools it needs, how to verify the result. Unlike a prompt, a skill is
 versioned, has a contract and a suite of quality evaluations. The <strong>Skills</strong>
 page (<code>/skills</code>); details — <code>docs/living-skills.md</code>.</p>
-<h2 id="the-skill-contract"><a class="anchor" href="#the-skill-contract" aria-label="Section link">#</a>The skill contract</h2><p><img src="../assets/skill-edit.webp" alt="The skill editor"></p>
+<h2 id="the-skill-contract"><a class="anchor" href="#the-skill-contract" aria-label="Section link">#</a>The skill contract</h2><p>The skill switch is the toggle in the bottom-right corner of the mini-card:
+a disabled skill is never served to agents (like an unapplied draft), its
+content stays untouched. Every flip is recorded in the audit log.</p>
+<p><img src="../assets/skill-edit.webp" alt="The skill editor"></p>
 <p>The manifest (<code>SKILL.md</code> + metadata) describes:</p>
 <ul>
 <li><strong>the procedure</strong> — the steps the agent performs;</li>

@@ -11,6 +11,7 @@ import {
   Column,
   Stack,
   Heading,
+  Toggle,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Key, Chat, ChevronRight, ChevronDown } from '@carbon/icons-react'
@@ -83,6 +84,20 @@ export default function Users() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // The uniform switch (the trigger pattern): an inactive user cannot sign
+  // in. Optimistic flip, rollback on failure.
+  const toggleUserEnabled = async (u: User) => {
+    const next = !u.active
+    setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, active: next } : x)))
+    try {
+      const updated = await workspaceApi.setUserEnabled(u.id, next)
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)))
+    } catch (f) {
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, active: u.active } : x)))
+      setError(message(f))
+    }
+  }
 
   const startCreate = () => {
     setEditing(null)
@@ -255,7 +270,7 @@ export default function Users() {
           <Grid>
             {visibleUsers.map((u) => (
           <Column key={u.id} sm={4} md={4} lg={4}>
-            <Tile style={{ marginBottom: '0.75rem' }}>
+            <Tile style={{ marginBottom: '0.75rem', opacity: u.active ? 1 : 0.5 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 				<div style={{ minWidth: 0, flex: 1 }}>
                 					<div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
@@ -270,6 +285,18 @@ export default function Users() {
                     {u.has_password && <Tag type="outline" size="sm">{t('users.has_password') ?? 'password login'}</Tag>}
                   </div>
                   <ChannelBadges user={u} />
+                  {/* The uniform switch, bottom-right of the mini-card (the
+                      trigger pattern): maps onto workspace_user.active — an
+                      inactive user cannot sign in. */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.4rem' }} title={t('users.enabled_hint') ?? 'Inactive users cannot sign in'}>
+                    <Toggle
+                      id={`user-enabled-${u.id}`}
+                      labelText=""
+                      toggled={u.active}
+                      onToggle={() => void toggleUserEnabled(u)}
+                      size="sm"
+                    />
+                  </div>
                 </div>
                 {/* Actions live in a right-hand column: four icon buttons in a
                     horizontal row overflew the card on narrow grids. */}

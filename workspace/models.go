@@ -390,8 +390,12 @@ type Agent struct {
 	// Identity
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"` // purpose: what this agent is for
-	// Scope (optional — agents can be global or project-scoped)
-	ProjectID string `json:"project_id,omitempty"`
+	// Enabled is the uniform on/off switch (the trigger pattern): a disabled
+	// agent cannot start new runs — API, intake, triggers and delegation all
+	// refuse; runs already in flight finish. Toggled through the dedicated
+	// /enabled endpoint, never by a config PUT.
+	Enabled     bool   `json:"enabled"`
+	ProjectID   string `json:"project_id,omitempty"`
 	// Model configuration
 	Model        string   `json:"model"`
 	Provider     string   `json:"provider,omitempty"` // provider ID (see Provider)

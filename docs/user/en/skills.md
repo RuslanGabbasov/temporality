@@ -14,6 +14,10 @@ page (`/skills`); details — `docs/living-skills.md`.
 
 ## The skill contract
 
+The skill switch is the toggle in the bottom-right corner of the mini-card:
+a disabled skill is never served to agents (like an unapplied draft), its
+content stays untouched. Every flip is recorded in the audit log.
+
 ![The skill editor](../assets/skill-edit.webp)
 
 The manifest (`SKILL.md` + metadata) describes:

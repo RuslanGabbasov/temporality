@@ -38,6 +38,11 @@ type Skill struct {
 	Version     string          `json:"version"`
 	Markdown    string          `json:"markdown"`
 	Manifest    json.RawMessage `json:"manifest"`
+	// Enabled is the uniform on/off switch (the trigger pattern): a disabled
+	// skill is never served to agents — a run silently degrades without it,
+	// exactly like drafts. Toggled through the dedicated /enabled endpoint,
+	// never by a content PUT.
+	Enabled bool `json:"enabled"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string `json:"org_unit_id,omitempty"`
 	// VersionStatus is the lifecycle status of the current version row:
@@ -141,12 +146,12 @@ func (s *Store) GetSkill(ctx context.Context, id string) (Skill, error) {
 	var pending int
 	var pendingVersion *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, ''),
+		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, s.enabled, COALESCE(cv.status, ''),
 				 (SELECT count(*) FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version),
 				 (SELECT v.version FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version ORDER BY v.created_at DESC LIMIT 1)
 				 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
 				 WHERE s.id = $1`, id).
-		Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt, &sk.VersionStatus, &pending, &pendingVersion)
+		Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt, &sk.Enabled, &sk.VersionStatus, &pending, &pendingVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sk, ErrNotFound
 	}
@@ -162,7 +167,7 @@ func (s *Store) GetSkill(ctx context.Context, id string) (Skill, error) {
 
 func (s *Store) ListAllSkills(ctx context.Context) ([]Skill, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, ''),
+		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, s.enabled, COALESCE(cv.status, ''),
 				 (SELECT count(*) FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version),
 				 (SELECT v.version FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version ORDER BY v.created_at DESC LIMIT 1)
 				 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
@@ -182,7 +187,7 @@ func (s *Store) ListSkillsVisible(ctx context.Context, units []string) ([]Skill,
 		return s.ListAllSkills(ctx)
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, ''),
+		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, s.enabled, COALESCE(cv.status, ''),
 				 (SELECT count(*) FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version),
 				 (SELECT v.version FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version ORDER BY v.created_at DESC LIMIT 1)
 				 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
@@ -202,7 +207,7 @@ func scanSkills(rows pgx.Rows) ([]Skill, error) {
 		var orgUnitID *string
 		var pending int
 		var pendingVersion *string
-		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt, &sk.VersionStatus, &pending, &pendingVersion); err != nil {
+		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt, &sk.Enabled, &sk.VersionStatus, &pending, &pendingVersion); err != nil {
 			return nil, err
 		}
 		sk.OrgUnitID = derefPtr(orgUnitID)
@@ -237,6 +242,21 @@ func (s *Store) UpdateSkill(ctx context.Context, sk *Skill) error {
 			 ON CONFLICT (skill_id, version) DO UPDATE SET markdown = EXCLUDED.markdown, manifest = EXCLUDED.manifest, origin = EXCLUDED.origin, change_summary = EXCLUDED.change_summary, status = 'active'`,
 		sk.ID, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), sk.UpdatedAt, SkillOriginHumanEdit, "")
 	return err
+}
+
+// SetSkillEnabled flips the uniform on/off switch without touching content:
+// the content PUT never carries enabled, so editing a skill cannot disable it
+// by omission. Disabled skills stop being served to agents (like drafts).
+func (s *Store) SetSkillEnabled(ctx context.Context, id string, enabled bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_skill SET enabled=$2, updated_at=now() WHERE id=$1`, id, enabled)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteSkill(ctx context.Context, id string) error {

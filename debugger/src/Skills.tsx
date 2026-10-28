@@ -8,6 +8,7 @@ import {
   Tile,
   Stack,
   Heading,
+  Toggle,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
@@ -190,6 +191,22 @@ export default function Skills() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // The uniform switch (the trigger pattern): optimistic flip, rollback on
+  // failure — and the detail pane follows the same skill object.
+  const toggleSkillEnabled = async (skill: Skill) => {
+    const next = skill.enabled === false
+    const apply = (enabled: boolean) => setSkills((prev) => prev.map((x) => (x.id === skill.id ? { ...x, enabled } : x)))
+    apply(next)
+    try {
+      const updated = await workspaceApi.setSkillEnabled(skill.id, next)
+      setSkills((prev) => prev.map((x) => (x.id === skill.id ? updated : x)))
+      setSelected((current) => (current?.id === updated.id ? updated : current))
+    } catch (f) {
+      apply(skill.enabled === true)
+      setError(message(f))
+    }
+  }
   // Prefill handoff from the supervisor queue (docs/supervisor-model.md C4):
   // a skill-candidate verdict leaves its draft here, and the form opens
   // pre-filled — 'create' becomes a review-and-save instead of retyping.
@@ -611,6 +628,7 @@ export default function Skills() {
                 style={{
                   marginBottom: '0.5rem', cursor: 'pointer', padding: '0.75rem',
                   outline: selected?.id === skill.id ? '1px solid var(--tm-amber)' : 'none',
+                  opacity: skill.enabled === false ? 0.5 : 1,
                 }}
                 onClick={() => setSelected(skill)}
               >
@@ -637,6 +655,17 @@ export default function Skills() {
                   </span>
                 </div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{skill.id}</div>
+                {/* The uniform switch, bottom-right of the mini-card (the
+                    trigger pattern): a disabled skill is never served. */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.3rem' }} title={t('skills.enabled_hint') ?? 'Disabled skills are never served to agents'} onClick={(e) => e.stopPropagation()}>
+                  <Toggle
+                    id={`skill-enabled-${skill.id}`}
+                    labelText=""
+                    toggled={skill.enabled !== false}
+                    onToggle={() => void toggleSkillEnabled(skill)}
+                    size="sm"
+                  />
+                </div>
               </Tile>
             ))}
           </div>

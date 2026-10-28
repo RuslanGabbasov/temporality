@@ -1606,6 +1606,7 @@ func main() {
 		}
 		return principal.VisibleUnits
 	}
+	registerEntityEnabledRoutes(mux, gate, ws, visibleUnits)
 
 	// wizardModelClient serves every description→draft wizard (agent, skill,
 	// team): the env gateway when configured, else the installation's
@@ -7937,7 +7938,9 @@ func resolveAgentSkills(ctx context.Context, ws *workspace.Store, a *workspace.A
 		}
 		// Drafts await human apply (docs/knowledge-evolution.md Wave A): agents
 		// never bind unreviewed content, the current revision keeps serving.
-		if s.VersionStatus == workspace.SkillVersionDraft {
+		// Disabled skills degrade the same way — the uniform switch (the
+		// trigger pattern) pulls the skill out of every new run.
+		if s.VersionStatus == workspace.SkillVersionDraft || !s.Enabled {
 			continue
 		}
 		manifest, err := skills.ParseManifest(string(s.Manifest))
@@ -7980,7 +7983,14 @@ func resolveAgentMCP(a *workspace.Agent, input *agent.RunInput) {
 // bare-model run. A missing project default agent degrades to a bare run
 // instead of failing, while a missing explicit agent stays an error so
 // callers learn about bad references immediately.
-func resolveRunAgent(ctx context.Context, ws *workspace.Store, projectID, agentID string) (string, *workspace.Agent, error) {
+// runAgentLookup is the store surface resolveRunAgent needs; an interface so
+// the disabled-agent rule is testable without a database.
+type runAgentLookup interface {
+	GetAgent(ctx context.Context, id string) (workspace.Agent, error)
+	GetProject(ctx context.Context, id string) (workspace.Project, error)
+}
+
+func resolveRunAgent(ctx context.Context, ws runAgentLookup, projectID, agentID string) (string, *workspace.Agent, error) {
 	explicit := agentID != ""
 	if !explicit {
 		proj, err := ws.GetProject(ctx, projectID)
@@ -7998,6 +8008,13 @@ func resolveRunAgent(ctx context.Context, ws *workspace.Store, projectID, agentI
 			return "", nil, nil
 		}
 		return "", nil, err
+	}
+	// The uniform switch (the trigger pattern): a disabled agent starts no new
+	// runs — every start path (API, intake, webhook and schedule triggers)
+	// resolves through here, and a project whose default agent was disabled
+	// fails loudly instead of silently losing its configuration.
+	if !a.Enabled {
+		return "", nil, fmt.Errorf("agent %q is disabled; enable it to start runs", a.ID)
 	}
 	return agentID, &a, nil
 }
@@ -8448,6 +8465,11 @@ type agentRefLookup interface {
 func resolveAgentRef(ctx context.Context, ws agentRefLookup, ref, project string) (workspace.Agent, error) {
 	a, err := ws.GetAgent(ctx, ref)
 	if err == nil {
+		// Delegation targets respect the same switch: a disabled agent is not
+		// launchable, not even from inside another run.
+		if !a.Enabled {
+			return workspace.Agent{}, fmt.Errorf("agent %q is disabled; enable it to start runs", a.ID)
+		}
 		return a, nil
 	}
 	if !errors.Is(err, workspace.ErrNotFound) {

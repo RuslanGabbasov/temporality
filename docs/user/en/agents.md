@@ -25,6 +25,11 @@ Three ways:
 
 ## What is configurable
 
+The agent switch is the toggle in the bottom-right corner of the mini-card:
+a disabled agent starts no new runs — API starts, intake, triggers and
+delegation all refuse — while runs already in flight finish. Every flip is
+recorded in the audit log.
+
 | Setting | What it gives |
 |---|---|
 | Model | The model name; if the default provider does not have it, the call is routed to a provider that declares it |

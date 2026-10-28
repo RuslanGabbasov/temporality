@@ -70,7 +70,9 @@ pull-only.
 ![Users and roles](../assets/team.webp)
 
 The **Users** page (`/users`): creation, roles, bearer tokens, notification
-channels. Roles are ordered: `reader < writer < operator < admin`.
+channels. Roles are ordered: `reader < writer < operator < admin`. The
+switch is the toggle in the bottom-right corner of the card: an inactive
+user cannot sign in (token or password) and drops out of delivery.
 
 | Role | Can |
 |---|---|

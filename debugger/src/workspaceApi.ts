@@ -131,6 +131,8 @@ export interface Agent {
   project_id?: string
   name: string
   description: string
+  /** the uniform on/off switch: a disabled agent cannot start new runs */
+  enabled?: boolean
   model: string
   provider: string
   system_prompt: string
@@ -421,6 +423,8 @@ export interface Skill {
   version: string
   markdown: string
   manifest: Record<string, unknown>
+  /** the uniform on/off switch: a disabled skill is never served to agents */
+  enabled?: boolean
   org_unit_id?: string
   /** draft = the current version awaits human apply; never served to agents */
   version_status?: string
@@ -1175,6 +1179,10 @@ export const workspaceApi = {
     request<Agent>('/v1/workspace/agents', { method: 'POST', body: JSON.stringify(data) }),
   updateAgent: (id: string, data: Partial<Agent>) =>
     request<Agent>(`/v1/workspace/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  // The uniform enable/disable switch (the trigger pattern): a dedicated
+  // POST, never part of the config PUT.
+  setAgentEnabled: (id: string, enabled: boolean) =>
+    request<Agent>(`/v1/workspace/agents/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   deleteAgent: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/agents/${id}`, { method: 'DELETE' }),
   listAgentVersions: (id: string) =>
@@ -1425,6 +1433,8 @@ export const workspaceApi = {
     request<Skill>('/v1/workspace/skills', { method: 'POST', body: JSON.stringify(data) }),
   updateSkill: (id: string, data: SkillInput) =>
     request<Skill>(`/v1/workspace/skills/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  setSkillEnabled: (id: string, enabled: boolean) =>
+    request<Skill>(`/v1/workspace/skills/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   deleteSkill: (id: string) =>
     request<{ status: string }>(`/v1/workspace/skills/${id}`, { method: 'DELETE' }),
   listSkillVersions: (id: string) =>
@@ -1609,6 +1619,9 @@ export const workspaceApi = {
     request<User>('/v1/workspace/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: Partial<User>) =>
     request<User>(`/v1/workspace/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  // Maps onto workspace_user.active — same switch, uniform request shape.
+  setUserEnabled: (id: string, enabled: boolean) =>
+    request<User>(`/v1/workspace/users/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   regenerateUserToken: (id: string) =>
     request<{ id: string; token: string }>(`/v1/workspace/users/${id}/token`, { method: 'POST' }),
   updateUserChannels: (id: string, data: { channels: UserChannel[]; preferred_channel: string }) =>

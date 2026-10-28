@@ -218,12 +218,12 @@ func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
 		 FROM workspace_agent WHERE id = $1`, id).
 		Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
 			&a.SystemPrompt, &skills, &mcp, &tools, &secrets, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
-			&a.MaxTurns, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.CreatedAt, &a.UpdatedAt)
+			&a.MaxTurns, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrNotFound
 	}
@@ -245,7 +245,7 @@ func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
 		 FROM workspace_agent ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -264,7 +264,7 @@ func (s *Store) ListAgentsVisible(ctx context.Context, units []string) ([]Agent,
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
 		 FROM workspace_agent WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
 	if err != nil {
 		return nil, err
@@ -279,7 +279,7 @@ func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Ag
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
 		 FROM workspace_agent WHERE project_id = $1 OR project_id IS NULL ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -297,7 +297,7 @@ func (s *Store) FindAgentsByName(ctx context.Context, name, projectID string) ([
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
 		 FROM workspace_agent WHERE (project_id IS NULL OR project_id = $1) AND lower(name) = lower($2) ORDER BY id`,
 		projectID, name)
 	if err != nil {
@@ -320,7 +320,7 @@ func scanAgents(rows interface {
 		if err := rows.Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
 			&a.SystemPrompt, &skills, &mcp, &tools, &secrets, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
-			&a.MaxTurns, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.MaxTurns, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		a.ProjectID = derefPtr(projectID)
@@ -384,6 +384,21 @@ func updateAgentRow(ctx context.Context, ex agentExecer, a Agent) error {
 		a.SystemPrompt, skills, mcp, tools, secrets, a.SandboxProfile,
 		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
 		a.MaxTurns, a.ApprovalMode, labels, definition, a.DefinitionVersion, nullString(a.OrgUnitID), egress, a.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetAgentEnabled flips the uniform on/off switch without touching the rest
+// of the configuration: the config PUT never carries enabled, so a normal
+// save cannot disable an agent by omission.
+func (s *Store) SetAgentEnabled(ctx context.Context, id string, enabled bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_agent SET enabled=$2, updated_at=now() WHERE id=$1`, id, enabled)
 	if err != nil {
 		return err
 	}
@@ -1508,6 +1523,22 @@ func (s *Store) UpdateUserChannels(ctx context.Context, id string, channels []Us
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_user SET channels=$2, preferred_channel=$3, updated_at=now() WHERE id=$1`,
 		id, raw, preferred)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetUserActive flips the uniform on/off switch: an inactive user cannot
+// sign in (token and password checks) and drops out of delivery resolution.
+// The toggle endpoint uses this instead of the full profile PUT, so an admin
+// flipping the switch cannot accidentally rewrite roles or channels.
+func (s *Store) SetUserActive(ctx context.Context, id string, active bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_user SET active=$2, updated_at=now() WHERE id=$1`, id, active)
 	if err != nil {
 		return err
 	}
