@@ -47,7 +47,8 @@
 <p>An agent is a named configuration: a model, a system prompt contract (purpose,
 constraints, completion checks), tools, a sandbox, access grants. Managed on
 the <strong>Agents</strong> page (<code>/agent-config</code>).</p>
-<h2 id="creating-an-agent"><a class="anchor" href="#creating-an-agent" aria-label="Section link">#</a>Creating an agent</h2><p>Three ways:</p>
+<h2 id="creating-an-agent"><a class="anchor" href="#creating-an-agent" aria-label="Section link">#</a>Creating an agent</h2><p><img src="../assets/agent-edit.png" alt="The agent card"></p>
+<p>Three ways:</p>
 <ol>
 <li><strong>From a template</strong> — ready-made roles: Lead, Developer, Reviewer, QA, Analyst and more.</li>
 <li><strong>From a description</strong> — describe in plain words what the agent should do;
@@ -85,7 +86,8 @@ the builder drafts the name, purpose, constraints and completion checks
 </tbody></table>
 <p>Constraints and completion checks are part of the contract: they enter the
 prompt and the result verification.</p>
-<h2 id="agent-evolution"><a class="anchor" href="#agent-evolution" aria-label="Section link">#</a>Agent evolution</h2><p>The agent can propose changes to its own configuration (the <code>agent_propose</code>
+<h2 id="agent-evolution"><a class="anchor" href="#agent-evolution" aria-label="Section link">#</a>Agent evolution</h2><p><img src="../assets/agent-evolution.png" alt="Evolution: versions, gate, regressions"></p>
+<p>The agent can propose changes to its own configuration (the <code>agent_propose</code>
 tool): the problem with evidence (run ids), the change and the expected
 effect. The proposal lands in the agent&#39;s card as a draft.</p>
 <p>Applying it goes through the <strong>quality loop</strong>: a proposal is applied only on

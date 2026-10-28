@@ -44,6 +44,7 @@
 <div class="docs-eyebrow">Working with the agent</div>
 <h1>Chat and runs</h1>
 <p class="docs-lead">Dialogue with the agent — from a message to a result: streaming, amendments, approvals, delegation.</p>
+<p><img src="../assets/dashboard.png" alt="The Temporality dashboard"></p>
 <p>The agent&#39;s working surface is <strong>Workspace</strong> (<code>/workspace</code>). Every message
 starts a durable run: it lives in Temporal, is journaled step by step, and
 survives restarts.</p>
@@ -86,7 +87,8 @@ The full mechanism — <code>docs/agent-delegation.md</code>.</p>
 that is running or finished</strong>: the intake run asks a clarifying question when
 unsure which run you mean, then starts a continuation on the same context.
 See <a href="inbound.html">Inbound and channels</a>.</p>
-<h2 id="watching-the-work"><a class="anchor" href="#watching-the-work" aria-label="Section link">#</a>Watching the work</h2><ul>
+<h2 id="watching-the-work"><a class="anchor" href="#watching-the-work" aria-label="Section link">#</a>Watching the work</h2><p><img src="../assets/run.png" alt="The run trace"></p>
+<ul>
 <li><strong>Runs</strong> (<code>/agents</code>) — the feed of runs and each run&#39;s trace: model calls,
 tools with arguments and results, tokens and cost, questions and approvals.</li>
 <li><strong>Uncertain operations.</strong> If a tool&#39;s effect could not be confirmed (a

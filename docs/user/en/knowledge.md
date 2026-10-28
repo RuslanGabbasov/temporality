@@ -7,6 +7,8 @@ description: How the agent accumulates experience — the knowledge lifecycle, t
 
 # Knowledge
 
+![The knowledge map](../assets/knowledge.png)
+
 Knowledge is the verified layer of experience: statements about the
 environment, tools and solutions, extracted from real trajectories. Unlike a
 "memory dump", every piece of knowledge carries an author, provenance, a

@@ -13,6 +13,8 @@ the **Agents** page (`/agent-config`).
 
 ## Creating an agent
 
+![The agent card](../assets/agent-edit.png)
+
 Three ways:
 
 1. **From a template** — ready-made roles: Lead, Developer, Reviewer, QA, Analyst and more.
@@ -35,6 +37,8 @@ Constraints and completion checks are part of the contract: they enter the
 prompt and the result verification.
 
 ## Agent evolution
+
+![Evolution: versions, gate, regressions](../assets/agent-evolution.png)
 
 The agent can propose changes to its own configuration (the `agent_propose`
 tool): the problem with evidence (run ids), the change and the expected

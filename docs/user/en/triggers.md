@@ -39,6 +39,8 @@ tasks keep counting against the sender.
 
 ## Observing
 
+![Triggers](../assets/trigger.png)
+
 Every fire is visible in "Runs" as a normal run (with a source marker), and
 the firing history is in the trigger's card. A failed trigger run is still a
 run: open it, understand the cause, restart it.

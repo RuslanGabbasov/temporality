@@ -65,6 +65,8 @@ pull-only.
 
 ## Users and RBAC
 
+![Users and roles](../assets/team.png)
+
 The **Users** page (`/users`): creation, roles, bearer tokens, notification
 channels. Roles are ordered: `reader < writer < operator < admin`.
 
@@ -117,6 +119,8 @@ are journaled (`secret.issued` / `secret.denied`), and the journal strips
 known token patterns from events as a second line of defense.
 
 ## Sandboxes
+
+![Sandbox profiles](../assets/sandbox.png)
 
 Sandbox profiles (Settings → Sandboxes): the image (built-in Go/Node/Python
 recipes or your own digest-pinned one), memory, CPU, tmpfs limits, cache

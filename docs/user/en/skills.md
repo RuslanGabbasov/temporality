@@ -14,6 +14,8 @@ page (`/skills`); details — `docs/living-skills.md`.
 
 ## The skill contract
 
+![The skill editor](../assets/skill-edit.png)
+
 The manifest (`SKILL.md` + metadata) describes:
 
 - **the procedure** — the steps the agent performs;

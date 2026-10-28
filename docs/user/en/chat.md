@@ -7,6 +7,8 @@ description: Dialogue with the agent — from a message to a result: streaming, 
 
 # Chat and runs
 
+![The Temporality dashboard](../assets/dashboard.png)
+
 The agent's working surface is **Workspace** (`/workspace`). Every message
 starts a durable run: it lives in Temporal, is journaled step by step, and
 survives restarts.
@@ -63,6 +65,8 @@ unsure which run you mean, then starts a continuation on the same context.
 See [Inbound and channels](inbound.html).
 
 ## Watching the work
+
+![The run trace](../assets/run.png)
 
 - **Runs** (`/agents`) — the feed of runs and each run's trace: model calls,
   tools with arguments and results, tokens and cost, questions and approvals.

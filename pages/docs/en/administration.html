@@ -96,7 +96,8 @@ the local images and silently turns <code>TEMPORALITY_VERSION</code> into <code>
 not do this on a real deployment, or &quot;latest release&quot; stops pointing at a
 published one. The base compose file cannot build at all: deployment is
 pull-only.</p>
-<h2 id="users-and-rbac"><a class="anchor" href="#users-and-rbac" aria-label="Section link">#</a>Users and RBAC</h2><p>The <strong>Users</strong> page (<code>/users</code>): creation, roles, bearer tokens, notification
+<h2 id="users-and-rbac"><a class="anchor" href="#users-and-rbac" aria-label="Section link">#</a>Users and RBAC</h2><p><img src="../assets/team.png" alt="Users and roles"></p>
+<p>The <strong>Users</strong> page (<code>/users</code>): creation, roles, bearer tokens, notification
 channels. Roles are ordered: <code>reader &lt; writer &lt; operator &lt; admin</code>.</p>
 <table>
 <thead>
@@ -150,7 +151,8 @@ granted to an agent on the agent&#39;s card: the value arrives in <code>run_comm
 a <code>SECRET_&lt;NAME&gt;</code> variable — the model sees the name, never the value. Grants
 are journaled (<code>secret.issued</code> / <code>secret.denied</code>), and the journal strips
 known token patterns from events as a second line of defense.</p>
-<h2 id="sandboxes"><a class="anchor" href="#sandboxes" aria-label="Section link">#</a>Sandboxes</h2><p>Sandbox profiles (Settings → Sandboxes): the image (built-in Go/Node/Python
+<h2 id="sandboxes"><a class="anchor" href="#sandboxes" aria-label="Section link">#</a>Sandboxes</h2><p><img src="../assets/sandbox.png" alt="Sandbox profiles"></p>
+<p>Sandbox profiles (Settings → Sandboxes): the image (built-in Go/Node/Python
 recipes or your own digest-pinned one), memory, CPU, tmpfs limits, cache
 variables. A profile is assigned to an agent; the agent&#39;s commands run in a
 container with no privileges, no network (unless enabled) and a read-only
