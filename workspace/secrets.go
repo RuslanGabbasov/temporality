@@ -271,7 +271,7 @@ func scanSecrets(rows pgx.Rows) ([]Secret, error) {
 		var secret Secret
 		var orgUnitID *string
 		if err := rows.Scan(&secret.ID, &secret.Name, &secret.Provider, &secret.ExternalRef, &secret.Description,
-			&orgUnitID, &secret.Enabled, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue); err != nil {
+			&secret.Enabled, &orgUnitID, &secret.CreatedAt, &secret.UpdatedAt, &secret.HasValue); err != nil {
 			return nil, err
 		}
 		secret.OrgUnitID = derefPtr(orgUnitID)
