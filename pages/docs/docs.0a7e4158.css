@@ -57,6 +57,10 @@
 .docs-content td { color: var(--tm-text-2); line-height: 1.6; }
 .docs-content td code, .docs-content th code { white-space: nowrap; }
 
+/* Screenshots from the markdown sources (img inside a paragraph): scale to
+   the content column instead of overflowing it. */
+.docs-content img { display: block; max-width: 100%; height: auto; margin: 14px auto; border: 1px solid var(--tm-border); border-radius: 8px; background: #101a19; }
+
 .docs-content h2 .anchor, .docs-content h3 .anchor { opacity: 0; margin-left: 8px; color: var(--tm-amber); font-weight: 400; text-decoration: none; transition: opacity .15s; }
 .docs-content h2:hover .anchor, .docs-content h3:hover .anchor { opacity: .8; }
 

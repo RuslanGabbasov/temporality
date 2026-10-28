@@ -238,7 +238,14 @@ const outDir = join(ROOT, 'pages', 'docs')
 mkdirSync(outDir, { recursive: true })
 // Remove stylesheets of previous builds so the directory holds exactly one.
 for (const file of readdirSync(outDir)) {
-  if (/^docs\.[0-9a-f]{8}\.css$/.test(file) && file !== cssName) rmSyncSafe(join(outDir, file))
+  if (/^docs\.[0-9a-f]{8}\.css$/.test(file) && file !== cssName) {
+    try {
+      rmSync(join(outDir, file))
+    } catch {
+      // A stale stylesheet that refuses to leave must not kill the build:
+      // the pages already point at the new hash.
+    }
+  }
 }
 writeFileSync(join(outDir, cssName), cssBody)
 for (const lang of LANGS) {
