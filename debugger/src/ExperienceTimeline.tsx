@@ -56,9 +56,10 @@ const TIMELINE_TYPES = [
 const MIN_RUNS_FOR_PAUSE = 1
 const MAX_INITIAL_PAGES = 24
 /** Primary run-section grouping dimension. */
-type GroupBy = 'unit' | 'agent' | 'day' | 'theme' | 'none'
+type GroupBy = 'unit' | 'orguser' | 'agent' | 'day' | 'theme' | 'none'
 const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'unit', label: 'timeline.group.unit' },
+  { value: 'orguser', label: 'timeline.group.orguser' },
   { value: 'agent', label: 'timeline.group.agent' },
   { value: 'theme', label: 'timeline.group.theme' },
   { value: 'day', label: 'timeline.group.day' },
@@ -220,7 +221,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   // Names beat ids everywhere a human reads the page: details panes resolve
   // actor ids through the directory, the raw id stays the fallback.
   const userNameOf = useCallback((id: string | undefined) => (id ? (users.find((u) => u.id === id)?.name ?? id) : ''), [users])
-  const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','agent','day','theme','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','orguser','agent','day','theme','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
   const parseLens = (s: string | null): Lens => { if (!s) return DEFAULT_LENS; try { return { ...DEFAULT_LENS, ...JSON.parse(s) } } catch { return DEFAULT_LENS } }
   const [lens, setLens] = useState<Lens>(() => parseLens(params.get('lens')))
   const parseKinds = (s: string | null): Set<LifecycleKind> => { if (!s) return new Set(LIFECYCLE_KINDS); const arr = s.split(',').filter((k): k is LifecycleKind => LIFECYCLE_KINDS.includes(k as LifecycleKind)); return arr.length ? new Set(arr) : new Set(LIFECYCLE_KINDS) }
@@ -531,9 +532,20 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       if (actor && !user) return { key: `actor:${actor}`, label: actor, order: `zz-${actor}` }
       return { key: 'unassigned', label: t('timeline.group.unassigned'), order: 'zzz-unassigned' }
     }
+    // Org unit → user: the composite groups read as a two-level collapse —
+    // the unit's people and their runs, one header per person.
+    const groupOfOrgUser = (root: RunInfo): { key: string; label: string; order: string } => {
+      const actor = root.actor
+      const user = actor ? userById.get(actor) : undefined
+      const unitLabel = user?.org_unit_id ? (unitName.get(user.org_unit_id) ?? user.org_unit_id) : t('timeline.group.unassigned')
+      const userLabel = user?.name ?? (actor || t('timeline.group.unassigned'))
+      const key = `${user?.org_unit_id ?? 'no-unit'}\u0000${user?.id ?? actor ?? 'no-actor'}`
+      return { key: `orguser:${key}`, label: `${unitLabel} · ${userLabel}`, order: `${unitLabel}\u0000${userLabel}` }
+    }
+    const groupOfFor = (root: RunInfo) => (groupBy === 'orguser' ? groupOfOrgUser(root) : groupOf(root))
     const groupsMap = new Map<string, RunGroup>()
     for (const chain of chains) {
-      const g = groupOf(chain.root)
+      const g = groupOfFor(chain.root)
       let group = groupsMap.get(g.key)
       if (!group) { group = { id: g.key, label: g.label, order: g.order, chains: [], runs: [], failed: 0, knowledgeEvents: 0, firstAt: chain.root.startedAt, lastAt: chain.lastAt, misleads: [] }; groupsMap.set(g.key, group) }
       group.chains.push(chain)

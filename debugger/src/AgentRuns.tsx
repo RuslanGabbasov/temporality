@@ -197,6 +197,9 @@ interface RunRow {
    * listings span projects, so every row carries its own project — detail
    * calls (result, cost, nudge) must use it, not the header filter. */
   project?: string
+  /** Who started the run: the event context actor (user id for API/chat
+   * starts, trigger id for automated ones). */
+  actor?: string
 }
 
 /** Build the run call tree: roots are runs without a known parent, children
@@ -237,6 +240,7 @@ function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStat
       workflow: typeof event.data?.workflow === 'string' ? event.data.workflow : undefined,
       agentId: typeof event.data?.agent_id === 'string' && event.data.agent_id ? event.data.agent_id : undefined,
       project: event.context?.project || undefined,
+      actor: event.context?.actor?.id || undefined,
     })
     for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1)
   }
@@ -733,6 +737,15 @@ export default function AgentRuns({ project }: { project: string }) {
   useEffect(() => {
     workspaceApi.listAllAgents().then((page) => setAgents(page.agents)).catch(() => { /* names fall back to ids */ })
   }, [])
+  // Run initiators: rows carry the actor id from the event context; the
+  // directory turns it into a name. Failures leave ids — still traceable.
+  const [users, setUsers] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    workspaceApi.listUsers().then((data) => {
+      setUsers(new Map((data.users ?? []).map((u) => [u.id, u.name])))
+    }).catch(() => { /* ids stay */ })
+  }, [])
+  const userNameOf = useCallback((id: string | undefined) => (id ? (users.get(id) ?? id) : ''), [users])
   // The selected run's own project: detail endpoints (result, approval,
   // nudge, knowledge doubt actions) need it even when the header filter is the
   // global "All projects". Falls back to the filter for run ids the list
@@ -903,6 +916,9 @@ export default function AgentRuns({ project }: { project: string }) {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(row.agentId && agents.find((a) => a.id === row.agentId)?.name) || row.role || 'agent'} · {shortTime(row.at)}</span>
+                    {row.actor && row.depth === 0 && (
+                      <span title={row.actor} style={{ flexShrink: 0 }}>👤 {userNameOf(row.actor)}</span>
+                    )}
                     {/* Project attribution in the global listing
                         (docs/activity-scoping.md §7): shows which project the
                         run worked in without narrowing the list. */}
@@ -958,6 +974,17 @@ export default function AgentRuns({ project }: { project: string }) {
                   {runTitle && (
                     <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', fontFamily: 'monospace', marginTop: '0.25rem', overflowWrap: 'anywhere' }}>{selected}</div>
                   )}
+                  {(() => {
+                    const root = timeline.find((item) => item.type === 'run.started' && runID(item) === selected)
+                    const actor = root?.context?.actor?.id
+                    if (!actor) return null
+                    return (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
+                        {t('runs.initiator') ?? 'Started by'}: <strong style={{ color: 'var(--tm-text-2)' }}>{userNameOf(actor)}</strong>
+                        <span title={actor} style={{ fontFamily: 'monospace', fontSize: '0.66rem', marginLeft: '0.4rem', opacity: 0.7 }}>{actor}</span>
+                      </div>
+                    )
+                  })()}
                   {teamStarted && (
                     <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.4rem' }}>
                       <Tag type="cyan" size="sm">👥 {String(teamStarted.data?.team_name ?? teamStarted.data?.team_id ?? '')}</Tag>
