@@ -65,7 +65,10 @@ type ReviewDecision struct {
 // artifactRequestedByKey is the decision key used when the round's requester
 // decides their own review without being listed among the model-authored
 // reviewer entries.
-const artifactRequestedByKey = "requested_by"
+// ArtifactRequestedByKey is the decision key used when the round's requester
+// decides their own review without being listed among the model-authored
+// reviewer entries.
+const ArtifactRequestedByKey = "requested_by"
 
 const artifactReviewColumns = `id, artifact_id, artifact_version, reviewers, mode, status, note, requested_by, requested_at, decisions, resolved_by, resolved_at, reminded_at, escalated_at`
 
@@ -257,7 +260,7 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entr
 	// the listed reviewers only. The kernel's own submits have no human
 	// requester to fall back to.
 	if len(entries) == 0 && review.RequestedBy != "" && review.RequestedBy != "kernel-internal" && review.RequestedBy == decidedBy {
-		entries = []string{artifactRequestedByKey}
+		entries = []string{ArtifactRequestedByKey}
 	}
 	if len(entries) == 0 {
 		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: %q is not a reviewer of this round", ErrConflict, decidedBy)

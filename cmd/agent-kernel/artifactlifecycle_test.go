@@ -81,6 +81,14 @@ func (f *fakeArtifactLifecycleStore) ResolveArtifactReview(_ context.Context, re
 	if f.resolveErr != nil {
 		return workspace.ArtifactReview{}, workspace.Artifact{}, f.resolveErr
 	}
+	// Mirror the store: an empty match is the «not a reviewer» conflict —
+	// only the round's requester (its RequestedBy) may decide unlisted.
+	if len(entries) == 0 {
+		if f.review.RequestedBy == "" || f.review.RequestedBy != decidedBy {
+			return workspace.ArtifactReview{}, workspace.Artifact{}, fmt.Errorf("%w: %q is not a reviewer of this round", workspace.ErrConflict, decidedBy)
+		}
+		entries = []string{workspace.ArtifactRequestedByKey}
+	}
 	decision := "reject"
 	if approve {
 		decision = "approve"
@@ -369,6 +377,15 @@ func TestArtifactDecisionMatchesGroupEntries(t *testing.T) {
 	status, body = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/approve", `{}`)
 	require.Equal(t, 409, status)
 	require.Contains(t, body, "not a reviewer")
+
+	// The round's requester decides even when the model-authored list missed
+	// them: the decision lands under the dedicated requested_by key.
+	store.review = workspace.ArtifactReview{ID: "round-1", ArtifactID: "req-spec", ArtifactVersion: 2,
+		Reviewers: []string{"user:stranger"}, Mode: "any", Status: "open", RequestedBy: "writer"}
+	status, body = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/approve", `{}`)
+	require.Equal(t, 200, status)
+	require.Contains(t, body, `"decisions":{"requested_by"`)
+	require.Contains(t, body, `"status":"approved"`)
 }
 
 // A reader may watch the queue but never touch it: 403 on decisions.

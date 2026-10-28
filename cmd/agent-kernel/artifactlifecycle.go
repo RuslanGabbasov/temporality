@@ -272,8 +272,11 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			}
 			// Empty match is not an immediate 409: the round's requester may
 			// decide their own review even when the model-authored reviewer
-			// list missed them — ResolveArtifactReview applies that rule.
+			// list missed them — the decision lands under the dedicated key.
 			entries := workspace.MatchArtifactReviewers(principal, users, review.Reviewers)
+			if len(entries) == 0 && review.RequestedBy == principal && principal != "" && !isKernelInternal(r) {
+				entries = []string{workspace.ArtifactRequestedByKey}
+			}
 			review, artifact, err := ws.ResolveArtifactReview(r.Context(), r.PathValue("reviewID"), entries, principal, approve, strings.TrimSpace(req.Comment))
 			if err != nil {
 				writeError(w, artifactReviewErrorStatus(err), err)
