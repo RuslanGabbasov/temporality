@@ -1397,7 +1397,7 @@ function SkillFormFields({
       <div className="form-actions" style={{ marginTop: 0 }}>
         {/* The uniform switch at the bottom-left of the button block. */}
         <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('skills.enabled_hint') ?? 'Disabled skills are never served to agents'}>
-          <Toggle id="skill-form-enabled" labelText={t('skills.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+          <Toggle id="skill-form-enabled" labelText="" hideLabel aria-label={t('skills.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
         </div>
         <Button kind="secondary" onClick={onValidate}>{t('skills.validate') ?? 'Validate'}</Button>
         <Button kind="secondary" onClick={onCancel}>{t('action.cancel') ?? 'Cancel'}</Button>

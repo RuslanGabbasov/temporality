@@ -1280,7 +1280,7 @@ function TeamForm({ form, setForm, editing, formEnabled, setFormEnabled, agents,
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem', marginTop: '1.25rem' }}>
         {/* The uniform switch at the bottom-left of the button block. */}
         <span style={{ marginRight: 'auto' }} title={t('teams.enabled_hint') ?? 'Disabled teams cannot be launched'}>
-          <Toggle id="team-form-enabled" labelText={t('teams.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+          <Toggle id="team-form-enabled" labelText="" hideLabel aria-label={t('teams.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
         </span>
         {canRegenerate && (
           <Button kind="secondary" renderIcon={MagicWand} style={{ marginRight: 'auto' }} onClick={onRegenerate}>

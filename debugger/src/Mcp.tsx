@@ -375,7 +375,7 @@ export default function Mcp() {
               <div className="form-actions">
                 {/* The uniform switch at the bottom-left of the button block. */}
                 <div style={{ marginRight: 'auto', display: 'flex', alignItems: 'center' }} title={t('mcp.enabled_hint') ?? 'Disabled servers are not connected'}>
-                  <Toggle id="mcp-form-enabled" labelText={t('mcp.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
+                  <Toggle id="mcp-form-enabled" labelText="" hideLabel aria-label={t('mcp.enabled_hint') ?? 'Enabled'} labelA={t('common.off') ?? 'Off'} labelB={t('common.on') ?? 'On'} toggled={formEnabled} onToggle={(v: boolean) => setFormEnabled(v)} size="sm" />
                 </div>
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
