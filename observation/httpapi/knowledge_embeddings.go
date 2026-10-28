@@ -146,11 +146,19 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	model := strings.TrimSpace(r.URL.Query().Get("model")) // empty = any stored model
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	// limit bounds the response for slow links; the client renders the map
-	// per zoom tier and does not need every dot at once.
+	// per zoom tier and does not need every dot at once. offset pages through
+	// the same stable order (freshness first), so the map can stream in
+	// batches instead of waiting for one heavy payload.
 	limit := 2000
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 100 && parsed <= 20000 {
 			limit = parsed
+		}
+	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+			offset = parsed
 		}
 	}
 	projects := []string{}
@@ -264,12 +272,26 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 			UpdatedAt: item.UpdatedAt.Format(time.RFC3339), Vector: vector,
 		})
 	}
-	// Newest first, bounded by the requested limit.
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	if len(items) > limit {
-		items = items[:limit]
+	// Newest first — the map streams in batches, so the freshest knowledge
+	// paints first — with an id tiebreak: the offset paging must stay stable
+	// across requests even when timestamps tie.
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].UpdatedAt != items[j].UpdatedAt {
+			return items[i].UpdatedAt > items[j].UpdatedAt
+		}
+		return items[i].ID < items[j].ID
+	})
+	total := len(items)
+	if offset < len(items) {
+		end := offset + limit
+		if end > len(items) {
+			end = len(items)
+		}
+		items = items[offset:end]
+	} else {
+		items = nil
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "model": model})
+	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total})
 }
 
 // neighborStore is the vector-listing capability behind the neighbors lookup.

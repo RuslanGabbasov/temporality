@@ -7,6 +7,7 @@ export const en: Record<string, string> = {
     'nav.knowledge': 'Knowledge',
     'nav.knowledge_map': 'Knowledge map',
     'knowledge.map_search': 'Search propositions and topics…',
+    'knowledge.map_progress': 'Knowledge: {{loaded}} of {{total}}',
     'knowledge.map_all': 'All',
     'knowledge.map_empty': 'No knowledge vectors yet: enable the semantic layer (an embeddings model) and let the backfill populate the base.',
     'knowledge.map_hint_zoom': 'Wheel — zoom, drag — pan, click a dot — dossier.',

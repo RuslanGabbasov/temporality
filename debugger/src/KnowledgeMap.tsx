@@ -126,28 +126,65 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
    *  rest of the map dims — reading a point's context beats hunting it in a
    *  crowd. Kept in a ref so the draw pass stays out of React state. */
   const highlightRef = useRef<{ center: number; set: Set<number> } | null>(null)
+  // Batch arrivals fade in: id → the frame time the point first appeared at.
+  // Kept in a ref — the draw pass reads it every frame while a fade is live.
+  const appearedAtRef = useRef<Map<string, number>>(new Map())
+  const [batchesLanded, setBatchesLanded] = useState(0)
   const pointIndexById = useMemo(() => new Map(points.map((p, i) => [p.id, i] as const)), [points])
 
+  // Streaming load: batches of 400 arrive freshest-first and land on the map
+  // as they come — the first paint needs one batch, not the whole corpus.
+  // genRef invalidates the loop when the project flips or the tab unmounts.
+  const [progress, setProgress] = useState<{ loaded: number; total: number | null } | null>(null)
+  const loadGen = useRef(0)
   const load = useCallback(async () => {
+    const gen = ++loadGen.current
+    const stale = () => gen !== loadGen.current
     setLoading(true); setError('')
+    setProgress({ loaded: 0, total: null })
     try {
-      const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: 2000 })
-      setItems(page.items ?? [])
+      const accumulated: Array<import('./semanticMap').MapItem> = []
+      const seen = new Set<string>()
+      const BATCH = 400
+      let total: number | null = null
+      for (let offset = 0; stale() && (total === null || offset < total); offset += BATCH) {
+        const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: BATCH, offset })
+        if (stale()) return
+        if (typeof page.total === 'number') total = page.total
+        const fresh = (page.items ?? []).filter((item) => !seen.has(item.id))
+        for (const item of page.items ?? []) seen.add(item.id)
+        accumulated.push(...fresh)
+        setItems([...accumulated])
+        setProgress({ loaded: accumulated.length, total: total ?? accumulated.length })
+        if ((page.items ?? []).length === 0) break
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed')
-      setItems([])
+      if (stale()) {
+        setError(e instanceof Error ? e.message : 'Request failed')
+        setItems([])
+      }
     } finally {
-      setLoading(false)
+      if (!stale()) {
+        setLoading(false)
+        setProgress(null)
+      }
     }
   }, [project])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(); return () => { loadGen.current++ } }, [load])
 
   // The heavy pipeline (normalize → kNN → force → cluster pyramid) runs in a
   // worker; this effect just installs the results into the render state.
   const { result: layout, pending: layoutPending } = useSemanticLayoutState(items)
   useEffect(() => {
     if (!layout) return
+    // Fresh arrivals get a fade-in window: their alpha ramps up in the draw
+    // pass from the moment they first appear on the map.
+    const now = performance.now()
+    for (const node of layout.nodes) {
+      if (!appearedAtRef.current.has(node.id)) appearedAtRef.current.set(node.id, now)
+    }
+    setBatchesLanded((n) => n + 1)
     const radius = Math.max(2.2, Math.min(4, 900 / Math.sqrt(layout.nodes.length + 1)))
     const mapPoints = layout.nodes.map((node) => ({ ...node, r: radius }))
     const grid = new Map<string, MapPoint[]>()
@@ -269,6 +306,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue
       visible.push({ p: points[i], sx, sy, active: matches[i], i })
     }
+    let stillFading = false
     // Hover focus belongs to the statements layer only: on the topic and
     // sub-cluster tiers the bubbles already aggregate the view, dimming the
     // plane around one dot there reads as flicker, not focus.
@@ -384,6 +422,16 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const shape = stateShape(p.item.state)
       const dead = shape === 'cross'
       let alpha = active ? dotAlpha : dotAlpha * 0.35
+      // Batch fade-in: arrivals ramp up over ~600ms so a landing batch reads
+      // as dots blooming in, not a flicker.
+      const born = appearedAtRef.current.get(p.id)
+      if (born !== undefined) {
+        const age = performance.now() - born
+        if (age < 600) {
+          alpha *= 0.15 + 0.85 * (age / 600)
+          stillFading = true
+        }
+      }
       let radius = dotR
       if (highlight) {
         // The lit neighborhood keeps (almost) full ink and the hovered point
@@ -407,6 +455,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       }
     }
     ctx.globalAlpha = 1
+    // A live fade keeps the animation frames coming until every arrival has
+    // reached full ink.
+    if (stillFading) frameRef.current = requestAnimationFrame(draw)
 
     // ── layer 4: cluster captions, on top of the dots ──
     if (scale < FAR) {
@@ -590,6 +641,27 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
       <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: '320px', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)', overflow: 'hidden', cursor: hover ? 'pointer' : 'grab' }}>
         <canvas ref={canvasRef} style={{ display: 'block' }} />
+        {/* Streaming progress lives on the map itself: batches land as dots
+            blooming in, this pill counts them up. */}
+        {progress && (
+          <div style={{
+            position: 'absolute', top: '0.6rem', left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.7rem',
+            background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)',
+            borderRadius: '999px', fontSize: '0.72rem', color: 'var(--tm-text-2)',
+            boxShadow: '0 4px 14px rgba(0,0,0,.25)', pointerEvents: 'none', zIndex: 3,
+          }}>
+            <span className="pulse" style={{ width: 6, height: 6, borderRadius: '999px', background: 'var(--tm-teal, #4fb3a9)', display: 'inline-block' }} />
+            <span>{t('knowledge.map_progress', { loaded: String(progress.loaded), total: String(progress.total ?? progress.loaded) }) ?? `Знания: ${progress.loaded} из ${progress.total ?? '…'}`}</span>
+            <span style={{ width: '5.5rem', height: 3, borderRadius: 999, background: 'var(--tm-border)', overflow: 'hidden', display: 'inline-block' }}>
+              <span style={{
+                display: 'block', height: '100%', borderRadius: 999,
+                width: `${progress.total ? Math.min(100, Math.round((progress.loaded / progress.total) * 100)) : 12}%`,
+                background: 'var(--tm-teal, #4fb3a9)', transition: 'width 240ms ease',
+              }} />
+            </span>
+          </div>
+        )}
         {hover && (() => {
           const card = 340
           const left = Math.min(Math.max(hover.clientX + 14, card / 2 + 8), (wrapRef.current?.clientWidth ?? card) - card / 2 - 8)
