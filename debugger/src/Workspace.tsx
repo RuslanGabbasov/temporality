@@ -405,6 +405,23 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const [attachments, setAttachments] = useState<UploadedFile[]>([])
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // The chat input grows with its content — up to a third of the screen —
+  // then scrolls internally. The composer sits at the column's bottom edge,
+  // so the extra height eats into the message pane: the field grows upward.
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const resizeChatInput = useCallback(() => {
+    const el = chatInputRef.current
+    if (!el) return
+    const cap = Math.floor(window.innerHeight / 3)
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, cap)}px`
+    el.style.overflowY = el.scrollHeight > cap ? 'auto' : 'hidden'
+  }, [])
+  useEffect(() => {
+    resizeChatInput()
+    window.addEventListener('resize', resizeChatInput)
+    return () => window.removeEventListener('resize', resizeChatInput)
+  }, [inputValue, resizeChatInput])
   // Auto-scroll stickiness: while the user reads near the bottom the chat
   // follows new content; once they scroll up into history it stops yanking
   // them down and counts unread messages on a floating jump button instead.
@@ -1743,10 +1760,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         : (t('chat.placeholder') ?? 'Введите сообщение… (Shift+Enter для новой строки)')
                     }
                     rows={3}
+                    ref={chatInputRef}
                     onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage() }
                     }}
-                    style={{ resize: 'vertical', minHeight: '72px' }}
+                    style={{ resize: 'none', minHeight: '72px', maxHeight: '33vh', overflowY: 'auto' }}
                   />
                 </div>
                 {loading && <span className="spinner" title={t('chat.sending') ?? 'Sending…'} style={{ alignSelf: 'center', flexShrink: 0 }} />}
