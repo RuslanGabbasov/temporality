@@ -120,9 +120,13 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     if (!adminName.trim() || adminPassword.length < 8) return
     setBusy(true); setError('')
     try {
-      await workspaceApi.createUser({ name: adminName.trim(), email: adminEmail.trim(), role: 'admin', password: adminPassword } as never)
-      // Sign in: later steps call gated endpoints.
-      await apiLogin(adminName.trim(), adminPassword)
+      await workspaceApi.createUser({ name: adminName.trim(), email: adminEmail.trim(), role: 'admin', password: adminPassword, active: true } as never)
+      // Creating the first user enables auth immediately (the gate counts live
+      // workspace users): the wizard must hold a token the kernel knows.
+      // Always log in as the fresh admin — a stale token from a previous
+      // install would 401 every later step; the login replaces it.
+      const session = await apiLogin(adminName.trim(), adminPassword)
+      localStorage.setItem(TOKEN_STORAGE_KEY, session.token)
       setAdminCreated(true)
       setStep('provider')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
