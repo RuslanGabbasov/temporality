@@ -5997,9 +5997,37 @@ func main() {
 			return
 		}
 		// Lifecycle filters (docs/artifact-lifecycle.md §9): status/kind exact
-		// match, saga_id traces one saga's work products.
+		// match, saga_id traces one saga's work products. q narrows by name,
+		// tag pages the catalog like a knowledge base (comma list = AND),
+		// limit/offset keep tens of thousands off one response.
 		filter := workspace.ArtifactFilter{
 			Status: r.URL.Query().Get("status"), Kind: r.URL.Query().Get("kind"), SagaID: r.URL.Query().Get("saga_id"),
+			Query: strings.TrimSpace(r.URL.Query().Get("q")),
+			Provider: r.URL.Query().Get("provider"),
+		}
+		if raw := strings.TrimSpace(r.URL.Query().Get("org_unit")); raw != "" {
+			// Explicit org narrowing is admin territory: non-admins keep their
+			// visibility chain (visibleUnits below).
+			if principal, ok := controlplane.FromContext(r.Context()); ok && principal.Role >= controlplane.RoleAdmin {
+				filter.OrgUnitID = raw
+			}
+		}
+		if raw := strings.TrimSpace(r.URL.Query().Get("tag")); raw != "" {
+			for _, tag := range strings.Split(raw, ",") {
+				if tag = strings.TrimSpace(strings.ToLower(tag)); tag != "" {
+					filter.Tags = append(filter.Tags, tag)
+				}
+			}
+		}
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 1000 {
+				filter.Limit = parsed
+			}
+		}
+		if raw := r.URL.Query().Get("offset"); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				filter.Offset = parsed
+			}
 		}
 		list, err := ws.ListArtifactsFiltered(r.Context(), visibleUnits(r), filter)
 		if err != nil {
@@ -6007,6 +6035,19 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"artifacts": list, "count": len(list)})
+	})
+
+	// Distinct catalog tags for the filter dropdown (most-used first).
+	mux.HandleFunc("GET /v1/workspace/artifacts/tags", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		tags, err := ws.ListArtifactTags(r.Context(), visibleUnits(r))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"tags": tags})
 	})
 	mux.HandleFunc("POST /v1/workspace/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {
@@ -8936,6 +8977,9 @@ type artifactRequest struct {
 	SagaID      *string `json:"saga_id"` // saga link; nil = keep on edit, "" = detach
 	OriginRun   string  `json:"origin_run"`
 	OrgUnitID   string  `json:"org_unit_id"` // only set on create; updates keep the stored binding
+	// Tags are catalog labels: normalized (trimmed, deduped, lowercased by
+	// normalize()) and filtered with AND semantics in the list endpoint.
+	Tags []string `json:"tags,omitempty"`
 }
 
 // toArtifact validates the request and converts it into a workspace.Artifact.
@@ -8987,6 +9031,7 @@ func (r artifactRequest) toArtifact(id string) (workspace.Artifact, error) {
 		SagaID:      derefString(r.SagaID),
 		OriginRun:   strings.TrimSpace(r.OriginRun),
 		OrgUnitID:   strings.TrimSpace(r.OrgUnitID),
+		Tags:        r.Tags,
 	}, nil
 }
 

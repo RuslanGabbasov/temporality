@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
 import {
   Button,
   TextInput,
@@ -12,10 +12,10 @@ import {
   SelectItem,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close } from '@carbon/icons-react'
 import { workspaceApi, type Artifact, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
 import { useT } from './i18n'
-import ListFilter, { matchesFilter } from './ListFilter'
+import ListFilter from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
@@ -60,6 +60,14 @@ export default function Artifacts() {
   const [providerFilter, setProviderFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [orgFilter, setOrgFilter] = useState('')
+  // Tens of thousands of artifacts: the list is a server-side search. q is
+  // debounced; tags narrow with AND; «Show more» pages offset.
+  const [serverQuery, setServerQuery] = useState('')
+  const [tagFilter, setTagFilter] = useState<string[]>([])
+  const [tagOptions, setTagOptions] = useState<Array<{ tag: string; count: number }>>([])
+  const [limit, setLimit] = useState(200)
+  const [totalKnown, setTotalKnown] = useState<number | null>(null)
+  const searchGen = useRef(0)
   // Two-column layout (docs/artifact-registry.md §8): the left column is the
   // filterable list, the right column is the selected artifact — body first,
   // so an approver reads the document where the decision is made.
@@ -86,17 +94,45 @@ export default function Artifacts() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      const tag = tagFilter.length > 0 ? tagFilter.join(',') : undefined
       const [list, refs] = await Promise.all([
-        workspaceApi.listArtifacts(),
+        workspaceApi.listArtifacts({
+          status: statusFilter || undefined,
+          provider: providerFilter || undefined,
+          org: orgFilter || undefined,
+          q: serverQuery.trim() || undefined,
+          tag,
+          limit,
+        }),
         workspaceApi.artifactReferences().catch(() => ({ references: {} as Record<string, string[]> })),
       ])
       setArtifacts(list.artifacts ?? [])
       setReferences(refs.references ?? {})
+      // count == limit hints there is more; the endpoint pages with offset.
+      setTotalKnown(list.count < limit ? (limit >= 200 ? list.count : null) : null)
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
-  }, [])
+  }, [statusFilter, providerFilter, orgFilter, serverQuery, tagFilter, limit])
 
   useEffect(() => { void load() }, [load])
+
+  // Distinct tags for the filter chips, most-used first. Reloaded when the
+  // org context changes; failures leave the row empty (filtering is
+  // optional, the search box works without it).
+  useEffect(() => {
+    let cancelled = false
+    void workspaceApi.artifactTags()
+      .then((data) => { if (!cancelled) setTagOptions(data.tags ?? []) })
+      .catch(() => { if (!cancelled) setTagOptions([]) })
+    return () => { cancelled = true }
+  }, [])
+
+  // Debounced server search: keystrokes land 300ms apart, not per keypress.
+  const [searchDraft, setSearchDraft] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setServerQuery(searchDraft), 300)
+    return () => clearTimeout(timer)
+  }, [searchDraft])
 
   const selected = artifacts.find((a) => a.id === selectedId) ?? null
 
@@ -136,14 +172,12 @@ export default function Artifacts() {
     return acc
   }, {})
   const orderedStatuses = ['in_review', 'draft', 'rejected', 'approved'].filter((s) => statusCounts[s] > 0)
-  const visibleArtifacts = artifacts
-    .filter((a) => {
-      if (providerFilter && a.provider !== providerFilter) return false
-      if (statusFilter && (a.status ?? 'approved') !== statusFilter) return false
-      if (orgFilter && (a.org_unit_id ?? '') !== orgFilter) return false
-      return matchesFilter(filter, a.title, a.id, a.description)
-    })
+  // Filtering happens server-side (tens of thousands of rows); the page
+  // only sorts the served page the way the registry reads: lifecycle first,
+  // then title.
+  const visibleArtifacts = [...artifacts]
     .sort((x, y) => (STATUS_ORDER[x.status ?? 'approved'] - STATUS_ORDER[y.status ?? 'approved']) || x.title.localeCompare(y.title))
+  const hasMore = totalKnown === null && artifacts.length >= limit
 
   const providerLabel = (p: string) =>
     p === 'builtin' ? (t('artifacts.provider_short_builtin') ?? 'In registry')
@@ -333,8 +367,17 @@ export default function Artifacts() {
         <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
           <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
             <div style={{ marginBottom: '0.5rem' }}>
-              <ListFilter value={filter} onChange={setFilter} placeholder={t('artifacts.filter_placeholder') ?? 'Filter artifacts…'} />
+              <ListFilter value={searchDraft} onChange={setSearchDraft} placeholder={t('artifacts.search_placeholder') ?? 'Search by name…'} />
             </div>
+            {tagFilter.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                {tagFilter.map((tag) => (
+                  <button key={tag} type="button" onClick={() => setTagFilter(tagFilter.filter((x) => x !== tag))} style={chipStyle(true)}>
+                    {tag} ✕
+                  </button>
+                ))}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem' }}>
               <button type="button" onClick={() => setStatusFilter('')} style={chipStyle(statusFilter === '')}>
                 {t('inbound.filter_all') ?? 'All'} · {artifacts.length}
@@ -345,6 +388,24 @@ export default function Artifacts() {
                 </button>
               ))}
             </div>
+            {tagOptions.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)' }}>
+                {tagOptions.map(({ tag, count }) => {
+                  const on = tagFilter.includes(tag)
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      title={t('artifacts.tag_filter_hint', { count: String(count) }) ?? `${count} artifacts`}
+                      onClick={() => setTagFilter(on ? tagFilter.filter((x) => x !== tag) : [...tagFilter, tag])}
+                      style={chipStyle(on)}
+                    >
+                      #{tag} · {count}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
             {/* Label-free selects: the first option doubles as the label
                 («Все источники» / «Все подразделения»), the full name is on
                 hover — the whole filter block stays one compact row. */}
@@ -379,10 +440,27 @@ export default function Artifacts() {
                   <span>{humanArtifactSize(a.size_bytes)}</span>
                   {(references[a.id] ?? []).length > 0 && <span title={(references[a.id] ?? []).join(', ')}>🔗 {(references[a.id] ?? []).length}</span>}
                 </div>
+                {(a.tags ?? []).length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                    {(a.tags ?? []).slice(0, 4).map((tag) => (
+                      <span key={tag} style={{ fontSize: '0.66rem', padding: '0.05rem 0.35rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.14))', color: 'var(--tm-text-3)' }}>#{tag}</span>
+                    ))}
+                    {(a.tags ?? []).length > 4 && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>+{(a.tags ?? []).length - 4}</span>}
+                  </div>
+                )}
               </div>
             ))}
-            {visibleArtifacts.length === 0 && !loading && artifacts.length > 0 && (
-              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0.25rem' }}>{t('artifacts.filter_empty') ?? 'Nothing matches the filters.'}</p>
+            {visibleArtifacts.length === 0 && !loading && (
+              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0.25rem' }}>
+                {artifacts.length === 0
+                  ? (t('artifacts.search_empty') ?? 'Nothing found. Try a shorter query or drop the filters.')
+                  : (t('artifacts.filter_empty') ?? 'Nothing matches the filters.')}
+              </p>
+            )}
+            {hasMore && (
+              <Button size="sm" kind="ghost" style={{ marginTop: '0.35rem' }} onClick={() => setLimit((n) => n + 200)}>
+                {t('artifacts.show_more') ?? 'Show more'}
+              </Button>
             )}
           </div>
         </div>
@@ -674,6 +752,36 @@ export default function Artifacts() {
                 ? (t('artifacts.saga_helper_edit') ?? 'Saga this work product belongs to; clear the field to detach — regulations usually carry none')
                 : (t('artifacts.saga_helper') ?? 'Optional: the saga this work product belongs to; company/department regulations do not need one')}
             />
+            <div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('artifacts.tags_label') ?? 'Tags'}</div>
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: '0.3rem', alignItems: 'center',
+                border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.35rem 0.5rem', minHeight: '2.2rem',
+              }}>
+                {(form.tags ?? []).map((tag) => (
+                  <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', padding: '0.1rem 0.3rem 0.1rem 0.45rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.15))', fontSize: '0.78rem' }}>
+                    #{tag}
+                    <button type="button" aria-label={`remove ${tag}`} onClick={() => setForm({ ...form, tags: (form.tags ?? []).filter((x) => x !== tag) })} style={{ background: 'none', border: 0, cursor: 'pointer', color: 'inherit', opacity: 0.7, display: 'inline-flex', padding: 0 }}>
+                      <Close size={12} />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  id="artifact-tags"
+                  placeholder={t('artifacts.tags_placeholder') ?? 'Add a tag and press Enter…'}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key !== 'Enter') return
+                    e.preventDefault()
+                    const raw = e.currentTarget.value.trim().toLowerCase()
+                    if (!raw) return
+                    if (!(form.tags ?? []).includes(raw)) setForm({ ...form, tags: [...(form.tags ?? []), raw] })
+                    e.currentTarget.value = ''
+                  }}
+                  style={{ flex: 1, minWidth: '9rem', border: 0, outline: 0, background: 'transparent', color: 'inherit', fontSize: '0.85rem', padding: '0.2rem 0' }}
+                />
+              </div>
+              <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>{t('artifacts.tags_hint') ?? 'Catalog labels: topic, product, team. The registry filters by them with AND.'}</p>
+            </div>
             {org.units.length > 0 && (
               <OrgUnitSelect
                 id="artifact-org"

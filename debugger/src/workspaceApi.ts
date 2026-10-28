@@ -766,6 +766,8 @@ export interface Artifact {
   id: string
   title: string
   description: string
+  /** catalog labels: filter tens of thousands by topic/product/team */
+  tags?: string[]
   provider: 'builtin' | 'url'
   external_ref?: string
   /** Builtin bodies are stripped from list responses; the editor fetches
@@ -1575,14 +1577,22 @@ export const workspaceApi = {
 
   // Reference artifacts (docs/artifact-registry.md phase 2): bodies load on
   // demand; lifecycle filters (status/kind/saga) narrow the listing.
-  listArtifacts: (params?: { status?: string; kind?: string; saga_id?: string }) => {
+  listArtifacts: (params?: { status?: string; kind?: string; saga_id?: string; q?: string; tag?: string; provider?: string; org?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams()
     if (params?.status) query.set('status', params.status)
     if (params?.kind) query.set('kind', params.kind)
     if (params?.saga_id) query.set('saga_id', params.saga_id)
+    if (params?.q) query.set('q', params.q)
+    if (params?.tag) query.set('tag', params.tag)
+    if (params?.provider) query.set('provider', params.provider)
+    if (params?.org) query.set('org_unit', params.org)
+    if (params?.limit) query.set('limit', String(params.limit))
+    if (params?.offset) query.set('offset', String(params.offset))
     const suffix = query.size > 0 ? `?${query.toString()}` : ''
     return request<{ artifacts: Artifact[]; count: number }>(`/v1/workspace/artifacts${suffix}`)
-  },
+  },  // Distinct catalog tags, most-used first — the filter dropdown's options.
+  artifactTags: () =>
+    request<{ tags: Array<{ tag: string; count: number }> }>('/v1/workspace/artifacts/tags'),
   getArtifact: (id: string) =>
     request<{ artifact: Artifact; offset: number; next_offset: number; truncated: boolean }>(`/v1/workspace/artifacts/${id}`),
   listArtifactVersions: (id: string) =>

@@ -21,6 +21,7 @@ import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge, type OrgUnitsState } from './orgUnits'
 import Markdown from './Markdown'
 import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions, type SectionProvenance } from './SkillManifestEditor'
+import { ArtifactRefsTab } from './ArtifactRefsTab'
 import { extractBundledFiles, scanBundledFiles, type BundledFile, type RiskFinding } from './skillFiles'
 import { highlightCode, languageForFile } from './syntax'
 
@@ -241,12 +242,9 @@ export default function Skills() {
     let cancelled = false
     void (async () => {
       try {
-        const [toolsData, serversData, artifactsData] = await Promise.all([
+        const [toolsData, serversData] = await Promise.all([
           workspaceApi.listMCPTools(),
           workspaceApi.listMCPServers(),
-          // Skills may reference approved artifacts only (docs/artifact-lifecycle.md
-          // §8), so the manifest picker never suggests drafts or reviews.
-          workspaceApi.listArtifacts({ status: 'approved' }).catch(() => ({ artifacts: [] as never[] })),
         ])
         if (cancelled) return
         const tools = new Set<string>()
@@ -257,7 +255,6 @@ export default function Skills() {
         setSuggestions({
           tools: [...tools].sort(),
           mcp: (serversData.servers ?? []).map((s) => s.name).sort(),
-          artifacts: (artifactsData.artifacts ?? []).map((a) => a.id).sort(),
         })
       } catch {
         // suggestions are optional — ignore load errors
@@ -1167,7 +1164,7 @@ export default function Skills() {
   )
 }
 
-type SkillFormTab = 'general' | 'instructions' | 'files' | 'contract' | 'runtime'
+type SkillFormTab = 'general' | 'instructions' | 'files' | 'artifacts' | 'contract' | 'runtime'
 
 /** Read-only reviewer for the files bundled with a skill (the import
  * pipeline inlines them into the "## Bundled files" markdown appendix):
@@ -1302,6 +1299,7 @@ function SkillFormFields({
     { key: 'general', label: t('skills.ftab_general') ?? 'General' },
     { key: 'instructions', label: t('skills.ftab_instructions') ?? 'Instructions' },
     { key: 'files', label: t('skills.ftab_files') ?? 'Bundled files' },
+    { key: 'artifacts', label: t('skills.ftab_artifacts') ?? 'Artifacts' },
     { key: 'contract', label: t('skills.ftab_contract') ?? 'Contract' },
     { key: 'runtime', label: t('skills.ftab_runtime') ?? 'Runtime & requirements' },
   ]
@@ -1375,6 +1373,12 @@ function SkillFormFields({
           <TextArea id="skill-markdown" labelText={t('skills.instructions') ?? 'Instructions (SKILL.md)'} rows={18} value={form.markdown} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { onTouch('markdown'); setForm({ ...form, markdown: e.target.value }) }} />
         )}
         {tab === 'files' && <BundledFilesTab markdown={form.markdown} />}
+        {tab === 'artifacts' && (
+          <ArtifactRefsTab
+            refs={(form.manifest?.artifacts ?? []) as Array<{ id: string; note?: string }>}
+            onChange={(artifacts) => { onTouch('artifacts'); setForm({ ...form, manifest: { ...form.manifest, artifacts } }) }}
+          />
+        )}
         {tab === 'contract' && (
           <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} suggestions={suggestions} provenance={provenance} onTouch={onTouch} variant="contract" />
         )}

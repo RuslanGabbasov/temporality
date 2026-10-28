@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -44,6 +45,10 @@ type Artifact struct {
 	OriginUser string `json:"origin_user,omitempty"` // creator (human path)
 	OriginRun  string `json:"origin_run,omitempty"`  // creating run (agent path)
 	SagaID     string `json:"saga_id,omitempty"`     // traceability, not access (visibility stays org-scoped)
+	// Tags are catalog labels (like real knowledge bases): free strings the
+	// registry filters by — topics, products, teams. Catalog metadata, not
+	// content: tagging never flips lifecycle state or bumps the version.
+	Tags []string `json:"tags,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -65,6 +70,20 @@ func (a *Artifact) normalize() {
 	if a.MimeType == "" {
 		a.MimeType = "text/markdown"
 	}
+	// Tags: trimmed, lowercased, deduped — filters compare the same way.
+	if len(a.Tags) > 0 {
+		tags := make([]string, 0, len(a.Tags))
+		seen := make(map[string]bool, len(a.Tags))
+		for _, tag := range a.Tags {
+			tag = strings.ToLower(strings.TrimSpace(tag))
+			if tag == "" || seen[tag] {
+				continue
+			}
+			seen[tag] = true
+			tags = append(tags, tag)
+		}
+		a.Tags = tags
+	}
 	if a.Provider != "builtin" {
 		a.Content = ""
 		a.ContentHash = ""
@@ -75,14 +94,14 @@ func (a *Artifact) normalize() {
 	a.SizeBytes = int64(len(a.Content))
 }
 
-const artifactColumns = `id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, org_unit_id, created_at, updated_at`
+const artifactColumns = `id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, org_unit_id, created_at, updated_at`
 
 func scanArtifact(row interface{ Scan(dest ...any) error }) (Artifact, error) {
 	var a Artifact
 	var orgUnitID, originUser, originRun, sagaID *string
 	if err := row.Scan(&a.ID, &a.Title, &a.Description, &a.Provider, &a.ExternalRef,
 		&a.Content, &a.ContentHash, &a.SizeBytes, &a.MimeType,
-		&a.Status, &a.Kind, &a.Version, &a.OriginType, &originUser, &originRun, &sagaID, &orgUnitID, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.Status, &a.Kind, &a.Version, &a.OriginType, &originUser, &originRun, &sagaID, &a.Tags, &orgUnitID, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return a, ErrNotFound
 		}
@@ -121,13 +140,13 @@ func (s *Store) CreateArtifact(ctx context.Context, artifact *Artifact) error {
 	artifact.CreatedAt = now
 	artifact.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_artifact (id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, org_unit_id, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+		`INSERT INTO workspace_artifact (id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, org_unit_id, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
 		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
 		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
 		artifact.Status, artifact.Kind, artifact.Version, artifact.OriginType,
 		nullString(artifact.OriginUser), nullString(artifact.OriginRun), nullString(artifact.SagaID),
-		nullString(artifact.OrgUnitID), artifact.CreatedAt, artifact.UpdatedAt)
+		textArray(artifact.Tags), nullString(artifact.OrgUnitID), artifact.CreatedAt, artifact.UpdatedAt)
 	return err
 }
 
@@ -185,10 +204,31 @@ func (s *Store) ListAllArtifacts(ctx context.Context) ([]Artifact, error) {
 // ArtifactFilter narrows a listing (docs/artifact-lifecycle.md §9): status and
 // kind are exact matches, saga_id traces a saga's work products. Zero values
 // mean "no constraint".
+// ArtifactTagCount is one filter-dropdown option: the tag and how many
+// visible artifacts carry it.
+type ArtifactTagCount struct {
+	Tag   string `json:"tag"`
+	Count int64  `json:"count"`
+}
+
 type ArtifactFilter struct {
 	Status string
 	Kind   string
 	SagaID string
+	// Provider and OrgUnitID narrow further; OrgUnitID is honored for admins
+	// only (the handler drops it otherwise) — everyone else keeps their
+	// visibility chain.
+	Provider  string
+	OrgUnitID string
+	// Query narrows by name: case-insensitive substring over title and
+	// description — the search box for registries of tens of thousands.
+	Query string
+	// Tags is AND semantics: an artifact must carry every listed tag.
+	Tags []string
+	// Limit/Offset page the list; Limit <= 0 means unbounded (callers that
+	// render everything).
+	Limit  int
+	Offset int
 }
 
 // ListArtifactsVisible honors the org-visibility rule shared by every
@@ -218,13 +258,67 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 		args = append(args, f.SagaID)
 		query += ` AND saga_id = $` + strconv.Itoa(len(args))
 	}
+	if f.Provider != "" {
+		args = append(args, f.Provider)
+		query += ` AND provider = $` + strconv.Itoa(len(args))
+	}
+	if f.OrgUnitID != "" {
+		args = append(args, f.OrgUnitID)
+		query += ` AND org_unit_id = $` + strconv.Itoa(len(args))
+	}
+	if f.Query != "" {
+		args = append(args, "%"+f.Query+"%")
+		n := strconv.Itoa(len(args))
+		query += ` AND (title ILIKE ` + n + ` OR description ILIKE ` + n + `)`
+	}
+	// AND semantics: every requested tag must be present (tags @> the set) —
+	// narrowing filters, the way knowledge bases drill down.
+	if len(f.Tags) > 0 {
+		args = append(args, textArray(f.Tags))
+		query += ` AND tags @> $` + strconv.Itoa(len(args))
+	}
 	query += ` ORDER BY title, id`
+	if f.Limit > 0 {
+		args = append(args, f.Limit)
+		query += ` LIMIT $` + strconv.Itoa(len(args))
+		if f.Offset > 0 {
+			args = append(args, f.Offset)
+			query += ` OFFSET $` + strconv.Itoa(len(args))
+		}
+	}
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanArtifacts(rows)
+}
+
+// ListArtifactTags returns the distinct catalog tags visible to the org chain
+// with how often each occurs — the filter dropdown's options, most-used
+// first (docs/artifact-registry.md: tagging like real knowledge bases).
+func (s *Store) ListArtifactTags(ctx context.Context, units []string) ([]ArtifactTagCount, error) {
+	query := `SELECT tag, count(*) AS uses FROM workspace_artifact, unnest(tags) AS tag WHERE 1=1`
+	args := []any{}
+	if units != nil {
+		args = append(args, units)
+		query += ` AND (org_unit_id IS NULL OR org_unit_id = ANY($` + strconv.Itoa(len(args)) + `))`
+	}
+	query += ` GROUP BY tag ORDER BY uses DESC, tag LIMIT 200`
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ArtifactTagCount
+	for rows.Next() {
+		var entry ArtifactTagCount
+		if err := rows.Scan(&entry.Tag, &entry.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
+	}
+	return result, rows.Err()
 }
 
 func scanArtifacts(rows pgx.Rows) ([]Artifact, error) {
@@ -294,11 +388,11 @@ func (s *Store) SaveArtifactEdit(ctx context.Context, artifact Artifact) error {
 	artifact.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_artifact
-		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, kind=$10, saga_id=$11, status='draft', updated_at=$12
+		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, kind=$10, saga_id=$11, tags=$12, status='draft', updated_at=$13
 		 WHERE id=$1 AND status IN ('draft','rejected')`,
 		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
 		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
-		artifact.Kind, nullString(artifact.SagaID), artifact.UpdatedAt)
+		artifact.Kind, nullString(artifact.SagaID), textArray(artifact.Tags), artifact.UpdatedAt)
 	if err != nil {
 		return err
 	}
