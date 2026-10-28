@@ -1086,16 +1086,18 @@ export class ApiError extends Error {
  *  failure mode for requests that never answer. */
 const REQUEST_TIMEOUT_MS = 60000
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   // Additive guard around the existing fetch: AbortController + setTimeout
   // covers both the response headers and the body read, and a caller-supplied
   // AbortSignal (e.g. listHumanRequests) keeps working through the relay.
+  // timeoutMs raises the deadline for long calls (sandbox builds).
+  const timeoutMs = (init as { timeoutMs?: number } | undefined)?.timeoutMs ?? REQUEST_TIMEOUT_MS
   const deadline = new AbortController()
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
     deadline.abort()
-  }, REQUEST_TIMEOUT_MS)
+  }, timeoutMs)
   const callerSignal = init?.signal
   const relayAbort = () => deadline.abort(callerSignal?.reason)
   if (callerSignal?.aborted) relayAbort()
@@ -1109,7 +1111,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return await response.json()
   } catch (e) {
     if (timedOut && !(e instanceof ApiError)) {
-      throw new ApiError(408, { error: `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s` })
+      throw new ApiError(408, { error: `request timed out after ${Math.round(timeoutMs / 1000)}s` })
     }
     throw e
   } finally {
@@ -1303,9 +1305,11 @@ export const workspaceApi = {
     request<{ dockerfile: string }>('/v1/workspace/sandbox-profiles/preview', { method: 'POST', body: JSON.stringify({ dockerfile_override: dockerfile }) }),
   // Pull an external image reference and pin its digest into the profile.
   pullSandboxProfile: (id: string, reference: string) =>
-    request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${encodeURIComponent(id)}/pull`, { method: 'POST', body: JSON.stringify({ reference }) }),
+    request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${encodeURIComponent(id)}/pull`, { method: 'POST', body: JSON.stringify({ reference }), timeoutMs: 15 * 60 * 1000 } as RequestInit & { timeoutMs: number }),
+  // Docker builds run for minutes: 15 minutes of client patience, and the
+  // server finishes the build even if the client gives up (detached context).
   buildSandboxProfile: (id: string) =>
-    request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${id}/build`, { method: 'POST' }),
+    request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${id}/build`, { method: 'POST', timeoutMs: 15 * 60 * 1000 } as RequestInit & { timeoutMs: number }),
   createSandboxProfile: (data: Partial<SandboxProfile> & { id: string; name: string }) =>
     request<SandboxProfile>('/v1/workspace/sandbox-profiles', { method: 'POST', body: JSON.stringify(data) }),
   updateSandboxProfile: (id: string, data: Partial<SandboxProfile>) =>

@@ -256,7 +256,9 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 			writeError(w, 409, fmt.Errorf("profile %q composes on a recipe; use build, not pull", id))
 			return
 		}
-		ref, err := builders.Pull(r.Context(), req.Reference)
+		pullCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Minute)
+		defer cancel()
+		ref, err := builders.Pull(pullCtx, req.Reference)
 		if err != nil {
 			writeError(w, 502, err)
 			return
@@ -313,7 +315,13 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 			}
 			custom = true
 		}
-		ref, err := builders.Build(r.Context(), def)
+		// The build outlives the HTTP request: clients time out in seconds
+		// while a cold docker build runs for minutes. WithoutCancel keeps it
+		// running to completion — the digest lands in the row and the next
+		// status poll reports the profile ready.
+		buildCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Minute)
+		defer cancel()
+		ref, err := builders.Build(buildCtx, def)
 		if err != nil {
 			writeError(w, 500, err)
 			return

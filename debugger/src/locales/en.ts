@@ -2329,6 +2329,7 @@ export const en: Record<string, string> = {
     'onboarding.sandbox_build': 'Build image',
     'onboarding.sandbox_building': 'Building…',
     'onboarding.sandbox_build_note': 'The build downloads a base image and may take a few minutes.',
+    'onboarding.sandbox_timeout': 'The build keeps running on the server — re-check the status in a minute.',
     'onboarding.sandbox_pinned_hint': 'The image is pinned by KERNEL_SANDBOX_IMAGE — feel free to skip this step.',
     'onboarding.agent_name_label': 'Agent name',
     'onboarding.agent_created': 'Agent created',

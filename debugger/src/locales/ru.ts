@@ -2329,6 +2329,7 @@ export const ru: Record<string, string> = {
     'onboarding.sandbox_build': 'Собрать образ',
     'onboarding.sandbox_building': 'Собираем…',
     'onboarding.sandbox_build_note': 'Сборка скачивает базовый образ и может занять несколько минут.',
+    'onboarding.sandbox_timeout': 'Сборка продолжается на сервере — проверьте статус через минуту.',
     'onboarding.sandbox_pinned_hint': 'Образ закреплён переменной KERNEL_SANDBOX_IMAGE — шаг можно пропустить.',
     'onboarding.agent_name_label': 'Имя агента',
     'onboarding.agent_created': 'Агент создан',

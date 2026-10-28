@@ -197,7 +197,19 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       setStatus(fresh)
       const list = await workspaceApi.listSandboxProfiles().catch(() => ({ profiles: [] as SandboxProfile[] }))
       setProfiles(list.profiles ?? [])
-    } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+    } catch (e) {
+      // A client timeout does not stop the build: the server finishes it in
+      // the background and the profile flips to «image ready» shortly.
+      const timeout = e instanceof Error && e.message.includes('timed out')
+      setError(timeout
+        ? (t('onboarding.sandbox_timeout') ?? 'The build keeps running on the server — re-check the status in a minute.')
+        : e instanceof Error ? e.message : 'Failed')
+      if (timeout) {
+        window.setTimeout(() => {
+          void workspaceApi.listSandboxProfiles().then((data) => setProfiles(data.profiles ?? [])).catch(() => {})
+        }, 60_000)
+      }
+    }
     finally { setBuildBusy('') }
   }
 
