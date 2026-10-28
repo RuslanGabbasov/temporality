@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -75,5 +76,33 @@ func TestMigrationDirectoriesOwnTheirChains(t *testing.T) {
 	assertHas("../migrations/quota", "000020_kernel_run_quota.up.sql")
 	if _, err := ListMigrations("../migrations/runtime"); err == nil {
 		t.Error("migrations/runtime must not exist: nothing applies it anymore")
+	}
+}
+
+// MigrateAll re-runs the whole set on every boot, so every up-migration must
+// be idempotent by construction. The one clause that keeps biting new
+// migrations is ALTER TABLE ADD COLUMN: plain ADD COLUMN dies with SQLSTATE
+// 42701 on the second boot (the 0013 regression), so the file set may never
+// carry it without IF NOT EXISTS.
+func TestMigrationUpFilesAddColumnsIdempotently(t *testing.T) {
+	entries, err := os.ReadDir("../migrations/workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".up.sql") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join("../migrations/workspace", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			upper := strings.ToUpper(line)
+			if strings.Contains(upper, "ADD COLUMN") && !strings.Contains(upper, "IF NOT EXISTS") {
+				t.Errorf("%s:%d: ADD COLUMN without IF NOT EXISTS — the set re-runs on every boot: %s",
+					entry.Name(), i+1, strings.TrimSpace(line))
+			}
+		}
 	}
 }

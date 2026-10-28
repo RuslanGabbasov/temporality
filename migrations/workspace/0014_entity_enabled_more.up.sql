@@ -2,6 +2,7 @@
 -- trigger/MCP pattern): a disabled team cannot be launched, a disabled
 -- sandbox profile cannot be resolved for new runs, a disabled secret stops
 -- resolving to values. Users keep workspace_user.active.
-ALTER TABLE public.workspace_team ADD COLUMN enabled boolean DEFAULT true NOT NULL;
-ALTER TABLE public.workspace_sandbox_profile ADD COLUMN enabled boolean DEFAULT true NOT NULL;
-ALTER TABLE public.workspace_secret ADD COLUMN enabled boolean DEFAULT true NOT NULL;
+-- Idempotent: the set re-runs on every boot (workspace/store.go MigrateAll).
+ALTER TABLE public.workspace_team ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE public.workspace_sandbox_profile ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE public.workspace_secret ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
