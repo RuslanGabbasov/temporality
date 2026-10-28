@@ -11,7 +11,11 @@ description: От нуля до первой задачи агента — ус�
 
 - Docker (Linux, macOS; Windows — через WSL2). Рекомендуется BuildKit.
 - ~4 ГБ свободной памяти для стека (PostgreSQL, Temporal, Journal, Kernel, UI).
-- Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный Ollama и т.д.). Anthropic подключается напрямую: base URL `https://api.anthropic.com/v1`, модель — например `claude-sonnet-4-5` (совместимый слой Anthropic поддерживает инструменты и стриминг).
+- Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный
+  Ollama и т.д.) — понадобится в мастере онбординга на третьем шаге.
+
+Больше ничего: модель, первый агент, песочница и модель-супервайзер
+настраиваются в мастере при первом запуске — `.env` для этого не нужен.
 
 ## Запуск
 
@@ -21,9 +25,6 @@ description: От нуля до первой задачи агента — ус�
 ```sh
 mkdir temporality && cd temporality
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
-curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
-cp .env.example .env
-# отредактируйте .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
 docker compose up -d
 ```
 
@@ -31,56 +32,57 @@ docker compose up -d
 [релизов](https://github.com/RuslanGabbasov/temporality/releases)). Для
 контролируемого обновления версию можно закрепить:
 `TEMPORALITY_VERSION=2026.2.113 docker compose up -d`. Обновление до новой
-версии: `docker compose pull && docker compose up -d` (или новая закреплённая
-версия) — миграции применяются ядром на старте.
+версии: `docker compose pull && docker compose up -d` — миграции применяются
+ядром на старте.
 
 Сборка из исходников (для разработки самого Temporality):
 
 ```sh
 git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
-cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
 
 Поднимаются: PostgreSQL, Journal (`:8080`), UI (`:3000`), Temporal (UI `:8233`),
 Agent Kernel (`:8090`), SearXNG (`127.0.0.1:8889`, метапоиск для агента) и
-headless-браузер Lightpanda. Пара `TEMPORALITY_MODEL_BASE_URL` + `_ID` —
-обязательный минимум; без них ядро не стартует.
-
-Примеры конфигурации провайдера:
-
-```dotenv
-# OpenAI
-TEMPORALITY_MODEL_BASE_URL=https://api.openai.com/v1
-TEMPORALITY_MODEL_ID=gpt-4.1-mini
-TEMPORALITY_MODEL_API_KEY=sk-...
-
-# Локальный Ollama
-TEMPORALITY_MODEL_BASE_URL=http://host.docker.internal:11434/v1
-TEMPORALITY_MODEL_ID=llama3.2
-TEMPORALITY_API_KEY=
-```
+headless-браузер Lightpanda.
 
 Остановить стек, сохранив данные: `make stack-stop`.
 
 ## Онбординг
 
-Откройте `http://localhost:3000`. При первом входе мастер онбординга проведёт
-через обязательные шаги и спрячет навигацию, пока они не пройдены:
+Откройте `http://localhost:3000` — мастер проведёт через настройку и спрячет
+навигацию, пока она не пройдена:
 
 1. **Первый проект** — рабочая область для задач агента.
-2. **Администратор** — ваш пользователь.
-3. **Провайдер модели** — base URL, ключ (сохраняется в зашифрованные секреты), автополучение списка моделей.
-4. **Агент** — из готового шаблона или по описанию.
-5. **Сборка песочницы** — образ, в котором будут выполняться команды агента (нужен доступ к Docker daemon).
+2. **Администратор** — ваш пользователь (после шага анонимный доступ закроется).
+3. **Провайдер моделей** — base URL и ключ: кнопка проверит ключ и подтянет
+   каталог моделей автоматически. Провайдер и ключ хранятся в базе; ключ
+   шифруется — если `KERNEL_SECRET_MASTER_KEY` не задан, ключ шифрования
+   генерируется при первом старте и сохраняется рядом. Для продакшена задайте
+   эту переменную в env до первого запуска, чтобы секреты пережили перенос
+   базы.
+4. **Песочница** — выберите готовый профиль окружения (Node, Python, Browser
+   E2E) и соберите его образ в один клик (нужен доступ к Docker daemon).
+   Можно пропустить и собрать позже.
+5. **Первый агент** — из шаблона: контракт, права и роль уже настроены
+   (Coder, Reviewer, Researcher, QA, DevOps). Останется назвать и выбрать
+   модель.
+6. **Модель-супервайзер** — модель, которая наблюдает за запусками и судит
+   эволюцию агентов. По умолчанию — та же, что у агента; меняется потом в
+   настройках.
 
 Два случая, когда мастер ведёт себя иначе:
 
 - задан `KERNEL_AUTH_TOKENS` — аутентификация включена вашим же env: мастер
   не стартует анонимно, войдите одним из этих токенов (режим «API-токен»)
   или закомментируйте переменную для анонимного онбординга;
-- задан `KERNEL_SANDBOX_IMAGE` — образ песочницы закреплён вашим env:
-  шаг сборки предлагается пропустить (пересобрать — `sandbox/build.sh`).
+- задан `KERNEL_SANDBOX_IMAGE` — образ песочницы закреплён вашим env: шаг
+  сборки предлагается пропустить.
+
+Модель провайдера можно добавить и через env
+(`TEMPORALITY_MODEL_BASE_URL` / `_ID` / `_API_KEY`) — это legacy-fallback
+«модели по умолчанию» для ранов без явной модели; мастер онбординга —
+основной путь.
 
 ## Первая задача
 

@@ -57,9 +57,14 @@ Prebuilt images from GHCR — no repository clone, no local build:
 ```sh
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
-cp .env.example .env   # configure TEMPORALITY_MODEL_* and optionally the sandbox
-TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+cp .env.example .env   # optional: production settings only
+docker compose up -d
 ```
+
+The model and everything else are configured in the onboarding wizard on
+first open of `http://localhost:3000` — provider, first-agent template,
+sandbox profile and the supervisor model. `.env` is only for production
+tunables (e.g. `KERNEL_SECRET_MASTER_KEY`), not required to start.
 
 `TEMPORALITY_VERSION` is the image version (see
 [releases](https://github.com/RuslanGabbasov/temporality/releases)); `latest`

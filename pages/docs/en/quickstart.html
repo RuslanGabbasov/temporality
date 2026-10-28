@@ -47,14 +47,14 @@
 <h2 id="requirements"><a class="anchor" href="#requirements" aria-label="Section link">#</a>Requirements</h2><ul>
 <li>Docker (Linux, macOS; Windows via WSL2). BuildKit recommended.</li>
 <li>~4 GB of free memory for the stack (PostgreSQL, Temporal, Journal, Kernel, UI).</li>
-<li>A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama, etc.). Anthropic connects directly: base URL <code>https://api.anthropic.com/v1</code>, model — e.g. <code>claude-sonnet-4-5</code> (Anthropic&#39;s compatibility layer supports tools and streaming).</li>
+<li>A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama,
+etc.) — the onboarding wizard asks for it on step three.</li>
 </ul>
+<p>That is all: the model, the first agent, the sandbox and the supervisor model
+are configured in the first-run wizard — no <code>.env</code> needed for that.</p>
 <h2 id="run-it"><a class="anchor" href="#run-it" aria-label="Section link">#</a>Run it</h2><p>Prebuilt images from GHCR — the recommended path, nothing to clone or build:</p>
 <pre><code class="language-sh">mkdir temporality &amp;&amp; cd temporality
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
-curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
-cp .env.example .env
-# edit .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
 docker compose up -d
 </code></pre>
 <p>The latest published release comes up by default (images from the
@@ -65,57 +65,59 @@ release: <code>docker compose pull &amp;&amp; docker compose up -d</code> (or se
 version) — the kernel migrates on start.</p>
 <p>Building from source (for developing Temporality itself):</p>
 <pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
-cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 </code></pre>
 <p>This starts PostgreSQL, the Journal (<code>:8080</code>), the UI (<code>:3000</code>), Temporal (UI <code>:8233</code>),
 the Agent Kernel (<code>:8090</code>), SearXNG (<code>127.0.0.1:8889</code>, meta-search for the agent)
-and a headless browser. <code>TEMPORALITY_MODEL_BASE_URL</code> + <code>_ID</code> are the mandatory
-minimum; the kernel refuses to start without them.</p>
-<p>Provider configuration examples:</p>
-<pre><code class="language-dotenv"># OpenAI
-TEMPORALITY_MODEL_BASE_URL=https://api.openai.com/v1
-TEMPORALITY_MODEL_ID=gpt-4.1-mini
-TEMPORALITY_MODEL_API_KEY=sk-...
-
-# Local Ollama
-TEMPORALITY_MODEL_BASE_URL=http://host.docker.internal:11434/v1
-TEMPORALITY_MODEL_ID=llama3.2
-TEMPORALITY_API_KEY=
-</code></pre>
+and a headless browser.</p>
 <p>Stop the stack keeping the data: <code>make stack-stop</code>.</p>
-<h2 id="onboarding"><a class="anchor" href="#onboarding" aria-label="Section link">#</a>Onboarding</h2><p>Open <code>http://localhost:3000</code>. On the first visit an onboarding wizard walks you
-through the required steps and hides navigation until they are done:</p>
+<h2 id="onboarding"><a class="anchor" href="#onboarding" aria-label="Section link">#</a>Onboarding</h2><p>Open <code>http://localhost:3000</code> — the wizard walks you through the setup and
+hides navigation until it is done:</p>
 <ol>
-<li><strong>First project</strong> — a workspace for the agent&#39;s tasks.</li>
-<li><strong>Administrator</strong> — your user.</li>
-<li><strong>Model provider</strong> — base URL, key (stored in encrypted secrets), automatic model listing.</li>
-<li><strong>Agent</strong> — from a template or from a plain-language description.</li>
-<li><strong>Sandbox build</strong> — the image the agent&#39;s commands will run in (requires Docker daemon access).</li>
+<li><strong>First project</strong> — the workspace for agent tasks.</li>
+<li><strong>Administrator</strong> — your user (anonymous access closes after this step).</li>
+<li><strong>Model provider</strong> — base URL and key: one button validates the key and
+fetches the model catalog automatically. The provider and the key live in
+the database; the key is encrypted — with <code>KERNEL_SECRET_MASTER_KEY</code> unset,
+an encryption key is generated on first start and stored next to it. For
+production set that variable in env before the first start, so secrets
+survive moving the database.</li>
+<li><strong>Sandbox</strong> — pick a ready-made environment profile (Node, Python, Browser
+E2E) and build its image in one click (needs access to the Docker daemon).
+Skippable — build it later.</li>
+<li><strong>First agent</strong> — from a template: contract, permissions and role are
+already set up (Coder, Reviewer, Researcher, QA, DevOps). Name it and pick
+a model.</li>
+<li><strong>Supervisor model</strong> — the model that watches runs and judges agent
+evolution. Defaults to the agent&#39;s model; change it later in Settings.</li>
 </ol>
 <p>Two cases where the wizard behaves differently:</p>
 <ul>
-<li><code>KERNEL_AUTH_TOKENS</code> is set — authentication was enabled by your own env:
-the wizard does not start anonymously. Sign in with one of those tokens
-(API-token mode) or comment the variable out for the anonymous flow;</li>
+<li><code>KERNEL_AUTH_TOKENS</code> is set — authentication is enabled by your env: the
+wizard does not run anonymously, sign in with one of those tokens
+(&quot;API-token&quot; mode) or comment the variable out for anonymous onboarding;</li>
 <li><code>KERNEL_SANDBOX_IMAGE</code> is set — the sandbox image is pinned by your env:
-the build step offers Skip (rebuild via <code>sandbox/build.sh</code>).</li>
+the build step offers a skip.</li>
 </ul>
-<h2 id="your-first-task"><a class="anchor" href="#your-first-task" aria-label="Section link">#</a>Your first task</h2><p>Open <strong>Workspace</strong> — the agent chat — and write a task. The agent responds with
-streaming output; along the way it may:</p>
+<p>The provider model can also come from env
+(<code>TEMPORALITY_MODEL_BASE_URL</code> / <code>_ID</code> / <code>_API_KEY</code>) — a legacy fallback
+&quot;default model&quot; for runs without an explicit model; the onboarding wizard is
+the main path.</p>
+<h2 id="the-first-task"><a class="anchor" href="#the-first-task" aria-label="Section link">#</a>The first task</h2><p>Open <strong>Workspace</strong> — the agent chat — and write a task. The agent answers
+with streaming; along the way it can:</p>
 <ul>
-<li>run commands in the sandbox (<code>/workspace</code> of the project is persistent storage),</li>
+<li>run commands in the sandbox (<code>/workspace</code> of the project — persistent storage),</li>
 <li>delegate subtasks to other agents (<code>plan</code>/<code>delegate</code>),</li>
-<li>ask you a question through an <strong>approval</strong> card (in the chat, mirrored in &quot;Runs&quot;),</li>
+<li>ask you a question via an <strong>approval</strong> (a card in the chat, mirrored in Runs),</li>
 <li>record a useful observation into the project&#39;s knowledge.</li>
 </ul>
-<p>When it finishes, look at <strong>Runs</strong> (the step-by-step trace) and <strong>Knowledge</strong>
+<p>When it finishes, check <strong>Runs</strong> (the step-by-step trace) and <strong>Knowledge</strong>
 (what the agent learned from the task).</p>
 <h2 id="what-to-set-up-next"><a class="anchor" href="#what-to-set-up-next" aria-label="Section link">#</a>What to set up next</h2><ul>
-<li><strong>Channels</strong> — let the agent receive tasks from Matrix/Telegram/Slack and ask questions where you live: <a href="inbound.html">Inbound and channels</a>.</li>
+<li><strong>Channels</strong> — let the agent receive tasks from Matrix/Telegram/Slack and ask questions where you are: <a href="inbound.html">Inbound and channels</a>.</li>
 <li><strong>Triggers</strong> — tasks on a schedule or on events: <a href="triggers.html">Triggers</a>.</li>
 <li><strong>Skills</strong> — capture a repeating procedure: <a href="skills.html">Skills</a>.</li>
-<li><strong>Users and access</strong> — your team and RBAC: <a href="administration.html">Administration</a>.</li>
+<li><strong>Users and access</strong> — the team and RBAC: <a href="administration.html">Administration</a>.</li>
 </ul>
 
 

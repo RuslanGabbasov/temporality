@@ -57,9 +57,14 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 ```sh
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
-cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опционально песочницу
-TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+cp .env.example .env   # необязательно: для прод-настроек (см. ниже)
+docker compose up -d
 ```
+
+Модель и всё остальное настраиваются в мастере онбординга при первом
+открытии `http://localhost:3000` — провайдер, шаблон первого агента,
+профиль песочницы и модель-супервайзер. `.env` нужен только для
+прод-тонкостей (например, `KERNEL_SECRET_MASTER_KEY`), не для старта.
 
 `TEMPORALITY_VERSION` — версия образов (см. [релизы](https://github.com/RuslanGabbasov/temporality/releases));
 Для стенда фиксируйте версию явно (дефолт compose-файла отстаёт от релизов).
@@ -146,6 +151,10 @@ activity round-trip на каждое событие, батч-доставка 
 ## Настройка модели
 
 Ядро вызывает провайдера через OpenAI-совместимый Chat Completions API.
+
+Модель обычно настраивается в мастере онбординга (провайдер хранится в базе);
+эти переменные — legacy-fallback: модель по умолчанию для ранов без явной
+модели. Настройку супервайзера мастер тоже делает.
 
 | Переменная | Описание | По умолчанию |
 |---|---|---|
