@@ -62,6 +62,11 @@ type ReviewDecision struct {
 	DecidedBy string    `json:"decided_by,omitempty"` // concrete principal behind a group entry
 }
 
+// artifactRequestedByKey is the decision key used when the round's requester
+// decides their own review without being listed among the model-authored
+// reviewer entries.
+const artifactRequestedByKey = "requested_by"
+
 const artifactReviewColumns = `id, artifact_id, artifact_version, reviewers, mode, status, note, requested_by, requested_at, decisions, resolved_by, resolved_at, reminded_at, escalated_at`
 
 func scanArtifactReview(row interface{ Scan(dest ...any) error }) (ArtifactReview, error) {
@@ -232,9 +237,6 @@ func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, rev
 // decision then lands under each of them. decidedBy is the concrete
 // principal, kept on every decision and in resolved_by.
 func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (ArtifactReview, Artifact, error) {
-	if len(entries) == 0 {
-		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: %q is not a reviewer of this round", ErrConflict, decidedBy)
-	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return ArtifactReview{}, Artifact{}, err
@@ -247,6 +249,18 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entr
 	}
 	if review.Status != "open" {
 		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: review is already %s", ErrConflict, review.Status)
+	}
+	// The requester can always decide their own round: the reviewer list was
+	// authored by a model at submit time, and an incomplete list must not
+	// hold the requester's work hostage. The decision is recorded under a
+	// dedicated key, not under any reviewer entry — mode=all still counts
+	// the listed reviewers only. The kernel's own submits have no human
+	// requester to fall back to.
+	if len(entries) == 0 && review.RequestedBy != "" && review.RequestedBy != "kernel-internal" && review.RequestedBy == decidedBy {
+		entries = []string{artifactRequestedByKey}
+	}
+	if len(entries) == 0 {
+		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: %q is not a reviewer of this round", ErrConflict, decidedBy)
 	}
 	// Every entry must be listed on the round — the handler matched the
 	// principal against the round's reviewer entries, not free-form strings.
@@ -377,12 +391,14 @@ func (s *Store) GetArtifactReview(ctx context.Context, reviewID string) (Artifac
 // user:<id> and bare ids/names match the principal directly, role:/org:
 // match the principal's workspace profile, project_owner degrades to the
 // installation admin (docs/org-structure.md §14 — projects carry no owner
-// yet). An account without an active workspace row satisfies nothing:
-// deactivated reviewers must not decide.
+// yet). Comparisons are case-insensitive: reviewer entries are often typed
+// by a model, and "Ivanov" vs "ivanov" must not void a review. An account
+// without an active workspace row satisfies nothing: deactivated reviewers
+// must not decide.
 func MatchArtifactReviewers(principal string, users []User, entries []string) []string {
 	var self *User
 	for i := range users {
-		if users[i].ID == principal || users[i].Name == principal {
+		if strings.EqualFold(users[i].ID, principal) || strings.EqualFold(users[i].Name, principal) {
 			self = &users[i]
 			break
 		}
@@ -398,16 +414,16 @@ func MatchArtifactReviewers(principal string, users []User, entries []string) []
 				matched = append(matched, entry)
 			}
 		case strings.HasPrefix(entry, "role:"):
-			if self.Role == strings.TrimSpace(strings.TrimPrefix(entry, "role:")) {
+			if strings.EqualFold(self.Role, strings.TrimSpace(strings.TrimPrefix(entry, "role:"))) {
 				matched = append(matched, entry)
 			}
 		case strings.HasPrefix(entry, "org:"):
-			if self.OrgUnitID == strings.TrimSpace(strings.TrimPrefix(entry, "org:")) {
+			if strings.EqualFold(self.OrgUnitID, strings.TrimSpace(strings.TrimPrefix(entry, "org:"))) {
 				matched = append(matched, entry)
 			}
 		default:
 			name := strings.TrimSpace(strings.TrimPrefix(entry, "user:"))
-			if name != "" && (name == self.ID || name == self.Name) {
+			if name != "" && (strings.EqualFold(name, self.ID) || strings.EqualFold(name, self.Name)) {
 				matched = append(matched, entry)
 			}
 		}
@@ -415,8 +431,6 @@ func MatchArtifactReviewers(principal string, users []User, entries []string) []
 	return matched
 }
 
-// CountArtifactSubmits returns how many review rounds one run opened in the
-// window (docs/artifact-lifecycle.md §9 quota for agent submits).
 func (s *Store) CountArtifactSubmits(ctx context.Context, runID string, since time.Time) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx,

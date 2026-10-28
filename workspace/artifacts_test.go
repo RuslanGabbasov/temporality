@@ -112,6 +112,18 @@ func TestMatchArtifactReviewers(t *testing.T) {
 	// Deactivated accounts never decide.
 	require.Empty(t, MatchArtifactReviewers("ghost", users, []string{"user:ghost", "role:writer"}))
 	require.Empty(t, MatchArtifactReviewers("writer", []User{{ID: "writer"}}, entries))
+
+	// Case-insensitive matching: reviewer entries are model-typed, and
+	// "Ivanov" vs "ivanov" must not void a review.
+	caseUsers := []User{
+		{ID: "user-2d08", Name: "Ivan Petrov", Role: "Writer", OrgUnitID: "Core", Active: true},
+	}
+	caseEntries := []string{"user:USER-2D08", "ivan petrov", "role:WRITER", "org:CORE"}
+	matched = MatchArtifactReviewers("USER-2D08", caseUsers, caseEntries)
+	require.Contains(t, matched, "user:USER-2D08")
+	require.Contains(t, matched, "ivan petrov")
+	require.Contains(t, matched, "role:WRITER")
+	require.Contains(t, matched, "org:CORE")
 }
 
 // CheckArtifactRefsApproved names the offending manifest references: drafts
