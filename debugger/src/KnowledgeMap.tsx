@@ -92,6 +92,17 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: 'circle' | 'diamond' | 
   }
 }
 
+/** Corpus cache keyed by project: the map unmounts on every dossier
+ *  open/close and a fresh mount would replay the whole batched fetch — a
+ *  cache hit paints the full map instantly and spends zero requests. TTL
+ *  bounds staleness: past it the next mount streams again. The layout worker
+ *  keeps its own cache (useSemanticLayout), so a corpus hit skips the heavy
+ *  pipeline too. */
+type CorpusEntry = { at: number; items: Array<import('./semanticMap').MapItem>; total: number | null; knowledgeTotal: number | null; states: Record<string, number> | null }
+const corpusCache = new Map<string, CorpusEntry>()
+const CORPUS_TTL_MS = 5 * 60 * 1000
+function cacheKey(project: string): string { return project || '*' }
+
 export default function KnowledgeMap({ project, onOpenDossier }: {
   project: string
   onOpenDossier: (id: string) => void
@@ -140,34 +151,57 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   // vectors do, the semantic layer never produced embeddings (model not
   // loaded) and the empty state must say that instead of a bare «empty».
   const [knowledgeTotal, setKnowledgeTotal] = useState<number | null>(null)
+  // Stable per-state totals from the server (the full corpus, not the pages
+  // landed so far): the filter chips must not «grow» with each batch.
+  const [states, setStates] = useState<Record<string, number> | null>(null)
   const [projectErrors, setProjectErrors] = useState<string[]>([])
   const projectErrorsRef = useRef<string[]>([])
   const loadGen = useRef(0)
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { ignoreCache?: boolean }) => {
     const gen = ++loadGen.current
     const stale = () => gen !== loadGen.current
     // Stream diagnostics go to the console on purpose: «карта не грузится»
     // reports need the client-side trace to be diagnosable remotely.
     console.info('[knowledge-map] load start, project:', JSON.stringify(project), 'gen:', gen)
+    // Fresh cache → instant paint, no network. Retry passes ignoreCache:
+    // a retry that answers from the cache would be no retry at all.
+    if (!opts?.ignoreCache) {
+      const cached = corpusCache.get(cacheKey(project))
+      if (cached && Date.now() - cached.at < CORPUS_TTL_MS) {
+        setItems([...cached.items])
+        setKnowledgeTotal(cached.knowledgeTotal)
+        setStates(cached.states)
+        setLoading(false)
+        setProgress(null)
+        console.info('[knowledge-map] cache hit:', cached.items.length, 'items, age', Math.round((Date.now() - cached.at) / 1000), 's')
+        return
+      }
+    } else {
+      corpusCache.delete(cacheKey(project))
+    }
     setLoading(true); setError('')
     setProgress({ loaded: 0, total: null })
     projectErrorsRef.current = []
     try {
       const accumulated: Array<import('./semanticMap').MapItem> = []
       const seen = new Set<string>()
-      const BATCH = 400
+      const BATCH = 100
       let total: number | null = null
       let knowledgeTotal: number | null = null
+      let states: Record<string, number> | null = null
       // Guards against a journal older than offset-paging (it would replay
       // the same first page forever): a hard page cap and a stall breaker —
-      // two consecutive pages with zero fresh items stop the stream.
-      const maxPages = 20
+      // two consecutive pages with zero fresh items stop the stream. The cap
+      // is sized for 100-item pages (4k items) — the corpus outgrowing that
+      // renders progressively but stops streaming rather than spin forever.
+      const maxPages = 40
       let stalled = 0
       for (let offset = 0, pageIdx = 0; !stale() && pageIdx < maxPages && (total === null || offset < total); offset += BATCH, pageIdx++) {
         const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: BATCH, offset })
         if (stale()) return
         if (typeof page.total === 'number') total = page.total
         if (typeof page.knowledge_total === 'number') knowledgeTotal = page.knowledge_total
+        if (page.states) states = page.states
         for (const pe of page.project_errors ?? []) if (!projectErrorsRef.current.includes(pe)) projectErrorsRef.current.push(pe)
         const before = accumulated.length
         const fresh = (page.items ?? []).filter((item) => !seen.has(item.id))
@@ -176,11 +210,16 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         setItems([...accumulated])
         setProgress({ loaded: accumulated.length, total: total ?? accumulated.length })
         setKnowledgeTotal(knowledgeTotal)
+        if (states) setStates(states)
         setProjectErrors([])
         console.info('[knowledge-map] batch ok: offset', offset, 'page', (page.items ?? []).length, 'accumulated', accumulated.length, 'total', total)
         if ((page.items ?? []).length === 0) break
         if (accumulated.length === before && ++stalled >= 2) break
       }
+      // Cache the corpus: the map unmounts on every dossier open/close and
+      // the fetch would otherwise replay on each return — a fresh cache
+      // paints the full map instantly and spends zero requests.
+      corpusCache.set(cacheKey(project), { at: Date.now(), items: accumulated, total, knowledgeTotal, states })
     } catch (e) {
       // A superseded gen must stay quiet — the newer load owns the UI state.
       if (!stale()) {
@@ -640,7 +679,18 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     }
   }, [points, draw, onOpenDossier, viewScale, pickPoint])
 
-  const states = useMemo(() => [...new Set((items ?? []).map((item) => item.state))].sort(), [items])
+  // Filter chips read the server's whole-corpus state counts — stable from
+  // the first batch instead of growing as later pages land. An older journal
+  // without `states` falls back to counting the pages landed so far.
+  const statesList = useMemo(() => {
+    if (states) return Object.keys(states).filter((s) => (states as Record<string, number>)[s] > 0).sort()
+    return [...new Set((items ?? []).map((item) => item.state))].sort()
+  }, [states, items])
+  const countOf = useCallback((state: string) => {
+    if (states) return (states as Record<string, number>)[state] ?? 0
+    return (items ?? []).filter((item) => item.state === state).length
+  }, [states, items])
+  const allCount = states ? statesList.reduce((sum, s) => sum + (states as Record<string, number>)[s], 0) : (items ?? []).length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', height: '100%' }}>
@@ -651,15 +701,15 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
           value={query} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
         />
         <Button size="sm" kind={stateFilter === '' ? 'primary' : 'ghost'} onClick={() => setStateFilter('')}>
-          {t('knowledge.map_all') ?? 'Все'} ({(items ?? []).length})
+          {t('knowledge.map_all') ?? 'Все'} ({allCount})
         </Button>
-        {states.map((state) => (
+        {statesList.map((state) => (
           <Button key={state} size="sm" kind={stateFilter === state ? 'primary' : 'ghost'} onClick={() => setStateFilter(stateFilter === state ? '' : state)}>
-            {stateLabel(state, t)} ({(items ?? []).filter((item) => item.state === state).length})
+            {stateLabel(state, t)} ({countOf(state)})
           </Button>
         ))}
         <span style={{ flex: 1 }} />
-        <Button size="sm" kind="ghost" onClick={() => void load()} disabled={loading}>↻</Button>
+        <Button size="sm" kind="ghost" onClick={() => void load({ ignoreCache: true })} disabled={loading}>↻</Button>
       </div>
 
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast />}
@@ -674,7 +724,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
             <div style={{ maxWidth: '28rem', textAlign: 'center', background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)', borderRadius: '10px', padding: '1rem 1.25rem' }}>
               <p style={{ color: 'var(--tm-danger, #da1e28)', fontWeight: 600, margin: 0 }}>{t('action.error') ?? 'Error'}</p>
               <p style={{ color: 'var(--tm-text-2)', fontSize: '0.8rem', margin: '0.4rem 0 0.75rem', wordBreak: 'break-word' }}>{error}</p>
-              <Button size="sm" onClick={() => { setError(''); void load() }}>{t('action.retry') ?? 'Retry'}</Button>
+              <Button size="sm" onClick={() => { setError(''); void load({ ignoreCache: true }) }}>{t('action.retry') ?? 'Retry'}</Button>
             </div>
           </div>
         )}

@@ -289,6 +289,13 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	// unreachable behind a corporate egress) and the UI can say so instead of
 	// a bare «empty».
 	knowledgeTotal := len(pending)
+	// State counts over the FULL embedded corpus (before the page slice): the
+	// map's filter chips must show stable totals from the first batch instead
+	// of numbers that keep growing as later pages land.
+	states := map[string]int{}
+	for _, item := range items {
+		states[item.State]++
+	}
 	if offset < len(items) {
 		end := offset + limit
 		if end > len(items) {
@@ -298,7 +305,7 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	} else {
 		items = nil
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total, "knowledge_total": knowledgeTotal, "project_errors": projectErrors})
+	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total, "knowledge_total": knowledgeTotal, "states": states, "project_errors": projectErrors})
 }
 
 // neighborStore is the vector-listing capability behind the neighbors lookup.
