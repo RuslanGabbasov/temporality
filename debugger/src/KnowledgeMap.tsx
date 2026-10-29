@@ -151,6 +151,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const morphRef = useRef<{ start: number; duration: number; from: Array<{ x: number; y: number } | null> }>({ start: 0, duration: 0, from: [] })
   const camRef = useRef<{ start: number; duration: number; from: { x: number; y: number; k: number }; to: { x: number; y: number; k: number } } | null>(null)
   const treeFadeRef = useRef<{ start: number; fromL1: ClusterTreeNode[]; fromL2: ClusterTreeNode[] } | null>(null)
+  // The moment the last pending birth reaches full ink — bounds the trail:
+  // past it the draw pass skips warmth computation entirely.
+  const maxBirthRef = useRef(0)
   const pointIndexById = useMemo(() => new Map(points.map((p, i) => [p.id, i] as const)), [points])
 
   // Streaming load: batches of 400 arrive freshest-first and land on the map
@@ -283,6 +286,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     const budget = prevById.size ? 2500 : 5000
     const step = newborns.length > 1 ? Math.min(16.7, budget / newborns.length) : 0
     newborns.forEach((node, i) => appearedAtRef.current.set(node.id, now + i * step))
+    if (newborns.length) maxBirthRef.current = now + (newborns.length - 1) * step + 750
     // Position morph: existing dots tween from where they were drawn to their
     // new layout positions; brand-new dots have no from — they only fade in.
     morphRef.current = {
@@ -521,10 +525,42 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // out as sub-clusters fade in) — during a relayout the previous tree
     // cross-fades into the new one so bubbles breathe instead of snapping. ──
     const treeFade = treeFadeRef.current
-    const treeT = treeFade ? Math.min(1, (performance.now() - treeFade.start) / 500) : 1
+    const treeT = treeFade ? Math.min(1, (now - treeFade.start) / 500) : 1
     if (treeT < 1) animating = true
     else treeFadeRef.current = null
     const treeE = easeOutCubic(treeT)
+    // Birth maturity of one dot (0 → не родилась, ramp → 1). Shared by edges,
+    // dots and the heat map below, so everything weaves in with one trail.
+    const maturityOf = (id: string): number => {
+      const born = appearedAtRef.current.get(id)
+      if (born === undefined) return 1
+      const age = now - born
+      if (age < 0) return 0
+      if (age < 750) return 0.1 + 0.9 * (1 - Math.pow(1 - age / 750, 2))
+      return 1
+    }
+    // Region warmth: the average maturity of its members. While the trail is
+    // running, a bubble's fill and caption warm up together with the dots it
+    // owns instead of sitting there fully painted from frame one. Computed
+    // only while births are pending (maxBirthRef bounds the whole trail).
+    let warmthMap: Map<ClusterTreeNode, number> | null = null
+    if (now < maxBirthRef.current) {
+      warmthMap = new Map()
+      const sums = new Map<ClusterTreeNode, number>()
+      const counts = new Map<ClusterTreeNode, number>()
+      for (let i = 0; i < points.length; i++) {
+        const region = level1Ref.current[points[i].cluster]
+        if (!region) continue
+        sums.set(region, (sums.get(region) ?? 0) + maturityOf(points[i].id))
+        counts.set(region, (counts.get(region) ?? 0) + 1)
+      }
+      for (const [region, sum] of sums) {
+        const warmth = sum / (counts.get(region) ?? 1)
+        warmthMap.set(region, warmth)
+        for (const child of region.children ?? []) warmthMap.set(child, warmth)
+      }
+    }
+    const warmthOf = (node: ClusterTreeNode): number => (warmthMap ? warmthMap.get(node) ?? 1 : 1)
     const drawTreePair = (drawTree: (nodes: ClusterTreeNode[], alpha: number) => void, next: ClusterTreeNode[], prev: ClusterTreeNode[] | undefined, baseAlpha: number) => {
       if (treeFade && treeT < 1 && prev) {
         if ((1 - treeE) * baseAlpha > 0.02) drawTree(prev, (1 - treeE) * baseAlpha)
@@ -534,14 +570,14 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       }
     }
     if (scale < FAR) {
-      drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleFill(region, a) }, level1Ref.current, treeFade?.fromL1, 1)
+      drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleFill(region, a * warmthOf(region)) }, level1Ref.current, treeFade?.fromL1, 1)
     } else if (scale < NEAR) {
       const regionAlpha = Math.max(0, Math.min(1, (FAR + 0.65 - scale) / 0.5))
       if (regionAlpha > 0.02) {
-        drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleFill(region, a * 0.7) }, level1Ref.current, treeFade?.fromL1, regionAlpha)
+        drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleFill(region, a * 0.7 * warmthOf(region)) }, level1Ref.current, treeFade?.fromL1, regionAlpha)
       }
       const subAlpha = Math.max(0, Math.min(1, (scale - FAR * 0.8) / 0.3))
-      drawTreePair((nodes, a) => { for (const child of nodes) drawBubbleFill(child, a) }, level2Ref.current, treeFade?.fromL2, subAlpha)
+      drawTreePair((nodes, a) => { for (const child of nodes) drawBubbleFill(child, a * warmthOf(child)) }, level2Ref.current, treeFade?.fromL2, subAlpha)
     }
 
     // ── dots: the color IS the lifecycle state (same palette as the
@@ -550,14 +586,6 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // Edges respect the birth trail too: an edge lights up with the alpha of
     // its least-mature endpoint, so threads appear as the trail reaches them
     // instead of hanging in the air before their dots exist.
-    const maturityOf = (id: string): number => {
-      const born = appearedAtRef.current.get(id)
-      if (born === undefined) return 1
-      const age = now - born
-      if (age < 0) return 0
-      if (age < 750) return 0.1 + 0.9 * (1 - Math.pow(1 - age / 750, 2))
-      return 1
-    }
     const showEdges = scale >= 0.5
     if (highlight) {
       // Focus mode: only the hovered point's own links, clearly brighter —
@@ -685,7 +713,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       }
     }
     const fadeCaption = (node: ClusterTreeNode, alpha: number, font: number) =>
-      drawBubbleCaption(node, alpha * (captionFactor.get(node) ?? 1), font)
+      drawBubbleCaption(node, alpha * (captionFactor.get(node) ?? 1) * warmthOf(node), font)
     if (scale < FAR) {
       drawTreePair((nodes, a) => { for (const region of nodes) fadeCaption(region, a, 13) }, level1Ref.current, treeFade?.fromL1, 1)
     } else if (scale < NEAR) {
