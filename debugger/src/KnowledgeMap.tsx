@@ -146,6 +146,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const load = useCallback(async () => {
     const gen = ++loadGen.current
     const stale = () => gen !== loadGen.current
+    // Stream diagnostics go to the console on purpose: «карта не грузится»
+    // reports need the client-side trace to be diagnosable remotely.
+    console.info('[knowledge-map] load start, project:', JSON.stringify(project), 'gen:', gen)
     setLoading(true); setError('')
     setProgress({ loaded: 0, total: null })
     projectErrorsRef.current = []
@@ -174,6 +177,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         setProgress({ loaded: accumulated.length, total: total ?? accumulated.length })
         setKnowledgeTotal(knowledgeTotal)
         setProjectErrors([])
+        console.info('[knowledge-map] batch ok: offset', offset, 'page', (page.items ?? []).length, 'accumulated', accumulated.length, 'total', total)
         if ((page.items ?? []).length === 0) break
         if (accumulated.length === before && ++stalled >= 2) break
       }
