@@ -102,12 +102,12 @@ func (s *ProviderModelSync) RegisterRoutes(mux *http.ServeMux, gate *controlplan
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
 			return
 		}
-		status, body, err := s.TestGeneration(r.Context(), r.PathValue("providerID"), strings.TrimSpace(r.URL.Query().Get("model")))
+		report, err := s.TestGeneration(r.Context(), r.PathValue("providerID"), strings.TrimSpace(r.URL.Query().Get("model")))
 		if err != nil {
 			s.writeSyncError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"status": status, "body": body})
+		writeJSON(w, 200, report)
 	})
 
 	// Probe previews the catalog of a not-yet-saved provider (the form's
@@ -303,31 +303,75 @@ func providerModelsRefreshInterval(log *slog.Logger) time.Duration {
 // probe-models (which authenticates with the raw form value against /models).
 // A green /models probe with a red generation means the route or the stored
 // credential differs, and the raw upstream body pins down which.
-func (s *ProviderModelSync) TestGeneration(ctx context.Context, providerID, model string) (int, string, error) {
+// GenTestReport is the full request/response pair of one test generation.
+// The credential is masked (prefix/suffix/length) — enough to recognize
+// WHICH key went out without exposing it.
+type GenTestReport struct {
+	OK       bool `json:"ok"`
+	Request  struct {
+		Method  string            `json:"method"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+		Body    string            `json:"body"`
+	} `json:"request"`
+	Response struct {
+		Status  int               `json:"status"`
+		Headers map[string]string `json:"headers"`
+		Body    string            `json:"body"`
+	} `json:"response"`
+}
+
+// maskSecret shows enough of a credential to recognize it — the head, the
+// tail and the length — without leaking the middle.
+func maskSecret(key string) string {
+	if key == "" {
+		return "(empty — no credential was sent)"
+	}
+	if len(key) <= 12 {
+		return fmt.Sprintf("%s%s%s (%d chars)", key[:2], strings.Repeat("•", 6), key[len(key)-2:], len(key))
+	}
+	return fmt.Sprintf("%s…%s (%d chars)", key[:8], key[len(key)-4:], len(key))
+}
+
+// TestGeneration runs a minimal chat completion with the provider's STORED
+// credential — the exact path a model call takes at runtime, unlike
+// probe-models (which authenticates with the raw form value against /models).
+// A green /models probe with a red generation means the route or the stored
+// credential differs, and the full request/response pair pins down which.
+func (s *ProviderModelSync) TestGeneration(ctx context.Context, providerID, model string) (GenTestReport, error) {
+	var report GenTestReport
 	provider, err := s.store.GetProvider(ctx, providerID)
 	if err != nil {
-		return 0, "", err
+		return report, err
 	}
 	key, err := s.keys(ctx, provider.APIKeyRef)
 	if err != nil {
-		return 0, "", fmt.Errorf("%w: %v", errCredential, err)
+		return report, fmt.Errorf("%w: %v", errCredential, err)
 	}
 	if model == "" {
 		if len(provider.Models) > 0 {
 			model = provider.Models[0]
 		} else {
-			return 0, "", errors.New("no model: pick one from the catalog first")
+			return report, errors.New("no model: pick one from the catalog first")
 		}
 	}
 	endpoint := strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/") + "/chat/completions"
 	payload, _ := json.Marshal(map[string]any{
-		"model": model,
-		"messages": []map[string]string{{"role": "user", "content": "Reply with the single word: ok"}},
+		"model":      model,
+		"messages":   []map[string]string{{"role": "user", "content": "Reply with the single word: ok"}},
 		"max_tokens": 8,
 	})
+	report.Request.Method = http.MethodPost
+	report.Request.URL = endpoint
+	report.Request.Headers = map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer " + maskSecret(key),
+	}
+	report.Request.Body = string(payload)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return 0, "", err
+		return report, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if key != "" {
@@ -335,11 +379,20 @@ func (s *ProviderModelSync) TestGeneration(ctx context.Context, providerID, mode
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return 0, "", err
+		return report, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-	return resp.StatusCode, strings.TrimSpace(string(body)), nil
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
+	report.Response.Status = resp.StatusCode
+	report.Response.Headers = map[string]string{}
+	for _, name := range []string{"Content-Type", "Www-Authenticate", "Server"} {
+		if value := resp.Header.Get(name); value != "" {
+			report.Response.Headers[name] = value
+		}
+	}
+	report.Response.Body = strings.TrimSpace(string(body))
+	report.OK = resp.StatusCode >= 200 && resp.StatusCode < 300
+	return report, nil
 }
 
 // fetchProviderModels reads the OpenAI-compatible catalog endpoint. Every

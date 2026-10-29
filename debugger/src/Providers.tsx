@@ -134,7 +134,7 @@ export default function Providers() {
   const [testingId, setTestingId] = useState('')
   const [testOpen, setTestOpen] = useState<Provider | null>(null)
   const [testModel, setTestModel] = useState('')
-  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const [testResult, setTestResult] = useState<{ ok: boolean; requestText: string; responseText: string } | null>(null)
   const openTest = (p: Provider) => {
     setTestOpen(p)
     setTestModel(p.models?.[0] ?? '')
@@ -146,12 +146,21 @@ export default function Providers() {
     setTestingId(p.id); setTestResult(null); setError('')
     try {
       const data = await workspaceApi.testProviderGeneration(p.id, testModel || undefined)
-      const ok = data.status >= 200 && data.status < 300
-      setTestResult({ ok, text: ok
-        ? (t('providers.test_ok') ?? 'Generation works with the stored key.')
-        : `${t('providers.test_failed', { status: String(data.status) }) ?? 'Upstream returned ' + data.status}: ${data.body.slice(0, 300)}` })
+      const requestText = [
+        data.request.method + ' ' + data.request.url,
+        ...Object.entries(data.request.headers ?? {}).map(([k, v]) => k + ': ' + v),
+        '',
+        data.request.body,
+      ].join('\n')
+      const responseText = [
+        'HTTP ' + data.response.status,
+        ...Object.entries(data.response.headers ?? {}).map(([k, v]) => k + ': ' + v),
+        '',
+        data.response.body,
+      ].join('\n')
+      setTestResult({ ok: data.ok, requestText, responseText })
     } catch (f) {
-      setTestResult({ ok: false, text: message(f) })
+      setTestResult({ ok: false, requestText: '', responseText: message(f) })
     }
   }
 
@@ -258,13 +267,26 @@ export default function Providers() {
               {(testOpen.models ?? []).map((m) => <SelectItem key={m} value={m} text={m} />)}
             </Select>
             {testResult && (
-              <InlineNotification
-                kind={testResult.ok ? 'success' : 'error'}
-                title={testResult.ok ? (t('providers.test_ok') ?? 'Generation works with the stored key.') : (t('providers.test_failed', { status: '' }) ?? 'Failed')}
-                subtitle={testResult.ok ? undefined : testResult.text}
-                lowContrast
-                hideCloseButton
-              />
+              <>
+                <InlineNotification
+                  kind={testResult.ok ? 'success' : 'error'}
+                  lowContrast
+                  hideCloseButton
+                  title={testResult.ok
+                    ? (t('providers.test_ok') ?? 'Generation works with the stored key.')
+                    : (t('providers.test_failed_generic') ?? 'The provider rejected this request — see the request/response pair below.')}
+                />
+                <div style={{ display: 'grid', gap: '0.5rem' }}>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginBottom: '0.2rem' }}>{t('providers.test_request') ?? 'Request'}</div>
+                    <pre className="provider-test-block">{testResult.requestText}</pre>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginBottom: '0.2rem' }}>{t('providers.test_response') ?? 'Response'}</div>
+                    <pre className="provider-test-block">{testResult.responseText}</pre>
+                  </div>
+                </div>
+              </>
             )}
             <div className="form-actions">
               <Button kind="secondary" onClick={() => setTestOpen(null)}>{t('action.close') ?? 'Close'}</Button>

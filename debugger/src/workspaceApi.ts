@@ -1390,7 +1390,7 @@ export const workspaceApi = {
   setProviderEnabled: (id: string, enabled: boolean) =>
     request<Provider>(`/v1/workspace/providers/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   testProviderGeneration: (id: string, model?: string) =>
-    request<{ status: number; body: string }>(`/v1/workspace/providers/${id}/test-generation${model ? '?model=' + encodeURIComponent(model) : ''}`, { method: 'POST', timeoutMs: 120_000 } as RequestInit & { timeoutMs: number }),
+    request<{ ok: boolean; request: { method: string; url: string; headers: Record<string, string>; body: string }; response: { status: number; headers: Record<string, string>; body: string } }>(`/v1/workspace/providers/${id}/test-generation${model ? '?model=' + encodeURIComponent(model) : ''}`, { method: 'POST', timeoutMs: 120_000 } as RequestInit & { timeoutMs: number }),
 
   // Triggers. listTriggers without a project hits the global listing
   // (docs/activity-scoping.md §5) — server-side constrained to the visible

@@ -3131,3 +3131,21 @@ button.header-nav-link {
 .artifact-body table { border-collapse: collapse; margin: 0.6em 0; font-size: 0.8rem; }
 .artifact-body th, .artifact-body td { border: 1px solid var(--tm-border); padding: 0.3rem 0.55rem; text-align: left; }
 .artifact-body a { color: var(--tm-teal); }
+
+/* Provider generation test dialog: the request/response pair is the whole
+   point — scrollable monospace blocks, never a stretched modal. */
+.provider-test-block {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--tm-surface-2, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--tm-border);
+  border-radius: 6px;
+  font-family: var(--tm-font-mono, monospace);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 10rem;
+  overflow-y: auto;
+  color: var(--tm-text-2);
+}
