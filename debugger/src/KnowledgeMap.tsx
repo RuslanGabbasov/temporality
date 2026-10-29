@@ -419,12 +419,13 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
+    const now = performance.now()
     let animating = false
     // Camera tween: write the interpolated transform back so viewScale picks
     // it up; wheel/drag handlers cancel camRef for manual control.
     const cam = camRef.current
     if (cam) {
-      const t = Math.min(1, (performance.now() - cam.start) / cam.duration)
+      const t = Math.min(1, (now - cam.start) / cam.duration)
       const e = easeOutCubic(t)
       transformRef.current = {
         k: cam.from.k + (cam.to.k - cam.from.k) * e,
@@ -442,7 +443,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // Position morph: dots glide from their previous layout positions to the
     // new ones instead of teleporting on every batch recompute.
     const morph = morphRef.current
-    const morphT = morph.duration ? Math.min(1, (performance.now() - morph.start) / morph.duration) : 1
+    const morphT = morph.duration ? Math.min(1, (now - morph.start) / morph.duration) : 1
     if (morphT < 1) animating = true
     const morphE = easeOutCubic(morphT)
     const animPos = points.map((p, i) => {
@@ -546,6 +547,17 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // ── dots: the color IS the lifecycle state (same palette as the
     // timeline), the shape is the verdict category; cluster membership is
     // already spoken by position and the region bubbles underneath. ──
+    // Edges respect the birth trail too: an edge lights up with the alpha of
+    // its least-mature endpoint, so threads appear as the trail reaches them
+    // instead of hanging in the air before their dots exist.
+    const maturityOf = (id: string): number => {
+      const born = appearedAtRef.current.get(id)
+      if (born === undefined) return 1
+      const age = now - born
+      if (age < 0) return 0
+      if (age < 750) return 0.1 + 0.9 * (1 - Math.pow(1 - age / 750, 2))
+      return 1
+    }
     const showEdges = scale >= 0.5
     if (highlight) {
       // Focus mode: only the hovered point's own links, clearly brighter —
@@ -555,26 +567,37 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       ctx.strokeStyle = 'rgba(122, 162, 247, 0.45)'
       for (const [a, b] of edgesRef.current) {
         if (a !== highlight.center && b !== highlight.center) continue
+        const edgeAlpha = Math.min(maturityOf(points[a].id), maturityOf(points[b].id))
+        if (edgeAlpha <= 0.01) { stillFading = true; continue }
         const pa = animPos[a], pb = animPos[b]
+        ctx.globalAlpha = edgeAlpha
         ctx.beginPath()
         ctx.moveTo(pa.x * scale + tx, pa.y * scale + ty)
         ctx.lineTo(pb.x * scale + tx, pb.y * scale + ty)
         ctx.stroke()
       }
+      ctx.globalAlpha = 1
     } else if (showEdges) {
       ctx.lineWidth = 1
-      ctx.strokeStyle = 'rgba(122, 162, 247, 0.08)'
+      ctx.strokeStyle = 'rgb(122, 162, 247)'
       const visibleIds = new Set(visible.map((entry) => entry.p.id))
       const indexById = new Map(points.map((p, i) => [p.id, i]))
       for (const [a, b] of edgesRef.current) {
+        const edgeAlpha = Math.min(maturityOf(points[a].id), maturityOf(points[b].id)) * 0.08
+        if (edgeAlpha <= 0.008) {
+          if (edgeAlpha > 0) stillFading = true
+          continue
+        }
         const pa = animPos[a], pb = animPos[b]
         if (!visibleIds.has(points[a].id) || !visibleIds.has(points[b].id)) continue
         if (!matches[indexById.get(points[a].id)!] || !matches[indexById.get(points[b].id)!]) continue
+        ctx.globalAlpha = edgeAlpha
         ctx.beginPath()
         ctx.moveTo(pa.x * scale + tx, pa.y * scale + ty)
         ctx.lineTo(pb.x * scale + tx, pb.y * scale + ty)
         ctx.stroke()
       }
+      ctx.globalAlpha = 1
     }
     const near = scale >= NEAR
     const stateAlpha = Math.max(0, Math.min(1, (scale - (NEAR - 0.2)) / 0.6))
@@ -595,7 +618,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       // thin and short-lived, not a strobe around every arrival.
       const born = appearedAtRef.current.get(p.id)
       if (born !== undefined) {
-        const age = performance.now() - born
+        const age = now - born
         if (age < 0) { stillFading = true; continue }
         if (age < 750) {
           const k = age / 750
