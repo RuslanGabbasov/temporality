@@ -406,6 +406,7 @@ export const ru: Record<string, string> = {
     'action.add': 'Добавить',
     'action.logout': 'Выйти',
     'action.error': 'Ошибка',
+    'action.retry': 'Повторить',
     'action.login': 'Войти',
 
     'login.description': 'Войдите в рабочее пространство Temporality.',

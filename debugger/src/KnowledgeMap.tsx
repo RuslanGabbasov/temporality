@@ -661,6 +661,18 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
       <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: '320px', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)', overflow: 'hidden', cursor: hover ? 'pointer' : 'grab' }}>
         <canvas ref={canvasRef} style={{ display: 'block' }} />
+        {/* A failed load is unmissable: dead center, with a retry — the old
+            placement (above the toolbar) scrolled out of sight and the map
+            looked «broken» instead of saying what happened. */}
+        {error && !loading && (
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,.25)', zIndex: 4 }}>
+            <div style={{ maxWidth: '28rem', textAlign: 'center', background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)', borderRadius: '10px', padding: '1rem 1.25rem' }}>
+              <p style={{ color: 'var(--tm-danger, #da1e28)', fontWeight: 600, margin: 0 }}>{t('action.error') ?? 'Error'}</p>
+              <p style={{ color: 'var(--tm-text-2)', fontSize: '0.8rem', margin: '0.4rem 0 0.75rem', wordBreak: 'break-word' }}>{error}</p>
+              <Button size="sm" onClick={() => { setError(''); void load() }}>{t('action.retry') ?? 'Retry'}</Button>
+            </div>
+          </div>
+        )}
         {/* Streaming progress lives on the map itself: batches land as dots
             blooming in, this pill counts them up. */}
         {progress && (

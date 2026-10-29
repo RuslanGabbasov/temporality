@@ -406,6 +406,7 @@ export const en: Record<string, string> = {
     'action.add': 'Add',
     'action.logout': 'Logout',
     'action.error': 'Error',
+    'action.retry': 'Retry',
     'action.login': 'Sign in',
 
     'login.description': 'Sign in to the Temporality workspace.',
