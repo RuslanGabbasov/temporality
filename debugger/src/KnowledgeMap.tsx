@@ -53,14 +53,14 @@ const LABEL_MAX = 70
 /** Shape codes the lifecycle, the way the experience timeline does: live
  *  statements are circles, challenged — diamonds, invalidated/superseded —
  *  crosses. Color carries the topic cluster, shape carries the verdict. */
-function stateShape(state: string): 'circle' | 'diamond' | 'cross' | 'square' {
+export function stateShape(state: string): 'circle' | 'diamond' | 'cross' | 'square' {
   if (state === 'invalidated' || state === 'disproved' || state === 'superseded') return 'cross'
   if (state === 'challenged') return 'diamond'
   if (state === 'rejected') return 'square'
   return 'circle' // proposed / confirmed / corrected — live
 }
 
-function drawShape(ctx: CanvasRenderingContext2D, shape: 'circle' | 'diamond' | 'cross' | 'square', x: number, y: number, r: number) {
+export function drawShape(ctx: CanvasRenderingContext2D, shape: 'circle' | 'diamond' | 'cross' | 'square', x: number, y: number, r: number) {
   switch (shape) {
     case 'cross': {
       const arm = r * 0.9
@@ -103,6 +103,8 @@ const corpusCache = new Map<string, CorpusEntry>()
 const CORPUS_TTL_MS = 5 * 60 * 1000
 function cacheKey(project: string): string { return project || '*' }
 
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
+
 export default function KnowledgeMap({ project, onOpenDossier }: {
   project: string
   onOpenDossier: (id: string) => void
@@ -124,6 +126,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   // Spatial grid for O(1) hover/click picking: bucket centers by 40px world
   // cells, rebuilt with the layout instead of a linear scan per mousemove.
   const gridRef = useRef<Map<string, MapPoint[]>>(new Map())
+  const pointsRef = useRef<MapPoint[]>([])
   const level1Ref = useRef<ClusterTreeNode[]>([])
   const level2Ref = useRef<ClusterTreeNode[]>([])
   /** Aggregate opacity per zoom: which pyramid tier is on stage. Kept in a
@@ -141,6 +144,13 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   // Kept in a ref — the draw pass reads it every frame while a fade is live.
   const appearedAtRef = useRef<Map<string, number>>(new Map())
   const [batchesLanded, setBatchesLanded] = useState(0)
+  // Streaming smoothness: between relayouts the dots MORPH to their new
+  // positions (per-batch force recomputes would otherwise jerk the whole
+  // plane), the camera TWEENS to each new fit instead of snapping, and the
+  // cluster bubbles cross-fade. Manual pan/zoom cancels the camera tween.
+  const morphRef = useRef<{ start: number; duration: number; from: Array<{ x: number; y: number } | null> }>({ start: 0, duration: 0, from: [] })
+  const camRef = useRef<{ start: number; duration: number; from: { x: number; y: number; k: number }; to: { x: number; y: number; k: number } } | null>(null)
+  const treeFadeRef = useRef<{ start: number; fromL1: ClusterTreeNode[]; fromL2: ClusterTreeNode[] } | null>(null)
   const pointIndexById = useMemo(() => new Map(points.map((p, i) => [p.id, i] as const)), [points])
 
   // Streaming load: batches of 400 arrive freshest-first and land on the map
@@ -242,11 +252,24 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const { result: layout, pending: layoutPending } = useSemanticLayoutState(items)
   useEffect(() => {
     if (!layout) return
-    // Fresh arrivals get a fade-in window: their alpha ramps up in the draw
-    // pass from the moment they first appear on the map.
+    // Fresh arrivals light up as a staggered cascade («зажигающиеся звёздочки»):
+    // each new dot gets a birth moment up to ~900ms out, the draw pass ramps
+    // its alpha and blooms a ring at that moment.
     const now = performance.now()
-    for (const node of layout.nodes) {
-      if (!appearedAtRef.current.has(node.id)) appearedAtRef.current.set(node.id, now)
+    const newborns = layout.nodes.filter((node) => !appearedAtRef.current.has(node.id))
+    const step = newborns.length > 1 ? Math.min(8, 900 / newborns.length) : 0
+    newborns.forEach((node, i) => appearedAtRef.current.set(node.id, now + i * step))
+    // Position morph: existing dots tween from where they were drawn to their
+    // new layout positions; brand-new dots have no from — they only fade in.
+    const prevById = new Map(pointsRef.current.map((p) => [p.id, { x: p.x, y: p.y }]))
+    morphRef.current = {
+      start: now,
+      duration: prevById.size ? 700 : 0,
+      from: layout.nodes.map((node) => prevById.get(node.id) ?? null),
+    }
+    // Bubbles have no stable ids across layouts — cross-fade the whole tree.
+    if (level1Ref.current.length) {
+      treeFadeRef.current = { start: now, fromL1: level1Ref.current, fromL2: level2Ref.current }
     }
     setBatchesLanded((n) => n + 1)
     const radius = Math.max(2.2, Math.min(4, 900 / Math.sqrt(layout.nodes.length + 1)))
@@ -259,6 +282,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       else grid.set(key, [point])
     }
     gridRef.current = grid
+    pointsRef.current = mapPoints
     setPoints(mapPoints)
     level1Ref.current = layout.level1
     level2Ref.current = layout.level2
@@ -279,7 +303,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         }),
     )
     // Fit-to-screen: the world layout is drawn at WORLD_W×H; scale it into
-    // the actual canvas box with a margin, centered.
+    // the actual canvas box with a margin, centered. The camera TWEENS to the
+    // new fit — a first mount starts zoomed in and flies out, later batches
+    // glide from the previous view — instead of snapping between batches.
     requestAnimationFrame(() => {
       const wrap = wrapRef.current
       if (!wrap) return
@@ -287,13 +313,19 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const margin = 40
       const fit = Math.min((w - margin) / WORLD_W, (h - margin) / WORLD_H)
       const base = Math.min(w / WORLD_W, h / WORLD_H)
-      // transform.k is relative to base (screen scale = k * base): the fit
-      // factor expressed in that space.
-      transformRef.current = {
+      const target = {
         k: Math.max(0.2, Math.min(8, fit / base)),
         x: (w - WORLD_W * fit) / 2,
         y: (h - WORLD_H * fit) / 2,
       }
+      const first = prevById.size === 0
+      const from = first
+        ? // Zoomed in on the center: the flight out reads as the camera
+          // pulling back from the first lit stars to the whole sky.
+          { k: target.k * 1.9, x: w / 2 - (w / 2 - target.x) * 1.9, y: h / 2 - (h / 2 - target.y) * 1.9 }
+        : { ...transformRef.current }
+      camRef.current = { start: performance.now(), duration: first ? 1200 : 700, from, to: target }
+      if (first) transformRef.current = from
     })
   }, [layout])
 
@@ -364,17 +396,44 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
+    let animating = false
+    // Camera tween: write the interpolated transform back so viewScale picks
+    // it up; wheel/drag handlers cancel camRef for manual control.
+    const cam = camRef.current
+    if (cam) {
+      const t = Math.min(1, (performance.now() - cam.start) / cam.duration)
+      const e = easeOutCubic(t)
+      transformRef.current = {
+        k: cam.from.k + (cam.to.k - cam.from.k) * e,
+        x: cam.from.x + (cam.to.x - cam.from.x) * e,
+        y: cam.from.y + (cam.to.y - cam.from.y) * e,
+      }
+      if (t < 1) animating = true
+      else camRef.current = null
+    }
     const { scale, tx, ty } = viewScale()
     // Dark theme: glows and captions need less fill and dimmer text to read
     // as a heat map; light theme packs stronger fills for the same contrast.
     const dark = theme === 'dark'
 
+    // Position morph: dots glide from their previous layout positions to the
+    // new ones instead of teleporting on every batch recompute.
+    const morph = morphRef.current
+    const morphT = morph.duration ? Math.min(1, (performance.now() - morph.start) / morph.duration) : 1
+    if (morphT < 1) animating = true
+    const morphE = easeOutCubic(morphT)
+    const animPos = points.map((p, i) => {
+      const from = morph.from[i]
+      if (!from) return { x: p.x, y: p.y }
+      return { x: from.x + (p.x - from.x) * morphE, y: from.y + (p.y - from.y) * morphE }
+    })
+
     // Project + cull once; everything below works in screen pixels, so fonts
     // stay constant-size and dots grow only mildly with zoom.
     const visible: Array<{ p: MapPoint; sx: number; sy: number; active: boolean; i: number }> = []
     for (let i = 0; i < points.length; i++) {
-      const sx = points[i].x * scale + tx
-      const sy = points[i].y * scale + ty
+      const sx = animPos[i].x * scale + tx
+      const sy = animPos[i].y * scale + ty
       if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue
       visible.push({ p: points[i], sx, sy, active: matches[i], i })
     }
@@ -435,16 +494,30 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     }
 
     // ── layer 1: heat fills (tier 1: broad regions; tier 2: regions fading
-    // out as sub-clusters fade in) ──
+    // out as sub-clusters fade in) — during a relayout the previous tree
+    // cross-fades into the new one so bubbles breathe instead of snapping. ──
+    const treeFade = treeFadeRef.current
+    const treeT = treeFade ? Math.min(1, (performance.now() - treeFade.start) / 500) : 1
+    if (treeT < 1) animating = true
+    else treeFadeRef.current = null
+    const treeE = easeOutCubic(treeT)
+    const drawTreePair = (drawTree: (nodes: ClusterTreeNode[], alpha: number) => void, next: ClusterTreeNode[], prev: ClusterTreeNode[] | undefined, baseAlpha: number) => {
+      if (treeFade && treeT < 1 && prev) {
+        if ((1 - treeE) * baseAlpha > 0.02) drawTree(prev, (1 - treeE) * baseAlpha)
+        if (treeE * baseAlpha > 0.02) drawTree(next, treeE * baseAlpha)
+      } else if (baseAlpha > 0.02) {
+        drawTree(next, baseAlpha)
+      }
+    }
     if (scale < FAR) {
-      for (const region of level1Ref.current) drawBubbleFill(region, 1)
+      drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleFill(region, a) }, level1Ref.current, treeFade?.fromL1, 1)
     } else if (scale < NEAR) {
       const regionAlpha = Math.max(0, Math.min(1, (FAR + 0.65 - scale) / 0.5))
       if (regionAlpha > 0.02) {
-        for (const region of level1Ref.current) drawBubbleFill(region, regionAlpha * 0.7)
+        drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleFill(region, a * 0.7) }, level1Ref.current, treeFade?.fromL1, regionAlpha)
       }
       const subAlpha = Math.max(0, Math.min(1, (scale - FAR * 0.8) / 0.3))
-      for (const child of level2Ref.current) drawBubbleFill(child, subAlpha)
+      drawTreePair((nodes, a) => { for (const child of nodes) drawBubbleFill(child, a) }, level2Ref.current, treeFade?.fromL2, subAlpha)
     }
 
     // ── dots: the color IS the lifecycle state (same palette as the
@@ -459,7 +532,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       ctx.strokeStyle = 'rgba(122, 162, 247, 0.45)'
       for (const [a, b] of edgesRef.current) {
         if (a !== highlight.center && b !== highlight.center) continue
-        const pa = points[a], pb = points[b]
+        const pa = animPos[a], pb = animPos[b]
         ctx.beginPath()
         ctx.moveTo(pa.x * scale + tx, pa.y * scale + ty)
         ctx.lineTo(pb.x * scale + tx, pb.y * scale + ty)
@@ -471,9 +544,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const visibleIds = new Set(visible.map((entry) => entry.p.id))
       const indexById = new Map(points.map((p, i) => [p.id, i]))
       for (const [a, b] of edgesRef.current) {
-        const pa = points[a], pb = points[b]
-        if (!visibleIds.has(pa.id) || !visibleIds.has(pb.id)) continue
-        if (!matches[indexById.get(pa.id)!] || !matches[indexById.get(pb.id)!]) continue
+        const pa = animPos[a], pb = animPos[b]
+        if (!visibleIds.has(points[a].id) || !visibleIds.has(points[b].id)) continue
+        if (!matches[indexById.get(points[a].id)!] || !matches[indexById.get(points[b].id)!]) continue
         ctx.beginPath()
         ctx.moveTo(pa.x * scale + tx, pa.y * scale + ty)
         ctx.lineTo(pb.x * scale + tx, pb.y * scale + ty)
@@ -494,14 +567,26 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const shape = stateShape(p.item.state)
       const dead = shape === 'cross'
       let alpha = active ? dotAlpha : dotAlpha * 0.35
-      // Batch fade-in: arrivals ramp up over ~600ms so a landing batch reads
-      // as dots blooming in, not a flicker.
+      // Star birth: a dot is invisible until its staggered birth moment, then
+      // ramps up over ~750ms while an expanding ring blooms for the first
+      // 450ms — the landing batch reads as stars lighting up one by one.
       const born = appearedAtRef.current.get(p.id)
       if (born !== undefined) {
         const age = performance.now() - born
-        if (age < 600) {
-          alpha *= 0.15 + 0.85 * (age / 600)
+        if (age < 0) { stillFading = true; continue }
+        if (age < 750) {
+          const k = age / 750
+          alpha *= 0.1 + 0.9 * (1 - Math.pow(1 - k, 2))
           stillFading = true
+          if (age < 450) {
+            const rk = age / 450
+            ctx.globalAlpha = (1 - rk) * 0.55 * (active ? 1 : 0.6)
+            ctx.strokeStyle = regionColor
+            ctx.lineWidth = 1.2
+            ctx.beginPath()
+            ctx.arc(sx, sy, dotR + 2 + rk * 9, 0, Math.PI * 2)
+            ctx.stroke()
+          }
         }
       }
       let radius = dotR
@@ -527,20 +612,21 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       }
     }
     ctx.globalAlpha = 1
-    // A live fade keeps the animation frames coming until every arrival has
-    // reached full ink.
-    if (stillFading) frameRef.current = requestAnimationFrame(draw)
+    // Keep the animation frames coming while births, morphs or the camera
+    // tween are still in flight.
+    if (stillFading || animating) frameRef.current = requestAnimationFrame(draw)
 
-    // ── layer 4: cluster captions, on top of the dots ──
+    // ── layer 4: cluster captions, on top of the dots (cross-faded with the
+    // bubbles they belong to) ──
     if (scale < FAR) {
-      for (const region of level1Ref.current) drawBubbleCaption(region, 1, 13)
+      drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleCaption(region, a, 13) }, level1Ref.current, treeFade?.fromL1, 1)
     } else if (scale < NEAR) {
       const regionAlpha = Math.max(0, Math.min(1, (FAR + 0.65 - scale) / 0.5))
       if (regionAlpha > 0.02) {
-        for (const region of level1Ref.current) drawBubbleCaption(region, regionAlpha * 0.7, 12)
+        drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleCaption(region, a * 0.7, 12) }, level1Ref.current, treeFade?.fromL1, regionAlpha)
       }
       const subAlpha = Math.max(0, Math.min(1, (scale - FAR * 0.8) / 0.3))
-      for (const child of level2Ref.current) drawBubbleCaption(child, subAlpha, 11)
+      drawTreePair((nodes, a) => { for (const child of nodes) drawBubbleCaption(child, a, 11) }, level2Ref.current, treeFade?.fromL2, subAlpha)
     }
 
     // ── layer 5: bounded, non-overlapping item labels ──
@@ -621,6 +707,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     const CLICK_SLOP = 4
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
+      camRef.current = null // manual control cancels the camera tween
       const transform = transformRef.current
       const factor = Math.exp(-event.deltaY * 0.0016)
       const next = Math.min(8, Math.max(0.2, transform.k * factor))
@@ -634,6 +721,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     const onDown = (event: MouseEvent) => {
       dragging = true; movedFar = false
       downX = lastX = event.clientX; downY = lastY = event.clientY
+      if (event.button === 0) camRef.current = null // a drag cancels the camera tween
     }
     const onMove = (event: MouseEvent) => {
       if (dragging) {

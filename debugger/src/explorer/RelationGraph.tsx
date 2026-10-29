@@ -5,6 +5,7 @@ import { useT } from '../i18n'
 import { queryMatchesItem } from '../knowledgeQuery'
 import { STATE_FILL } from './AreaMap'
 import { stateLabel } from './shared'
+import RelationMapCanvas from './RelationMapCanvas'
 
 /** Relation neighborhood of one knowledge item (ТЗ §7). The engine's expand
  *  walk already bounds the graph: explicit edges first, heuristic candidates
@@ -278,58 +279,14 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
 
       {view === 'graph' && graph.nodes.length > 0 && (
         <>
-          <svg role="group" aria-label={t('explorer.relations_title') ?? 'Relation graph'} width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)' }}>
-            {graph.edges.map((edge, index) => {
-              const from = byID.get(edge.from_id)
-              const to = byID.get(edge.to_id)
-              if (!from || !to) return null
-              const candidate = edge.basis === 'candidate'
-              const highlight = selected === edge.from_id || selected === edge.to_id
-              return (
-                <line
-                  key={`${edge.from_id}-${edge.to_id}-${edge.type}-${index}`}
-                  x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-                  stroke={relationColor(edge.type)}
-                  strokeWidth={highlight ? 2.2 : 1.2}
-                  strokeOpacity={highlight ? 0.95 : 0.5}
-                  strokeDasharray={candidate ? '5 4' : undefined}
-                >
-                  <title>{candidate
-                    ? `${relationLabel(edge.type, t)} · ${t('explorer.relations_candidate_note') ?? 'candidate'}${edge.note ? ` · ${edge.note}` : ''}`
-                    : `${relationLabel(edge.type, t)}${edge.note ? ` · ${edge.note}` : ''}${edge.event_id ? ` · ${edge.event_id}` : ''}`}</title>
-                </line>
-              )
-            })}
-            {positioned.map(({ node, x, y, r }) => {
-              const isRoot = node.depth === 0
-              const active = node.id === selected
-              return (
-                <g
-                  key={node.id}
-                  role="button" tabIndex={0}
-                  aria-label={truncate(node.label, 80)}
-                  onClick={() => setSelected(active ? '' : node.id)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(active ? '' : node.id) } }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <title>{`${node.label} [${stateLabel(node.state, t)}]${node.via ? ` · via ${node.via}` : ''}${node.basis === 'candidate' ? ' · candidate' : ''}`}</title>
-                  <circle
-                    cx={x} cy={y} r={r}
-                    fill={STATE_FILL[node.state] ?? 'var(--tm-info)'}
-                    fillOpacity={active ? 0.6 : isRoot ? 0.45 : 0.3}
-                    stroke={active ? 'var(--tm-teal)' : isRoot ? 'var(--tm-text)' : 'var(--tm-border)'}
-                    strokeWidth={active ? 2.5 : isRoot ? 1.6 : 1}
-                  />
-                  {node.basis === 'candidate' && (
-                    <circle cx={x} cy={y} r={r + 3.5} fill="none" stroke="var(--tm-text-3)" strokeWidth={0.8} strokeDasharray="3 3" />
-                  )}
-                  <text x={x} y={y + r + 11} textAnchor="middle" fill={active ? 'var(--tm-text)' : 'var(--tm-text-3)'} fontSize={10} style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                    {truncate(node.label, isRoot ? 34 : 22)}
-                  </text>
-                </g>
-              )
-            })}
-          </svg>
+          {/* The map's visual language on canvas (halo dots, verdict shapes):
+              the old concentric SVG rings read as a debug artifact. */}
+          <RelationMapCanvas
+            positioned={positioned}
+            edges={graph.edges}
+            selected={selected}
+            onSelect={setSelected}
+          />
           {/* Legend: two independent channels — edge style/color for relation
               type, node fill for lifecycle state (ТЗ §7.3). */}
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.4rem', fontSize: '0.68rem', color: 'var(--tm-muted)' }}>
