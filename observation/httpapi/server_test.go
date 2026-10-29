@@ -1795,3 +1795,75 @@ func TestEventsTypesFilterAndDescOrder(t *testing.T) {
 		t.Fatalf("desc page 2 = %v, want [evt-1] (strictly older)", page2)
 	}
 }
+
+func TestKnowledgeResolveAcrossProjects(t *testing.T) {
+	handler := newTestServer(t)
+	events := []observation.Event{
+		proposedEvent("lighthouse", "evt-1", "K1", "gatekeeper v3 authenticates via oauth device flow"),
+		proposedEvent("calc", "evt-2", "K2", "migrations run through make migrate"),
+	}
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// The whole point of resolve: one request finds the owning project, no
+	// per-project probing that surfaces as 404 noise.
+	res, body := doJSON(t, handler, "GET", "/v1/observations/knowledge/resolve?knowledge_id=K2", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("global resolve status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["project"] != "calc" {
+		t.Fatalf("resolve project = %v, want calc", body["project"])
+	}
+	found := body["knowledge"].([]any)
+	if len(found) != 1 || found[0].(map[string]any)["id"] != "K2" {
+		t.Fatalf("resolve knowledge = %v", body["knowledge"])
+	}
+
+	// A concrete project behaves like the listing endpoint.
+	res, _ = doJSON(t, handler, "GET", "/v1/observations/knowledge/resolve?knowledge_id=K1&project=lighthouse", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("projected resolve status = %d", res.StatusCode)
+	}
+	res, _ = doJSON(t, handler, "GET", "/v1/observations/knowledge/resolve?knowledge_id=K1&project=calc", nil)
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("wrong-project resolve status = %d, want 404", res.StatusCode)
+	}
+	res, _ = doJSON(t, handler, "GET", "/v1/observations/knowledge/resolve?knowledge_id=K-missing", nil)
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing resolve status = %d, want 404", res.StatusCode)
+	}
+	res, _ = doJSON(t, handler, "GET", "/v1/observations/knowledge/resolve", nil)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("no-id resolve status = %d, want 400", res.StatusCode)
+	}
+}
+
+func TestKnowledgeResolveScopesToPrincipal(t *testing.T) {
+	gate, err := controlplane.NewGate("write-all-1234567890:kernel:writer:*;read-lh-1234567890:alice:reader:lighthouse")
+	if err != nil {
+		t.Fatalf("NewGate: %v", err)
+	}
+	handler := New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), gate)
+	events := []observation.Event{
+		proposedEvent("lighthouse", "evt-1", "K1", "gatekeeper v3 authenticates via oauth device flow"),
+		proposedEvent("elsewhere", "evt-2", "K2", "secret project knowledge"),
+	}
+	if res, body := doJSONWithToken(t, handler, "POST", "/v1/observations/events", "write-all-1234567890", map[string]any{"events": events}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// A principal scoped to lighthouse resolves its own knowledge...
+	res, body := doJSONWithToken(t, handler, "GET", "/v1/observations/knowledge/resolve?knowledge_id=K1", "read-lh-1234567890", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("scoped resolve status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["project"] != "lighthouse" {
+		t.Fatalf("scoped resolve project = %v, want lighthouse", body["project"])
+	}
+	// ...but never an item that lives only in a project outside its scope.
+	res, _ = doJSONWithToken(t, handler, "GET", "/v1/observations/knowledge/resolve?knowledge_id=K2", "read-lh-1234567890", nil)
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("out-of-scope resolve status = %d, want 404", res.StatusCode)
+	}
+}

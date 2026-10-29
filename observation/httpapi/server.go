@@ -168,6 +168,7 @@ func NewServer(store observation.Store, log *slog.Logger, gate *controlplane.Gat
 	mux.HandleFunc("GET /v1/observations/events/{id...}", s.getObservationEvent)
 	mux.HandleFunc("GET /v1/observations/stats/health", s.observationHealthStats)
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
+	mux.HandleFunc("GET /v1/observations/knowledge/resolve", s.resolveObservationKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/chain", s.knowledgeChain)
 	mux.HandleFunc("GET /v1/observations/runs/state", s.runState)
@@ -862,6 +863,67 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 		"knowledge": page, "count": len(page), "total": len(filtered),
 		"next_cursor": nextCursor, "facets": facets,
 	})
+}
+
+// resolveObservationKnowledge answers «which project owns this knowledge id?»
+// in ONE request (GET /v1/observations/knowledge/resolve?knowledge_id=X
+// [&project=Y]): the supervisor panel used to probe every visible project
+// serially, and each miss surfaced as a 404 in access logs and dashboards.
+// A concrete project behaves exactly like the listing endpoint; an omitted
+// one walks the principal's visible knowledge-bearing projects (same scoping
+// rules as the global event listing, docs/activity-scoping.md §5).
+func (s *Server) resolveObservationKnowledge(w http.ResponseWriter, r *http.Request) {
+	knowledgeID := strings.TrimSpace(r.URL.Query().Get("knowledge_id"))
+	if knowledgeID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("knowledge_id is required"))
+		return
+	}
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	var projects []string
+	if project != "" {
+		if _, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, project); !allowed {
+			return
+		}
+		projects = []string{project}
+	} else {
+		principal, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, "")
+		if !allowed {
+			return
+		}
+		if visible, all := principal.AllowedProjects(); !all {
+			projects = visible
+		}
+	}
+	if project == "" && len(projects) == 0 {
+		// Either the principal sees every project or nothing is scoped yet:
+		// enumerate the knowledge-bearing projects so the walk stays O(projects
+		// with knowledge) instead of loading unrelated projections.
+		lister, ok := s.store.(knowledgeProjectLister)
+		if !ok {
+			writeError(w, http.StatusNotImplemented, errors.New("the store cannot enumerate knowledge projects; pass ?project="))
+			return
+		}
+		all, err := lister.ListKnowledgeProjects(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("could not enumerate knowledge projects: %w", err))
+			return
+		}
+		projects = all
+	}
+	for _, candidate := range projects {
+		knowledge, _, err := s.cachedKnowledge(r.Context(), candidate, nil, nil)
+		if err != nil {
+			continue // a broken projection must not hide the item in other projects
+		}
+		for _, item := range knowledge {
+			if item.ID != knowledgeID {
+				continue
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"knowledge": []observation.Knowledge{item}, "count": 1, "project": candidate})
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, observation.ErrKnowledgeNotFound)
 }
 
 func (s *Server) diffKnowledge(w http.ResponseWriter, r *http.Request) {

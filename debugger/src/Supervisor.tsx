@@ -357,64 +357,47 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
 
   // Resolve the proposition texts behind conflict verdicts that were published
   // without them (older payloads, or verdicts whose kernel-side meta scan
-  // missed the item): one exact-item lookup per missing side. The listing
-  // requires a project — when the verdict does not name one (or the item is
-  // not there), walk the account's visible projects. Results are stored under
-  // "project/id" AND the project-less "/id" key the render reads when the
-  // verdict names no project; project carries where the item was FOUND, so
-  // the dossier link opens the right project.
+  // missed the item): one resolve request per missing id — the journal finds
+  // the owning project among the caller's visible ones (server-side, one
+  // request instead of the per-project probe loop that spammed 404s).
+  // Results are stored under "project/id" AND the project-less "/id" key the
+  // render reads when the verdict names no project; project carries where the
+  // item was FOUND, so the dossier link opens the right project.
   const propFallbackRef = useRef<Record<string, { text: string; project?: string }>>({})
   useEffect(() => {
-    const missing: { project: string; id: string }[] = []
+    const missingIDs: string[] = []
+    const seenIDs = new Set<string>()
     for (const row of clusterVerdicts(verdicts)) {
       const cf = row.conflict
       if (!cf) continue
-      if (!cf.newProp) {
-        const project = cf.newProject || row.project
-        if (!(`${project}/${cf.newID}` in propFallbackRef.current) && !(`/${cf.newID}` in propFallbackRef.current)) missing.push({ project, id: cf.newID })
-      }
-      if (!cf.oldProp) {
-        const project = cf.oldProject || row.project
-        if (!(`${project}/${cf.oldID}` in propFallbackRef.current) && !(`/${cf.oldID}` in propFallbackRef.current)) missing.push({ project, id: cf.oldID })
+      for (const side of [
+        { named: cf.newProject || row.project, id: cf.newID, have: cf.newProp },
+        { named: cf.oldProject || row.project, id: cf.oldID, have: cf.oldProp },
+      ]) {
+        if (side.have || !side.id || seenIDs.has(side.id)) continue
+        if (`${side.named}/${side.id}` in propFallbackRef.current || `/${side.id}` in propFallbackRef.current) continue
+        seenIDs.add(side.id)
+        missingIDs.push(side.id)
       }
     }
-    if (missing.length === 0) return
+    if (missingIDs.length === 0) return
     let cancelled = false
     void (async () => {
-      let candidates: string[] = []
-      try {
-        const { projects } = await workspaceApi.listProjects()
-        candidates = projects.map((p) => p.id)
-      } catch { /* no project list — only the verdict's own project is tried */ }
       const next: Record<string, { text: string; project?: string }> = {}
-      let fetched = 0
-      const lookup = async (project: string, id: string): Promise<string> => {
-        if (fetched >= 40) return ''
-        fetched++
-        try {
-          const page = await observationApi.knowledge(project, undefined, undefined, { knowledge_id: id, limit: 1 })
-          return page.knowledge?.[0]?.proposition ?? ''
-        } catch {
-          return '' // not visible from this account
-        }
-      }
-      for (const item of missing) {
-        // Verdict's project first (the common case, one lookup), then the
-        // visible projects for items born elsewhere or project-less verdicts.
-        const order = [...new Set([item.project, ...candidates].filter(Boolean))]
+      for (const id of missingIDs) {
         let found: { text: string; project?: string } | null = null
-        for (const project of order) {
-          const text = await lookup(project, item.id)
-          if (text) { found = { text, project }; break }
-        }
+        try {
+          const page = await observationApi.resolveKnowledge(id)
+          const proposition = page.knowledge?.[0]?.proposition ?? ''
+          if (proposition) found = { text: proposition, project: page.project }
+        } catch { /* not visible from this account */ }
         // Store under the found project and the project-less render key; the
         // bare entry also stops the effect from re-fetching on every render.
         if (found) {
-          next[`${found.project}/${item.id}`] = found
-          next[`/${item.id}`] = found
+          next[`${found.project}/${id}`] = found
+          next[`/${id}`] = found
         } else {
-          next[`${item.project}/${item.id}`] = { text: '' }
-          next[`/${item.id}`] = { text: '' }
+          next[`/${id}`] = { text: '' }
         }
       }
       if (cancelled) return

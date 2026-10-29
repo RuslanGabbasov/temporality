@@ -194,6 +194,11 @@ export const observationApi = {
   hintEffectiveness: (project?: string) =>
     request<{ tiers: { tier: string; helpful: number; harmful: number; helpful_rate_pct: number }[]; since: string }>(
       '/v1/observations/hints/effectiveness', undefined, { project }),
+  // Resolve one knowledge id to its owning project in a single request: the
+  // supervisor fallback used to probe every visible project serially, and
+  // each miss surfaced as a 404 in the network log.
+  resolveKnowledge: (knowledgeID: string) =>
+    request<{ knowledge: KnowledgeItem[]; count: number; project?: string }>('/v1/observations/knowledge/resolve', undefined, { knowledge_id: knowledgeID }),
 }
 
 /** All events of one run, oldest-first, following journal cursors to the end.

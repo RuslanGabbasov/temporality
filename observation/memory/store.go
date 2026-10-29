@@ -6,6 +6,7 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,6 +165,26 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 		page.NextCursor = observation.EncodeCursor(page.Events[len(page.Events)-1])
 	}
 	return page, nil
+}
+
+// ListKnowledgeProjects enumerates the projects that carry knowledge events
+// (same contract as the postgres store): the global semantic map and the
+// knowledge resolve walk exactly these projects, so a store that cannot
+// answer says 501 at the handler instead of silently returning nothing.
+func (s *Store) ListKnowledgeProjects(_ context.Context) ([]string, error) {
+	seen := make(map[string]bool)
+	projects := []string{}
+	s.mu.RLock()
+	for _, event := range s.observationEvents {
+		if !strings.HasPrefix(event.Type, "knowledge.") || event.Context.Project == "" || seen[event.Context.Project] {
+			continue
+		}
+		seen[event.Context.Project] = true
+		projects = append(projects, event.Context.Project)
+	}
+	s.mu.RUnlock()
+	sort.Strings(projects)
+	return projects, nil
 }
 
 // HealthEvents feeds the dashboard aggregation (docs/system-dashboard.md §3.1):
