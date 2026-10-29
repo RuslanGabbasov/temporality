@@ -1614,6 +1614,7 @@ func main() {
 		return principal.VisibleUnits
 	}
 	registerEntityEnabledRoutes(mux, gate, ws, visibleUnits)
+	registerRunSearchRoutes(mux, gate, ws, observationURL, visibleUnits, journalToken)
 
 	// wizardModelClient serves every description→draft wizard (agent, skill,
 	// team): the env gateway when configured, else the installation's
@@ -3423,6 +3424,12 @@ func main() {
 			TaskID:  task.ID,
 			Prompt:  task.Prompt,
 			Title:   task.Title,
+		}
+		// «Давай продолжим» after a broken run: the new attempt gets the tail
+		// of the interrupted run's journal as a system block, so it continues
+		// from where the previous one stopped instead of starting blind.
+		if tail := fetchPriorAttemptTail(r.Context(), observationURL, journalToken, task.ID, ws); tail != "" {
+			input.PriorTail = tail
 		}
 		applyAgentConfig(r.Context(), ws, agentCfg, &input)
 		applyProjectModel(r.Context(), ws, task.ProjectID, &input)
@@ -8037,6 +8044,68 @@ func resolveAgentMCP(a *workspace.Agent, input *agent.RunInput) {
 // bare-model run. A missing project default agent degrades to a bare run
 // instead of failing, while a missing explicit agent stays an error so
 // callers learn about bad references immediately.
+// priorTailCap bounds the previous-attempt block: enough events to show how
+// far the interrupted attempt got, small enough not to eat the context.
+const priorTailCap = 40
+
+// fetchPriorAttemptTail renders the journal tail of the task's last
+// interrupted (failed/cancelled) run as a compact system block. Empty string
+// means nothing to continue from. Best-effort: a journal hiccup must not
+// block starting the new run.
+func fetchPriorAttemptTail(ctx context.Context, observationURL, journalToken, taskID string, ws *workspace.Store) string {
+	prevRunID, prevStatus, err := ws.LatestInterruptedRun(ctx, taskID)
+	if err != nil || prevRunID == "" {
+		return ""
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		observationURL+"/v1/observations/events?"+url.Values{"run": {prevRunID}, "order": {"desc"}, "limit": {strconv.Itoa(priorTailCap)}}.Encode(), nil)
+	if err != nil {
+		return ""
+	}
+	if journalToken != "" {
+		req.Header.Set("Authorization", "Bearer "+journalToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var page struct {
+		Events []struct {
+			OccurredAt string `json:"occurred_at"`
+			Type       string `json:"type"`
+			Data       map[string]any `json:"data"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return ""
+	}
+	lines := make([]string, 0, len(page.Events))
+	for _, event := range page.Events {
+		line := event.Type
+		if tool, ok := event.Data["tool"].(string); ok && tool != "" {
+			line += " · " + tool
+		}
+		if errMsg, ok := event.Data["error"].(string); ok && errMsg != "" {
+			line += " — " + truncateForLog(errMsg, 200)
+		} else if answer, ok := event.Data["answer"].(string); ok && answer != "" {
+			line += " — " + truncateForLog(answer, 200)
+		}
+		lines = append(lines, "- "+line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[Previous attempt of this task was interrupted (status: " + prevStatus + "). Below is the tail of its journal, newest first — continue from where it stopped; do not redo work it already completed:]\n")
+	b.WriteString(strings.Join(lines, "\n"))
+	return b.String()
+}
+
 // runAgentLookup is the store surface resolveRunAgent needs; an interface so
 // the disabled-agent rule is testable without a database.
 type runAgentLookup interface {

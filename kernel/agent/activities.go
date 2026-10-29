@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1143,6 +1144,10 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleIntakeRunStatus(ctx, request)
 	case "cancel_run":
 		return a.handleIntakeCancelRun(ctx, request)
+	case "run_search":
+		return a.handleRunSearch(ctx, request)
+	case "trace_read":
+		return a.handleTraceRead(ctx, request)
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			if faultAfterEffect(request.RunID, request.Name, request.OperationID) {
@@ -1504,6 +1509,57 @@ func (a *Activities) handleIntakeStartTask(ctx context.Context, request ToolRequ
 // handleIntakeRunStatus answers progress questions: the sender's earlier
 // routed messages with their run outcomes. The sender is the run actor —
 // the intake run always runs as the identified sender (docs §10).
+// handleRunSearch backs the run_search tool: recent runs visible to the
+// run's initiator through the org structure (own runs, the unit subtree,
+// ancestor units). The kernel endpoint enforces the visibility; the tool
+// only relays who the initiator is.
+func (a *Activities) handleRunSearch(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if request.ActorID == "" {
+		return ToolResult{Content: "error: run initiator is not set for this run"}, nil
+	}
+	params := url.Values{"actor": {request.ActorID}}
+	if project, ok := request.Arguments["project"].(string); ok && strings.TrimSpace(project) != "" {
+		params.Set("project", strings.TrimSpace(project))
+	}
+	if status, ok := request.Arguments["status"].(string); ok && strings.TrimSpace(status) != "" {
+		params.Set("status", strings.TrimSpace(status))
+	}
+	if days, ok := numericArg(request.Arguments["since_days"]); ok && days > 0 {
+		params.Set("since_days", strconv.Itoa(int(days)))
+	}
+	if limit, ok := numericArg(request.Arguments["limit"]); ok && limit > 0 {
+		params.Set("limit", strconv.Itoa(int(limit)))
+	}
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, a.WorkspaceURL+"/v1/agent/run-search?"+params.Encode(), nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: run_search failed (HTTP %d): %s", status, truncate(body, 400))}, nil
+	}
+	return ToolResult{Content: compactJSON(body, 6000)}, nil
+}
+
+// handleTraceRead backs the trace_read tool: a compact tail of one run's
+// journal — org-scoped the same way as run_search.
+func (a *Activities) handleTraceRead(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if request.ActorID == "" {
+		return ToolResult{Content: "error: run initiator is not set for this run"}, nil
+	}
+	runID, _ := request.Arguments["run_id"].(string)
+	if strings.TrimSpace(runID) == "" {
+		return ToolResult{Content: "error: run_id is required (take it from run_search)"}, nil
+	}
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, a.WorkspaceURL+"/v1/agent/trace?"+url.Values{"actor": {request.ActorID}, "run": {runID}}.Encode(), nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: trace_read failed (HTTP %d): %s", status, truncate(body, 400))}, nil
+	}
+	return ToolResult{Content: compactJSON(body, 8000)}, nil
+}
+
 func (a *Activities) handleIntakeRunStatus(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	if request.ActorID == "" {
 		return ToolResult{Content: "error: sender is not set for this run"}, nil

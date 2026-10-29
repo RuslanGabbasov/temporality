@@ -578,6 +578,22 @@ func decodeExecContext(raw []byte) map[string]any {
 	return m
 }
 
+// LatestInterruptedRun returns the most recent failed or cancelled run of a
+// task, if any — the continuation context for a «давай продолжим» follow-up.
+func (s *Store) LatestInterruptedRun(ctx context.Context, taskID string) (string, string, error) {
+	var id, status string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, status FROM workspace_run WHERE task_id = $1 AND status IN ('failed','cancelled') ORDER BY created_at DESC LIMIT 1`, taskID).
+		Scan(&id, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return id, status, nil
+}
+
 func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
 	var r Run
 	var agentID *string

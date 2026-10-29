@@ -67,6 +67,10 @@ type RunInput struct {
 	TaskID  string `json:"task_id"`
 	ActorID string `json:"actor_id"`
 	Prompt  string `json:"prompt"`
+	// PriorTail carries the journal tail of the interrupted previous attempt
+	// of the same task (failed/cancelled): rendered as a system block so a
+	// «давай продолжим» run resumes instead of starting blind.
+	PriorTail string `json:"prior_tail,omitempty"`
 	// Title is the owning task's display title. When present it becomes the
 	// run title directly — no model call, so a slow provider never leaves the
 	// Runs list with bare agent names (runtitle fallback ladder).
@@ -427,6 +431,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	messages := []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
 	if hintBlock != "" {
 		messages = append(messages, llm.Message{Role: "system", Content: hintBlock})
+	}
+	if input.PriorTail != "" {
+		messages = append(messages, llm.Message{Role: "system", Content: input.PriorTail})
 	}
 	// Hint usage is NOT recorded here: injection is an offer, not a use. The
 	// honest used/ignored signal is derived from the run's own output after it
@@ -2836,7 +2843,7 @@ const IntakeProjectID = "intake"
 var intakeDialogTools = map[string]bool{
 	"search_projects": true, "search_org_units": true,
 	"start_task": true, "intake_decide": true,
-	"run_status": true, "cancel_run": true,
+	"run_status": true, "cancel_run": true, "run_search": true, "trace_read": true,
 }
 
 // tools the policy regime itself relies on. Consequential tools —
@@ -2869,7 +2876,7 @@ var policySafeTools = map[string]bool{
 	// tools (no sandbox, no delegation).
 	"search_projects": true, "search_org_units": true,
 	"start_task": true, "intake_decide": true,
-	"run_status": true, "cancel_run": true,
+	"run_status": true, "cancel_run": true, "run_search": true, "trace_read": true,
 }
 
 // policySafeTool reports whether a tool may run without approval when the
@@ -3665,6 +3672,8 @@ func KernelTools() []llm.ToolDef {
 		{Name: "start_task", Description: "Create a task in the resolved project from the incoming message and immediately start its run, attributed to the sender. The prompt must be self-contained: the executing agent sees only what you write here. Call it at most once per message", Parameters: map[string]any{"type": "object", "properties": map[string]any{"project_id": map[string]any{"type": "string"}, "title": map[string]any{"type": "string", "description": "Short task title"}, "prompt": map[string]any{"type": "string", "description": "Self-contained task prompt with explicit steps and checkpoints"}, "agent_id": map[string]any{"type": "string", "description": "Optional agent override; defaults to the project's default agent"}, "saga": map[string]any{"type": "string", "description": "Optional saga hint — the long-running effort this task belongs to: a saga id, its title, or words from it. Matched fuzzily (id, title, meaning); with no hint the best-matching saga above the confidence bar binds automatically"}}, "required": []string{"project_id", "title", "prompt"}}},
 		{Name: "intake_decide", Description: "Record the classification of the incoming message: task (do something new), amendment (adds to running work), status (progress question), cancel (stop earlier work), chatter (no work), reply (answers an agent question). Call it exactly once, before anything else", Parameters: map[string]any{"type": "object", "properties": map[string]any{"classification": map[string]any{"type": "string", "enum": []string{"task", "amendment", "status", "cancel", "chatter", "reply"}}, "note": map[string]any{"type": "string", "description": "Optional one-line justification"}}, "required": []string{"classification"}}},
 		{Name: "user_remember", Description: "Save a durable fact or preference about the CURRENT sender — how they want answers (style, length, language), what they own or lead, working agreements. Only durable facts: a one-off request is work, not memory. Never store secrets or credentials", Parameters: map[string]any{"type": "object", "properties": map[string]any{"fact": map[string]any{"type": "string", "description": "One short fact in the sender's own language, e.g. 'предпочитает краткие ответы' or 'ведёт проект Omni'"}}, "required": []string{"fact"}}},
+		{Name: "run_search", Description: "Search recent agent runs you are allowed to see through the org structure: your own runs, your teammates' and subordinate units' runs (admins see everything). Returns run id, title, status, project, initiator and start time. Use it to find a run by topic or teammate, then read its trace with trace_read", Parameters: map[string]any{"type": "object", "properties": map[string]any{"project": map[string]any{"type": "string", "description": "Optional project id to narrow the search"}, "status": map[string]any{"type": "string", "description": "Optional lifecycle filter: running, completed, failed, cancelled"}, "since_days": map[string]any{"type": "integer", "description": "How far back to look, days (default 14, max 90)"}, "limit": map[string]any{"type": "integer", "description": "Optional cap, default 15"}}}},
+		{Name: "trace_read", Description: "Read a compact tail of one run's journal: model turns, tool steps, errors and the final status — org visibility applies (your runs, teammates', subordinate units'). Use it to learn how a run went before continuing it, diagnosing a failure, or reporting progress", Parameters: map[string]any{"type": "object", "properties": map[string]any{"run_id": map[string]any{"type": "string", "description": "Run id from run_search"}}, "required": []string{"run_id"}}},
 		{Name: "run_status", Description: "List the earlier tasks the message sender started through this channel, with the current status and answer of each run. Use it for progress questions (\"what happened to my estimate?\") instead of starting new work", Parameters: map[string]any{"type": "object", "properties": map[string]any{"limit": map[string]any{"type": "integer", "description": "Optional cap, default 10"}}}},
 		{Name: "cancel_run", Description: "Cancel a run the sender started through this channel. Only runs produced from the sender's own messages may be cancelled; pass the run_id exactly as run_status reported it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"run_id": map[string]any{"type": "string", "description": "Target run id from run_status"}}, "required": []string{"run_id"}}},
 		{Name: "agent_propose", Description: "Propose an evolution of an agent definition grounded in evidence: what problem you observed, what change you propose and the expected effect. Additive by contract: omitted parts keep the current definition, and the agent's purpose (description) never changes through a proposal — a human edits that themselves. The proposal lands as pending and changes nothing until a human applies it in the Agents UI. Use it to turn repeated friction into a durable definition fix; capabilities cannot be proposed — a proposal never grants new powers", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent whose definition should change (usually you)"}, "problem": map[string]any{"type": "string", "description": "The observed problem: what kept going wrong or missing, grounded in concrete runs"}, "change": map[string]any{"type": "string", "description": "The proposed definition change: constraints or completion checks"}, "effect": map[string]any{"type": "string", "description": "Expected effect once a human applies it"}, "constraints": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Full replacement list of constraints (what the agent must never do)"}, "completion": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Full replacement list of completion checks (what to verify before declaring done)"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Run ids, knowledge ids or other refs supporting the problem"}}, "required": []string{"agent_id", "problem", "change"}}},
