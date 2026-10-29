@@ -10,7 +10,7 @@
 // browser does the math. Bounded at ~1500 items — cosine pairs and the force
 // pass stay in the tens of milliseconds to low seconds range.
 
-import { forceSimulation, forceLink, forceManyBody, forceX, forceY } from 'd3-force'
+import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-force'
 import { captionLines, dominantTopic, topicColor } from './knowledgeTaxonomy'
 
 export interface MapItem {
@@ -314,10 +314,15 @@ export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
     let cx = 0, cy = 0
     for (const index of memberIndices) { cx += nodes[index].x; cy += nodes[index].y }
     cx /= memberIndices.length; cy /= memberIndices.length
-    let radius = 0
-    for (const index of memberIndices) {
-      radius = Math.max(radius, Math.hypot(nodes[index].x - cx, nodes[index].y - cy))
-    }
+    // Robust covering radius: the 90th-percentile member distance. A plain
+    // max lets a few far-flung stragglers inflate the bubble into an empty
+    // giant that overlaps its neighbors — the «острые растянутые кластеры»
+    // look. Stragglers stay on the map as dots of their region's hue; the
+    // soft blob now hugs the dense core.
+    const distances = memberIndices
+      .map((index) => Math.hypot(nodes[index].x - cx, nodes[index].y - cy))
+      .sort((a, b) => a - b)
+    const radius = distances[Math.min(distances.length - 1, Math.max(0, Math.ceil(distances.length * 0.9) - 1))] + 14
     const node1: ClusterTreeNode = {
       label: captionFor(items, memberIndices),
       labelLines: captionLinesFor(items, memberIndices),
@@ -340,10 +345,10 @@ export function buildClusterTree(items: MapItem[], nodes: LayoutNode[]): {
         let scx = 0, scy = 0
         for (const index of subMembers) { scx += nodes[index].x; scy += nodes[index].y }
         scx /= subMembers.length; scy /= subMembers.length
-        let sRadius = 0
-        for (const index of subMembers) {
-          sRadius = Math.max(sRadius, Math.hypot(nodes[index].x - scx, nodes[index].y - scy))
-        }
+        const subDistances = subMembers
+          .map((index) => Math.hypot(nodes[index].x - scx, nodes[index].y - scy))
+          .sort((a, b) => a - b)
+        const sRadius = subDistances[Math.min(subDistances.length - 1, Math.max(0, Math.ceil(subDistances.length * 0.9) - 1))]
         const child: ClusterTreeNode = {
           label: captionFor(items, subMembers),
           labelLines: captionLinesFor(items, subMembers),
@@ -643,28 +648,67 @@ export function buildSemanticMap(
 
   const links = edges.map(([source, target, similarity]) => ({
     source, target,
-    distance: 18 + (1 - Math.max(0, Math.min(1, similarity))) * 112,
+    similarity: Math.max(0, Math.min(1, similarity)),
   }))
-  const simTicks = prevPositions ? Math.min(ticks, 90) : ticks
   const simulation = forceSimulation(nodes)
-    .force('link', forceLink(links).distance((link: { distance: number }) => link.distance).strength(0.6))
+    // Weak (dissimilar) links used to drag as hard as strong ones: kNN chains
+    // stretched into long strands and every cluster read as a sharp elongated
+    // clump. Strong edges now pull tight, weak ones barely hold.
+    .force('link', forceLink(links)
+      .distance((link: { similarity: number }) => 16 + (1 - link.similarity) * 72)
+      .strength((link: { similarity: number }) => 0.2 + 0.55 * link.similarity))
     .force('charge', forceManyBody().strength(-90))
+    .force('collide', forceCollide(7))
     .force('x', forceX(width / 2).strength(0.03))
     .force('y', forceY(height / 2).strength(0.03))
     .stop()
-  for (let i = 0; i < simTicks; i++) simulation.tick()
 
-  // The anchor pass: placed items keep 85% of where they were — the force
-  // pass only bends them locally, so a batch adjusts neighborhoods instead of
-  // relocating the whole plane.
   if (prevPositions) {
+    // Incremental relaxation in two phases (the crystal-growth model):
+    //
+    // A) Newcomers land collapsed on their seeds — spread them at medium
+    //    energy while the placed items HOLD their ground (re-pinned every
+    //    tick), so a landing batch blooms into its own cluster shape instead
+    //    of dragging the old members into stretched compromise lumps.
+    //
+    // B) Everyone relaxes at low energy — the clusters round out and absorb
+    //    the newcomers gently.
+    //
+    // Finally the displacement cap keeps placed items within a short walk of
+    // where they were: convergence accumulates ACROSS batches (кластеры
+    // плавно подгребают к своей форме), never a per-batch jump.
+    const pinned: Array<{ node: LayoutNode; x: number; y: number }> = []
     for (const node of nodes) {
       const prev = prevPositions.get(node.id)
-      if (prev) {
-        node.x = prev.x + (node.x - prev.x) * 0.15
-        node.y = prev.y + (node.y - prev.y) * 0.15
+      if (prev) pinned.push({ node, x: prev.x, y: prev.y })
+    }
+    const fx = (node: LayoutNode) => node as LayoutNode & { vx?: number; vy?: number }
+
+    simulation.alpha(0.7)
+    for (let i = 0; i < 70; i++) {
+      simulation.tick()
+      for (const pin of pinned) {
+        pin.node.x = pin.x
+        pin.node.y = pin.y
+        fx(pin.node).vx = 0
+        fx(pin.node).vy = 0
       }
     }
+    simulation.alpha(0.3)
+    for (let i = 0; i < 60; i++) simulation.tick()
+
+    const DISPLACEMENT_CAP = 30
+    for (const pin of pinned) {
+      const dx = pin.node.x - pin.x
+      const dy = pin.node.y - pin.y
+      const dist = Math.hypot(dx, dy)
+      if (dist > DISPLACEMENT_CAP) {
+        pin.node.x = pin.x + (dx / dist) * DISPLACEMENT_CAP
+        pin.node.y = pin.y + (dy / dist) * DISPLACEMENT_CAP
+      }
+    }
+  } else {
+    for (let i = 0; i < ticks; i++) simulation.tick()
   }
 
   const tree = buildClusterTree(items, nodes)
