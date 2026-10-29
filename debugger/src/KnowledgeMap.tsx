@@ -136,6 +136,10 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   // as they come — the first paint needs one batch, not the whole corpus.
   // genRef invalidates the loop when the project flips or the tab unmounts.
   const [progress, setProgress] = useState<{ loaded: number; total: number | null } | null>(null)
+  // Knowledge items seen vs vectors embedded: when knowledge exists but no
+  // vectors do, the semantic layer never produced embeddings (model not
+  // loaded) and the empty state must say that instead of a bare «empty».
+  const [knowledgeTotal, setKnowledgeTotal] = useState<number | null>(null)
   const loadGen = useRef(0)
   const load = useCallback(async () => {
     const gen = ++loadGen.current
@@ -147,6 +151,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const seen = new Set<string>()
       const BATCH = 400
       let total: number | null = null
+      let knowledgeTotal: number | null = null
       // Guards against a journal older than offset-paging (it would replay
       // the same first page forever): a hard page cap and a stall breaker —
       // two consecutive pages with zero fresh items stop the stream.
@@ -156,12 +161,14 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: BATCH, offset })
         if (stale()) return
         if (typeof page.total === 'number') total = page.total
+        if (typeof page.knowledge_total === 'number') knowledgeTotal = page.knowledge_total
         const before = accumulated.length
         const fresh = (page.items ?? []).filter((item) => !seen.has(item.id))
         for (const item of page.items ?? []) seen.add(item.id)
         accumulated.push(...fresh)
         setItems([...accumulated])
         setProgress({ loaded: accumulated.length, total: total ?? accumulated.length })
+        setKnowledgeTotal(knowledgeTotal)
         if ((page.items ?? []).length === 0) break
         if (accumulated.length === before && ++stalled >= 2) break
       }
@@ -693,7 +700,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         {loading && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>…</div>}
         {!loading && items !== null && items.length === 0 && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--tm-muted)', fontSize: '0.8rem', textAlign: 'center', padding: '1rem' }}>
-            {t('knowledge.map_empty') ?? 'Нет векторов знаний для карты: включите эмбеддинги (semantic-слой) и дайте бэкфиллу наполнить базу.'}
+            {(knowledgeTotal ?? 0) > 0
+              ? t('knowledge.map_no_vectors') ?? 'Знания есть ({{count}}), но векторы не считаны: модель эмбеддингов не загрузилась. Проверьте логи ядра при старте и доступ ядра к huggingface.co (или задайте KERNEL_EMBEDDINGS_MODEL на локально закэшированную модель).'
+              : t('knowledge.map_empty') ?? 'Нет векторов знаний для карты: включите эмбеддинги (semantic-слой) и дайте бэкфиллу наполнить базу.'}
           </div>
         )}
       </div>

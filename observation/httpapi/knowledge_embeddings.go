@@ -282,6 +282,12 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 		return items[i].ID < items[j].ID
 	})
 	total := len(items)
+	// knowledgeTotal = knowledge items seen regardless of vectors: when it is
+	// non-zero but total is zero, the semantic layer has produced no vectors
+	// for this installation (embeddings model never loaded — Hugging Face
+	// unreachable behind a corporate egress) and the UI can say so instead of
+	// a bare «empty».
+	knowledgeTotal := len(pending)
 	if offset < len(items) {
 		end := offset + limit
 		if end > len(items) {
@@ -291,7 +297,7 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	} else {
 		items = nil
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total})
+	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total, "knowledge_total": knowledgeTotal})
 }
 
 // neighborStore is the vector-listing capability behind the neighbors lookup.
