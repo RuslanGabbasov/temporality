@@ -147,16 +147,23 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const seen = new Set<string>()
       const BATCH = 400
       let total: number | null = null
-      for (let offset = 0; stale() && (total === null || offset < total); offset += BATCH) {
+      // Guards against a journal older than offset-paging (it would replay
+      // the same first page forever): a hard page cap and a stall breaker —
+      // two consecutive pages with zero fresh items stop the stream.
+      const maxPages = 20
+      let stalled = 0
+      for (let offset = 0, pageIdx = 0; stale() && pageIdx < maxPages && (total === null || offset < total); offset += BATCH, pageIdx++) {
         const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: BATCH, offset })
         if (stale()) return
         if (typeof page.total === 'number') total = page.total
+        const before = accumulated.length
         const fresh = (page.items ?? []).filter((item) => !seen.has(item.id))
         for (const item of page.items ?? []) seen.add(item.id)
         accumulated.push(...fresh)
         setItems([...accumulated])
         setProgress({ loaded: accumulated.length, total: total ?? accumulated.length })
         if ((page.items ?? []).length === 0) break
+        if (accumulated.length === before && ++stalled >= 2) break
       }
     } catch (e) {
       if (stale()) {
