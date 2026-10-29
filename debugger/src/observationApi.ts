@@ -172,8 +172,19 @@ export const observationApi = {
   // Semantic map: every embedded knowledge item visible to the caller — raw
   // vectors + render meta; the client projects them to 2D. offset/total page
   // through the stable freshness order, so the map streams in batches.
-  knowledgeEmbeddingMap: (opts?: { model?: string; project?: string; limit?: number; offset?: number }) =>
-    request<{ items: Array<import('./semanticMap').MapItem>; model: string; total?: number; knowledge_total?: number; project_errors?: string[] }>('/v1/observations/knowledge/embeddings/map', undefined, { model: opts?.model, project: opts?.project, limit: opts?.limit, offset: opts?.offset }),
+  // The map request can legitimately run for a while (the journal computes
+  // the project's knowledge projection on cache misses). 120s with a clear
+  // failure beats a request that hangs forever with no feedback.
+  knowledgeEmbeddingMap: async (opts?: { model?: string; project?: string; limit?: number; offset?: number }) => {
+    try {
+      return await request<{ items: Array<import('./semanticMap').MapItem>; model: string; total?: number; knowledge_total?: number; project_errors?: string[] }>('/v1/observations/knowledge/embeddings/map', { signal: AbortSignal.timeout(120_000) }, { model: opts?.model, project: opts?.project, limit: opts?.limit, offset: opts?.offset })
+    } catch (e) {
+      if (e instanceof DOMException && (e.name === 'AbortError' || e.name === 'TimeoutError')) {
+        throw new Error('journal did not answer the map request in 120 s — the knowledge projection is likely recomputing, see the journal log')
+      }
+      throw e
+    }
+  },
   healthStats: (project?: string, since?: string) =>
     request<HealthStats>('/v1/observations/stats/health', undefined, { project, since }),
   // Hint tier effectiveness (docs/supervisor-model.md §6.6): helpful/harmful
