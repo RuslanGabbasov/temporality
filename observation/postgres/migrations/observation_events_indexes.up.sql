@@ -19,3 +19,10 @@ CREATE INDEX IF NOT EXISTS observation_events_run_occurred_idx
 -- for ordering.
 CREATE INDEX IF NOT EXISTS observation_events_cursor_idx
     ON observation_events (occurred_at, received_at, source_id, event_id);
+
+-- Knowledge projection scans (the knowledge list, the map and hint retrieval)
+-- filter by project: without this index every projection recompute seq-scans
+-- the whole event table, which on installations with a long agent history
+-- turns the first knowledge/map load after a journal restart into minutes.
+CREATE INDEX IF NOT EXISTS observation_events_project_occurred_idx
+    ON observation_events (project_id, occurred_at, received_at, source_id, event_id);

@@ -699,9 +699,18 @@ func (s *Server) cachedKnowledge(ctx context.Context, project string, asOf, know
 	if ok && time.Since(entry.computed) < knowledgeCacheTTL {
 		return entry.items, entry.chain, nil
 	}
+	computeStarted := time.Now()
 	items, chain, err := s.computeKnowledge(ctx, project, nil, nil)
 	if err != nil {
 		return nil, nil, err
+	}
+	// The recompute duration is the number one remote-diagnosis datum for
+	// «карта/знания не грузятся»: on installations with a long event history
+	// the projection scan runs for minutes without an index, and every cache
+	// miss (journal restart, TTL) repeats it.
+	if s.log != nil {
+		s.log.Info("knowledge projection computed", "project", project,
+			"items", len(items), "duration", time.Since(computeStarted).Round(time.Millisecond))
 	}
 	s.knowledgeMu.Lock()
 	// Cap the cache: an installation with hundreds of projects must not grow
