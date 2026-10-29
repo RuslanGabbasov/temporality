@@ -248,6 +248,41 @@ func registerEntityEnabledRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 		writeJSON(w, 200, secret)
 	})
 
+	mux.HandleFunc("POST /v1/workspace/providers/{providerID}/enabled", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		providerID := r.PathValue("providerID")
+		enabled, ok := decodeEnabledRequest(w, r)
+		if !ok {
+			return
+		}
+		provider, err := ws.GetProvider(r.Context(), providerID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(provider.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		if err := ws.SetProviderEnabled(r.Context(), providerID, enabled); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		action := workspace.AuditProviderEnabled
+		if !enabled {
+			action = workspace.AuditProviderDisabled
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestSubject(r), action, "provider", providerID, map[string]any{"name": provider.Name})
+		provider.Enabled = enabled
+		writeJSON(w, 200, provider)
+	})
+
 	mux.HandleFunc("POST /v1/workspace/sandbox-profiles/{profileID}/enabled", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleAdmin) {
 			return

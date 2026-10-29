@@ -1277,9 +1277,9 @@ func (s *Store) GetProvider(ctx context.Context, id string) (Provider, error) {
 	var labels []byte
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, base_url, api_key_ref, models, labels, org_unit_id, created_at, updated_at
+		`SELECT id, name, base_url, api_key_ref, models, labels, enabled, org_unit_id, created_at, updated_at
 		 FROM workspace_provider WHERE id = $1`, id).
-		Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &orgUnitID, &p.CreatedAt, &p.UpdatedAt)
+		Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -1292,7 +1292,7 @@ func (s *Store) GetProvider(ctx context.Context, id string) (Provider, error) {
 }
 
 func (s *Store) ListProviders(ctx context.Context) ([]Provider, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, org_unit_id, created_at, updated_at FROM workspace_provider ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, enabled, org_unit_id, created_at, updated_at FROM workspace_provider ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -1302,7 +1302,7 @@ func (s *Store) ListProviders(ctx context.Context) ([]Provider, error) {
 		var p Provider
 		var labels []byte
 		var orgUnitID *string
-		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &orgUnitID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.OrgUnitID = derefPtr(orgUnitID)
@@ -1318,7 +1318,7 @@ func (s *Store) ListProvidersVisible(ctx context.Context, units []string) ([]Pro
 	if units == nil {
 		return s.ListProviders(ctx)
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, org_unit_id, created_at, updated_at FROM workspace_provider WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, enabled, org_unit_id, created_at, updated_at FROM workspace_provider WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
 	if err != nil {
 		return nil, err
 	}
@@ -1328,7 +1328,7 @@ func (s *Store) ListProvidersVisible(ctx context.Context, units []string) ([]Pro
 		var p Provider
 		var labels []byte
 		var orgUnitID *string
-		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &orgUnitID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.OrgUnitID = derefPtr(orgUnitID)
@@ -1344,6 +1344,21 @@ func (s *Store) UpdateProvider(ctx context.Context, p Provider) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_provider SET name=$2, base_url=$3, api_key_ref=$4, models=$5, labels=$6, org_unit_id=$7, updated_at=$8 WHERE id=$1`,
 		p.ID, p.Name, p.BaseURL, p.APIKeyRef, p.Models, labels, nullString(p.OrgUnitID), p.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetProviderEnabled flips the uniform on/off switch without touching the
+// connection config: a disabled provider refuses to serve model calls — runs
+// referencing it fail loudly instead of looping on provider auth errors.
+func (s *Store) SetProviderEnabled(ctx context.Context, id string, enabled bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_provider SET enabled=$2, updated_at=now() WHERE id=$1`, id, enabled)
 	if err != nil {
 		return err
 	}

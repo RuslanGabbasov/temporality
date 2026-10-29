@@ -869,6 +869,8 @@ export interface MCPDiscoverResult {
 export interface Provider {
   id: string
   name: string
+  /** the uniform on/off switch: a disabled provider does not serve model calls */
+  enabled?: boolean
   base_url: string
   api_key_ref: string
   models: string[]
@@ -1385,6 +1387,8 @@ export const workspaceApi = {
   // One minimal chat completion with the STORED credential — the runtime
   // path of call_model in one click (probe-models only authenticates
   // /models with a raw form value).
+  setProviderEnabled: (id: string, enabled: boolean) =>
+    request<Provider>(`/v1/workspace/providers/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
   testProviderGeneration: (id: string, model?: string) =>
     request<{ status: number; body: string }>(`/v1/workspace/providers/${id}/test-generation${model ? '?model=' + encodeURIComponent(model) : ''}`, { method: 'POST', timeoutMs: 120_000 } as RequestInit & { timeoutMs: number }),
 

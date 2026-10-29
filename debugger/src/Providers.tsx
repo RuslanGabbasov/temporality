@@ -9,6 +9,7 @@ import {
   Column,
   Stack,
   Heading,
+  Toggle,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Renew, SendAlt } from '@carbon/icons-react'
@@ -143,6 +144,20 @@ export default function Providers() {
     }
   }
 
+  // The uniform switch (the trigger pattern): a disabled provider does not
+  // serve model calls. Optimistic flip, rollback on failure.
+  const toggleProviderEnabled = async (p: Provider) => {
+    const next = p.enabled === false
+    setProviders((prev) => prev.map((x) => (x.id === p.id ? { ...x, enabled: next } : x)))
+    try {
+      const updated = await workspaceApi.setProviderEnabled(p.id, next)
+      setProviders((prev) => prev.map((x) => (x.id === p.id ? updated : x)))
+    } catch (f) {
+      setProviders((prev) => prev.map((x) => (x.id === p.id ? { ...x, enabled: p.enabled } : x)))
+      setError(message(f))
+    }
+  }
+
   // Sync mirrors the stored provider's catalog now (the background loop
   // already does this on a schedule; this covers "do it immediately").
   const syncProvider = async (p: Provider) => {
@@ -170,8 +185,8 @@ export default function Providers() {
       <Grid>
         {visibleProviders.map((p) => (
           <Column key={p.id} sm={4} md={4} lg={4}>
-            <Tile style={{ marginBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <Tile style={{ marginBottom: '0.75rem', opacity: p.enabled === false ? 0.5 : 1, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flex: 1 }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
                     <strong>{p.name}</strong>
@@ -202,7 +217,7 @@ export default function Providers() {
                     {testResult.ok ? '✓ ' : '✕ '}{testResult.text}
                   </p>
                 )}
-                <Stack orientation="horizontal" gap={1}>
+                <Stack orientation="vertical" gap={1} style={{ flexShrink: 0 }}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Renew} iconDescription={t('providers.sync_now') ?? 'Sync catalog now'}
                     disabled={syncingId === p.id} onClick={() => void syncProvider(p)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={SendAlt} iconDescription={t('providers.test_generation') ?? 'Test generation'}
@@ -210,6 +225,11 @@ export default function Providers() {
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(p)} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(p)} />
                 </Stack>
+              </div>
+              {/* The uniform switch, bottom-right of the mini-card: a disabled
+                  provider does not serve model calls. */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem', paddingTop: '0.4rem', borderTop: '1px solid var(--tm-border)' }} title={t('providers.enabled_hint') ?? 'Disabled providers do not serve model calls'}>
+                <Toggle id={`provider-enabled-${p.id}`} labelText="" hideLabel aria-label={t('providers.enabled_hint') ?? 'Toggle provider'} toggled={p.enabled !== false} onToggle={() => void toggleProviderEnabled(p)} size="sm" />
               </div>
             </Tile>
           </Column>
@@ -224,7 +244,7 @@ export default function Providers() {
               <TextInput id="prov-url" labelText={t('providers.url_label') ?? 'Base URL'} value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
               {/* One-click presets for the two direct-connection hosts people
                   reach for first; everything OpenAI-compatible works by URL. */}
-              <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '-0.75rem' }}>
+              <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
                 {[
                   { label: 'Anthropic', url: 'https://api.anthropic.com/v1' },
                   { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
@@ -242,7 +262,7 @@ export default function Providers() {
               </div>
               <TextInput id="prov-key" labelText={t('providers.key_label') ?? 'API Key'} value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="secret://my-api-key, Z_AI_API_KEY or the key itself" helperText={t('providers.key_helper') ?? 'secret://name (recommended), an env var name, or the key itself'} />
               {secrets.length > 0 && (
-                <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '-0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
                   {secrets.map((s) => (
                     <Tag key={s.id} size="sm" type={form.api_key_ref === `secret://${s.name}` ? 'green' : 'outline'} style={{ cursor: 'pointer' }} onClick={() => setForm({ ...form, api_key_ref: `secret://${s.name}` })}>
                       secret://{s.name}

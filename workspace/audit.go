@@ -96,6 +96,8 @@ const (
 	AuditSecretEnabled     = "secret.enabled"
 	AuditSandboxDisabled   = "sandbox.profile.disabled"
 	AuditSandboxEnabled    = "sandbox.profile.enabled"
+	AuditProviderDisabled  = "provider.disabled"
+	AuditProviderEnabled   = "provider.enabled"
 	AuditAuthLoginSucceeded      = "auth.login.succeeded"
 	AuditAuthLoginFailed         = "auth.login.failed"
 	AuditAuthLogout              = "auth.logout"

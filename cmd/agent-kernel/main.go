@@ -4363,7 +4363,19 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		disabledHit := false
 		for _, p := range providers {
+			// The uniform switch (the trigger/MCP pattern): a disabled provider
+			// does not serve calls — and if it was the only one serving this
+			// model, the caller gets a loud 409 instead of a silent fallback.
+			if !p.Enabled {
+				for _, m := range p.Models {
+					if m == model {
+						disabledHit = true
+					}
+				}
+				continue
+			}
 			for _, m := range p.Models {
 				if m == model {
 					apiKey, kErr := resolveProviderAPIKey(r.Context(), ws, p.APIKeyRef, secretMasterKey)
@@ -4388,6 +4400,10 @@ func main() {
 					return
 				}
 			}
+		}
+		if disabledHit {
+			writeError(w, 409, fmt.Errorf("the provider serving model %q is disabled; enable it in Providers", model))
+			return
 		}
 		writeError(w, 404, fmt.Errorf("no provider serves model %q", model))
 	})

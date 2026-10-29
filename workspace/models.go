@@ -522,6 +522,10 @@ type Provider struct {
 	Name      string            `json:"name"`
 	BaseURL   string            `json:"base_url"`
 	APIKeyRef string            `json:"api_key_ref,omitempty"` // env var name or secret ref
+	// Enabled is the uniform on/off switch (the trigger/MCP pattern): a
+	// disabled provider refuses to serve model calls — runs referencing it
+	// fail loudly instead of looping on provider auth errors.
+	Enabled bool `json:"enabled"`
 	Models    []string          `json:"models,omitempty"`      // model IDs discovered or listed
 	Labels    map[string]string `json:"labels,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.

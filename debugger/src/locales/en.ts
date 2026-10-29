@@ -1643,6 +1643,7 @@ export const en: Record<string, string> = {
     'providers.fetch_failed': 'Could not read the provider catalog',
     'providers.fetched_n': 'Discovered {{count}} models',
     'providers.sync_now': 'Sync catalog now',
+    'providers.enabled_hint': 'Disabled providers do not serve model calls',
     'providers.test_generation': 'Test generation',
     'providers.test_ok': 'Generation works with the stored key.',
     'providers.test_failed': 'Upstream returned {{status}}:',

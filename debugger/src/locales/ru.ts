@@ -1643,6 +1643,7 @@ export const ru: Record<string, string> = {
     'providers.fetch_failed': 'Не удалось прочитать каталог провайдера',
     'providers.fetched_n': 'Загружено моделей: {{count}}',
     'providers.sync_now': 'Синхронизировать каталог',
+    'providers.enabled_hint': 'Выключенный провайдер не обслуживает вызовы модели',
     'providers.test_generation': 'Проверить генерацию',
     'providers.test_ok': 'Генерация работает с сохранённым ключом.',
     'providers.test_failed': 'Провайдер вернул {{status}}:',
