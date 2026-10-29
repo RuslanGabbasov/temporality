@@ -617,16 +617,41 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     if (stillFading || animating) frameRef.current = requestAnimationFrame(draw)
 
     // ── layer 4: cluster captions, on top of the dots (cross-faded with the
-    // bubbles they belong to) ──
+    // bubbles they belong to). While a search/state filter dims most dots,
+    // a caption fades in proportion to the share of its region's points that
+    // still match — the bright captions point at where the hits live. ──
+    const filtering = matches.some((m) => !m)
+    const captionFactor = new Map<ClusterTreeNode, number>()
+    if (filtering) {
+      const totals = new Map<ClusterTreeNode, number>()
+      const hits = new Map<ClusterTreeNode, number>()
+      for (let i = 0; i < points.length; i++) {
+        const region = level1Ref.current[points[i].cluster]
+        if (!region) continue
+        totals.set(region, (totals.get(region) ?? 0) + 1)
+        if (matches[i]) hits.set(region, (hits.get(region) ?? 0) + 1)
+      }
+      for (const region of level1Ref.current) {
+        const total = totals.get(region) ?? 0
+        const ratio = total ? (hits.get(region) ?? 0) / total : 0
+        // A floor keeps the geography readable: a fully dark region still
+        // whispers its name instead of vanishing.
+        const factor = 0.1 + 0.9 * ratio
+        captionFactor.set(region, factor)
+        for (const child of region.children ?? []) captionFactor.set(child, factor)
+      }
+    }
+    const fadeCaption = (node: ClusterTreeNode, alpha: number, font: number) =>
+      drawBubbleCaption(node, alpha * (captionFactor.get(node) ?? 1), font)
     if (scale < FAR) {
-      drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleCaption(region, a, 13) }, level1Ref.current, treeFade?.fromL1, 1)
+      drawTreePair((nodes, a) => { for (const region of nodes) fadeCaption(region, a, 13) }, level1Ref.current, treeFade?.fromL1, 1)
     } else if (scale < NEAR) {
       const regionAlpha = Math.max(0, Math.min(1, (FAR + 0.65 - scale) / 0.5))
       if (regionAlpha > 0.02) {
-        drawTreePair((nodes, a) => { for (const region of nodes) drawBubbleCaption(region, a * 0.7, 12) }, level1Ref.current, treeFade?.fromL1, regionAlpha)
+        drawTreePair((nodes, a) => { for (const region of nodes) fadeCaption(region, a * 0.7, 12) }, level1Ref.current, treeFade?.fromL1, regionAlpha)
       }
       const subAlpha = Math.max(0, Math.min(1, (scale - FAR * 0.8) / 0.3))
-      drawTreePair((nodes, a) => { for (const child of nodes) drawBubbleCaption(child, a, 11) }, level2Ref.current, treeFade?.fromL2, subAlpha)
+      drawTreePair((nodes, a) => { for (const child of nodes) fadeCaption(child, a, 11) }, level2Ref.current, treeFade?.fromL2, subAlpha)
     }
 
     // ── layer 5: bounded, non-overlapping item labels ──
