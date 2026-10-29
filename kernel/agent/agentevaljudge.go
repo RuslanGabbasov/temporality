@@ -65,7 +65,7 @@ func (a *Activities) judgeConfig(ctx context.Context) (workspaceJudgeConfig, err
 // when no visible provider serves it, the env endpoint with the model id
 // overridden stays the fallback.
 func (a *Activities) judgeModelClient(ctx context.Context, model string) (*llm.Client, error) {
-	if config, ok, err := a.modelConfigFor(ctx, "", model); err == nil && ok {
+	if config, _, ok, err := a.modelConfigFor(ctx, "", model); err == nil && ok {
 		return llm.New(config), nil
 	}
 	config, err := llm.ConfigFromEnv()

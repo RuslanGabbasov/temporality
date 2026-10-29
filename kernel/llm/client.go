@@ -997,6 +997,19 @@ func transient(err error) bool {
 	return errors.As(err, &transportErr)
 }
 
+// StatusOf reports the HTTP status behind a provider status error (4xx/5xx
+// rejected by the gateway). Callers use it to react to specific codes — the
+// kernel evicts its provider cache on 401/403 so a rotated key re-resolves
+// on the retry instead of serving the stale credential until the TTL runs
+// out. ok=false when the error is not a status error (transport, cancel).
+func StatusOf(err error) (code int, ok bool) {
+	var statusErr *statusError
+	if !errors.As(err, &statusErr) {
+		return 0, false
+	}
+	return statusErr.code, true
+}
+
 type transportError struct {
 	err error
 }

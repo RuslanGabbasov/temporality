@@ -182,8 +182,19 @@ type skillEmbedEntry struct {
 // cached negative "no provider serves this model" answer.
 type providerCacheEntry struct {
 	config    llm.Config
+	providerID string
 	ok        bool
 	fetchedAt time.Time
+}
+
+// evictModelConfig drops the cached routing decision for project|model: a
+// 401/403 from a routed provider means the cached credential may be stale
+// (rotated key, replaced secret) — the retry ladder re-resolves instead of
+// serving the stale key until the TTL runs out.
+func (a *Activities) evictModelConfig(project, model string) {
+	a.providerCacheMu.Lock()
+	delete(a.providerCache, project+"|"+model)
+	a.providerCacheMu.Unlock()
 }
 
 // providerCacheTTL bounds how stale a resolution may be: long enough to keep
@@ -637,6 +648,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		}
 	}
 	client := a.Model
+	routeProvider := "" // set when a workspace provider served this call
 	// Vision fallback (docs/supervisor-model.md §4): when a call carries images
 	// and the supervisor panel pins a vision model, route the call there — the
 	// main model may be text-only. Routing reuse means the vision model just
@@ -656,7 +668,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		// config with the model name swapped in — the pre-routing behavior.
 		routed := false
 		if a.WorkspaceURL != "" {
-			config, ok, err := a.modelConfigFor(ctx, request.Project, request.Model)
+			config, providerID, ok, err := a.modelConfigFor(ctx, request.Project, request.Model)
 			if err != nil {
 				// Transient lookup failure (workspace unreachable, 5xx): do not
 				// fail the turn — fall back to env and keep going.
@@ -664,11 +676,12 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 					if logger := activity.GetLogger(ctx); logger != nil {
 						logger.Warn("model-config lookup failed, falling back to env provider",
 							"run_id", request.RunID, "model", request.Model, "error", err.Error())
-					}
+						}
 				}
 			} else if ok {
 				client = llm.New(config)
 				routed = true
+				routeProvider = providerID
 			}
 		}
 		if !routed {
@@ -679,6 +692,14 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			config.Model = request.Model
 			client = llm.New(config)
 		}
+		route := "env fallback"
+		if routed {
+			route = "provider " + routeProvider
+		}
+		// The routing decision rides in the trace: «диагностика зелёная, а ран
+		// красный» almost always means the run took a different provider (or the
+		// env fallback) than the one the operator tested — make that visible.
+		a.emitModelRoute(ctx, request, activityID, route)
 	}
 	if client == nil {
 		return llm.Completion{}, errors.New("no model configured: set the run's model or a project default, or configure TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID")
@@ -777,7 +798,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 				completion.StreamMs = streamMs + retryMs
 				completion.StreamError = retryErr.Error()
 			}
-			return completion, err
+			return completion, a.routeFailure(ctx, request, routeProvider, err)
 		}
 		// A stream that stalls behind gateway keepalives can burn most of the
 		// activity budget before dying; the fallback then looks suspiciously
@@ -799,9 +820,30 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			completion.StreamMs = streamMs
 			completion.StreamError = streamErr.Error()
 		}
-		return completion, err
+		return completion, a.routeFailure(ctx, request, routeProvider, err)
 	}
-	return client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
+	completion, err := client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
+	return completion, a.routeFailure(ctx, request, routeProvider, err)
+}
+
+// routeFailure annotates a provider rejection with the routing outcome (which
+// provider — or the env fallback — served this call, host and model, never
+// the key) and evicts the cached routing on auth rejections: a rotated key
+// must re-resolve on the retry ladder instead of serving the stale credential
+// until the provider cache TTL runs out. «Диагностика зелёная, а ран крас-»
+// «ный» почти всегда значит, что ран пошёл не в тот провайдер, что проверяли.
+func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, routeProvider string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if code, ok := llm.StatusOf(err); ok && (code == http.StatusUnauthorized || code == http.StatusForbidden) {
+		a.evictModelConfig(request.Project, request.Model)
+	}
+	route := "env fallback"
+	if routeProvider != "" {
+		route = "provider " + routeProvider
+	}
+	return fmt.Errorf("%w (served by %s)", err, route)
 }
 
 // boundedAttemptError clips a transport error for the journal marker; the
@@ -850,6 +892,29 @@ func (a *Activities) emitModelAttempt(ctx context.Context, request ModelRequest,
 	}
 	// Enqueue is a local buffer write, not a network call; a failure only
 	// costs the marker, never the attempt.
+	_ = a.Events.Enqueue(ctx, event)
+}
+
+// emitModelRoute journals the routing decision of one call_model invocation
+// (model.attempt/route): which provider (or the env fallback) served the
+// call. Operators triaging «диагностика зелёная, а ран красный» need this —
+// the tested provider and the serving one are often different. Best-effort,
+// same outbox namespace as the attempt markers with its own id suffix so it
+// never collides with them.
+func (a *Activities) emitModelRoute(ctx context.Context, request ModelRequest, activityID, route string) {
+	if a.Events == nil || request.RunID == "" || route == "" {
+		return
+	}
+	eventID := fmt.Sprintf("%s/model-attempt/%s/route/%s", eventScope(a.SourceID, request.Project, request.RunID), activityID, strings.ReplaceAll(route, " ", "-"))
+	event := observation.Event{
+		Schema: observation.Schema, EventID: eventID, OccurredAt: time.Now().UTC(),
+		Source:  observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
+		Context: observation.Context{Project: request.Project, Run: request.RunID, Actor: observation.Actor{ID: "system", Type: "agent"}},
+		Type:    "model.attempt", Data: map[string]any{"turn": request.Turn, "model": request.Model, "reason": "routed", "route": route},
+	}
+	if err := event.Validate(); err != nil {
+		return
+	}
 	_ = a.Events.Enqueue(ctx, event)
 }
 
@@ -1306,7 +1371,7 @@ func (a *Activities) handleDeleteTrigger(ctx context.Context, request ToolReques
 // nil error is the clean negative "no provider serves this model" answer
 // (cached); a non-nil error is a transport/server failure the caller may
 // retry or fall back from.
-func (a *Activities) modelConfigFor(ctx context.Context, project, model string) (config llm.Config, ok bool, err error) {
+func (a *Activities) modelConfigFor(ctx context.Context, project, model string) (config llm.Config, providerID string, ok bool, err error) {
 	key := project + "|" + model
 	a.providerCacheMu.Lock()
 	if a.providerCache == nil {
@@ -1314,24 +1379,24 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 	}
 	if hit, seen := a.providerCache[key]; seen && time.Since(hit.fetchedAt) < providerCacheTTL {
 		a.providerCacheMu.Unlock()
-		return hit.config, hit.ok, nil
+		return hit.config, hit.providerID, hit.ok, nil
 	}
 	a.providerCacheMu.Unlock()
 
 	endpoint := fmt.Sprintf("%s/v1/workspace/model-config?model=%s&project=%s", a.WorkspaceURL, url.QueryEscape(model), url.QueryEscape(project))
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return llm.Config{}, false, err
+		return llm.Config{}, "", false, err
 	}
 	if status == http.StatusNotFound {
 		// Definitive negative: no visible provider lists this model. Cache it —
 		// the fallback path below still works, and hammering the endpoint every
 		// turn would only burn a round trip.
-		a.providerCachePut(key, llm.Config{}, false)
-		return llm.Config{}, false, nil
+		a.providerCachePut(key, llm.Config{}, "", false)
+		return llm.Config{}, "", false, nil
 	}
 	if status >= 400 {
-		return llm.Config{}, false, fmt.Errorf("model-config lookup failed (HTTP %d): %s", status, truncate(body, 200))
+		return llm.Config{}, "", false, fmt.Errorf("model-config lookup failed (HTTP %d): %s", status, truncate(body, 200))
 	}
 	var answer struct {
 		ProviderID string `json:"provider_id"`
@@ -1340,10 +1405,10 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 		Model      string `json:"model"`
 	}
 	if err := json.Unmarshal([]byte(body), &answer); err != nil {
-		return llm.Config{}, false, fmt.Errorf("model-config decode: %w", err)
+		return llm.Config{}, "", false, fmt.Errorf("model-config decode: %w", err)
 	}
 	if answer.BaseURL == "" || answer.Model == "" {
-		return llm.Config{}, false, fmt.Errorf("model-config response incomplete for model %q", model)
+		return llm.Config{}, "", false, fmt.Errorf("model-config response incomplete for model %q", model)
 	}
 	// An empty api_key is a legitimate keyless provider (ollama, lmstudio);
 	// llm.Config sends no Authorization header for those.
@@ -1366,18 +1431,18 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 		config.StreamFirstTokenTimeout = 2 * time.Minute
 		config.MaxOutputTokens = 16384
 	}
-	a.providerCachePut(key, config, true)
-	return config, true, nil
+	a.providerCachePut(key, config, answer.ProviderID, true)
+	return config, answer.ProviderID, true, nil
 }
 
 // providerCachePut stores one resolution under the mutex.
-func (a *Activities) providerCachePut(key string, config llm.Config, ok bool) {
+func (a *Activities) providerCachePut(key string, config llm.Config, providerID string, ok bool) {
 	a.providerCacheMu.Lock()
 	defer a.providerCacheMu.Unlock()
 	if a.providerCache == nil {
 		a.providerCache = map[string]providerCacheEntry{}
 	}
-	a.providerCache[key] = providerCacheEntry{config: config, ok: ok, fetchedAt: time.Now()}
+	a.providerCache[key] = providerCacheEntry{config: config, providerID: providerID, ok: ok, fetchedAt: time.Now()}
 }
 
 // workspaceErrorDetail extracts the message the workspace API reports in its
@@ -2034,7 +2099,7 @@ func (a *Activities) skillBuilderModel(ctx context.Context, project string) (*ll
 		}
 	}
 	if project != "" && a.WorkspaceURL != "" {
-		if config, ok, err := a.modelConfigFor(ctx, project, ""); err == nil && ok {
+		if config, _, ok, err := a.modelConfigFor(ctx, project, ""); err == nil && ok {
 			return llm.New(config), nil
 		}
 	}
