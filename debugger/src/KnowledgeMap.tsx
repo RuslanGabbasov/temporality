@@ -618,25 +618,22 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
     // ── layer 4: cluster captions, on top of the dots (cross-faded with the
     // bubbles they belong to). While a search/state filter dims most dots,
-    // a caption fades in proportion to the share of its region's points that
-    // still match — the bright captions point at where the hits live. ──
+    // caption ink is normalized across regions by ABSOLUTE hit counts: the
+    // region holding the most matches stays at full brightness, the rest
+    // fade proportionally — 10 hits → 100%, 3 hits → 30%, none → 0. ──
     const filtering = matches.some((m) => !m)
     const captionFactor = new Map<ClusterTreeNode, number>()
     if (filtering) {
-      const totals = new Map<ClusterTreeNode, number>()
       const hits = new Map<ClusterTreeNode, number>()
       for (let i = 0; i < points.length; i++) {
+        if (!matches[i]) continue
         const region = level1Ref.current[points[i].cluster]
         if (!region) continue
-        totals.set(region, (totals.get(region) ?? 0) + 1)
-        if (matches[i]) hits.set(region, (hits.get(region) ?? 0) + 1)
+        hits.set(region, (hits.get(region) ?? 0) + 1)
       }
+      const maxHits = Math.max(0, ...hits.values())
       for (const region of level1Ref.current) {
-        const total = totals.get(region) ?? 0
-        const ratio = total ? (hits.get(region) ?? 0) / total : 0
-        // A floor keeps the geography readable: a fully dark region still
-        // whispers its name instead of vanishing.
-        const factor = 0.1 + 0.9 * ratio
+        const factor = maxHits ? (hits.get(region) ?? 0) / maxHits : 0
         captionFactor.set(region, factor)
         for (const child of region.children ?? []) captionFactor.set(child, factor)
       }
