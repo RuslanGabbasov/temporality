@@ -5799,6 +5799,36 @@ func main() {
 			writeError(w, 422, fmt.Errorf("provider must be builtin or env (got %q)", req.Provider))
 			return
 		}
+		// A secret name becomes SECRET_<NAME> in the sandbox environment: reject
+		// names that cannot survive that mapping (empty after trim, control
+		// characters) or that would collide with an existing secret on the same
+		// env key — the kernel sanitizes and skips collisions at runtime, but
+		// a confusing pair should never be created in the first place.
+		if req.Name == "" {
+			writeError(w, 422, errors.New("name is required"))
+			return
+		}
+		if len(req.Name) > 128 {
+			writeError(w, 422, errors.New("name exceeds 128 characters"))
+			return
+		}
+		for _, r := range req.Name {
+			if r < 0x20 || r == 0x7f {
+				writeError(w, 422, fmt.Errorf("name must not contain control characters"))
+				return
+			}
+		}
+		if existing, err := ws.ListSecretsVisible(r.Context(), visibleUnits(r)); err == nil {
+			for _, other := range existing {
+				if other.ID == req.ID {
+					continue
+				}
+				if agent.SecretEnvVarName(other.Name) == agent.SecretEnvVarName(req.Name) {
+					writeError(w, 409, fmt.Errorf("name %q collides with existing secret %q on the same SECRET_ env var; pick a name that differs after sanitization", req.Name, other.Name))
+					return
+				}
+			}
+		}
 		if existing, err := ws.GetSecretByName(r.Context(), req.Name); err == nil && existing.ID != req.ID {
 			writeError(w, 409, fmt.Errorf("secret name %q is already taken by %q", req.Name, existing.ID))
 			return

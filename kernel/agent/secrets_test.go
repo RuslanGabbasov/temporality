@@ -80,14 +80,62 @@ func TestSecretBrokerDeniedOnNotFound(t *testing.T) {
 
 func TestSecretEnvVarName(t *testing.T) {
 	cases := map[string]string{
-		"github-token": "SECRET_GITHUB_TOKEN",
-		"db.json":      "SECRET_DB_JSON",
-		"simple":       "SECRET_SIMPLE",
+		"github-token":          "SECRET_GITHUB_TOKEN",
+		"db.json":               "SECRET_DB_JSON",
+		"simple":                "SECRET_SIMPLE",
+		// Spaces and other odd characters from a freestyle workspace name must
+		// sanitize away — a raw space used to fail docker --env and kill runs.
+		"azure devops project hrpro": "SECRET_AZURE_DEVOPS_PROJECT_HRPRO",
+		"token (prod) v2":            "SECRET_TOKEN__PROD__V2",
+		"--weird--":                  "SECRET___WEIRD__",
 	}
 	for input, want := range cases {
 		if got := SecretEnvVarName(input); got != want {
 			t.Errorf("SecretEnvVarName(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestSandboxSecretEnvSkipsCollidingNames(t *testing.T) {
+	// This stub resolves ANY name (the collision test needs three granted
+	// names, not just github-token).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/resolve") || r.Header.Get("Authorization") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "any", "value": "v"})
+	}))
+	t.Cleanup(server.Close)
+	outbox := &secretOutbox{}
+	activities := &Activities{
+		HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal",
+		Events: outbox, SourceID: "kernel", Secrets: &SecretBroker{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"},
+	}
+	// "azure-devops" and "azure devops" sanitize to the same env key: the
+	// first wins, the second is skipped — a soft, model-visible condition,
+	// never a run-killing docker validation error.
+	request := ToolRequest{
+		RunID: "run-collide", OperationID: "run-collide/turn/01/call_1", Project: "demo",
+		Secrets: []string{"azure-devops", "azure devops", "plain"},
+	}
+	env, denied, err, scan, skipped := activities.sandboxSecretEnv(context.Background(), request)
+	if err != nil {
+		t.Fatalf("sandboxSecretEnv: %v", err)
+	}
+	if len(denied) != 0 {
+		t.Fatalf("denied = %v, want none", denied)
+	}
+	if len(skipped) != 1 || skipped[0] != "azure devops" {
+		t.Fatalf("skipped = %v, want [azure devops]", skipped)
+	}
+	if len(env) != 2 || env[0] != "SECRET_AZURE_DEVOPS=v" || env[1] != "SECRET_PLAIN=v" {
+		t.Fatalf("env = %v, want the first collision winner and plain", env)
+	}
+	// Only the injected values arm the scan: the skipped secret never enters
+	// the sandbox, so there is nothing of it to guard.
+	if len(scan) != 2 {
+		t.Fatalf("scan secrets = %d, want 2 (injected only)", len(scan))
 	}
 }
 
@@ -103,7 +151,7 @@ func TestSandboxSecretEnvEmitsIssuedOncePerRun(t *testing.T) {
 		RunID: "run-secret", OperationID: "run-secret/turn/01/call_1", Project: "demo",
 		Secrets: []string{"github-token", "missing-secret"},
 	}
-	env, denied, err, _ := activities.sandboxSecretEnv(context.Background(), request)
+	env, denied, err, _, _ := activities.sandboxSecretEnv(context.Background(), request)
 	if err != nil {
 		t.Fatalf("sandboxSecretEnv: %v", err)
 	}
@@ -116,7 +164,7 @@ func TestSandboxSecretEnvEmitsIssuedOncePerRun(t *testing.T) {
 	// A second command in the same run re-injects the value at its own
 	// execution boundary but must not journal another issuance.
 	request.OperationID = "run-secret/turn/02/call_2"
-	env2, denied2, err, _ := activities.sandboxSecretEnv(context.Background(), request)
+	env2, denied2, err, _, _ := activities.sandboxSecretEnv(context.Background(), request)
 	if err != nil {
 		t.Fatalf("second sandboxSecretEnv: %v", err)
 	}

@@ -1016,12 +1016,17 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		// into the container environment and never enter the model context.
 		// The same values arm the behavior guard: after the command, the
 		// output is scanned for leaked values (docs/agent-behavior-monitoring.md).
-		secretEnv, deniedSecrets, sErr, scanSecrets := a.sandboxSecretEnv(ctx, request)
+		secretEnv, deniedSecrets, sErr, scanSecrets, skippedSecrets := a.sandboxSecretEnv(ctx, request)
 		if sErr != nil {
 			return ToolResult{}, sErr
 		}
 		if len(deniedSecrets) > 0 {
 			return ToolResult{Content: fmt.Sprintf("error: secrets not available for this agent: %s", strings.Join(deniedSecrets, ", "))}, nil
+		}
+		if len(skippedSecrets) > 0 {
+			// A broken name must not kill the run: colliding secrets are simply
+			// not injected, and the model is told which ones and why.
+			return ToolResult{Content: fmt.Sprintf("error: these secrets were not injected because their names collide on the same SECRET_ env var after sanitization: %s. Rename one of them in the workspace settings.", strings.Join(skippedSecrets, ", "))}, nil
 		}
 		a.guardScan(ctx, request, scanCommandArgs(strings.Join(command, " ")), scanSecrets)
 		// Layer 2: semantic similarity of the command against the danger

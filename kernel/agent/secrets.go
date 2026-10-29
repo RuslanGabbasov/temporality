@@ -153,14 +153,18 @@ func (b *SecretBroker) store(name, value string, canary bool) {
 }
 
 // SecretEnvVarName converts a secret name into the environment variable the
-// sandbox receives: SECRET_<UPPERCASE_NAME> with dashes and dots becoming
-// underscores (docs/secrets-management.md §8).
+// sandbox receives: SECRET_<UPPERCASE_NAME>, every character outside
+// [A-Za-z0-9_] becoming an underscore (docs/secrets-management.md §8). A
+// workspace name like "azure devops project hrpro" must still inject — a
+// raw space in the key used to fail docker --env and kill the whole run.
 func SecretEnvVarName(name string) string {
 	replaced := strings.Map(func(r rune) rune {
-		if r == '-' || r == '.' {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
 			return '_'
 		}
-		return r
 	}, name)
 	return "SECRET_" + strings.ToUpper(replaced)
 }
@@ -171,13 +175,19 @@ func SecretEnvVarName(name string) string {
 // secretsForScan carries the same values as behaviorSecret descriptors for the
 // behavior guard (docs/agent-behavior-monitoring.md): the scan needs the
 // values it must recognize in arguments and output.
-func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) (env []string, denied []string, err error, secretsForScan []behaviorSecret) {
+// skipped reports names whose sanitized env key collides with an earlier
+// granted secret ("a-b" and "a_b" both map to SECRET_A_B): the first name
+// wins deterministically, the rest are left out of the environment — a soft,
+// model-visible condition instead of a run-killing docker error.
+func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) (env []string, denied []string, err error, secretsForScan []behaviorSecret, skipped []string) {
 	if len(request.Secrets) == 0 || a.Secrets == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 	env = make([]string, 0, len(request.Secrets))
 	denied = make([]string, 0)
+	skipped = make([]string, 0)
 	resolved := make([]string, 0, len(request.Secrets))
+	usedKeys := make(map[string]string, len(request.Secrets))
 	for _, name := range request.Secrets {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -185,18 +195,24 @@ func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) 
 		}
 		value, deniedFlag, err := a.Secrets.Resolve(ctx, name)
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolve secret %q: %w", name, err), nil
+			return nil, nil, fmt.Errorf("resolve secret %q: %w", name, err), nil, nil
 		}
 		if deniedFlag {
 			denied = append(denied, name)
 			continue
 		}
-		env = append(env, SecretEnvVarName(name)+"="+value)
+		key := SecretEnvVarName(name)
+		if _, taken := usedKeys[key]; taken {
+			skipped = append(skipped, name)
+			continue
+		}
+		usedKeys[key] = name
+		env = append(env, key+"="+value)
 		resolved = append(resolved, name)
 		secretsForScan = append(secretsForScan, newBehaviorSecret(name, value, a.Secrets.Canary(name)))
 	}
 	a.emitSecretIssued(ctx, request, resolved, denied)
-	return env, denied, nil, secretsForScan
+	return env, denied, nil, secretsForScan, skipped
 }
 
 // resolveRunSecrets resolves granted secrets for scanning only — no env, no
