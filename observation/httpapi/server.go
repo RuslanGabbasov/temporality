@@ -52,6 +52,10 @@ type Server struct {
 	// mutex: the projection is the journal's most expensive read path.
 	knowledgeMu    sync.Mutex
 	knowledgeCache map[string]knowledgeCacheEntry
+	// knowledgeComputeMu serializes projection recomputes across ALL
+	// projects: parallel computes of the same corpus multiply the scan cost
+	// and saturate the journal (see cachedKnowledge).
+	knowledgeComputeMu sync.Mutex
 }
 
 // Option customizes the journal server.
@@ -668,6 +672,11 @@ func stringData(data map[string]any, key string) string {
 	return value
 }
 
+// knowledgeComputeTimeout caps one projection recompute: a pathological
+// dataset must fail a request after minutes, not hold the journal's
+// knowledge endpoints hostage forever.
+const knowledgeComputeTimeout = 5 * time.Minute
+
 // knowledgeCacheTTL bounds how long a projected knowledge listing stays
 // warm. The projection walks every knowledge event of the project (plus
 // shared-scope events) per request — the supervisor's conflict panel and the
@@ -693,6 +702,14 @@ func (s *Server) cachedKnowledge(ctx context.Context, project string, asOf, know
 	if asOf != nil || knownAt != nil {
 		return s.computeKnowledge(ctx, project, asOf, knownAt)
 	}
+	// Serialize projection recomputes GLOBALLY (singleflight): every waiting
+	// request used to spawn its own full scan of the project's events, and a
+	// burst of them (map + list + explore + supervisor queue) piled up into
+	// CPU saturation of the journal — the «everything hangs» mode.
+	s.knowledgeComputeMu.Lock()
+	defer s.knowledgeComputeMu.Unlock()
+	// Another goroutine may have finished the compute while we waited for
+	// the mutex: re-check the cache before paying for the scan again.
 	s.knowledgeMu.Lock()
 	entry, ok := s.knowledgeCache[project]
 	s.knowledgeMu.Unlock()
@@ -700,7 +717,9 @@ func (s *Server) cachedKnowledge(ctx context.Context, project string, asOf, know
 		return entry.items, entry.chain, nil
 	}
 	computeStarted := time.Now()
-	items, chain, err := s.computeKnowledge(ctx, project, nil, nil)
+	computeCtx, cancel := context.WithTimeout(ctx, knowledgeComputeTimeout)
+	defer cancel()
+	items, chain, err := s.computeKnowledge(computeCtx, project, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
