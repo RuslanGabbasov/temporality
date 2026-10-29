@@ -916,9 +916,6 @@ export default function AgentRuns({ project }: { project: string }) {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(row.agentId && agents.find((a) => a.id === row.agentId)?.name) || row.role || 'agent'} · {shortTime(row.at)}</span>
-                    {row.actor && row.depth === 0 && (
-                      <span title={row.actor} style={{ flexShrink: 0 }}>👤 {userNameOf(row.actor)}</span>
-                    )}
                     {/* Project attribution in the global listing
                         (docs/activity-scoping.md §7): shows which project the
                         run worked in without narrowing the list. */}
@@ -949,7 +946,9 @@ export default function AgentRuns({ project }: { project: string }) {
                     )}
                   </div>
                   {(row.title || agentName) && (
-                    <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.id}</div>
+                    row.depth === 0 && row.actor
+                      ? <div title={row.actor} style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👤 {userNameOf(row.actor)}</div>
+                      : <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.id}</div>
                   )}
                 </Tile>
                 )
