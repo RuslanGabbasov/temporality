@@ -269,7 +269,7 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 	if f.Query != "" {
 		args = append(args, "%"+f.Query+"%")
 		n := strconv.Itoa(len(args))
-		query += ` AND (title ILIKE ` + n + ` OR description ILIKE ` + n + `)`
+		query += ` AND (title ILIKE $` + n + ` OR description ILIKE $` + n + `)`
 	}
 	// AND semantics: every requested tag must be present (tags @> the set) —
 	// narrowing filters, the way knowledge bases drill down.
