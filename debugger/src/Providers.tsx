@@ -10,6 +10,8 @@ import {
   Stack,
   Heading,
   Toggle,
+  Select,
+  SelectItem,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Renew, SendAlt } from '@carbon/icons-react'
@@ -130,17 +132,26 @@ export default function Providers() {
   // /models but not /chat/completions (different route, header or model
   // access) — the raw upstream body shows which.
   const [testingId, setTestingId] = useState('')
-  const [testResult, setTestResult] = useState<{ id: string; ok: boolean; text: string } | null>(null)
-  const testGeneration = async (p: Provider) => {
+  const [testOpen, setTestOpen] = useState<Provider | null>(null)
+  const [testModel, setTestModel] = useState('')
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const openTest = (p: Provider) => {
+    setTestOpen(p)
+    setTestModel(p.models?.[0] ?? '')
+    setTestResult(null)
+  }
+  const testGeneration = async () => {
+    const p = testOpen
+    if (!p) return
     setTestingId(p.id); setTestResult(null); setError('')
     try {
-      const data = await workspaceApi.testProviderGeneration(p.id)
+      const data = await workspaceApi.testProviderGeneration(p.id, testModel || undefined)
       const ok = data.status >= 200 && data.status < 300
-      setTestResult({ id: p.id, ok, text: ok
+      setTestResult({ ok, text: ok
         ? (t('providers.test_ok') ?? 'Generation works with the stored key.')
         : `${t('providers.test_failed', { status: String(data.status) }) ?? 'Upstream returned ' + data.status}: ${data.body.slice(0, 300)}` })
     } catch (f) {
-      setTestResult({ id: p.id, ok: false, text: message(f) })
+      setTestResult({ ok: false, text: message(f) })
     }
   }
 
@@ -212,16 +223,11 @@ export default function Providers() {
                     </div>
                   ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t('providers.no_models') ?? 'No models listed'}</p>}
                 </div>
-                {testResult?.id === p.id && (
-                  <p style={{ fontSize: '0.75rem', marginTop: '0.4rem', color: testResult.ok ? 'var(--tm-text-2)' : 'var(--tm-danger, #da1e28)', wordBreak: 'break-word' }}>
-                    {testResult.ok ? '✓ ' : '✕ '}{testResult.text}
-                  </p>
-                )}
                 <Stack orientation="vertical" gap={1} style={{ flexShrink: 0 }}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Renew} iconDescription={t('providers.sync_now') ?? 'Sync catalog now'}
                     disabled={syncingId === p.id} onClick={() => void syncProvider(p)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={SendAlt} iconDescription={t('providers.test_generation') ?? 'Test generation'}
-                    disabled={testingId === p.id} onClick={() => void testGeneration(p)} />
+                    onClick={() => openTest(p)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(p)} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(p)} />
                 </Stack>
@@ -235,6 +241,40 @@ export default function Providers() {
           </Column>
         ))}
       </Grid>
+
+      {testOpen && (
+        <AppModal onClose={() => setTestOpen(null)} panelStyle={{ width: '520px' }}>
+          <Heading>{t('providers.test_generation') ?? 'Test generation'}</Heading>
+          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+            {t('providers.test_hint') ?? 'One minimal chat completion with the stored key — the same path a model call takes.'}
+          </p>
+          <Stack gap={3}>
+            <Select
+              id="provider-test-model"
+              labelText={t('providers.test_model_label') ?? 'Model to test'}
+              value={testModel}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTestModel(e.target.value)}
+            >
+              {(testOpen.models ?? []).map((m) => <SelectItem key={m} value={m} text={m} />)}
+            </Select>
+            {testResult && (
+              <InlineNotification
+                kind={testResult.ok ? 'success' : 'error'}
+                title={testResult.ok ? (t('providers.test_ok') ?? 'Generation works with the stored key.') : (t('providers.test_failed', { status: '' }) ?? 'Failed')}
+                subtitle={testResult.ok ? undefined : testResult.text}
+                lowContrast
+                hideCloseButton
+              />
+            )}
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setTestOpen(null)}>{t('action.close') ?? 'Close'}</Button>
+              <Button onClick={() => void testGeneration()} disabled={testingId === testOpen.id || !testModel}>
+                {testingId === testOpen.id ? (t('providers.testing') ?? 'Testing…') : (t('providers.test_run') ?? 'Run test')}
+              </Button>
+            </div>
+          </Stack>
+        </AppModal>
+      )}
 
       {showForm && (
         <AppModal onClose={() => { setShowForm(false); setEditing(null) }}>
