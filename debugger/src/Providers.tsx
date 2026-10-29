@@ -11,7 +11,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Renew, SendAlt } from '@carbon/icons-react'
 import { workspaceApi, type Provider, type Secret } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -124,6 +124,25 @@ export default function Providers() {
     } finally { setFetching(false) }
   }
 
+  // The runtime-path check: one minimal chat completion with the STORED
+  // credential. probe-models green + test red = the gateway authorizes
+  // /models but not /chat/completions (different route, header or model
+  // access) — the raw upstream body shows which.
+  const [testingId, setTestingId] = useState('')
+  const [testResult, setTestResult] = useState<{ id: string; ok: boolean; text: string } | null>(null)
+  const testGeneration = async (p: Provider) => {
+    setTestingId(p.id); setTestResult(null); setError('')
+    try {
+      const data = await workspaceApi.testProviderGeneration(p.id)
+      const ok = data.status >= 200 && data.status < 300
+      setTestResult({ id: p.id, ok, text: ok
+        ? (t('providers.test_ok') ?? 'Generation works with the stored key.')
+        : `${t('providers.test_failed', { status: String(data.status) }) ?? 'Upstream returned ' + data.status}: ${data.body.slice(0, 300)}` })
+    } catch (f) {
+      setTestResult({ id: p.id, ok: false, text: message(f) })
+    }
+  }
+
   // Sync mirrors the stored provider's catalog now (the background loop
   // already does this on a schedule; this covers "do it immediately").
   const syncProvider = async (p: Provider) => {
@@ -178,9 +197,16 @@ export default function Providers() {
                     </div>
                   ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t('providers.no_models') ?? 'No models listed'}</p>}
                 </div>
+                {testResult?.id === p.id && (
+                  <p style={{ fontSize: '0.75rem', marginTop: '0.4rem', color: testResult.ok ? 'var(--tm-text-2)' : 'var(--tm-danger, #da1e28)', wordBreak: 'break-word' }}>
+                    {testResult.ok ? '✓ ' : '✕ '}{testResult.text}
+                  </p>
+                )}
                 <Stack orientation="horizontal" gap={1}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Renew} iconDescription={t('providers.sync_now') ?? 'Sync catalog now'}
                     disabled={syncingId === p.id} onClick={() => void syncProvider(p)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={SendAlt} iconDescription={t('providers.test_generation') ?? 'Test generation'}
+                    disabled={testingId === p.id} onClick={() => void testGeneration(p)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(p)} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(p)} />
                 </Stack>

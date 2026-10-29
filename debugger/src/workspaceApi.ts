@@ -1382,6 +1382,11 @@ export const workspaceApi = {
     request<{ models: string[]; count: number }>(`/v1/workspace/providers/${id}/refresh-models`, { method: 'POST' }),
   probeProviderModels: (data: { base_url: string; api_key_ref?: string }) =>
     request<{ models: string[]; count: number }>('/v1/workspace/providers/probe-models', { method: 'POST', body: JSON.stringify(data) }),
+  // One minimal chat completion with the STORED credential — the runtime
+  // path of call_model in one click (probe-models only authenticates
+  // /models with a raw form value).
+  testProviderGeneration: (id: string, model?: string) =>
+    request<{ status: number; body: string }>(`/v1/workspace/providers/${id}/test-generation${model ? '?model=' + encodeURIComponent(model) : ''}`, { method: 'POST', timeoutMs: 120_000 } as RequestInit & { timeoutMs: number }),
 
   // Triggers. listTriggers without a project hits the global listing
   // (docs/activity-scoping.md §5) — server-side constrained to the visible

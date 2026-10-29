@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -92,6 +93,21 @@ func (s *ProviderModelSync) RegisterRoutes(mux *http.ServeMux, gate *controlplan
 			return
 		}
 		writeJSON(w, 200, map[string]any{"models": models, "count": len(models)})
+	})
+
+	// Test generation with the STORED credential: the runtime path
+	// (call_model) in one click. A green /models probe with a red test means
+	// the gateway authorizes the catalog route but not the chat one.
+	mux.HandleFunc("POST /v1/workspace/providers/{providerID}/test-generation", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		status, body, err := s.TestGeneration(r.Context(), r.PathValue("providerID"), strings.TrimSpace(r.URL.Query().Get("model")))
+		if err != nil {
+			s.writeSyncError(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"status": status, "body": body})
 	})
 
 	// Probe previews the catalog of a not-yet-saved provider (the form's
@@ -280,6 +296,50 @@ func providerModelsRefreshInterval(log *slog.Logger) time.Duration {
 		return 24 * time.Hour
 	}
 	return interval
+}
+
+// TestGeneration runs a minimal chat completion with the provider's STORED
+// credential — the exact path a model call takes at runtime, unlike
+// probe-models (which authenticates with the raw form value against /models).
+// A green /models probe with a red generation means the route or the stored
+// credential differs, and the raw upstream body pins down which.
+func (s *ProviderModelSync) TestGeneration(ctx context.Context, providerID, model string) (int, string, error) {
+	provider, err := s.store.GetProvider(ctx, providerID)
+	if err != nil {
+		return 0, "", err
+	}
+	key, err := s.keys(ctx, provider.APIKeyRef)
+	if err != nil {
+		return 0, "", fmt.Errorf("%w: %v", errCredential, err)
+	}
+	if model == "" {
+		if len(provider.Models) > 0 {
+			model = provider.Models[0]
+		} else {
+			return 0, "", errors.New("no model: pick one from the catalog first")
+		}
+	}
+	endpoint := strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/") + "/chat/completions"
+	payload, _ := json.Marshal(map[string]any{
+		"model": model,
+		"messages": []map[string]string{{"role": "user", "content": "Reply with the single word: ok"}},
+		"max_tokens": 8,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	return resp.StatusCode, strings.TrimSpace(string(body)), nil
 }
 
 // fetchProviderModels reads the OpenAI-compatible catalog endpoint. Every
