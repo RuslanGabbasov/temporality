@@ -252,16 +252,39 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const { result: layout, pending: layoutPending } = useSemanticLayoutState(items)
   useEffect(() => {
     if (!layout) return
-    // Fresh arrivals light up as a staggered cascade («зажигающиеся звёздочки»):
-    // each new dot gets a birth moment up to ~900ms out, the draw pass ramps
-    // its alpha and blooms a ring at that moment.
+    // Fresh arrivals light up ONE PER FRAME as a spatial chain: each next dot
+    // is the nearest to the previous one, so the batch reads as a trail
+    // unrolling through the cluster («шлейф»), not a big blob snapping in at
+    // once. The trail's total span is budgeted (5s first mount, 2.5s per
+    // batch) — corpora larger than the frame budget just accelerate the
+    // per-dot spacing.
     const now = performance.now()
+    const prevById = new Map(pointsRef.current.map((p) => [p.id, { x: p.x, y: p.y }]))
     const newborns = layout.nodes.filter((node) => !appearedAtRef.current.has(node.id))
-    const step = newborns.length > 1 ? Math.min(8, 900 / newborns.length) : 0
+    if (newborns.length > 2) {
+      const remaining = [...newborns]
+      const chain: typeof newborns = [remaining.shift()!]
+      let current = chain[0]
+      while (remaining.length) {
+        let bestIdx = 0
+        let bestDist = Infinity
+        for (let i = 0; i < remaining.length; i++) {
+          const dx = remaining[i].x - current.x
+          const dy = remaining[i].y - current.y
+          const d = dx * dx + dy * dy
+          if (d < bestDist) { bestDist = d; bestIdx = i }
+        }
+        current = remaining.splice(bestIdx, 1)[0]
+        chain.push(current)
+      }
+      newborns.length = 0
+      newborns.push(...chain)
+    }
+    const budget = prevById.size ? 2500 : 5000
+    const step = newborns.length > 1 ? Math.min(16.7, budget / newborns.length) : 0
     newborns.forEach((node, i) => appearedAtRef.current.set(node.id, now + i * step))
     // Position morph: existing dots tween from where they were drawn to their
     // new layout positions; brand-new dots have no from — they only fade in.
-    const prevById = new Map(pointsRef.current.map((p) => [p.id, { x: p.x, y: p.y }]))
     morphRef.current = {
       start: now,
       duration: prevById.size ? 700 : 0,
