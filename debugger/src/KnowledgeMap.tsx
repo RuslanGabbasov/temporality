@@ -140,12 +140,15 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   // vectors do, the semantic layer never produced embeddings (model not
   // loaded) and the empty state must say that instead of a bare «empty».
   const [knowledgeTotal, setKnowledgeTotal] = useState<number | null>(null)
+  const [projectErrors, setProjectErrors] = useState<string[]>([])
+  const projectErrorsRef = useRef<string[]>([])
   const loadGen = useRef(0)
   const load = useCallback(async () => {
     const gen = ++loadGen.current
     const stale = () => gen !== loadGen.current
     setLoading(true); setError('')
     setProgress({ loaded: 0, total: null })
+    projectErrorsRef.current = []
     try {
       const accumulated: Array<import('./semanticMap').MapItem> = []
       const seen = new Set<string>()
@@ -162,6 +165,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         if (stale()) return
         if (typeof page.total === 'number') total = page.total
         if (typeof page.knowledge_total === 'number') knowledgeTotal = page.knowledge_total
+        for (const pe of page.project_errors ?? []) if (!projectErrorsRef.current.includes(pe)) projectErrorsRef.current.push(pe)
         const before = accumulated.length
         const fresh = (page.items ?? []).filter((item) => !seen.has(item.id))
         for (const item of page.items ?? []) seen.add(item.id)
@@ -169,6 +173,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         setItems([...accumulated])
         setProgress({ loaded: accumulated.length, total: total ?? accumulated.length })
         setKnowledgeTotal(knowledgeTotal)
+        setProjectErrors([])
         if ((page.items ?? []).length === 0) break
         if (accumulated.length === before && ++stalled >= 2) break
       }
@@ -181,6 +186,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       if (!stale()) {
         setLoading(false)
         setProgress(null)
+        setProjectErrors([...projectErrorsRef.current])
       }
     }
   }, [project])
@@ -701,8 +707,11 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         {!loading && items !== null && items.length === 0 && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--tm-muted)', fontSize: '0.8rem', textAlign: 'center', padding: '1rem' }}>
             {(knowledgeTotal ?? 0) > 0
-              ? t('knowledge.map_no_vectors') ?? 'Знания есть ({{count}}), но векторы не считаны: модель эмбеддингов не загрузилась. Проверьте логи ядра при старте и доступ ядра к huggingface.co (или задайте KERNEL_EMBEDDINGS_MODEL на локально закэшированную модель).'
+              ? t('knowledge.map_no_vectors', { count: String(knowledgeTotal) }) ?? 'Знания есть, но векторы не считаны — проверьте логи ядра и доступ к huggingface.co.'
               : t('knowledge.map_empty') ?? 'Нет векторов знаний для карты: включите эмбеддинги (semantic-слой) и дайте бэкфиллу наполнить базу.'}
+            {projectErrors.length > 0 && (
+              <p style={{ color: 'var(--tm-danger, #da1e28)', marginTop: '0.4rem' }}>{t('knowledge.map_project_errors') ?? 'Проекции с ошибками:'} {projectErrors.join('; ')}</p>
+            )}
           </div>
         )}
       </div>

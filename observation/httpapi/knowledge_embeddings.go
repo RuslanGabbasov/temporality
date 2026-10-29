@@ -217,13 +217,19 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 		}
 		return nil
 	}
-	if len(projects) > 0 {
+	// One broken project's projection must not zero the whole map: collect
+	// failures degrade to a per-project error list in the response — the UI
+	// renders the healthy projects and names the broken ones.
+	projectErrors := []string{}
+	collectMany := func(projects []string) {
 		for _, project := range projects {
 			if err := collect(project); err != nil {
-				writeError(w, 500, err)
-				return
+				projectErrors = append(projectErrors, project+": "+err.Error())
 			}
 		}
+	}
+	if len(projects) > 0 {
+		collectMany(projects)
 	} else {
 		// Global view: enumerate the projects that carry knowledge events
 		// (few in an installation; each projection is cached after the first
@@ -238,12 +244,7 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 			writeError(w, 500, err)
 			return
 		}
-		for _, project := range all {
-			if err := collect(project); err != nil {
-				writeError(w, 500, err)
-				return
-			}
-		}
+		collectMany(all)
 	}
 	vectors := map[string][]float32{}
 	if len(pending) > 0 {
@@ -297,7 +298,7 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	} else {
 		items = nil
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total, "knowledge_total": knowledgeTotal})
+	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total, "knowledge_total": knowledgeTotal, "project_errors": projectErrors})
 }
 
 // neighborStore is the vector-listing capability behind the neighbors lookup.

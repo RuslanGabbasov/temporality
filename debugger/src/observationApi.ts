@@ -173,7 +173,7 @@ export const observationApi = {
   // vectors + render meta; the client projects them to 2D. offset/total page
   // through the stable freshness order, so the map streams in batches.
   knowledgeEmbeddingMap: (opts?: { model?: string; project?: string; limit?: number; offset?: number }) =>
-    request<{ items: Array<import('./semanticMap').MapItem>; model: string; total?: number; knowledge_total?: number }>('/v1/observations/knowledge/embeddings/map', undefined, { model: opts?.model, project: opts?.project, limit: opts?.limit, offset: opts?.offset }),
+    request<{ items: Array<import('./semanticMap').MapItem>; model: string; total?: number; knowledge_total?: number; project_errors?: string[] }>('/v1/observations/knowledge/embeddings/map', undefined, { model: opts?.model, project: opts?.project, limit: opts?.limit, offset: opts?.offset }),
   healthStats: (project?: string, since?: string) =>
     request<HealthStats>('/v1/observations/stats/health', undefined, { project, since }),
   // Hint tier effectiveness (docs/supervisor-model.md §6.6): helpful/harmful

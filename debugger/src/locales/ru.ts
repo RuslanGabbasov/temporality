@@ -8,6 +8,7 @@ export const ru: Record<string, string> = {
     'nav.knowledge_map': 'Карта знаний',
     'knowledge.map_search': 'Поиск по формулировкам и топикам…',
     'knowledge.map_progress': 'Знания: {{loaded}} из {{total}}',
+    'knowledge.map_project_errors': 'Проекции с ошибками:',
     'knowledge.map_no_vectors': 'Знания есть ({{count}}), но векторы не считаны: модель эмбеддингов не загрузилась. Проверьте логи ядра при старте и доступ ядра к huggingface.co (или задайте KERNEL_EMBEDDINGS_MODEL на локально закэшированную модель).',
     'knowledge.map_all': 'Все',
     'knowledge.map_empty': 'Пока нет векторов знаний: включите semantic-слой (модель эмбеддингов) и дайте бэкфиллу наполнить базу.',
