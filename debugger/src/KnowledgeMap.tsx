@@ -163,7 +163,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       // two consecutive pages with zero fresh items stop the stream.
       const maxPages = 20
       let stalled = 0
-      for (let offset = 0, pageIdx = 0; stale() && pageIdx < maxPages && (total === null || offset < total); offset += BATCH, pageIdx++) {
+      for (let offset = 0, pageIdx = 0; !stale() && pageIdx < maxPages && (total === null || offset < total); offset += BATCH, pageIdx++) {
         const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: BATCH, offset })
         if (stale()) return
         if (typeof page.total === 'number') total = page.total
@@ -182,7 +182,8 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         if (accumulated.length === before && ++stalled >= 2) break
       }
     } catch (e) {
-      if (stale()) {
+      // A superseded gen must stay quiet — the newer load owns the UI state.
+      if (!stale()) {
         setError(e instanceof Error ? e.message : 'Request failed')
         setItems([])
       }
