@@ -267,8 +267,16 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       [...layout.level1]
         .sort((a, b) => b.count - a.count)
         .slice(0, 6)
-        .filter((node) => node.label)
-        .map((node) => ({ label: node.label, color: node.color, count: node.count })),
+        .filter((node) => node.label || node.labelLines?.length)
+        .map((node) => {
+          // The canvas captions a bubble with its TWO most distinctive topics
+          // (labelLines); the legend used to show only the dominant one —
+          // every «git»-dominated region then read as «git · N» and the
+          // legend repeated the same word for genuinely different regions.
+          // Join the same lines the canvas draws so entries stay distinct.
+          const lines = [...new Set([node.label, ...(node.labelLines ?? [])])].filter(Boolean)
+          return { label: lines.join(' · '), color: node.color, count: node.count }
+        }),
     )
     // Fit-to-screen: the world layout is drawn at WORLD_W×H; scale it into
     // the actual canvas box with a margin, centered.
@@ -788,8 +796,8 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       {legendTopics.length > 0 && (
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', fontSize: '0.7rem', color: 'var(--tm-text-2)', alignItems: 'center' }}>
           <span style={{ color: 'var(--tm-muted)' }}>{t('knowledge.map_legend_topics') ?? 'Регионы:'}</span>
-          {legendTopics.map((topic) => (
-            <span key={topic.label} style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
+          {legendTopics.map((topic, index) => (
+            <span key={index} style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
               <span style={{ display: 'inline-block', width: '0.6rem', height: '0.6rem', borderRadius: '50%', background: topic.color, opacity: 0.55, flexShrink: 0 }} />
               {topic.label} · {topic.count}
             </span>
