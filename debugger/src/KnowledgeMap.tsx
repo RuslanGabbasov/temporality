@@ -568,8 +568,8 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       const dead = shape === 'cross'
       let alpha = active ? dotAlpha : dotAlpha * 0.35
       // Star birth: a dot is invisible until its staggered birth moment, then
-      // ramps up over ~750ms while an expanding ring blooms for the first
-      // 450ms — the landing batch reads as stars lighting up one by one.
+      // ramps up over ~750ms. The bloom ring is a quiet one-frame accent —
+      // thin and short-lived, not a strobe around every arrival.
       const born = appearedAtRef.current.get(p.id)
       if (born !== undefined) {
         const age = performance.now() - born
@@ -578,13 +578,13 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
           const k = age / 750
           alpha *= 0.1 + 0.9 * (1 - Math.pow(1 - k, 2))
           stillFading = true
-          if (age < 450) {
-            const rk = age / 450
-            ctx.globalAlpha = (1 - rk) * 0.55 * (active ? 1 : 0.6)
+          if (age < 260) {
+            const rk = age / 260
+            ctx.globalAlpha = (1 - rk) * 0.28 * (active ? 1 : 0.6)
             ctx.strokeStyle = regionColor
-            ctx.lineWidth = 1.2
+            ctx.lineWidth = 0.9
             ctx.beginPath()
-            ctx.arc(sx, sy, dotR + 2 + rk * 9, 0, Math.PI * 2)
+            ctx.arc(sx, sy, dotR + 1.5 + rk * 5, 0, Math.PI * 2)
             ctx.stroke()
           }
         }

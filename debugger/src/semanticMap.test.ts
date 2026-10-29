@@ -180,4 +180,45 @@ describe('buildSemanticMap', () => {
     expect(first.nodes.map((n) => [Math.round(n.x), Math.round(n.y)])).toEqual(
       second.nodes.map((n) => [Math.round(n.x), Math.round(n.y)]))
   })
+
+  it('incremental build keeps placed items near where they were', () => {
+    const first = buildSemanticMap(items, { width: 800, height: 600 })
+    const positions = new Map(first.nodes.map((n) => [n.id, { x: n.x, y: n.y }]))
+    const next = buildSemanticMap(items, { width: 800, height: 600, previous: { positions, basis: first.basis } })
+    let maxShift = 0
+    for (const node of next.nodes) {
+      const prev = positions.get(node.id)!
+      maxShift = Math.max(maxShift, Math.hypot(node.x - prev.x, node.y - prev.y))
+    }
+    // The anchor pass keeps placed items within a local adjustment — not the
+    // whole-plane migration a fresh re-fit produces.
+    expect(maxShift).toBeLessThan(60)
+  })
+
+  it('incremental build seats newcomers next to their placed neighbors', () => {
+    const first = buildSemanticMap(items, { width: 800, height: 600 })
+    const positions = new Map(first.nodes.map((n) => [n.id, { x: n.x, y: n.y }]))
+    const newcomer: MapItem = { id: 'new', project: 'p', proposition: 'new statement', state: 'confirmed', topics: ['frontend'], vector: [0.98, 0.1, 0] }
+    const next = buildSemanticMap([newcomer, ...items], { width: 800, height: 600, previous: { positions, basis: first.basis } })
+    const seeded = next.nodes.find((n) => n.id === 'new')!
+    // Its nearest placed item is the frontend cluster; the newcomer must
+    // settle inside that half of the canvas, not at a fresh PCA seed.
+    const placedX = [...positions.values()].reduce((sum, p) => sum + p.x, 0) / positions.size
+    const frontend = first.nodes.filter((n) => n.item.topics![0] === 'frontend')
+    const clusterX = frontend.reduce((sum, n) => sum + n.x, 0) / frontend.length
+    expect(Math.abs(seeded.x - clusterX)).toBeLessThan(Math.abs(placedX - clusterX) + 200)
+  })
+
+  it('a different corpus ignores the previous layout (project flip)', () => {
+    const other: MapItem[] = Array.from({ length: 30 }, (_, i) => ({
+      id: `other${i}`, project: 'q', proposition: `other ${i}`, state: 'confirmed',
+      topics: ['x'], vector: [Math.cos(i), Math.sin(i), 0.1],
+    }))
+    const first = buildSemanticMap(items, { width: 800, height: 600 })
+    const positions = new Map(first.nodes.map((n) => [n.id, { x: n.x, y: n.y }]))
+    // Nothing matches: must fall back to a fresh build without throwing.
+    const next = buildSemanticMap(other, { width: 800, height: 600, previous: { positions, basis: first.basis } })
+    expect(next.nodes).toHaveLength(30)
+    expect(next.basis).toBeDefined()
+  })
 })

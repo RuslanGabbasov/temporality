@@ -105,7 +105,16 @@ function normalize(vector: number[]): number[] {
 /** PCA to 2D via two power iterations on the centered covariance — a far
  *  better starting layout than random, so the force pass converges quickly
  *  and deterministically. */
-function pca2(vectors: number[][]): { x: number[]; y: number[] } {
+export interface ProjectionBasis {
+  mean: number[]
+  v1: number[]
+  v2: number[]
+}
+
+/** Compute the projection axes for a corpus. Called ONCE per stream (first
+ *  batch) and then reused: re-fitting the axes per batch would rotate the
+ *  whole plane between batches and every dot would migrate with it. */
+export function projectionBasis(vectors: number[][]): ProjectionBasis {
   const n = vectors.length
   const dim = n > 0 ? vectors[0].length : 0
   const mean = new Array<number>(dim).fill(0)
@@ -113,38 +122,57 @@ function pca2(vectors: number[][]): { x: number[]; y: number[] } {
     for (let d = 0; d < dim; d++) mean[d] += vector[d] / n
   }
   const centered = vectors.map((vector) => vector.map((value, d) => value - mean[d]))
-  const power = (): { x: number[]; y: number[] } => {
-    // First component: repeated vector×matrix products.
-    let v1 = new Array<number>(dim).fill(0).map((_, i) => Math.sin(i + 1))
-    for (let iter = 0; iter < 8; iter++) {
-      const next = new Array<number>(dim).fill(0)
-      for (const row of centered) {
-        const dot = row.reduce((acc, value, d) => acc + value * v1[d], 0)
-        for (let d = 0; d < dim; d++) next[d] += dot * row[d]
-      }
-      const norm = Math.sqrt(next.reduce((acc, value) => acc + value * value, 0)) || 1
-      v1 = next.map((value) => value / norm)
+  // First component: repeated vector×matrix products.
+  let v1 = new Array<number>(dim).fill(0).map((_, i) => Math.sin(i + 1))
+  for (let iter = 0; iter < 8; iter++) {
+    const next = new Array<number>(dim).fill(0)
+    for (const row of centered) {
+      const dot = row.reduce((acc, value, d) => acc + value * v1[d], 0)
+      for (let d = 0; d < dim; d++) next[d] += dot * row[d]
     }
-    // Second component orthogonal to the first.
-    let v2 = new Array<number>(dim).fill(0).map((_, i) => Math.cos(i + 2))
-    for (let iter = 0; iter < 8; iter++) {
-      const next = new Array<number>(dim).fill(0)
-      for (const row of centered) {
-        const dot = row.reduce((acc, value, d) => acc + value * v2[d], 0)
-        for (let d = 0; d < dim; d++) next[d] += dot * row[d]
-      }
-      const proj = v2.reduce((acc, value, d) => acc + value * v1[d], 0)
-      for (let d = 0; d < dim; d++) v2[d] -= proj * v1[d]
-      const norm = Math.sqrt(v2.reduce((acc, value) => acc + value * value, 0)) || 1
-      v2 = v2.map((value) => value / norm)
-    }
-    return {
-      x: centered.map((row) => row.reduce((acc, value, d) => acc + value * v1[d], 0)),
-      y: centered.map((row) => row.reduce((acc, value, d) => acc + value * v2[d], 0)),
-    }
+    const norm = Math.sqrt(next.reduce((acc, value) => acc + value * value, 0)) || 1
+    v1 = next.map((value) => value / norm)
   }
+  // Second component orthogonal to the first.
+  let v2 = new Array<number>(dim).fill(0).map((_, i) => Math.cos(i + 2))
+  for (let iter = 0; iter < 8; iter++) {
+    const next = new Array<number>(dim).fill(0)
+    for (const row of centered) {
+      const dot = row.reduce((acc, value, d) => acc + value * v2[d], 0)
+      for (let d = 0; d < dim; d++) next[d] += dot * row[d]
+    }
+    const proj = v2.reduce((acc, value, d) => acc + value * v1[d], 0)
+    for (let d = 0; d < dim; d++) v2[d] -= proj * v1[d]
+    const norm = Math.sqrt(v2.reduce((acc, value) => acc + value * value, 0)) || 1
+    v2 = v2.map((value) => value / norm)
+  }
+  return { mean, v1, v2 }
+}
+
+/** Project vectors onto a FIXED basis (centered by its own mean). */
+function projectWith(vectors: number[][], basis: ProjectionBasis): { x: number[]; y: number[] } {
+  const { mean, v1, v2 } = basis
+  const x: number[] = []
+  const y: number[] = []
+  for (const vector of vectors) {
+    let dx = 0, dy = 0
+    for (let d = 0; d < mean.length; d++) {
+      const centered = vector[d] - mean[d]
+      dx += centered * v1[d]
+      dy += centered * v2[d]
+    }
+    x.push(dx)
+    y.push(dy)
+  }
+  return { x, y }
+}
+
+function pca2(vectors: number[][]): { x: number[]; y: number[] } {
+  const n = vectors.length
+  const dim = n > 0 ? vectors[0].length : 0
   if (n === 0 || dim === 0) return { x: [], y: [] }
-  return power()
+  const basis = projectionBasis(vectors)
+  return projectWith(vectors, basis)
 }
 
 /** k-nearest-neighbor edges over cosine similarity (vectors must be
@@ -524,14 +552,30 @@ export interface SemanticMapResult {
   level2: ClusterTreeNode[]
   width: number
   height: number
+  /** The fixed projection axes of this build — feed back into the next
+   *  incremental build so the coordinate frame never rotates mid-stream. */
+  basis?: ProjectionBasis
+}
+
+/** Previous-layout state for incremental builds: where items ended up last
+ *  time and the projection axes the corpus lives in. */
+export interface PreviousLayout {
+  positions: Map<string, { x: number; y: number }>
+  basis?: ProjectionBasis
 }
 
 /** One-pass build: normalize once, kNN once, force layout, cluster pyramid.
  *  Deterministic; heavy enough (a couple of seconds at a few thousand items)
- *  to run inside a worker — the UI module imports this through one. */
+ *  to run inside a worker — the UI module imports this through one.
+ *
+ *  Incremental mode (previous given and covering most of the corpus): the
+ *  coordinate frame stays the previous basis, already-placed items start (and
+ *  predominantly stay) at their previous spots — only newcomers settle, next
+ *  to whichever placed neighbor their kNN edges name. The map grows like a
+ *  crystal instead of the whole herd migrating after every batch. */
 export function buildSemanticMap(
   items: MapItem[],
-  options?: { k?: number; width?: number; height?: number; ticks?: number },
+  options?: { k?: number; width?: number; height?: number; ticks?: number; previous?: PreviousLayout },
 ): SemanticMapResult {
   const width = options?.width ?? WORLD_DEFAULT_W
   const height = options?.height ?? WORLD_DEFAULT_H
@@ -547,8 +591,19 @@ export function buildSemanticMap(
 
   const edges = knnEdgesFlat(flat, items.length, dim, k)
 
-  const pca = pca2(items.map((item) => item.vector))
+  // Incremental frame: reuse the previous basis only when it actually covers
+  // this corpus (a project flip changes nearly every id — rebuild fresh).
+  const previous = options?.previous
+  let matched = 0
+  if (previous) {
+    for (const item of items) if (previous.positions.has(item.id)) matched++
+  }
+  const incremental = !!previous && matched >= items.length * 0.3 && matched > 0
+  const basis = incremental && previous!.basis ? previous!.basis : projectionBasis(items.map((item) => item.vector))
+  const pca = incremental && previous!.basis ? projectWith(items.map((item) => item.vector), basis) : pca2(items.map((item) => item.vector))
+  const prevPositions = incremental ? previous!.positions : null
   const random = rng(hashStrings(items.map((item) => item.id)))
+
   const nodes: LayoutNode[] = items.map((item, i) => ({
     id: item.id,
     item,
@@ -558,20 +613,62 @@ export function buildSemanticMap(
   }))
   clusterAssign(items).forEach((cluster, i) => { nodes[i].cluster = cluster })
 
+  // Newcomers first: seed each at its strongest already-placed kNN neighbor,
+  // so a fresh dot is born inside the cluster it belongs to instead of
+  // migrating across the plane.
+  if (prevPositions) {
+    const indexById = new Map(nodes.map((n, i) => [n.id, i]))
+    const placed = nodes.map((n) => prevPositions.has(n.id))
+    const seedFrom = new Map<number, number>()
+    for (const [a, b] of edges) {
+      for (const [self, other] of [[a, b], [b, a]] as const) {
+        if (placed[other] && !placed[self] && !seedFrom.has(self)) seedFrom.set(self, other)
+      }
+    }
+    for (const [self, other] of seedFrom) {
+      const prev = prevPositions.get(nodes[other].id)
+      if (prev) {
+        nodes[self].x = prev.x + (random() - 0.5) * 14
+        nodes[self].y = prev.y + (random() - 0.5) * 14
+      }
+    }
+    // Already-placed items start exactly where they were.
+    for (let i = 0; i < nodes.length; i++) {
+      if (placed[i]) {
+        const prev = prevPositions.get(nodes[i].id)
+        if (prev) { nodes[i].x = prev.x; nodes[i].y = prev.y }
+      }
+    }
+  }
+
   const links = edges.map(([source, target, similarity]) => ({
     source, target,
     distance: 18 + (1 - Math.max(0, Math.min(1, similarity))) * 112,
   }))
+  const simTicks = prevPositions ? Math.min(ticks, 90) : ticks
   const simulation = forceSimulation(nodes)
     .force('link', forceLink(links).distance((link: { distance: number }) => link.distance).strength(0.6))
     .force('charge', forceManyBody().strength(-90))
     .force('x', forceX(width / 2).strength(0.03))
     .force('y', forceY(height / 2).strength(0.03))
     .stop()
-  for (let i = 0; i < ticks; i++) simulation.tick()
+  for (let i = 0; i < simTicks; i++) simulation.tick()
+
+  // The anchor pass: placed items keep 85% of where they were — the force
+  // pass only bends them locally, so a batch adjusts neighborhoods instead of
+  // relocating the whole plane.
+  if (prevPositions) {
+    for (const node of nodes) {
+      const prev = prevPositions.get(node.id)
+      if (prev) {
+        node.x = prev.x + (node.x - prev.x) * 0.15
+        node.y = prev.y + (node.y - prev.y) * 0.15
+      }
+    }
+  }
 
   const tree = buildClusterTree(items, nodes)
-  return { nodes, edges, level1: tree.level1, level2: tree.level2, width, height }
+  return { nodes, edges, level1: tree.level1, level2: tree.level2, width, height, basis }
 }
 
 const WORLD_DEFAULT_W = 1400
