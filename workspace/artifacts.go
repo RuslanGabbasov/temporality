@@ -269,7 +269,9 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 	if f.Query != "" {
 		args = append(args, "%"+f.Query+"%")
 		n := strconv.Itoa(len(args))
-		query += ` AND (title ILIKE $` + n + ` OR description ILIKE $` + n + `)`
+		// The id matches too: registry ids (discovery-omni-presence-100k)
+		// carry meaning users search by, and titles alone don't cover them.
+		query += ` AND (title ILIKE $` + n + ` OR description ILIKE $` + n + ` OR id ILIKE $` + n + `)`
 	}
 	// AND semantics: every requested tag must be present (tags @> the set) —
 	// narrowing filters, the way knowledge bases drill down.
