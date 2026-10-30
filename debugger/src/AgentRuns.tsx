@@ -300,6 +300,11 @@ export default function AgentRuns({ project }: { project: string }) {
   const [opsOnly, setOpsOnly] = useState(false)
   const [identity, setIdentity] = useState<Whoami | null>(null)
   const [reconcileNote, setReconcileNote] = useState('')
+  // Reconcile wall (docs/failure-reconciliation.md): long runs pile up dozens
+  // of same-cause operations — groups are collapsed until expanded, and one
+  // bulk verdict closes a whole group at once.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
   // Historical knowledge events (recorded before propositions were embedded in
   // events) carry bare knowledge ids — resolve them against the project list.
   // Full items (not just propositions): the run's knowledge rows also show the
@@ -1127,22 +1132,116 @@ export default function AgentRuns({ project }: { project: string }) {
                 {/* Failure reconciliation — uncertain operations of this run and
                     its delegated children (docs/failure-reconciliation.md). The
                     verdict is recorded next to the trace that produced the
-                    uncertainty; unlike approvals it never resumes the run. */}
-                {selectedOps.length > 0 && (
+                    uncertainty; unlike approvals it never resumes the run.
+                    Long runs pile up dozens of same-cause operations: they are
+                    grouped by (reason × tool × agent) with a bulk verdict per
+                    group, so one decision closes the wall instead of dozens of
+                    separate cards. */}
+                {selectedOps.length > 0 && (() => {
+                  const signature = (op: UncertainOperation) => `${op.reason}|${op.tool}|${op.agent_id ?? ''}|${op.error_type ?? ''}`
+                  const groups = new Map<string, UncertainOperation[]>()
+                  for (const op of selectedOps) {
+                    const sig = signature(op)
+                    const list = groups.get(sig) ?? []
+                    list.push(op)
+                    groups.set(sig, list)
+                  }
+                  const opGroups = [...groups.entries()]
+                    .map(([sig, ops]) => ({ sig, ops }))
+                    .sort((a, b) => b.ops.length - a.ops.length || (a.ops[0].started_at < b.ops[0].started_at ? -1 : 1))
+                  const bulkReconcile = async (ops: UncertainOperation[], effect: ReconcileEffect) => {
+                    setBusy(true); setError('')
+                    setBulkProgress({ done: 0, total: ops.length })
+                    let failed = 0
+                    try {
+                      for (const op of ops) {
+                        try {
+                          await reconcile({
+                            project: op.project || project.trim(),
+                            run_id: op.run_id,
+                            operation_id: op.operation_id,
+                            effect,
+                            note: reconcileNote.trim() || t('operations.bulk_note_default'),
+                            actor_id: identity?.subject && identity.subject !== 'anonymous' ? identity.subject : 'human-ui',
+                            started_event_id: op.started_event_id,
+                          })
+                        } catch { failed++ }
+                        setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p))
+                      }
+                      await Promise.all([refreshOps(), loadRun(selected, true)])
+                      if (failed) setError(t('operations.bulk_partial', { failed: String(failed), total: String(ops.length) }))
+                    } catch (f) { setError(message(f)) }
+                    finally { setBulkProgress(null); setBusy(false) }
+                  }
+                  return (
                   <Tile style={{ borderLeft: '3px solid #f7768e' }}>
                     <Heading style={{ fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       ⚠ {t('runs.reconcile_title')}
                       <Tag type="red" size="sm">{selectedOps.length}</Tag>
                     </Heading>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0.25rem 0 0.75rem' }}>{t('operations.check_external')}</p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0.25rem 0 0.75rem' }}>
+                      {selectedOps.length > 2 ? t('operations.group_hint') : t('operations.check_external')}
+                    </p>
                     <Stack gap={3}>
-                      {selectedOps.map((op) => {
-                        const info = toolInfo(op.tool, op.server)
-                        const turn = turnOf(op.operation_id)
-                        const look = whereToLook(op, t)
-                        const delegated = op.error_type === 'delegated_run_failed'
+                      {opGroups.map(({ sig, ops }) => {
+                        const first = ops[0]
+                        const info = toolInfo(first.tool, first.server)
+                        const grouped = ops.length > 1
+                        const collapsed = grouped && !expandedGroups.has(sig)
+                        const times = ops.map((o) => o.started_at).sort()
+                        const bulk = (
+                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                            {(['occurred', 'none', 'unknown'] as ReconcileEffect[]).map((effect) => (
+                              <Button
+                                key={effect}
+                                size="sm"
+                                kind={effect === 'none' ? 'danger' : effect === 'occurred' ? 'primary' : 'secondary'}
+                                disabled={busy || !operator}
+                                onClick={() => void bulkReconcile(ops, effect)}
+                              >
+                                {effect === 'occurred' ? t('operations.happened') : effect === 'none' ? t('operations.did_not_happen') : t('operations.unknown_verdict')}
+                              </Button>
+                            ))}
+                            {bulkProgress && (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>
+                                {t('operations.bulk_progress', { done: String(bulkProgress.done), total: String(bulkProgress.total) })}
+                              </span>
+                            )}
+                          </div>
+                        )
                         return (
-                          <div key={op.operation_id} style={{ padding: '0.75rem', background: 'var(--tm-raised)', borderRadius: '6px', minWidth: 0 }}>
+                          <div key={sig}>
+                            {grouped && (
+                              <div style={{ padding: '0.6rem 0.75rem', background: 'var(--tm-raised)', borderRadius: '6px', minWidth: 0, marginBottom: collapsed ? 0 : '0.5rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', fontSize: '0.85rem' }}>
+                                  <span>{info.icon}</span>
+                                  <strong>{info.label}</strong>
+                                  <Tag type="gray" size="sm">× {ops.length}</Tag>
+                                  <Tag type="red" size="sm">{REASON_KEYS[first.reason] ? t(REASON_KEYS[first.reason]) : first.reason}</Tag>
+                                  {first.agent_id && <Tag type="cool-gray" size="sm">{userNameOf(first.agent_id)}</Tag>}
+                                  <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>{shortTime(times[0])} — {shortTime(times[times.length - 1])}</span>
+                                  <button
+                                    onClick={() => setExpandedGroups((prev) => {
+                                      const next = new Set(prev)
+                                      if (next.has(sig)) next.delete(sig)
+                                      else next.add(sig)
+                                      return next
+                                    })}
+                                    style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}
+                                  >
+                                    {collapsed ? t('operations.expand_group', { count: String(ops.length) }) : t('operations.collapse_group')}
+                                  </button>
+                                </div>
+                                <div style={{ marginTop: '0.5rem' }}>{bulk}</div>
+                              </div>
+                            )}
+                            {!collapsed && ops.map((op) => {
+                              const info = toolInfo(op.tool, op.server)
+                              const turn = turnOf(op.operation_id)
+                              const look = whereToLook(op, t)
+                              const delegated = op.error_type === 'delegated_run_failed'
+                              return (
+                          <div key={op.operation_id} style={{ padding: '0.75rem', background: 'var(--tm-raised)', borderRadius: '6px', minWidth: 0, marginTop: grouped ? '0.5rem' : 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', fontSize: '0.85rem' }}>
                               <span>{info.icon}</span>
                               <strong style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{info.label}</strong>
@@ -1184,6 +1283,9 @@ export default function AgentRuns({ project }: { project: string }) {
                             </div>
                             {!operator && <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.5rem', marginBottom: 0 }}>{t('operations.operator_required')}</p>}
                           </div>
+                              )
+                            })}
+                          </div>
                         )
                       })}
                     </Stack>
@@ -1191,7 +1293,8 @@ export default function AgentRuns({ project }: { project: string }) {
                       <TextInput id="reconcile-note" labelText={t('operations.what_did_you_find')} value={reconcileNote} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReconcileNote(e.target.value)} placeholder={t('operations.find_placeholder')} />
                     </div>
                   </Tile>
-                )}
+                  )
+                })()}
 
                 {view === 'overview' && (<>
                 {/* Empty-state onboarding: the overview tab opens by default,
