@@ -798,7 +798,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 				completion.StreamMs = streamMs + retryMs
 				completion.StreamError = retryErr.Error()
 			}
-			return completion, a.routeFailure(ctx, request, routeProvider, err)
+			return completion, a.routeFailure(ctx, request, routeProvider, attempt, err)
 		}
 		// A stream that stalls behind gateway keepalives can burn most of the
 		// activity budget before dying; the fallback then looks suspiciously
@@ -820,28 +820,55 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			completion.StreamMs = streamMs
 			completion.StreamError = streamErr.Error()
 		}
-		return completion, a.routeFailure(ctx, request, routeProvider, err)
+		return completion, a.routeFailure(ctx, request, routeProvider, attempt, err)
 	}
 	completion, err := client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
-	return completion, a.routeFailure(ctx, request, routeProvider, err)
+	return completion, a.routeFailure(ctx, request, routeProvider, attempt, err)
 }
 
-// routeFailure annotates a provider rejection with the routing outcome (which
-// provider — or the env fallback — served this call, host and model, never
-// the key) and evicts the cached routing on auth rejections: a rotated key
-// must re-resolve on the retry ladder instead of serving the stale credential
-// until the provider cache TTL runs out. «Диагностика зелёная, а ран крас-»
-// «ный» почти всегда значит, что ран пошёл не в тот провайдер, что проверяли.
-func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, routeProvider string, err error) error {
+// routeFailure annotates a provider rejection with the routing outcome and
+// journals the full request/response pair (model.call_failed): which provider
+// — or the env fallback — served this call, the masked credential, what we
+// sent and what came back. The same pair the provider test-generation dialog
+// shows, captured from the call that actually failed. Also evicts the cached
+// routing on auth rejections: a rotated key must re-resolve on the retry
+// ladder instead of serving the stale credential until the TTL runs out.
+func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, routeProvider string, attempt int, err error) error {
 	if err == nil {
 		return nil
-	}
-	if code, ok := llm.StatusOf(err); ok && (code == http.StatusUnauthorized || code == http.StatusForbidden) {
-		a.evictModelConfig(request.Project, request.Model)
 	}
 	route := "env fallback"
 	if routeProvider != "" {
 		route = "provider " + routeProvider
+	}
+	if code, ok := llm.StatusOf(err); ok {
+		if code == http.StatusUnauthorized || code == http.StatusForbidden {
+			a.evictModelConfig(request.Project, request.Model)
+		}
+		// The diagnosable pair rides to the journal: in the chat, a failed run
+		// gets a «запрос → ответ» button that reads this event.
+		if report, has := llm.CallReportOf(err); a.Events != nil && request.RunID != "" && has {
+			if report.RequestHeaders == nil {
+				report.RequestHeaders = map[string]string{}
+			}
+			if report.ResponseHeaders == nil {
+				report.ResponseHeaders = map[string]string{}
+			}
+			eventID := fmt.Sprintf("%s/model-call-failed/%d/a%d/turn-%d", eventScope(a.SourceID, request.Project, request.RunID), code, attempt, request.Turn)
+			event := observation.Event{
+				Schema: observation.Schema, EventID: eventID, OccurredAt: time.Now().UTC(),
+				Source:  observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
+				Context: observation.Context{Project: request.Project, Run: request.RunID, Actor: observation.Actor{ID: "system", Type: "agent"}},
+				Type:    "model.call_failed",
+				Data: map[string]any{
+					"turn": request.Turn, "model": request.Model, "route": route,
+					"status": code, "request": report, "error": boundedAttemptError(err),
+				},
+			}
+			if err := event.Validate(); err == nil {
+				_ = a.Events.Enqueue(ctx, event)
+			}
+		}
 	}
 	return fmt.Errorf("%w (served by %s)", err, route)
 }

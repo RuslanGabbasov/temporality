@@ -6,6 +6,7 @@ import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import RunDisputes from './RunDisputes'
 import Markdown from './Markdown'
+import AppModal from './Modal'
 import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
 import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
@@ -305,6 +306,11 @@ export default function AgentRuns({ project }: { project: string }) {
   // current lifecycle state, which changes when the reader doubts one.
   const [knowledgeItems, setKnowledgeItems] = useState<Map<string, KnowledgeItem>>(new Map())
   const [knowledgeRevision, setKnowledgeRevision] = useState(0)
+  // The rejected provider call behind a failed run (model.call_failed): the
+  // «запрос → ответ» button in the overview opens the same request/response
+  // pair the provider test dialog shows — which model, which base URL, which
+  // masked credential the call actually used.
+  const [callReportOpen, setCallReportOpen] = useState(false)
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
   // Ancestors of runs with unresolved ops light up too, so the delegation
   // chain points straight at the failure; subtree counts feed the row tags.
@@ -866,6 +872,14 @@ export default function AgentRuns({ project }: { project: string }) {
   const ownEvents = useMemo(
     () => timeline.filter((event) => runID(event) === selected),
     [timeline, selected])
+  // The last rejected provider call of this run (route, masked credential,
+  // request/response pair) — the overview's «запрос → ответ» button reads it.
+  const callFailedEvent = useMemo(() => {
+    for (let i = ownEvents.length - 1; i >= 0; i--) {
+      if (ownEvents[i].type === 'model.call_failed') return ownEvents[i]
+    }
+    return null
+  }, [ownEvents])
   const overviewEmpty = typeof answer !== 'string' && !Array.isArray(stages) && result?.result === undefined
     && !ownEvents.some((event) => event.type === 'delegation.started' || event.type === 'plan.started' || event.type === 'plan.task.started')
   const overviewRunning = selectedLive || (!result && ownEvents.some((event) => event.type === 'run.started') && !ownEvents.some((event) => event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled'))
@@ -1212,7 +1226,14 @@ export default function AgentRuns({ project }: { project: string }) {
                       )
                     })()}
                     <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0 0 0.75rem' }}>{t('runs.overview.hint')}</p>
-                    <Button size="sm" kind="secondary" onClick={() => setView('trace')}>{t('runs.overview.open_trace')}</Button>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <Button size="sm" kind="secondary" onClick={() => setView('trace')}>{t('runs.overview.open_trace')}</Button>
+                      {callFailedEvent && (
+                        <Button size="sm" kind="danger" onClick={() => setCallReportOpen(true)}>
+                          {t('runs.call_report') ?? 'Запрос → Ответ'}
+                        </Button>
+                      )}
+                    </div>
                   </Tile>
                 )}
 
@@ -1519,7 +1540,57 @@ export default function AgentRuns({ project }: { project: string }) {
         </Column>
       </Grid>
 
+      {callReportOpen && callFailedEvent && (
+        <AppModal onClose={() => setCallReportOpen(false)} panelStyle={{ width: '640px' }}>
+          <CallReportView event={callFailedEvent} t={t} />
+        </AppModal>
+      )}
+
       {busy && <PageLoading />}
     </div>
+  )
+}
+
+/** The rejected provider call behind a failed run, in the same request →
+ *  response shape the provider test dialog shows: which model, which base
+ *  URL, which masked credential the call actually carried — the quickest way
+ *  to see «ран ушёл в env-fallback с кривым токеном» vs «правильный
+ *  провайдер отклонил ключ». Data comes from the run's model.call_failed
+ *  journal event; no extra request is made. */
+export function CallReportView({ event, t }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string }) {
+  const data = (event.data ?? {}) as Record<string, unknown>
+  const report = (data.request ?? {}) as Record<string, unknown>
+  const requestHeaders = (report.request_headers ?? {}) as Record<string, string>
+  const responseHeaders = (report.response_headers ?? {}) as Record<string, string>
+  const route = String(data.route ?? '')
+  const model = String(data.model ?? '')
+  const requestText = [
+    `${String(report.method ?? 'POST')} ${String(report.url ?? '')}`,
+    ...Object.entries(requestHeaders).map(([k, v]) => (v ? `${k}: ${v}` : '')),
+    '',
+    String(report.request_body ?? ''),
+  ].join('\n')
+  const responseText = [
+    `HTTP ${String(report.status ?? data.status ?? '?')}`,
+    ...Object.entries(responseHeaders).map(([k, v]) => (v ? `${k}: ${v}` : '')),
+    '',
+    String(report.response_body ?? ''),
+  ].join('\n')
+  const pre = { background: 'var(--tm-raised)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.75rem', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: '0.25rem 0 0.75rem' } as const
+  return (
+    <>
+      <h3 style={{ margin: '0 0 0.25rem', fontSize: '1rem' }}>{t('runs.call_report_title') ?? 'Отклонённый вызов провайдера'}</h3>
+      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', margin: '0.25rem 0 0.75rem' }}>
+        {route && <Tag type={route.startsWith('env') ? 'red' : 'blue'} size="sm">{t('runs.call_report_route') ?? 'Маршрут'}: {route}</Tag>}
+        {model && <Tag type="gray" size="sm">{t('runs.model', { name: model })}</Tag>}
+      </div>
+      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+        {t('runs.call_report_hint') ?? 'Тот же формат, что у проверки генерации: куда и с каким токеном (замаскирован) стучался вызов. Красный маршрут «env fallback» значит, что модель агента не заявлена ни в одном включённом провайдере.'}
+      </p>
+      <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.25rem 0' }}>{t('providers.test_request') ?? 'Request'}</h5>
+      <pre style={pre}>{requestText}</pre>
+      <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.25rem 0' }}>{t('providers.test_response') ?? 'Response'}</h5>
+      <pre style={pre}>{responseText}</pre>
+    </>
   )
 }

@@ -827,6 +827,16 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 			code:       response.StatusCode,
 			body:       truncate(string(body), 400),
 			retryAfter: parseRetryAfterHeader(response.Header.Get("Retry-After"), time.Now()),
+			url:        request.URL.String(),
+			reqHeaders: map[string]string{
+				"Content-Type":  "application/json",
+				"Authorization": "Bearer " + maskKey(c.cfg.APIKey),
+			},
+			reqBody:     truncate(string(payload), 2000),
+			respHeaders: map[string]string{
+				"Content-Type":     response.Header.Get("Content-Type"),
+				"Www-Authenticate": response.Header.Get("Www-Authenticate"),
+			},
 		}
 	}
 
@@ -1024,6 +1034,58 @@ type statusError struct {
 	// (a 429 mostly): Complete folds it into the retry delay, StreamComplete
 	// does not retry status errors and only carries it for the message.
 	retryAfter time.Duration
+	// Diagnostic context for the journal (model.call_failed): what we sent —
+	// with the credential masked — and what came back, so a 401 seen in a
+	// chat can show the full request/response pair without re-hitting the
+	// provider. url/reqBody/respHeaders stay bounded by the constructors.
+	url         string
+	reqHeaders  map[string]string
+	reqBody     string
+	respHeaders map[string]string
+}
+
+// CallReport is the diagnosable snapshot of one rejected provider call.
+// Credentials are masked at construction; the journal and the UI show it
+// verbatim.
+type CallReport struct {
+	Method         string            `json:"method"`
+	URL            string            `json:"url"`
+	RequestHeaders map[string]string `json:"request_headers"`
+	RequestBody    string            `json:"request_body"`
+	Status         int               `json:"status"`
+	ResponseHeaders map[string]string `json:"response_headers"`
+	ResponseBody   string            `json:"response_body"`
+}
+
+// maskKey keeps enough of a bearer token to tell WHICH credential was used
+// (a rotated key vs an env one) without leaking it: first 6, last 4.
+func maskKey(key string) string {
+	if key == "" {
+		return "<none>"
+	}
+	if len(key) <= 12 {
+		return strings.Repeat("*", len(key))
+	}
+	return key[:6] + "…" + key[len(key)-4:]
+}
+
+// CallReportOf extracts the request/response snapshot behind a provider
+// status error. ok=false for transport errors and cancels — nothing was
+// rejected by the provider, so there is nothing to show.
+func CallReportOf(err error) (CallReport, bool) {
+	var statusErr *statusError
+	if !errors.As(err, &statusErr) || statusErr.url == "" {
+		return CallReport{}, false
+	}
+	return CallReport{
+		Method:         http.MethodPost,
+		URL:            statusErr.url,
+		RequestHeaders: statusErr.reqHeaders,
+		RequestBody:    statusErr.reqBody,
+		Status:         statusErr.code,
+		ResponseHeaders: statusErr.respHeaders,
+		ResponseBody:   statusErr.body,
+	}, true
 }
 
 func (e *statusError) Error() string {
@@ -1174,6 +1236,16 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 			code:       response.StatusCode,
 			body:       truncate(string(body), 400),
 			retryAfter: parseRetryAfterHeader(response.Header.Get("Retry-After"), time.Now()),
+			url:        request.URL.String(),
+			reqHeaders: map[string]string{
+				"Content-Type":  "application/json",
+				"Authorization": "Bearer " + maskKey(c.cfg.APIKey),
+			},
+			reqBody:  truncate(string(payload), 2000),
+			respHeaders: map[string]string{
+				"Content-Type": response.Header.Get("Content-Type"),
+				"Www-Authenticate": response.Header.Get("Www-Authenticate"),
+			},
 		}
 	}
 	var decoded chatResponse
