@@ -29,7 +29,7 @@ const supervisorTriageIntervalDefault = 2 * time.Minute
 // Bounded per pass so a burst of failures cannot burn the model budget.
 const supervisorTriagePassCap = 2
 
-func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities *agent.Activities, ws supervisorCaseStore, observationURL string, modelClient func(ctx context.Context) (*llm.Client, error)) {
+func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities *agent.Activities, ws supervisorCaseStore, observationURL string, liveness agent.WorkflowLiveness, modelClient func(ctx context.Context) (*llm.Client, error)) {
 	interval := supervisorTriageIntervalDefault
 	if raw := strings.TrimSpace(os.Getenv("KERNEL_SUPERVISOR_TRIAGE_INTERVAL")); raw != "" {
 		if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
@@ -54,6 +54,9 @@ func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities
 			// Waves B/C: knowledge triage/hygiene, friction, intake audit,
 			// skill mining, narratives — one pass, per-subject dedup.
 			runSupervisorCasesPass(ctx, log, activities, ws, observationURL, modelClient)
+			// Reconciliation walls: a long run's pile of uncertain operations
+			// gets one integrated supervisor verdict instead of a human wall.
+			runSupervisorReconcilePass(ctx, log, activities, observationURL, liveness, modelClient)
 			select {
 			case <-ctx.Done():
 				return

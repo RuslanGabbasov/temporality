@@ -7562,7 +7562,7 @@ func main() {
 	})
 	// Supervisor triage (docs/supervisor-model.md §3 wave A1): diagnose
 	// failed runs with the supervisor model, journal supervisor.verdict.
-	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, func(ctx context.Context) (*llm.Client, error) {
+	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, liveness, func(ctx context.Context) (*llm.Client, error) {
 		return judgeModelClient(ctx, ws, secretMasterKey)
 	})
 	// Scheduled quality runs (docs/agent-quality-loop.md §8.1): the cadence is

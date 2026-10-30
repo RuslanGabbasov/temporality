@@ -877,6 +877,13 @@ export default function AgentRuns({ project }: { project: string }) {
   const ownEvents = useMemo(
     () => timeline.filter((event) => runID(event) === selected),
     [timeline, selected])
+  // The supervisor's integrated reconciliation verdict for this run: when it
+  // exists, the uncertain-operations wall is replaced by ONE card (causes,
+  // remedies, what was auto-closed) — the cognitive load the wall created is
+  // the supervisor's job now.
+  const reconcileVerdict = useMemo(
+    () => ownEvents.find((event) => event.type === 'supervisor.verdict' && event.data?.kind === 'reconciliation') ?? null,
+    [ownEvents])
   // The last rejected provider call of this run (route, masked credential,
   // request/response pair) — the overview's «запрос → ответ» button reads it.
   const callFailedEvent = useMemo(() => {
@@ -1137,7 +1144,53 @@ export default function AgentRuns({ project }: { project: string }) {
                     grouped by (reason × tool × agent) with a bulk verdict per
                     group, so one decision closes the wall instead of dozens of
                     separate cards. */}
-                {selectedOps.length > 0 && (() => {
+                {selectedOps.length > 0 && reconcileVerdict && (() => {
+                  // The supervisor already reconciled this wall: one integrated
+                  // card (causes, remedies, what was auto-closed) instead of the
+                  // raw per-op wall. The remaining selectedOps here are ops that
+                  // appeared AFTER the verdict — still grouped and bulkable.
+                  const needsAttention = reconcileVerdict.data?.needs_attention === true
+                  const causes = Array.isArray(reconcileVerdict.data?.causes) ? reconcileVerdict.data.causes as string[] : []
+                  const remedies = Array.isArray(reconcileVerdict.data?.remedies) ? reconcileVerdict.data.remedies as string[] : []
+                  const fresh = selectedOps.length
+                  return (
+                    <Tile style={{ borderLeft: `3px solid ${needsAttention ? '#f7768e' : '#9ece6a'}` }}>
+                      <Heading style={{ fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        🛰 {t('runs.reconcile_supervisor_title')}
+                        {needsAttention
+                          ? <Tag type="red" size="sm">{t('runs.reconcile_attention')}</Tag>
+                          : <Tag type="green" size="sm">{t('runs.reconcile_no_attention')}</Tag>}
+                      </Heading>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--tm-text)', margin: '0.5rem 0' }}>{String(reconcileVerdict.data?.summary ?? '')}</p>
+                      {causes.length > 0 && (
+                        <div style={{ fontSize: '0.8rem', marginBottom: '0.4rem' }}>
+                          <strong style={{ color: 'var(--tm-text-2)' }}>{t('runs.reconcile_causes')}:</strong>
+                          <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0 }}>
+                            {causes.map((cause, i) => <li key={i} style={{ marginBottom: '0.15rem' }}>{cause}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {remedies.length > 0 && (
+                        <div style={{ fontSize: '0.8rem', marginBottom: '0.4rem' }}>
+                          <strong style={{ color: 'var(--tm-text-2)' }}>{t('runs.reconcile_remedies')}:</strong>
+                          <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0 }}>
+                            {remedies.map((remedy, i) => <li key={i} style={{ marginBottom: '0.15rem' }}>{remedy}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0.5rem' }}>
+                        {t('runs.reconcile_closed', { applied: String(reconcileVerdict.data?.applied ?? 0), total: String(reconcileVerdict.data?.operations ?? 0) })}
+                      </p>
+                      {fresh > 0 && (
+                        <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', margin: '0 0 0.5rem' }}>
+                          {t('runs.reconcile_fresh', { count: String(fresh) })}
+                        </p>
+                      )}
+                    </Tile>
+                  )
+                })()}
+
+                {selectedOps.length > 0 && !reconcileVerdict && (() => {
                   const signature = (op: UncertainOperation) => `${op.reason}|${op.tool}|${op.agent_id ?? ''}|${op.error_type ?? ''}`
                   const groups = new Map<string, UncertainOperation[]>()
                   for (const op of selectedOps) {
