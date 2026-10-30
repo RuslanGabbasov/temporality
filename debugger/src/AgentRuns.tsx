@@ -566,16 +566,32 @@ export default function AgentRuns({ project }: { project: string }) {
       const startedPage = await observationApi.events(scope, undefined, undefined, undefined, { type: 'run.started', limit: 500 })
       // Terminal events give every list row (roots and delegated children
       // alike) its status tag without opening each run. run.cancelled matters
-      // as much: without it a cancelled run shows "running" forever.
-      const [completedPage, failedPage, cancelledPage] = await Promise.all([
-        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.completed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
-        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.failed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
-        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.cancelled', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+      // as much: without it a cancelled run shows "running" forever. The
+      // journal pages OLDEST-first, so a flat limit=500 page would silently
+      // drop the NEWEST terminal events once a type outgrows the page —
+      // freshly terminated runs would stay «running» forever. Each terminal
+      // type walks cursors to the newest end instead.
+      const newestTypedEvents = async (type: string): Promise<ObservationEvent[]> => {
+        const collected: ObservationEvent[] = []
+        let cursor: string | undefined
+        for (let page = 0; page < 4; page++) {
+          const pageData = await observationApi.events(scope, cursor, undefined, undefined, { type, limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], next_cursor: '' }))
+          collected.push(...(pageData.events ?? []))
+          cursor = pageData.next_cursor
+          if (!cursor) break
+        }
+        // Keep the NEWEST slice if the type outgrew even the walk.
+        return collected.slice(-500)
+      }
+      const [completedEvents, failedEvents, cancelledEvents] = await Promise.all([
+        newestTypedEvents('run.completed'),
+        newestTypedEvents('run.failed'),
+        newestTypedEvents('run.cancelled'),
       ])
       const statuses = new Map<string, RunStatus>()
-      for (const event of failedPage.events) statuses.set(runID(event), 'failed')
-      for (const event of cancelledPage.events) statuses.set(runID(event), 'cancelled')
-      for (const event of completedPage.events) statuses.set(runID(event), 'completed')
+      for (const event of failedEvents) statuses.set(runID(event), 'failed')
+      for (const event of cancelledEvents) statuses.set(runID(event), 'cancelled')
+      for (const event of completedEvents) statuses.set(runID(event), 'completed')
       const allRows = buildRunRows(startedPage.events, statuses)
       setRows(allRows)
       // Open human questions mark the asking runs (best-effort — the badge
