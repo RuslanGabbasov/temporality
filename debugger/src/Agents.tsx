@@ -2521,6 +2521,10 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
   const [applyMcp, setApplyMcp] = useState(false)
   const [mcpAdd, setMcpAdd] = useState<string[]>([])
   const [mcpRemove, setMcpRemove] = useState<string[]>([])
+  const [applyParams, setApplyParams] = useState(false)
+  const [bulkTemp, setBulkTemp] = useState(0.7)
+  const [bulkMaxTokens, setBulkMaxTokens] = useState(16384)
+  const [bulkMaxTurns, setBulkMaxTurns] = useState(20)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [failures, setFailures] = useState<string[]>([])
   const [done, setDone] = useState(0)
@@ -2545,6 +2549,11 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
           // moves a server between them).
           const next = [...current.filter((s) => !mcpRemove.includes(s)), ...mcpAdd.filter((s) => !current.includes(s))]
           patch.mcp_servers = next
+        }
+        if (applyParams) {
+          patch.temperature = bulkTemp
+          patch.max_tokens = bulkMaxTokens
+          patch.max_turns = bulkMaxTurns
         }
         await workspaceApi.updateAgent(id, patch)
         ok++
@@ -2662,6 +2671,41 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
         </div>
       ) )}
 
+      {section(applyParams, () => setApplyParams(!applyParams), t('agents.bulk_params') ?? 'Параметры генерации: температура, лимит токенов и ходов', (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'stretch' }}>
+          <div style={{ flex: '1 1 100%' }}>
+            <TemperatureControl label={t('agents.temperature') ?? 'Temperature'} value={bulkTemp} onChange={setBulkTemp} />
+          </div>
+          <div style={{ flex: '1 1 45%', minWidth: 0 }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_tokens') ?? 'Max tokens'}</label>
+            <input
+              type="number"
+              value={bulkMaxTokens}
+              min={64}
+              max={1000000}
+              step={1}
+              onChange={(e) => setBulkMaxTokens(Math.max(64, Math.floor(Number(e.target.value) || 64)))}
+              style={bulkInputStyle}
+            />
+          </div>
+          <div style={{ flex: '1 1 45%', minWidth: 0 }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_turns') ?? 'Max turns'}</label>
+            <input
+              type="number"
+              value={bulkMaxTurns}
+              min={1}
+              max={100}
+              step={1}
+              onChange={(e) => setBulkMaxTurns(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+              style={bulkInputStyle}
+            />
+          </div>
+          <p style={{ flex: '1 1 100%', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: 0 }}>
+            {t('agents.bulk_params_hint') ?? 'Значения применяются всем выбранным агентам как есть (текущие значения агентов не учитываются).'}
+          </p>
+        </div>
+      ) )}
+
       {progress && (
         <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>
           {t('agents.bulk_progress', { done: String(progress.done), total: String(progress.total) }) ?? `Применено: ${progress.done} из ${progress.total}…`}
@@ -2684,7 +2728,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
         </Button>
         <Button
           onClick={() => void apply()}
-          disabled={(!applyModel && !applySandbox && !applySecrets && !applyMcp) || (!!progress && progress.done < progress.total)}
+          disabled={(!applyModel && !applySandbox && !applySecrets && !applyMcp && !applyParams) || (!!progress && progress.done < progress.total)}
         >
           {progress && progress.done < progress.total
             ? (t('agents.bulk_applying') ?? 'Применяю…')

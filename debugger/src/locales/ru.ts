@@ -1010,6 +1010,8 @@ export const ru: Record<string, string> = {
     'agents.bulk_pick_sandbox': 'Профиль…',
     'agents.bulk_secrets': 'Доступ к секретам (заменить набор)',
     'agents.bulk_mcp': 'MCP-серверы: добавить/убрать',
+    'agents.bulk_params': 'Параметры генерации: температура, лимит токенов и ходов',
+    'agents.bulk_params_hint': 'Значения применяются всем выбранным агентам как есть (текущие значения агентов не учитываются).',
     'agents.bulk_mcp_hint': '+ добавит сервер всем, − уберёт у всех, без пометки — не тронет.',
     'agents.bulk_secrets_add': 'Секреты: добавить выбранные всем',
     'agents.bulk_present': 'уже у агента',

@@ -1010,6 +1010,8 @@ export const en: Record<string, string> = {
     'agents.bulk_pick_sandbox': 'Profile…',
     'agents.bulk_secrets': 'Secret access (replace the set)',
     'agents.bulk_mcp': 'MCP servers: add/remove',
+    'agents.bulk_params': 'Generation params: temperature, token and turn limits',
+    'agents.bulk_params_hint': 'Values apply to every selected agent as-is (per-agent current values are not considered).',
     'agents.bulk_mcp_hint': '+ adds the server to everyone, − removes it from everyone, unmarked — untouched.',
     'agents.bulk_secrets_add': 'Secrets: add the selected to everyone',
     'agents.bulk_present': 'already on the agent',
