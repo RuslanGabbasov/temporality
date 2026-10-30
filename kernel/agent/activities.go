@@ -1108,12 +1108,20 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		// into the container environment and never enter the model context.
 		// The same values arm the behavior guard: after the command, the
 		// output is scanned for leaked values (docs/agent-behavior-monitoring.md).
-		secretEnv, deniedSecrets, sErr, scanSecrets, skippedSecrets := a.sandboxSecretEnv(ctx, request)
+		secretEnv, deniedSecrets, sErr, scanSecrets, skippedSecrets, disabledSecrets := a.sandboxSecretEnv(ctx, request)
 		if sErr != nil {
 			return ToolResult{}, sErr
 		}
 		if len(deniedSecrets) > 0 {
 			return ToolResult{Content: fmt.Sprintf("error: secrets not available for this agent: %s", strings.Join(deniedSecrets, ", "))}, nil
+		}
+		disabledNotice := ""
+		if len(disabledSecrets) > 0 {
+			// An operator switched these off: the run continues WITHOUT them —
+			// the model is told which entries are missing so it can adapt, and
+			// the journal carries the denial. One switched-off secret must not
+			// kill every run that references it.
+			disabledNotice = fmt.Sprintf("note: secret(s) %s are disabled by an operator — the command runs without them; if the command needs these credentials it may fail, report that honestly instead of guessing.", strings.Join(disabledSecrets, ", "))
 		}
 		if len(skippedSecrets) > 0 {
 			// A broken name must not kill the run: colliding secrets are simply
@@ -1162,7 +1170,11 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if len(scanSecrets) > 0 {
 			a.guardScan(ctx, request, scanSecretValues(result.Output, scanSecrets), nil)
 		}
-		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil
+		content := fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output)
+		if disabledNotice != "" {
+			content = disabledNotice + "\n" + content
+		}
+		return ToolResult{Content: content, ExitCode: &exitCode}, nil
 	case "read_file":
 		return a.handleReadFile(request)
 	case "write_file":

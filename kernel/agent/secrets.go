@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -56,6 +57,14 @@ func (b *SecretBroker) ttl() time.Duration {
 // secret the caller is not granted (missing, org-invisible or provider
 // failure): the caller reports it as a denial, never as a hard error, so the
 // model sees an actionable message instead of a crashed tool call.
+// errDisabledSecret marks an operator-DISABLED secret (the deliberate
+// «run without it» switch): distinct from a grant denial (404/403 = not
+// granted / not visible), because the two must behave differently — a
+// disabled secret skips injection with a visible note and the run continues,
+// while a grant problem stops the tool call (the agent is asking for
+// something that was never granted to it).
+var errDisabledSecret = fmt.Errorf("secret is disabled by an operator")
+
 func (b *SecretBroker) Resolve(ctx context.Context, name string) (value string, denied bool, err error) {
 	if b == nil || b.HTTP == nil || b.WorkspaceURL == "" {
 		return "", true, fmt.Errorf("secret broker is not configured")
@@ -78,6 +87,11 @@ func (b *SecretBroker) Resolve(ctx context.Context, name string) (value string, 
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusConflict {
+		// The workspace's disabled-secret answer (deliberate switch): the
+		// typed signal — not a denial, not a transport failure.
+		return "", false, errDisabledSecret
+	}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
 		return "", true, nil
 	}
@@ -179,13 +193,17 @@ func SecretEnvVarName(name string) string {
 // granted secret ("a-b" and "a_b" both map to SECRET_A_B): the first name
 // wins deterministically, the rest are left out of the environment — a soft,
 // model-visible condition instead of a run-killing docker error.
-func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) (env []string, denied []string, err error, secretsForScan []behaviorSecret, skipped []string) {
+// disabled reports operator-switched-off secrets: they skip injection with a
+// visible note and the run continues — a deliberate switch must not kill
+// every run that references the secret (the old behavior).
+func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) (env []string, denied []string, err error, secretsForScan []behaviorSecret, skipped []string, disabled []string) {
 	if len(request.Secrets) == 0 || a.Secrets == nil {
-		return nil, nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil
 	}
 	env = make([]string, 0, len(request.Secrets))
 	denied = make([]string, 0)
 	skipped = make([]string, 0)
+	disabled = make([]string, 0)
 	resolved := make([]string, 0, len(request.Secrets))
 	usedKeys := make(map[string]string, len(request.Secrets))
 	for _, name := range request.Secrets {
@@ -195,7 +213,14 @@ func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) 
 		}
 		value, deniedFlag, err := a.Secrets.Resolve(ctx, name)
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolve secret %q: %w", name, err), nil, nil
+			if errors.Is(err, errDisabledSecret) {
+				// An operator switched the secret off: the run continues without
+				// the entry, the model is told, the denial is journaled. Not a
+				// grant problem — never worth killing the call over.
+				disabled = append(disabled, name)
+				continue
+			}
+			return nil, nil, fmt.Errorf("resolve secret %q: %w", name, err), nil, nil, nil
 		}
 		if deniedFlag {
 			denied = append(denied, name)
@@ -211,8 +236,8 @@ func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) 
 		resolved = append(resolved, name)
 		secretsForScan = append(secretsForScan, newBehaviorSecret(name, value, a.Secrets.Canary(name)))
 	}
-	a.emitSecretIssued(ctx, request, resolved, denied)
-	return env, denied, nil, secretsForScan, skipped
+	a.emitSecretIssued(ctx, request, resolved, append(denied, disabled...))
+	return env, denied, nil, secretsForScan, skipped, disabled
 }
 
 // resolveRunSecrets resolves granted secrets for scanning only — no env, no

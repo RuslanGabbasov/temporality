@@ -119,7 +119,7 @@ func TestSandboxSecretEnvSkipsCollidingNames(t *testing.T) {
 		RunID: "run-collide", OperationID: "run-collide/turn/01/call_1", Project: "demo",
 		Secrets: []string{"azure-devops", "azure devops", "plain"},
 	}
-	env, denied, err, scan, skipped := activities.sandboxSecretEnv(context.Background(), request)
+	env, denied, err, scan, skipped, _ := activities.sandboxSecretEnv(context.Background(), request)
 	if err != nil {
 		t.Fatalf("sandboxSecretEnv: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestSandboxSecretEnvEmitsIssuedOncePerRun(t *testing.T) {
 		RunID: "run-secret", OperationID: "run-secret/turn/01/call_1", Project: "demo",
 		Secrets: []string{"github-token", "missing-secret"},
 	}
-	env, denied, err, _, _ := activities.sandboxSecretEnv(context.Background(), request)
+	env, denied, err, _, _, _ := activities.sandboxSecretEnv(context.Background(), request) // disabled not exercised here
 	if err != nil {
 		t.Fatalf("sandboxSecretEnv: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestSandboxSecretEnvEmitsIssuedOncePerRun(t *testing.T) {
 	// A second command in the same run re-injects the value at its own
 	// execution boundary but must not journal another issuance.
 	request.OperationID = "run-secret/turn/02/call_2"
-	env2, denied2, err, _, _ := activities.sandboxSecretEnv(context.Background(), request)
+	env2, denied2, err, _, _, _ := activities.sandboxSecretEnv(context.Background(), request)
 	if err != nil {
 		t.Fatalf("second sandboxSecretEnv: %v", err)
 	}
@@ -218,5 +218,64 @@ func TestHandleSecretListShowsGrantedNamesOnly(t *testing.T) {
 	}
 	if strings.Contains(result.Content, "SECRET_GITHUB_TOKEN=") {
 		t.Fatal("secret_list must never contain values")
+	}
+}
+
+// An operator-DISABLED secret (the workspace answers 409) skips injection
+// with a visible notice — the run continues; the other secrets still inject.
+func TestSandboxSecretEnvDisabledContinues(t *testing.T) {
+	var calls int32
+	// github-token resolves; the disabled one answers 409.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		if !strings.HasSuffix(r.URL.Path, "/resolve") || r.Header.Get("Authorization") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if strings.Contains(r.URL.Path, "off-secret") {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"secret \"off-secret\" is disabled; enable it in Settings → Secrets"}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "github-token", "value": "ghp_value"})
+	}))
+	t.Cleanup(server.Close)
+	outbox := &secretOutbox{}
+	activities := &Activities{
+		HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal",
+		Events: outbox, SourceID: "kernel", Secrets: &SecretBroker{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"},
+	}
+	request := ToolRequest{
+		RunID: "run-disabled", OperationID: "run-disabled/turn/01/call_1", Project: "demo",
+		Secrets: []string{"github-token", "off-secret"},
+	}
+	env, denied, err, scan, skipped, disabled := activities.sandboxSecretEnv(context.Background(), request)
+	if err != nil {
+		t.Fatalf("a disabled secret must not error the resolution: %v", err)
+	}
+	if len(denied) != 0 {
+		t.Fatalf("denied = %v, want none (disabled is not a denial)", denied)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("skipped = %v, want none", skipped)
+	}
+	if len(disabled) != 1 || disabled[0] != "off-secret" {
+		t.Fatalf("disabled = %v, want [off-secret]", disabled)
+	}
+	if len(env) != 1 || env[0] != "SECRET_GITHUB_TOKEN=ghp_value" {
+		t.Fatalf("env = %v, want the healthy secret only", env)
+	}
+	if len(scan) != 1 {
+		t.Fatalf("scan = %d, want 1 (only the injected value)", len(scan))
+	}
+	// The denial rides the journal either way (audit of what was skipped).
+	denials := 0
+	for _, event := range outbox.events {
+		if event.Type == "secret.denied" {
+			denials++
+		}
+	}
+	if denials == 0 {
+		t.Fatal("the disabled secret must be journaled as secret.denied for the audit")
 	}
 }

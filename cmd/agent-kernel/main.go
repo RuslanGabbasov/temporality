@@ -6013,9 +6013,14 @@ func main() {
 			return
 		}
 		// The uniform switch (the trigger pattern): a disabled secret stops
-		// resolving — the run degrades without it, the stored value stays.
+		// resolving — but a DISABLED secret is an operator's deliberate act
+		// («run without it»), not a grant denial: the kernel gets a distinct
+		// 409 and keeps the run alive without this entry instead of failing
+		// the whole tool call (one switched-off secret used to kill every run
+		// that referenced it). Not-found stays 404 = the name does not exist,
+		// which the kernel treats as a grant problem.
 		if !secret.Enabled {
-			writeError(w, 404, fmt.Errorf("secret %q is disabled; enable it in Settings → Secrets", secret.Name))
+			writeError(w, http.StatusConflict, fmt.Errorf("secret %q is disabled; enable it in Settings → Secrets", secret.Name))
 			return
 		}
 		var value string
