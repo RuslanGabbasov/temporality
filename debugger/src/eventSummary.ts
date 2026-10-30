@@ -254,9 +254,12 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       // call (activity_retry), the stream died mid-flight and the blocking
       // API salvaged the turn (stream_fallback), or the first-token watchdog
       // caught a queueing provider and failed the attempt so the Temporal
-      // retry opens a fresh connection (stream_timeout). Without it a hanging
-      // provider looks like a silent multi-minute gap inside one
-      // model.started…completed.
+      // retry opens a fresh connection (stream_timeout). reason=routed is the
+      // routing decision, not a retry: it names the serving provider.
+      if (d.reason === 'routed') {
+        const route = String(d.route ?? '')
+        return { icon: '🛒', label: t('runs.event.model_route'), detail: route, color: 'var(--tm-teal)' }
+      }
       const reasonKey = d.reason === 'stream_fallback'
         ? 'runs.event.model_attempt_fallback'
         : d.reason === 'stream_timeout'

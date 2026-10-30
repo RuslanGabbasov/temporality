@@ -198,6 +198,14 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
 		case 'model.attempt': {
 			// Silent-recovery markers: without a line the user sees the chat freeze
 			// for minutes while the kernel quietly retries a stalled provider.
+			// The routing marker (reason=routed) is NOT a retry: it just names the
+			// provider that served the call — show it as one quiet line, and skip
+			// the line entirely for the default routing (no news is no noise).
+			if (d.reason === 'routed') {
+				const route = String(d.route ?? '')
+				if (!route || route === 'default') return ''
+				return prefix + t('chat.stream.model_route', { route })
+			}
 			const attempt = String(d.attempt ?? '?')
 			if (d.reason === 'stream_timeout') return t('chat.stream.model_attempt_timeout', { attempt })
 			if (d.reason === 'stream_fallback') return t('chat.stream.model_attempt_fallback', { attempt })
