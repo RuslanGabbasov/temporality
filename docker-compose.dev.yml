@@ -8,6 +8,13 @@
 # healthchecks) comes from the base file. A plain `docker compose up` on a
 # repository checkout stays pull-only by design: it can never silently
 # downgrade a pinned TEMPORALITY_VERSION to a locally compiled image.
+#
+# Building next to a live stack is the memory spike that killed a 32 GiB
+# host once (2026-10-30): go build spawns one compiler process per core and
+# vite holds the whole module graph in one heap. The images accept caps:
+#   docker build --build-arg GOFLAGS="-p=2" --target agent-kernel .
+#   docker build --build-arg NPM_MAX_OLD_SPACE=2048 debugger
+# The deployment path needs none of this — pull the published images.
 services:
   journal:
     build:

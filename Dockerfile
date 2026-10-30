@@ -9,6 +9,12 @@ ARG BUILD_VERSION="dev"
 # QEMU emulation of a Go build would take 10x longer for the same output.
 ARG TARGETARCH
 ENV GOARCH=$TARGETARCH
+# Build memory lever for shared machines (building on the live stand): go
+# build spawns one compiler process per -p job, each holding hundreds of MB.
+# Default = all cores (fast CI); on a busy host pass
+# --build-arg GOFLAGS="-p=2" to halve the footprint.
+ARG GOFLAGS=""
+ENV GOFLAGS=${GOFLAGS}
 WORKDIR /src
 COPY go.mod go.sum ./
 # Cache mounts (BuildKit) keep downloaded modules and compiled package
