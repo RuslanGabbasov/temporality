@@ -167,6 +167,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [agents, setAgents] = useState<Agent[]>([])
+  // Bulk configuration: checkbox mode over the agent list, then one dialog —
+  // provider+model, sandbox profile, secrets — applied to every selected
+  // agent (per-agent GET+PUT, so each agent keeps its own version history).
+  const [bulkMode, setBulkMode] = useState(false)
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set())
+  const [bulkOpen, setBulkOpen] = useState(false)
   // The edit dialog's copy of the uniform switch: the config PUT never
   // carries enabled, so a changed toggle lands through the /enabled endpoint
   // right after the save.
@@ -630,6 +636,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // Client-side filter over the visible set (name/id).
   const [filter, setFilter] = useState('')
   const filteredAgents = visibleAgents.filter((a) => matchesFilter(filter, a.name, a.id, a.description))
+  const toggleBulk = useCallback((id: string) => {
+    setBulkSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   // Skills and MCP servers come from the global registry. Ids bound earlier
   // that no longer exist stay listed with a marker so they can be reviewed
@@ -1056,6 +1070,22 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   return (
     <div style={{ padding: '1rem' }}>
       {confirmDialogNode}
+      {bulkOpen && (
+        <BulkAgentDialog
+          agentIds={[...bulkSelected]}
+          providers={providers}
+          sandboxProfiles={sandboxProfiles}
+          secrets={secretsList.filter((s) => s.enabled !== false)}
+          onClose={() => setBulkOpen(false)}
+          onApplied={() => {
+            setBulkOpen(false)
+            setBulkMode(false)
+            setBulkSelected(new Set())
+            void load()
+          }}
+          t={t}
+        />
+      )}
       {transferReport && (
         <AppModal onClose={() => setTransferReport(null)} panelStyle={{ width: '560px' }}>
           <Heading style={{ fontSize: '1.05rem', marginBottom: '0.75rem' }}>{t('skills.transfer_report_title') ?? 'Transfer report'}</Heading>
@@ -1112,19 +1142,39 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
                 <Heading style={{ fontSize: '1rem' }}>{t('agents.count', { count: String(filteredAgents.length) }) ?? `Agents (${filteredAgents.length})`}</Heading>
+                <button
+                  type="button"
+                  onClick={() => { setBulkMode(!bulkMode); setBulkSelected(new Set()) }}
+                  style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: bulkMode ? 'var(--tm-amber)' : 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+                  title={t('agents.bulk_hint') ?? 'Select agents and apply provider/model, sandbox or secrets to all of them at once'}
+                >{t('agents.bulk_mode') ?? 'Массовая настройка'}</button>
               </div>
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_agents') ?? 'Filter agents…'} />
             </div>
             <Stack gap={1}>
               {filteredAgents.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('agents.none_created') ?? 'No agents yet'}</Tile>}
+              {bulkMode && bulkSelected.size > 0 && (
+                <Button size="sm" style={{ marginTop: '0.5rem' }} onClick={() => setBulkOpen(true)}>
+                  {t('agents.bulk_configure', { count: String(bulkSelected.size) }) ?? `Настроить выбранные (${bulkSelected.size})`}
+                </Button>
+              )}
               {filteredAgents.map((a) => (
                 <Tile
                   key={a.id}
-                  onClick={() => setSelectedId(a.id)}
-                  className={`workspace-tile ${selectedId === a.id ? 'selected' : ''}`}
-                  style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', opacity: a.enabled === false ? 0.5 : 1 }}
+                  onClick={() => (bulkMode ? toggleBulk(a.id) : setSelectedId(a.id))}
+                  className={`workspace-tile ${selectedId === a.id ? 'selected' : ''} ${bulkMode && bulkSelected.has(a.id) ? 'bulk-selected' : ''}`}
+                  style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', opacity: a.enabled === false ? 0.5 : 1, borderLeft: bulkMode && bulkSelected.has(a.id) ? '3px solid var(--tm-amber)' : undefined }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    {bulkMode && (
+                      <input
+                        type="checkbox"
+                        readOnly
+                        checked={bulkSelected.has(a.id)}
+                        onClick={(e) => { e.stopPropagation(); toggleBulk(a.id) }}
+                        style={{ cursor: 'pointer', accentColor: 'var(--tm-amber)' }}
+                      />
+                    )}
                     <span style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{a.name}</span>
                     {(pendingProposals[a.id] ?? 0) > 0 && (
                       <span title={t('agents.pending_proposals_hint', { count: String(pendingProposals[a.id]) })}>
@@ -2419,3 +2469,144 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       </div>
     )
   }
+
+/** Bulk configuration dialog: apply one provider+model, sandbox profile
+ *  and/or secrets set to MANY agents at once — «переключить всех с Xiaomi
+ *  на z.ai» в два клика вместо шести обходов карточек. Only the checked
+ *  sections are applied; every selected agent is read (GET) and written
+ *  (PUT) whole, so skills/prompts/versions stay untouched and each agent
+ *  keeps its own version history. */
+function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClose, onApplied, t }: {
+  agentIds: string[]
+  providers: Provider[]
+  sandboxProfiles: SandboxProfile[]
+  secrets: Secret[]
+  onClose: () => void
+  onApplied: () => void
+  t: (key: string, vars?: Record<string, string>) => string
+}) {
+  const [applyModel, setApplyModel] = useState(false)
+  const [providerId, setProviderId] = useState('')
+  const [model, setModel] = useState('')
+  const [applySandbox, setApplySandbox] = useState(false)
+  const [sandboxProfile, setSandboxProfile] = useState('')
+  const [applySecrets, setApplySecrets] = useState(false)
+  const [secretSet, setSecretSet] = useState<string[]>([])
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [failures, setFailures] = useState<string[]>([])
+  const [done, setDone] = useState(0)
+
+  const providerModels = providers.find((p) => p.id === providerId)?.models ?? []
+
+  const apply = async () => {
+    setProgress({ done: 0, total: agentIds.length })
+    const failed: string[] = []
+    let ok = 0
+    for (const id of agentIds) {
+      try {
+        const full = await workspaceApi.getAgent(id)
+        const patch: Partial<Agent> = { ...full }
+        if (applyModel) { patch.provider = providerId; patch.model = model }
+        if (applySandbox) patch.sandbox_profile = sandboxProfile
+        if (applySecrets) patch.secrets = secretSet
+        await workspaceApi.updateAgent(id, patch)
+        ok++
+      } catch {
+        failed.push(id)
+      }
+      setProgress((p) => (p ? { ...p, done: p.done + 1 } : p))
+    }
+    setDone(ok)
+    setFailures(failed)
+    onApplied()
+  }
+
+  const section = (checked: boolean, onCheck: () => void, label: string, content: React.ReactNode) => (
+    <div style={{ padding: '0.6rem 0', borderTop: '1px solid var(--tm-border)' }}>
+      <label style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}>
+        <input type="checkbox" checked={checked} onChange={onCheck} style={{ accentColor: 'var(--tm-amber)' }} />
+        {label}
+      </label>
+      {checked && <div style={{ marginTop: '0.45rem' }}>{content}</div>}
+    </div>
+  )
+
+  const selectStyle = { width: '100%' } as const
+
+  return (
+    <AppModal onClose={onClose} panelStyle={{ width: '560px', maxHeight: '85vh', overflowY: 'auto' }}>
+      <Heading>{t('agents.bulk_title', { count: String(agentIds.length) }) ?? `Массовая настройка: ${agentIds.length} агентов`}</Heading>
+      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.35rem 0 0.75rem' }}>
+        {t('agents.bulk_hint_dialog') ?? 'Применяется только отмеченное. Прочие настройки агентов (промпты, навыки, права) не трогаются.'}
+      </p>
+
+      {section(applyModel, () => setApplyModel(!applyModel), t('agents.bulk_model') ?? 'Провайдер и модель', (
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          <select value={providerId} onChange={(e) => { setProviderId(e.target.value); setModel('') }} style={{ ...selectStyle, flex: 1 }}>
+            <option value="">{t('agents.bulk_pick_provider') ?? 'Провайдер…'}</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select value={model} onChange={(e) => setModel(e.target.value)} disabled={!providerId} style={{ ...selectStyle, flex: 1 }}>
+            <option value="">{t('agents.bulk_pick_model') ?? 'Модель…'}</option>
+            {providerModels.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+      ))}
+
+      {section(applySandbox, () => setApplySandbox(!applySandbox), t('agents.bulk_sandbox') ?? 'Профиль песочницы', (
+        <select value={sandboxProfile} onChange={(e) => setSandboxProfile(e.target.value)} style={selectStyle}>
+          <option value="">{t('agents.bulk_pick_sandbox') ?? 'Профиль…'}</option>
+          {sandboxProfiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      ))}
+
+      {section(applySecrets, () => setApplySecrets(!applySecrets), t('agents.bulk_secrets') ?? 'Доступ к секретам (заменить набор)', (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+          {secrets.map((s) => {
+            const on = secretSet.includes(s.name)
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSecretSet(on ? secretSet.filter((x) => x !== s.name) : [...secretSet, s.name])}
+                style={{ background: on ? 'var(--tm-amber)' : 'transparent', border: `1px solid ${on ? 'var(--tm-amber)' : 'var(--tm-border)'}`, borderRadius: 999, color: on ? '#17211e' : 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}
+              >
+                {s.name}
+              </button>
+            )
+          })}
+        </div>
+      ))}
+
+      {progress && (
+        <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>
+          {t('agents.bulk_progress', { done: String(progress.done), total: String(progress.total) }) ?? `Применено: ${progress.done} из ${progress.total}…`}
+        </p>
+      )}
+      {failures.length > 0 && (
+        <p style={{ fontSize: '0.78rem', color: 'var(--tm-danger)' }}>
+          {t('agents.bulk_failures', { count: String(failures.length) }) ?? `Не удалось применить к ${failures.length}`} — {failures.join(', ')}
+        </p>
+      )}
+      {done > 0 && failures.length === 0 && (
+        <p style={{ fontSize: '0.8rem', color: 'var(--tm-success, #5e887a)' }}>
+          {t('agents.bulk_done', { count: String(done) }) ?? `Готово: применено к ${done} агентам.`}
+        </p>
+      )}
+
+      <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
+        <Button kind="secondary" onClick={onClose} disabled={!!progress && progress.done < progress.total}>
+          {done > 0 ? (t('action.close') ?? 'Close') : (t('action.cancel') ?? 'Cancel')}
+        </Button>
+        <Button
+          onClick={() => void apply()}
+          disabled={(!applyModel && !applySandbox && !applySecrets) || (!!progress && progress.done < progress.total)}
+        >
+          {progress && progress.done < progress.total
+            ? (t('agents.bulk_applying') ?? 'Применяю…')
+            : t('agents.bulk_apply', { count: String(agentIds.length) }) ?? `Применить к ${agentIds.length}`}
+        </Button>
+      </div>
+    </AppModal>
+  )
+}
