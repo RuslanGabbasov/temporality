@@ -133,6 +133,10 @@ func (s *Store) PublishOne(ctx context.Context) (bool, error) {
 // so the remaining chunks may still succeed and publishing continues.
 var errEventRejected = errors.New("event ingest rejected")
 
+// quarantineAfterAttempts: an event rejected this many times by the journal
+// itself (not transport!) is quarantined instead of blocking the queue.
+const quarantineAfterAttempts = 10
+
 func (s *Store) publishBatch(ctx context.Context, limit int) (int, error) {
 	claimed, err := s.claimEvents(ctx, limit)
 	if err != nil || len(claimed) == 0 {
@@ -197,13 +201,34 @@ func (s *Store) deliverChunk(ctx context.Context, chunk []claimedEvent) (int, er
 	for _, failed := range failedEvents {
 		s.noteFailure(ctx, failed.Event.SourceID, failed.Event.EventID, failed.Reason)
 	}
-	if len(failedEvents) > 0 {
+	// Poison isolation: a permanently rejected event (validation, duplicate id
+	// shape, …) must NOT hold the queue hostage. The journal answered, so the
+	// transport is fine — mark the rejects delivered-side dead (quarantine
+	// after N attempts) and keep delivering the rest. Without this, one bad
+	// event shape froze the whole outbox for two days: 19k events queued
+	// behind a single poisoned row while runs, traces and the chat starved.
+	for _, failed := range failedEvents {
+		s.quarantineIfHopeless(ctx, failed.Event.SourceID, failed.Event.EventID)
+	}
+	if len(failedEvents) > 0 && len(deliveredEvents) == 0 {
 		return 0, fmt.Errorf("%w: %s", errEventRejected, failedEvents[0].Reason)
 	}
 	if err := s.markDeliveredBatch(ctx, deliveredEvents); err != nil {
 		return 0, err
 	}
 	return len(deliveredEvents), nil
+}
+
+// quarantineIfHopeless buries an event that failed delivery enough times:
+// it is marked delivered with a quarantine flag instead of blocking the
+// queue forever. The row keeps its last_error for the post-mortem; the
+// event itself is lost by design — a poison event must cost itself, not
+// the whole pipeline.
+func (s *Store) quarantineIfHopeless(ctx context.Context, sourceID, eventID string) {
+	_, _ = s.pool.Exec(ctx, `UPDATE kernel_event_outbox
+		SET delivered_at = clock_timestamp(), last_error = last_error || ' [quarantined: permanently rejected]'
+		WHERE source_id = $1 AND event_id = $2 AND attempts >= $3`,
+		sourceID, eventID, quarantineAfterAttempts)
 }
 
 // failChunk applies the single-event failure semantics to every event of a
