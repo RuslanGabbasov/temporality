@@ -29,6 +29,13 @@ import { randomUUID } from './uuid'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
+/** The runs-tab trace view of one chat run — the «Трейс» link next to Stop.
+ *  Same URL contract AgentRuns' initializers read (project/run/view), so the
+ *  page opens straight on the trace tab. */
+export function runTraceUrl(project: string, runId: string): string {
+  return `/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(runId)}&view=trace`
+}
+
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -1684,6 +1691,18 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                               style={{ background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px', color: 'var(--tm-danger)', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem', marginLeft: 'auto' }}
                               title={t('chat.cancel_run') ?? 'Cancel this run'}
                             >{t('chat.stop') ?? 'Stop'}</button>
+                          )}
+                          {msg.runId && (
+                            /* New tab on purpose: the run is still streaming
+                               here — the chat keeps its live view while the
+                               trace opens next to it. */
+                            <a
+                              href={runTraceUrl(project, msg.runId)}
+                              target="_blank"
+                              rel="noopener"
+                              style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', textDecoration: 'none', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}
+                              title={t('chat.trace_title') ?? 'Open the run trace'}
+                            >{t('chat.trace') ?? 'Trace'}</a>
                           )}
                         </div>
                       </div>

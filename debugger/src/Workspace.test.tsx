@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sendFileChip, formatStreamEvent, normalizeRunStatus } from './Workspace'
+import { sendFileChip, formatStreamEvent, normalizeRunStatus, runTraceUrl } from './Workspace'
 import { pluralT } from './i18n'
 import { en } from './locales/en'
 import { ru } from './locales/ru'
@@ -17,6 +17,20 @@ function translator(messages: Record<string, string>) {
 
 const enT = translator(en)
 const ruT = translator(ru)
+
+describe('runTraceUrl', () => {
+  it('points at the run\'s trace view; project and run id are URL-encoded', () => {
+    expect(runTraceUrl('omni', 'abc-123')).toBe('/agents?project=omni&run=abc-123&view=trace')
+    expect(runTraceUrl('a b', 'x/y')).toBe('/agents?project=a%20b&run=x%2Fy&view=trace')
+  })
+
+  it('the chat trace link is localized in both bundles', () => {
+    expect(en['chat.trace']).toBeDefined()
+    expect(ru['chat.trace']).toBeDefined()
+    expect(en['chat.trace_title']).toBeDefined()
+    expect(ru['chat.trace_title']).toBeDefined()
+  })
+})
 
 describe('pluralT', () => {
   it('picks Russian one/few/many forms', () => {

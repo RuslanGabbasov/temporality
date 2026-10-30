@@ -441,6 +441,8 @@ export const en: Record<string, string> = {
     'chat.send': 'Send',
     'chat.sending': 'Sending…',
     'chat.stop': 'Stop',
+    'chat.trace': 'Trace',
+    'chat.trace_title': 'Open the run trace (new tab)',
     'chat.branch': 'Branch',
     'chat.streaming': 'streaming…',
     'chat.scroll_bottom': 'Scroll to bottom',

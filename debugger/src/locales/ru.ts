@@ -440,6 +440,8 @@ export const ru: Record<string, string> = {
     'chat.send': 'Отправить',
     'chat.sending': 'Отправка…',
     'chat.stop': 'Стоп',
+    'chat.trace': 'Трейс',
+    'chat.trace_title': 'Открыть трейс рана (в новой вкладке)',
     'chat.branch': 'Ветка',
     'chat.streaming': 'загрузка…',
     'chat.scroll_bottom': 'Прокрутить вниз',
