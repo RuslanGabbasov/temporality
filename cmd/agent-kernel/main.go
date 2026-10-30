@@ -6063,6 +6063,22 @@ func main() {
 			Query: strings.TrimSpace(r.URL.Query().Get("q")),
 			Provider: r.URL.Query().Get("provider"),
 		}
+		// Creator filter: «my artifacts» and per-author views (case-insensitive
+		// match against origin_user).
+		if raw := strings.TrimSpace(r.URL.Query().Get("author")); raw != "" {
+			filter.Author = raw
+		}
+		// CreatedAt window: the new / this-week / this-month presets.
+		if raw := strings.TrimSpace(r.URL.Query().Get("created_after")); raw != "" {
+			if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+				filter.CreatedAfter = &parsed
+			}
+		}
+		if raw := strings.TrimSpace(r.URL.Query().Get("created_before")); raw != "" {
+			if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+				filter.CreatedBefore = &parsed
+			}
+		}
 		if raw := strings.TrimSpace(r.URL.Query().Get("org_unit")); raw != "" {
 			// Explicit org narrowing is admin territory: non-admins keep their
 			// visibility chain (visibleUnits below).
@@ -6095,6 +6111,29 @@ func main() {
 		writeJSON(w, 200, map[string]any{"artifacts": list, "count": len(list)})
 	})
 
+	// My approvals inbox: open review rounds addressed to the caller (their
+	// profile satisfies a reviewer entry) or requested by them. One endpoint
+	// for the «требуют моего согласования» tab — no more hunting through the
+	// whole catalog for rounds addressed to you.
+	mux.HandleFunc("GET /v1/workspace/artifacts/inbox", func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := controlplane.FromContext(r.Context())
+		if !ok || principal.Subject == "" {
+			writeError(w, 401, errors.New("authentication required"))
+			return
+		}
+		users, err := ws.ListUsers(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		entries, err := ws.ListArtifactReviewInbox(r.Context(), principal.Subject, users, visibleUnits(r))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"entries": entries, "count": len(entries)})
+	})
+
 	// Distinct catalog tags for the filter dropdown (most-used first).
 	mux.HandleFunc("GET /v1/workspace/artifacts/tags", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -6106,6 +6145,32 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"tags": tags})
+	})
+	// The tag editor: replace the artifact's tag set. Operators only — tags
+	// drive the catalog filters, so a viewer re-tagging everything would
+	// scramble other people's navigation.
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/tags", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var req struct {
+			Tags []string `json:"tags"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		artifact, err := ws.SetArtifactTags(r.Context(), r.PathValue("artifactID"), req.Tags)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactTagged, "artifact", artifact.ID, map[string]any{"tags": artifact.Tags})
+		writeJSON(w, 200, map[string]any{"artifact": artifact})
 	})
 	mux.HandleFunc("POST /v1/workspace/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {

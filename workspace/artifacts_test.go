@@ -84,16 +84,20 @@ func TestValidateArtifactReviewers(t *testing.T) {
 // any member, and an account without an active row satisfies nothing.
 func TestMatchArtifactReviewers(t *testing.T) {
 	users := []User{
-		{ID: "writer", Name: "Olga", Role: "writer", OrgUnitID: "core", Active: true},
+		{ID: "writer", Name: "Olga", Email: "olga@corp.ru", Role: "writer", OrgUnitID: "core", Active: true},
 		{ID: "admin", Name: "Ruslan", Role: "admin", OrgUnitID: "core", Active: true},
 		{ID: "ghost", Name: "Ghost", Role: "writer", Active: false},
 	}
-	entries := []string{"user:writer", "writer", "Olga", "org:core", "role:admin", "project_owner", "user:admin"}
+	entries := []string{"user:writer", "writer", "Olga", "org:core", "role:admin", "project_owner", "user:admin", "olga@corp.ru", "user:olga@corp.ru"}
 
 	matched := MatchArtifactReviewers("writer", users, entries)
 	require.Contains(t, matched, "user:writer")
 	require.Contains(t, matched, "writer")
 	require.Contains(t, matched, "Olga")
+	// The model freely writes the email as the identifier: both the bare
+	// address and the user:<email> form must satisfy the round.
+	require.Contains(t, matched, "olga@corp.ru")
+	require.Contains(t, matched, "user:olga@corp.ru")
 	require.Contains(t, matched, "org:core")
 	require.NotContains(t, matched, "role:admin")
 	require.NotContains(t, matched, "project_owner")

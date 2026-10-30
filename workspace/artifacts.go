@@ -220,13 +220,17 @@ type ArtifactFilter struct {
 	// visibility chain.
 	Provider  string
 	OrgUnitID string
-	// Query narrows by name: case-insensitive substring over title and
-	// description — the search box for registries of tens of thousands.
+	// Query narrows by name: case-insensitive substring over title,
+	// description and id — the search box for registries of tens of thousands.
 	Query string
 	// Tags is AND semantics: an artifact must carry every listed tag.
 	Tags []string
-	// Limit/Offset page the list; Limit <= 0 means unbounded (callers that
-	// render everything).
+	// Author narrows to one creator (origin_user, case-insensitive) — the
+	// «my artifacts» and per-author views.
+	Author string
+	// CreatedAt window: the new / this-week / this-month presets.
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
 	Limit  int
 	Offset int
 }
@@ -273,6 +277,22 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 		// carry meaning users search by, and titles alone don't cover them.
 		query += ` AND (title ILIKE $` + n + ` OR description ILIKE $` + n + ` OR id ILIKE $` + n + `)`
 	}
+	// Creator filter: origin_user is the human initiator on the human path
+	// (agent artifacts carry an empty origin_user and a run slug in origin_run
+	// — an agent filter needs a proper column, not a LIKE guess).
+	if f.Author != "" {
+		args = append(args, f.Author)
+		n := strconv.Itoa(len(args))
+		query += ` AND (origin_user ILIKE $` + n + `)`
+	}
+	if f.CreatedAfter != nil {
+		args = append(args, *f.CreatedAfter)
+		query += ` AND created_at >= $` + strconv.Itoa(len(args))
+	}
+	if f.CreatedBefore != nil {
+		args = append(args, *f.CreatedBefore)
+		query += ` AND created_at < $` + strconv.Itoa(len(args))
+	}
 	// AND semantics: every requested tag must be present (tags @> the set) —
 	// narrowing filters, the way knowledge bases drill down.
 	if len(f.Tags) > 0 {
@@ -294,6 +314,39 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 	}
 	defer rows.Close()
 	return scanArtifacts(rows)
+}
+
+// SetArtifactTags replaces an artifact's tag set (the tag editor): tags are
+// lowercased and deduped — the listing filter narrows by lowercase tags, so
+// a mixed-case tag would silently never match. The artifact body is not
+// touched; versions and review rounds keep their history.
+func (s *Store) SetArtifactTags(ctx context.Context, id string, tags []string) (Artifact, error) {
+	clean := make([]string, 0, len(tags))
+	seen := map[string]bool{}
+	for _, tag := range tags {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		clean = append(clean, tag)
+	}
+	sort.Strings(clean)
+	rows, err := s.pool.Query(ctx,
+		`UPDATE workspace_artifact SET tags = $2, updated_at = now() WHERE id = $1 RETURNING `+artifactColumns,
+		id, textArray(clean))
+	if err != nil {
+		return Artifact{}, err
+	}
+	defer rows.Close()
+	artifacts, err := scanArtifacts(rows)
+	if err != nil {
+		return Artifact{}, err
+	}
+	if len(artifacts) == 0 {
+		return Artifact{}, ErrNotFound
+	}
+	return artifacts[0], nil
 }
 
 // ListArtifactTags returns the distinct catalog tags visible to the org chain

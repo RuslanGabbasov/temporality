@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -401,7 +402,7 @@ func (s *Store) GetArtifactReview(ctx context.Context, reviewID string) (Artifac
 func MatchArtifactReviewers(principal string, users []User, entries []string) []string {
 	var self *User
 	for i := range users {
-		if strings.EqualFold(users[i].ID, principal) || strings.EqualFold(users[i].Name, principal) {
+		if strings.EqualFold(users[i].ID, principal) || strings.EqualFold(users[i].Name, principal) || strings.EqualFold(users[i].Email, principal) {
 			self = &users[i]
 			break
 		}
@@ -425,8 +426,12 @@ func MatchArtifactReviewers(principal string, users []User, entries []string) []
 				matched = append(matched, entry)
 			}
 		default:
+			// The model authors reviewer entries at submit time and freely uses
+			// the user's email as the identifier — match it too, or a correctly
+			// addressed reviewer cannot approve their own round (a bare email
+			// and user:<email> both count).
 			name := strings.TrimSpace(strings.TrimPrefix(entry, "user:"))
-			if name != "" && (strings.EqualFold(name, self.ID) || strings.EqualFold(name, self.Name)) {
+			if name != "" && (strings.EqualFold(name, self.ID) || strings.EqualFold(name, self.Name) || strings.EqualFold(name, self.Email)) {
 				matched = append(matched, entry)
 			}
 		}
@@ -469,6 +474,75 @@ type StaleArtifactReview struct {
 	Review        ArtifactReview
 	ArtifactTitle string
 	OrgUnitID     string
+}
+
+// ArtifactInboxEntry is one open review round addressed to the caller, with
+// the artifact the round is about — the «my approvals» inbox rows.
+type ArtifactInboxEntry struct {
+	Review        ArtifactReview `json:"review"`
+	ArtifactID    string         `json:"artifact_id"`
+	ArtifactTitle string         `json:"artifact_title"`
+	Kind          string         `json:"kind,omitempty"`
+	Status        string         `json:"status"`
+	Version       int            `json:"version"`
+	OriginType    string         `json:"origin_type,omitempty"`
+	OriginUser    string         `json:"origin_user,omitempty"`
+	OriginRun     string         `json:"origin_run,omitempty"`
+	Tags          []string       `json:"tags,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	// Matched reports WHICH of the round's reviewer entries this principal
+	// satisfies (their profile matched those entries) — the UI can show «you
+	// are reviewing as org:core» instead of guessing.
+	Matched []string `json:"matched"`
+}
+
+// ListArtifactReviewInbox returns the caller's open review rounds: rounds
+// where the principal satisfies at least one reviewer entry (id, name,
+// email, org unit, role) through the same MatchArtifactReviewers the approve
+// call enforces — what the inbox shows is exactly what the user can decide —
+// plus rounds the principal requested themselves. Org visibility applies to
+// the artifact row; newest first.
+func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, users []User, units []string) ([]ArtifactInboxEntry, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+artifactReviewColumns+`, a.id, a.title, a.kind, a.status, a.version,
+			COALESCE(a.origin_type, ''), COALESCE(a.origin_user, ''), a.origin_run, a.tags, a.created_at, a.updated_at, COALESCE(a.org_unit_id, '')
+		 FROM workspace_artifact_review r
+		 JOIN workspace_artifact a ON a.id = r.artifact_id
+		 WHERE r.status = 'open'
+		 ORDER BY r.requested_at DESC
+		 LIMIT 500`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []ArtifactInboxEntry{}
+	for rows.Next() {
+		var entry ArtifactInboxEntry
+		var orgUnit string
+		var tags []byte
+		review, err := scanArtifactReviewInto(rows, []any{&entry.ArtifactID, &entry.ArtifactTitle, &entry.Kind, &entry.Status, &entry.Version,
+			&entry.OriginType, &entry.OriginUser, &entry.OriginRun, &tags, &entry.CreatedAt, &entry.UpdatedAt, &orgUnit})
+		if err != nil {
+			return nil, err
+		}
+		entry.Review = review
+		entry.Matched = MatchArtifactReviewers(principal, users, review.Reviewers)
+		isRequester := review.RequestedBy != "" && review.RequestedBy != "kernel-internal" && strings.EqualFold(review.RequestedBy, principal)
+		if len(entry.Matched) == 0 && !isRequester {
+			continue
+		}
+		// Org visibility mirrors the artifact listing: an unassigned row is
+		// installation-wide, otherwise it must sit on the caller's unit path.
+		if units != nil && orgUnit != "" && !slices.Contains(units, orgUnit) {
+			continue
+		}
+		if len(tags) > 0 {
+			_ = json.Unmarshal(tags, &entry.Tags)
+		}
+		result = append(result, entry)
+	}
+	return result, rows.Err()
 }
 
 // ListOpenArtifactReviews returns every open review round with its artifact's

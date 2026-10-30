@@ -65,6 +65,7 @@ const (
 	AuditArtifactCreated         = "artifact.created"
 	AuditArtifactUpdated         = "artifact.updated"
 	AuditArtifactDeleted         = "artifact.deleted"
+	AuditArtifactTagged          = "artifact.tagged"
 	AuditArtifactProposed        = "artifact.proposed"
 	AuditArtifactSubmitted       = "artifact.submitted"
 	AuditArtifactReviewRequested = "artifact.review.requested"

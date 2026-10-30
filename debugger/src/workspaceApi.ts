@@ -831,6 +831,23 @@ export interface ArtifactReview {
   resolved_at?: string
 }
 
+/** One open review round addressed to the caller (the approvals inbox). */
+export interface ArtifactInboxEntry {
+  review: ArtifactReview
+  artifact_id: string
+  artifact_title: string
+  kind?: string
+  status: string
+  version: number
+  origin_type?: string
+  origin_user?: string
+  origin_run?: string
+  tags?: string[]
+  created_at: string
+  updated_at: string
+  matched: string[]
+}
+
 export interface MCPServer {
   id: string
   name: string
@@ -1590,7 +1607,7 @@ export const workspaceApi = {
 
   // Reference artifacts (docs/artifact-registry.md phase 2): bodies load on
   // demand; lifecycle filters (status/kind/saga) narrow the listing.
-  listArtifacts: (params?: { status?: string; kind?: string; saga_id?: string; q?: string; tag?: string; provider?: string; org?: string; limit?: number; offset?: number }) => {
+  listArtifacts: (params?: { status?: string; kind?: string; saga_id?: string; q?: string; tag?: string; provider?: string; org?: string; author?: string; created_after?: string; created_before?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams()
     if (params?.status) query.set('status', params.status)
     if (params?.kind) query.set('kind', params.kind)
@@ -1599,11 +1616,22 @@ export const workspaceApi = {
     if (params?.tag) query.set('tag', params.tag)
     if (params?.provider) query.set('provider', params.provider)
     if (params?.org) query.set('org_unit', params.org)
+    if (params?.author) query.set('author', params.author)
+    if (params?.created_after) query.set('created_after', params.created_after)
+    if (params?.created_before) query.set('created_before', params.created_before)
     if (params?.limit) query.set('limit', String(params.limit))
     if (params?.offset) query.set('offset', String(params.offset))
     const suffix = query.size > 0 ? `?${query.toString()}` : ''
     return request<{ artifacts: Artifact[]; count: number }>(`/v1/workspace/artifacts${suffix}`)
-  },  // Distinct catalog tags, most-used first — the filter dropdown's options.
+  },
+  // My approvals inbox: open review rounds addressed to me (or requested by
+  // me), each with the artifact the round is about and WHICH reviewer
+  // entries my profile satisfied.
+  artifactInbox: () =>
+    request<{ entries: ArtifactInboxEntry[]; count: number }>('/v1/workspace/artifacts/inbox'),
+  // The tag editor: replaces the artifact's tag set (operators only).
+  setArtifactTags: (id: string, tags: string[]) =>
+    request<{ artifact: Artifact }>(`/v1/workspace/artifacts/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags }) }),  // Distinct catalog tags, most-used first — the filter dropdown's options.
   artifactTags: () =>
     request<{ tags: Array<{ tag: string; count: number }> }>('/v1/workspace/artifacts/tags'),
   getArtifact: (id: string) =>

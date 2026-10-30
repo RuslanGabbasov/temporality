@@ -13,8 +13,10 @@ import {
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close } from '@carbon/icons-react'
-import { workspaceApi, type Artifact, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
+import { workspaceApi, type Artifact, type ArtifactInboxEntry, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
+import { whoami, canReconcile } from './kernelApi'
 import { useT } from './i18n'
+import { shortTime } from './eventSummary'
 import ListFilter from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -65,6 +67,30 @@ export default function Artifacts() {
   const [serverQuery, setServerQuery] = useState('')
   const [tagFilter, setTagFilter] = useState<string[]>([])
   const [tagOptions, setTagOptions] = useState<Array<{ tag: string; count: number }>>([])
+  // Creator and age filters: «my artifacts» and the new / this-week /
+  // this-month presets — a 10k registry is unnavigable without them.
+  const [authorFilter, setAuthorFilter] = useState('')
+  const [ageFilter, setAgeFilter] = useState<'' | 'week' | 'month' | 'quarter'>('')
+  // Approvals inbox: open review rounds addressed to the caller, one tab.
+  const [inboxMode, setInboxMode] = useState(false)
+  const [inbox, setInbox] = useState<ArtifactInboxEntry[] | null>(null)
+  const [inboxBusy, setInboxBusy] = useState(false)
+  // Tag editor state + the caller's role (tags drive shared filters, so only
+  // operators re-tag; viewers see the tags read-only).
+  const [tagDraft, setTagDraft] = useState('')
+  const [tagsBusy, setTagsBusy] = useState(false)
+  const [operator, setOperator] = useState(false)
+  useEffect(() => { void whoami().then((identity) => setOperator(canReconcile(identity.role))).catch(() => setOperator(false)) }, [])
+  const saveTags = async (artifact: Artifact, tags: string[]) => {
+    setTagsBusy(true)
+    try {
+      const page = await workspaceApi.setArtifactTags(artifact.id, tags)
+      setArtifacts((current) => current.map((a) => (a.id === artifact.id ? { ...page.artifact, content: a.content } : a)))
+      setTagDraft('')
+      void workspaceApi.artifactTags().then((data) => setTagOptions(data.tags ?? [])).catch(() => { /* dropdown refresh is best-effort */ })
+    } catch (f) { setError(message(f)) }
+    finally { setTagsBusy(false) }
+  }
   const [limit, setLimit] = useState(200)
   const [totalKnown, setTotalKnown] = useState<number | null>(null)
   const searchGen = useRef(0)
@@ -113,6 +139,11 @@ export default function Artifacts() {
     setLoading(true)
     try {
       const tag = tagFilter.length > 0 ? tagFilter.join(',') : undefined
+      const now = new Date()
+      const createdAfter = ageFilter === 'week' ? new Date(now.getTime() - 7 * 864e5)
+        : ageFilter === 'month' ? new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
+        : ageFilter === 'quarter' ? new Date(now.getFullYear(), now.getMonth() - 3, now.getDate())
+        : undefined
       const [list, refs] = await Promise.all([
         workspaceApi.listArtifacts({
           status: statusFilter || undefined,
@@ -120,6 +151,8 @@ export default function Artifacts() {
           org: orgFilter || undefined,
           q: serverQuery.trim() || undefined,
           tag,
+          author: authorFilter.trim() || undefined,
+          created_after: createdAfter?.toISOString(),
           limit,
         }),
         workspaceApi.artifactReferences().catch(() => ({ references: {} as Record<string, string[]> })),
@@ -130,9 +163,21 @@ export default function Artifacts() {
       setTotalKnown(list.count < limit ? (limit >= 200 ? list.count : null) : null)
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
-  }, [statusFilter, providerFilter, orgFilter, serverQuery, tagFilter, limit])
+  }, [statusFilter, providerFilter, orgFilter, serverQuery, tagFilter, authorFilter, ageFilter, limit])
 
   useEffect(() => { void load() }, [load])
+
+  // Approvals inbox: loaded on tab open and refreshed with the list — the
+  // decisions made elsewhere (chat/agent) must unstick the rows here.
+  const loadInbox = useCallback(async () => {
+    setInboxBusy(true)
+    try {
+      const page = await workspaceApi.artifactInbox()
+      setInbox(page.entries ?? [])
+    } catch { setInbox([]) }
+    finally { setInboxBusy(false) }
+  }, [])
+  useEffect(() => { if (inboxMode) void loadInbox() }, [inboxMode, loadInbox])
 
   const firstLoadRef = useRef(true)
   useEffect(() => {
@@ -399,104 +444,166 @@ export default function Artifacts() {
             Same sticky pattern as the runs page: the column is the scroller
             and the filter block pins to its top. */}
         <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
-          <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
-            <div style={{ marginBottom: '0.5rem' }}>
-              <ListFilter value={searchDraft} onChange={setSearchDraft} placeholder={t('artifacts.search_placeholder') ?? 'Search by name…'} />
-            </div>
-            {tagFilter.length > 0 && (
-              <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                {tagFilter.map((tag) => (
-                  <button key={tag} type="button" onClick={() => setTagFilter(tagFilter.filter((x) => x !== tag))} style={chipStyle(true)}>
-                    {tag} ✕
-                  </button>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem' }}>
-              <button type="button" onClick={() => setStatusFilter('')} style={chipStyle(statusFilter === '')}>
-                {t('inbound.filter_all') ?? 'All'} · {artifacts.length}
-              </button>
-              {orderedStatuses.map((s) => (
-                <button key={s} type="button" onClick={() => setStatusFilter(statusFilter === s ? '' : s)} style={chipStyle(statusFilter === s)}>
-                  {statusLabel(s)} · {statusCounts[s]}
-                </button>
-              ))}
-            </div>
-            {tagOptions.length > 0 && (
-              <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)' }}>
-                {tagOptions.map(({ tag, count }) => {
-                  const on = tagFilter.includes(tag)
-                  return (
-                    <button
-                      key={tag}
-                      type="button"
-                      title={t('artifacts.tag_filter_hint', { count: String(count) }) ?? `${count} artifacts`}
-                      onClick={() => setTagFilter(on ? tagFilter.filter((x) => x !== tag) : [...tagFilter, tag])}
-                      style={chipStyle(on)}
-                    >
-                      #{tag} · {count}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-            {/* Label-free selects: the first option doubles as the label
-                («Все источники» / «Все подразделения»), the full name is on
-                hover — the whole filter block stays one compact row. */}
-            <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.6rem' }}>
-              <label className="toolbar-select" title={t('artifacts.filter_provider_label') ?? 'Source'} style={{ flex: 1, minWidth: 0 }}>
-                <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} style={{ width: '100%' }}>
-                  <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
-                  <option value="builtin">{providerLabel('builtin')}</option>
-                  <option value="url">{providerLabel('url')}</option>
-                </select>
-              </label>
-              {org.units.length > 0 && (
-                <label className="toolbar-select" title={t('artifacts.filter_org_label') ?? 'Unit'} style={{ flex: 1, minWidth: 0 }}>
-                  <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
-                    <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
-                    {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
-                </label>
-              )}
-            </div>
+          {/* Two views: the whole catalog vs my approvals inbox (rounds
+              addressed to me) — a 10k registry buries your two rounds deep. */}
+          <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '0.5rem' }}>
+            <button type="button" onClick={() => setInboxMode(false)} style={chipStyle(!inboxMode)}>
+              {t('artifacts.tab_catalog') ?? 'Каталог'}
+            </button>
+            <button type="button" onClick={() => setInboxMode(true)} style={chipStyle(inboxMode)}>
+              {t('artifacts.tab_inbox') ?? 'На моём согласовании'}{(inbox?.length ?? 0) > 0 && ` · ${inbox!.length}`}
+            </button>
           </div>
-
-          <div style={{ paddingRight: '0.15rem' }}>
-            {visibleArtifacts.map((a) => (
-              <div key={a.id} style={rowStyle(selectedId === a.id)} onClick={() => setSelectedId(a.id)}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-                  <strong style={{ fontSize: '0.85rem' }}>{a.title}</strong>
-                  <Tag type={statusTagType(a.status)} size="sm">{statusLabel(a.status)}</Tag>
+          {inboxMode ? (
+            <>
+              {inboxBusy && <Tile style={{ color: 'var(--tm-text-3)' }}>{t('common.loading') ?? 'Loading…'}</Tile>}
+              {!inboxBusy && (inbox ?? []).length === 0 && (
+                <Tile style={{ color: 'var(--tm-text-3)' }}>{t('artifacts.inbox_empty') ?? 'Открытых согласований на тебя нет.'}</Tile>
+              )}
+              {(inbox ?? []).map((entry) => (
+                <div
+                  key={entry.review.id}
+                  style={{ ...rowStyle(selectedId === entry.artifact_id), borderLeft: '3px solid var(--tm-amber, #e0af68)' }}
+                  onClick={() => { setSelectedId(entry.artifact_id); setInboxMode(false) }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                    <strong style={{ fontSize: '0.85rem' }}>{entry.artifact_title}</strong>
+                    <Tag type="purple" size="sm">{t('artifacts.inbox_review') ?? 'согласование'}</Tag>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.2rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    {entry.review.mode === 'all' ? (t('artifacts.inbox_mode_all') ?? 'все рецензенты') : (t('artifacts.inbox_mode_any') ?? 'любой рецензент')}
+                    {' · '}{shortTime(entry.review.requested_at)}
+                    {entry.origin_user ? ` · ${entry.origin_user}` : ''}
+                  </div>
+                  {entry.matched.length > 0 && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)', marginTop: '0.2rem' }}>
+                      {t('artifacts.inbox_matched') ?? 'ты рецензент как'}: {entry.matched.join(', ')}
+                    </div>
+                  )}
                 </div>
-                <div style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.15rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <span>{a.id}{a.version && a.version > 1 ? ` · v${a.version}` : ''}</span>
-                  <span>{humanArtifactSize(a.size_bytes)}</span>
-                  {(references[a.id] ?? []).length > 0 && <span title={(references[a.id] ?? []).join(', ')}>🔗 {(references[a.id] ?? []).length}</span>}
+              ))}
+            </>
+          ) : (
+            <>
+              <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <ListFilter value={searchDraft} onChange={setSearchDraft} placeholder={t('artifacts.search_placeholder') ?? 'Search by name…'} />
                 </div>
-                {(a.tags ?? []).length > 0 && (
-                  <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-                    {(a.tags ?? []).slice(0, 4).map((tag) => (
-                      <span key={tag} style={{ fontSize: '0.66rem', padding: '0.05rem 0.35rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.14))', color: 'var(--tm-text-3)' }}>#{tag}</span>
+                {tagFilter.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                    {tagFilter.map((tag) => (
+                      <button key={tag} type="button" onClick={() => setTagFilter(tagFilter.filter((x) => x !== tag))} style={chipStyle(true)}>
+                        {tag} ✕
+                      </button>
                     ))}
-                    {(a.tags ?? []).length > 4 && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>+{(a.tags ?? []).length - 4}</span>}
                   </div>
                 )}
+                <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem' }}>
+                  <button type="button" onClick={() => setStatusFilter('')} style={chipStyle(statusFilter === '')}>
+                    {t('inbound.filter_all') ?? 'All'} · {artifacts.length}
+                  </button>
+                  {orderedStatuses.map((s) => (
+                    <button key={s} type="button" onClick={() => setStatusFilter(statusFilter === s ? '' : s)} style={chipStyle(statusFilter === s)}>
+                      {statusLabel(s)} · {statusCounts[s]}
+                    </button>
+                  ))}
+                </div>
+                {tagOptions.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)' }}>
+                    {tagOptions.map(({ tag, count }) => {
+                      const on = tagFilter.includes(tag)
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          title={t('artifacts.tag_filter_hint', { count: String(count) }) ?? `${count} artifacts`}
+                          onClick={() => setTagFilter(on ? tagFilter.filter((x) => x !== tag) : [...tagFilter, tag])}
+                          style={chipStyle(on)}
+                        >
+                          #{tag} · {count}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {/* Label-free selects: the first option doubles as the label
+                    («Все источники» / «Все подразделения»), the full name is on
+                    hover — the whole filter block stays one compact row. */}
+                <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.6rem' }}>
+                  <label className="toolbar-select" title={t('artifacts.filter_provider_label') ?? 'Source'} style={{ flex: 1, minWidth: 0 }}>
+                    <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} style={{ width: '100%' }}>
+                      <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
+                      <option value="builtin">{providerLabel('builtin')}</option>
+                      <option value="url">{providerLabel('url')}</option>
+                    </select>
+                  </label>
+                  {org.units.length > 0 && (
+                    <label className="toolbar-select" title={t('artifacts.filter_org_label') ?? 'Unit'} style={{ flex: 1, minWidth: 0 }}>
+                      <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
+                        <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
+                        {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                    </label>
+                  )}
+                </div>
+                {/* Creator and age: the presets a 10k registry actually gets
+                    navigated by — «my artifacts this week» is two clicks. */}
+                <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.6rem' }}>
+                  <label className="toolbar-select" title={t('artifacts.filter_author_label') ?? 'Author'} style={{ flex: 1, minWidth: 0 }}>
+                    <input
+                      value={authorFilter}
+                      onChange={(e) => setAuthorFilter(e.target.value)}
+                      placeholder={t('artifacts.filter_author_label') ?? 'Author…'}
+                      style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'inherit', fontSize: 'inherit' }}
+                    />
+                  </label>
+                  <label className="toolbar-select" title={t('artifacts.filter_age_label') ?? 'Age'} style={{ flex: 1, minWidth: 0 }}>
+                    <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value as typeof ageFilter)}>
+                      <option value="">{t('artifacts.filter_age_all') ?? 'Any time'}</option>
+                      <option value="week">{t('artifacts.filter_age_week') ?? 'This week'}</option>
+                      <option value="month">{t('artifacts.filter_age_month') ?? 'This month'}</option>
+                      <option value="quarter">{t('artifacts.filter_age_quarter') ?? 'Last 3 months'}</option>
+                    </select>
+                  </label>
+                </div>
               </div>
-            ))}
-            {visibleArtifacts.length === 0 && !loading && (
-              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0.25rem' }}>
-                {artifacts.length === 0
-                  ? (t('artifacts.search_empty') ?? 'Nothing found. Try a shorter query or drop the filters.')
-                  : (t('artifacts.filter_empty') ?? 'Nothing matches the filters.')}
-              </p>
-            )}
-            {hasMore && (
-              <Button size="sm" kind="ghost" style={{ marginTop: '0.35rem' }} onClick={() => setLimit((n) => n + 200)}>
-                {t('artifacts.show_more') ?? 'Show more'}
-              </Button>
-            )}
-          </div>
+              <div style={{ paddingRight: '0.15rem' }}>
+                {visibleArtifacts.map((a) => (
+                  <div key={a.id} style={rowStyle(selectedId === a.id)} onClick={() => setSelectedId(a.id)}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                      <strong style={{ fontSize: '0.85rem' }}>{a.title}</strong>
+                      <Tag type={statusTagType(a.status)} size="sm">{statusLabel(a.status)}</Tag>
+                    </div>
+                    <div style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.15rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span>{a.id}{a.version && a.version > 1 ? ` · v${a.version}` : ''}</span>
+                      <span>{humanArtifactSize(a.size_bytes)}</span>
+                      {(references[a.id] ?? []).length > 0 && <span title={(references[a.id] ?? []).join(', ')}>🔗 {(references[a.id] ?? []).length}</span>}
+                    </div>
+                    {(a.tags ?? []).length > 0 && (
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                        {(a.tags ?? []).slice(0, 4).map((tag) => (
+                          <span key={tag} style={{ fontSize: '0.66rem', padding: '0.05rem 0.35rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.14))', color: 'var(--tm-text-3)' }}>#{tag}</span>
+                        ))}
+                        {(a.tags ?? []).length > 4 && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>+{(a.tags ?? []).length - 4}</span>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {visibleArtifacts.length === 0 && !loading && (
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0.25rem' }}>
+                    {artifacts.length === 0
+                      ? (t('artifacts.search_empty') ?? 'Nothing found. Try a shorter query or drop the filters.')
+                      : (t('artifacts.filter_empty') ?? 'Nothing matches the filters.')}
+                  </p>
+                )}
+                {hasMore && (
+                  <Button size="sm" kind="ghost" style={{ marginTop: '0.35rem' }} onClick={() => setLimit((n) => n + 200)}>
+                    {t('artifacts.show_more') ?? 'Show more'}
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Right column: the selected artifact — header, actions, the readable
@@ -575,6 +682,45 @@ export default function Artifacts() {
                   {usedBy.length > 0
                     ? <Tag type="green" size="sm" title={usedBy.join(', ')}>{t('artifacts.used_by', { n: String(usedBy.length) }) ?? `used by ${usedBy.length} skill(s)`}</Tag>
                     : <Tag size="sm">{t('artifacts.not_used') ?? 'not referenced'}</Tag>}
+                </div>
+
+                {/* Tag editor: live on the card, lifecycle-independent — tags
+                    drive the catalog filters, locking them behind the review
+                    state just breaks other people's navigation. */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', alignItems: 'center', marginTop: '0.5rem' }}>
+                  {(selected.tags ?? []).map((tag) => (
+                    <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.15rem', padding: '0.1rem 0.3rem 0.1rem 0.45rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.15))', fontSize: '0.75rem' }}>
+                      #{tag}
+                      {operator && (
+                        <button
+                          type="button"
+                          aria-label={`remove tag ${tag}`}
+                          disabled={tagsBusy}
+                          onClick={() => void saveTags(selected, (selected.tags ?? []).filter((x) => x !== tag))}
+                          style={{ background: 'none', border: 0, cursor: 'pointer', color: 'inherit', opacity: 0.7, display: 'inline-flex', padding: 0 }}
+                        >✕</button>
+                      )}
+                    </span>
+                  ))}
+                  {operator && (
+                    <input
+                      id="artifact-tag-editor"
+                      value={tagDraft}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTagDraft(e.target.value)}
+                      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                        if (e.key === 'Enter' && tagDraft.trim()) {
+                          e.preventDefault()
+                          void saveTags(selected, [...(selected.tags ?? []), tagDraft])
+                        }
+                      }}
+                      list="artifact-tag-options"
+                      placeholder={t('artifacts.tag_add') ?? '+ tag'}
+                      style={{ border: '1px dashed var(--tm-border)', borderRadius: 999, background: 'transparent', color: 'var(--tm-text-2)', fontSize: '0.72rem', padding: '0.1rem 0.45rem', width: '7rem', outline: 'none' }}
+                    />
+                  )}
+                  <datalist id="artifact-tag-options">
+                    {tagOptions.map(({ tag }) => <option key={tag} value={tag} />)}
+                  </datalist>
                 </div>
 
                 {selected.description && (
