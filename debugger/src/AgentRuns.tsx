@@ -563,7 +563,11 @@ export default function AgentRuns({ project }: { project: string }) {
     if (!silent) setError('')
     try {
       void refreshOps()
-      const startedPage = await observationApi.events(scope, undefined, undefined, undefined, { type: 'run.started', limit: 500 })
+      // Fresh-first: the journal pages OLDEST-first by default, so a flat
+      // page silently dropped every run newer than the page window — on a
+      // grown stand a live run simply did not exist in the list. desc puts
+      // the newest runs on the first page, which is what a runs list means.
+      const startedPage = await observationApi.events(scope, undefined, undefined, undefined, { type: 'run.started', limit: 500, order: 'desc' })
       // Terminal events give every list row (roots and delegated children
       // alike) its status tag without opening each run. run.cancelled matters
       // as much: without it a cancelled run shows "running" forever. The
@@ -648,11 +652,11 @@ export default function AgentRuns({ project }: { project: string }) {
       // to the dawn of the run, no trajectory, no cost endpoints, no
       // per-child fan-out. Those heavy pieces load on the switch (silent
       // false) and on demand from the tabs, not on every poll tick.
-      if (silent) {
-        // Light tail pass: the newest page of this run's events merged into
-        // the already-loaded timeline, plus the result endpoint for the
-        // terminal state. No cursor walk, no trajectory, no costs, no
-        // per-child fan-out — those belong to the switch and the tabs.
+      if (silent && timeline.length > 0) {
+        // Light tail pass — ONLY when the timeline is already loaded. A page
+        // reload (or a fresh dialog) starts with an empty timeline, and
+        // merging a tail into nothing would leave the chat forever blank:
+        // that case takes the full walk below.
         const tailPage = await observationApi.events(undefined, undefined, undefined, undefined, { run, limit: 200, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] }))
         const fresh = [...(tailPage.events ?? [])].reverse()
         if (fresh.length > 0) {
