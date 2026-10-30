@@ -200,15 +200,22 @@ func (s *Store) deliverChunk(ctx context.Context, chunk []claimedEvent) (int, er
 	deliveredEvents, failedEvents := resolveIngestOutcome(chunk, results)
 	for _, failed := range failedEvents {
 		s.noteFailure(ctx, failed.Event.SourceID, failed.Event.EventID, failed.Reason)
-	}
-	// Poison isolation: a permanently rejected event (validation, duplicate id
-	// shape, …) must NOT hold the queue hostage. The journal answered, so the
-	// transport is fine — mark the rejects delivered-side dead (quarantine
-	// after N attempts) and keep delivering the rest. Without this, one bad
-	// event shape froze the whole outbox for two days: 19k events queued
-	// behind a single poisoned row while runs, traces and the chat starved.
-	for _, failed := range failedEvents {
-		s.quarantineIfHopeless(ctx, failed.Event.SourceID, failed.Event.EventID)
+		// Poison isolation: a permanently rejected event (validation, duplicate
+		// id shape, …) must NOT hold the queue hostage. The journal answered, so
+		// the transport is fine — mark the rejects delivered-side dead and keep
+		// delivering the rest. Without this, one bad event shape froze the whole
+		// outbox for two days: 19k events queued behind a single poisoned row
+		// while runs, traces and the chat starved.
+		//
+		// A «same id, different content» conflict gets zero retries: the stored
+		// payload is frozen, so the journal's answer can never change — bury it
+		// on the first rejection. Everything else earns quarantineAfterAttempts
+		// honest attempts first.
+		threshold := quarantineAfterAttempts
+		if hopelesslyRejected(failed.Reason) {
+			threshold = 1
+		}
+		s.quarantineIfHopeless(ctx, failed.Event.SourceID, failed.Event.EventID, threshold)
 	}
 	if len(failedEvents) > 0 && len(deliveredEvents) == 0 {
 		return 0, fmt.Errorf("%w: %s", errEventRejected, failedEvents[0].Reason)
@@ -224,11 +231,22 @@ func (s *Store) deliverChunk(ctx context.Context, chunk []claimedEvent) (int, er
 // queue forever. The row keeps its last_error for the post-mortem; the
 // event itself is lost by design — a poison event must cost itself, not
 // the whole pipeline.
-func (s *Store) quarantineIfHopeless(ctx context.Context, sourceID, eventID string) {
+func (s *Store) quarantineIfHopeless(ctx context.Context, sourceID, eventID string, minAttempts int) {
 	_, _ = s.pool.Exec(ctx, `UPDATE kernel_event_outbox
 		SET delivered_at = clock_timestamp(), last_error = last_error || ' [quarantined: permanently rejected]'
 		WHERE source_id = $1 AND event_id = $2 AND attempts >= $3`,
-		sourceID, eventID, quarantineAfterAttempts)
+		sourceID, eventID, minAttempts)
+}
+
+// conflictReasonMarker matches the journal's id-conflict rejection: an event
+// with the same id but different content already exists. The outbox row's
+// payload is frozen at enqueue time, so this answer can never change — the
+// row is deterministically undeliverable and must not consume its retry
+// budget (2026-10-30: 12.8k such rows cycled for two days).
+const conflictReasonMarker = "already exists with different content"
+
+func hopelesslyRejected(reason string) bool {
+	return strings.Contains(reason, conflictReasonMarker)
 }
 
 // failChunk applies the single-event failure semantics to every event of a

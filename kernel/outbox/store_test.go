@@ -336,6 +336,22 @@ func TestResolveIngestOutcomeEmptyChunk(t *testing.T) {
 	}
 }
 
+// hopelesslyRejected singles out the one deterministic journal rejection:
+// the id conflict, where the stored payload can never satisfy the journal —
+// every retry returns the same answer, so the row is buried on first sight
+// instead of burning its retry budget (and the operator's patience).
+func TestHopelesslyRejected(t *testing.T) {
+	if !hopelesslyRejected("Temporality rejected event: source event ID already exists with different content") {
+		t.Fatal("the journal's id-conflict rejection must be recognized as deterministic")
+	}
+	if hopelesslyRejected("Temporality rejected event: validation failed") {
+		t.Fatal("validation rejections still earn the full retry budget")
+	}
+	if hopelesslyRejected("") {
+		t.Fatal("an empty reason is not a conflict")
+	}
+}
+
 func TestInvalidIngestResponseReason(t *testing.T) {
 	err := errors.New("unexpected end of JSON input")
 	want := "invalid Temporality ingest response: unexpected end of JSON input"
