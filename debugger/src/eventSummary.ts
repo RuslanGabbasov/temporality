@@ -258,7 +258,7 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       // routing decision, not a retry: it names the serving provider.
       if (d.reason === 'routed') {
         const route = String(d.route ?? '')
-        return { icon: '🛒', label: t('runs.event.model_route'), detail: route, color: 'var(--tm-teal)' }
+        return { icon: '⇒', label: t('runs.event.model_route'), detail: route, color: 'var(--tm-teal)' }
       }
       const reasonKey = d.reason === 'stream_fallback'
         ? 'runs.event.model_attempt_fallback'

@@ -264,16 +264,23 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
     status: 'ok',
   }),
   'model.failed': (d) => ({ status: 'error', fact: causeOf(d) }),
-  'model.attempt': (d, { t }) => ({
-    title: t('runs.event.model_attempt'),
-    fact: [
-      d.reason === 'stream_fallback' ? t('runs.event.model_attempt_fallback')
-        : d.reason === 'stream_timeout' ? t('runs.event.model_attempt_timeout')
-          : t('runs.event.model_attempt_retry'),
-      t('runs.event.model_attempt_n', { n: squash(d.attempt ?? '?') }),
-    ].filter(Boolean).join(' · '),
-    status: 'error',
-  }),
+  'model.attempt': (d, { t }) => {
+    // reason=routed is the routing decision (which provider served the call),
+    // not a retry — no attempt number, no error styling.
+    if (d.reason === 'routed') {
+      return { title: t('runs.event.model_route'), fact: squash(d.route ?? ''), status: 'ok' }
+    }
+    return {
+      title: t('runs.event.model_attempt'),
+      fact: [
+        d.reason === 'stream_fallback' ? t('runs.event.model_attempt_fallback')
+          : d.reason === 'stream_timeout' ? t('runs.event.model_attempt_timeout')
+            : t('runs.event.model_attempt_retry'),
+        t('runs.event.model_attempt_n', { n: squash(d.attempt ?? '?') }),
+      ].filter(Boolean).join(' · '),
+      status: 'error',
+    }
+  },
   'model.nudged': (d, { t }) => ({ title: t('runs.event.model_nudged'), fact: t('runs.event.model_nudged_detail', { turn: squash(d.turn ?? '?') }) }),
   // ── §5.3 tools ──
   'tool.started': (d, { t }) => ({ title: toolTitle(d, t), fact: toolFact(d) }),
