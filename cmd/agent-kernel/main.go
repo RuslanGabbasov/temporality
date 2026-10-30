@@ -4386,7 +4386,7 @@ func main() {
 						writeError(w, 502, fmt.Errorf("provider %q credential: %w", p.ID, kErr))
 						return
 					}
-					payload := map[string]any{"provider_id": p.ID, "base_url": p.BaseURL, "model": m}
+					payload := map[string]any{"provider_id": p.ID, "provider_name": p.Name, "base_url": p.BaseURL, "model": m}
 					// Plaintext credentials leave the process only for the kernel's
 					// service principal (the call_model hot path). Human callers get
 					// the routing answer with the reference, not the key — the same

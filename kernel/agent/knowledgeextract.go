@@ -186,7 +186,7 @@ func (a *Activities) extractionModelClient(ctx context.Context, project, model s
 		return a.Model, nil
 	}
 	if model != "" && a.WorkspaceURL != "" {
-		if config, _, ok, err := a.modelConfigFor(ctx, project, model); err == nil && ok {
+		if config, _, _, ok, err := a.modelConfigFor(ctx, project, model); err == nil && ok {
 			return llm.New(config), nil
 		}
 		// A failed lookup (workspace unreachable) or a clean 404 (no provider

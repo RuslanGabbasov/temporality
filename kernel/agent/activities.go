@@ -183,6 +183,9 @@ type skillEmbedEntry struct {
 type providerCacheEntry struct {
 	config    llm.Config
 	providerID string
+	// providerName is the human label of the serving provider — the route
+	// markers and failure messages show it instead of the opaque id.
+	providerName string
 	ok        bool
 	fetchedAt time.Time
 }
@@ -648,7 +651,8 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		}
 	}
 	client := a.Model
-	routeProvider := "" // set when a workspace provider served this call
+	routeProvider := ""     // set when a workspace provider served this call
+	routeProviderName := "" // human label of that provider
 	// Vision fallback (docs/supervisor-model.md §4): when a call carries images
 	// and the supervisor panel pins a vision model, route the call there — the
 	// main model may be text-only. Routing reuse means the vision model just
@@ -668,7 +672,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		// config with the model name swapped in — the pre-routing behavior.
 		routed := false
 		if a.WorkspaceURL != "" {
-			config, providerID, ok, err := a.modelConfigFor(ctx, request.Project, request.Model)
+			config, providerID, providerName, ok, err := a.modelConfigFor(ctx, request.Project, request.Model)
 			if err != nil {
 				// Transient lookup failure (workspace unreachable, 5xx): do not
 				// fail the turn — fall back to env and keep going.
@@ -676,12 +680,13 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 					if logger := activity.GetLogger(ctx); logger != nil {
 						logger.Warn("model-config lookup failed, falling back to env provider",
 							"run_id", request.RunID, "model", request.Model, "error", err.Error())
-						}
+							}
 				}
 			} else if ok {
 				client = llm.New(config)
 				routed = true
 				routeProvider = providerID
+				routeProviderName = providerName
 			}
 		}
 		if !routed {
@@ -694,7 +699,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		}
 		route := "env fallback"
 		if routed {
-			route = "provider " + routeProvider
+			route = "provider " + routeLabel(routeProvider, routeProviderName)
 		}
 		// The routing decision rides in the trace: «диагностика зелёная, а ран
 		// красный» almost always means the run took a different provider (or the
@@ -798,7 +803,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 				completion.StreamMs = streamMs + retryMs
 				completion.StreamError = retryErr.Error()
 			}
-			return completion, a.routeFailure(ctx, request, routeProvider, attempt, err)
+			return completion, a.routeFailure(ctx, request, routeProvider, routeProviderName, attempt, err)
 		}
 		// A stream that stalls behind gateway keepalives can burn most of the
 		// activity budget before dying; the fallback then looks suspiciously
@@ -820,10 +825,10 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			completion.StreamMs = streamMs
 			completion.StreamError = streamErr.Error()
 		}
-		return completion, a.routeFailure(ctx, request, routeProvider, attempt, err)
+		return completion, a.routeFailure(ctx, request, routeProvider, routeProviderName, attempt, err)
 	}
 	completion, err := client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
-	return completion, a.routeFailure(ctx, request, routeProvider, attempt, err)
+	return completion, a.routeFailure(ctx, request, routeProvider, routeProviderName, attempt, err)
 }
 
 // routeFailure annotates a provider rejection with the routing outcome and
@@ -833,13 +838,13 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 // shows, captured from the call that actually failed. Also evicts the cached
 // routing on auth rejections: a rotated key must re-resolve on the retry
 // ladder instead of serving the stale credential until the TTL runs out.
-func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, routeProvider string, attempt int, err error) error {
+func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, routeProvider, routeProviderName string, attempt int, err error) error {
 	if err == nil {
 		return nil
 	}
 	route := "env fallback"
 	if routeProvider != "" {
-		route = "provider " + routeProvider
+		route = "provider " + routeLabel(routeProvider, routeProviderName)
 	}
 	if code, ok := llm.StatusOf(err); ok {
 		if code == http.StatusUnauthorized || code == http.StatusForbidden {
@@ -871,6 +876,15 @@ func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, rou
 		}
 	}
 	return fmt.Errorf("%w (served by %s)", err, route)
+}
+
+// routeLabel prefers the provider's human name over the opaque id —
+// «provider prov-465a01…» tells the operator nothing.
+func routeLabel(id, name string) string {
+	if name != "" {
+		return name
+	}
+	return id
 }
 
 // boundedAttemptError clips a transport error for the journal marker; the
@@ -1410,7 +1424,7 @@ func (a *Activities) handleDeleteTrigger(ctx context.Context, request ToolReques
 // nil error is the clean negative "no provider serves this model" answer
 // (cached); a non-nil error is a transport/server failure the caller may
 // retry or fall back from.
-func (a *Activities) modelConfigFor(ctx context.Context, project, model string) (config llm.Config, providerID string, ok bool, err error) {
+func (a *Activities) modelConfigFor(ctx context.Context, project, model string) (config llm.Config, providerID, providerName string, ok bool, err error) {
 	key := project + "|" + model
 	a.providerCacheMu.Lock()
 	if a.providerCache == nil {
@@ -1418,36 +1432,37 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 	}
 	if hit, seen := a.providerCache[key]; seen && time.Since(hit.fetchedAt) < providerCacheTTL {
 		a.providerCacheMu.Unlock()
-		return hit.config, hit.providerID, hit.ok, nil
+		return hit.config, hit.providerID, hit.providerName, hit.ok, nil
 	}
 	a.providerCacheMu.Unlock()
 
 	endpoint := fmt.Sprintf("%s/v1/workspace/model-config?model=%s&project=%s", a.WorkspaceURL, url.QueryEscape(model), url.QueryEscape(project))
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return llm.Config{}, "", false, err
+		return llm.Config{}, "", "", false, err
 	}
 	if status == http.StatusNotFound {
 		// Definitive negative: no visible provider lists this model. Cache it —
 		// the fallback path below still works, and hammering the endpoint every
 		// turn would only burn a round trip.
-		a.providerCachePut(key, llm.Config{}, "", false)
-		return llm.Config{}, "", false, nil
+		a.providerCachePut(key, llm.Config{}, "", "", false)
+		return llm.Config{}, "", "", false, nil
 	}
 	if status >= 400 {
-		return llm.Config{}, "", false, fmt.Errorf("model-config lookup failed (HTTP %d): %s", status, truncate(body, 200))
+		return llm.Config{}, "", "", false, fmt.Errorf("model-config lookup failed (HTTP %d): %s", status, truncate(body, 200))
 	}
 	var answer struct {
-		ProviderID string `json:"provider_id"`
-		BaseURL    string `json:"base_url"`
-		APIKey     string `json:"api_key"`
-		Model      string `json:"model"`
+		ProviderID   string `json:"provider_id"`
+		ProviderName string `json:"provider_name"`
+		BaseURL      string `json:"base_url"`
+		APIKey       string `json:"api_key"`
+		Model        string `json:"model"`
 	}
 	if err := json.Unmarshal([]byte(body), &answer); err != nil {
-		return llm.Config{}, "", false, fmt.Errorf("model-config decode: %w", err)
+		return llm.Config{}, "", "", false, fmt.Errorf("model-config decode: %w", err)
 	}
 	if answer.BaseURL == "" || answer.Model == "" {
-		return llm.Config{}, "", false, fmt.Errorf("model-config response incomplete for model %q", model)
+		return llm.Config{}, "", "", false, fmt.Errorf("model-config response incomplete for model %q", model)
 	}
 	// An empty api_key is a legitimate keyless provider (ollama, lmstudio);
 	// llm.Config sends no Authorization header for those.
@@ -1470,18 +1485,18 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 		config.StreamFirstTokenTimeout = 2 * time.Minute
 		config.MaxOutputTokens = 16384
 	}
-	a.providerCachePut(key, config, answer.ProviderID, true)
-	return config, answer.ProviderID, true, nil
+	a.providerCachePut(key, config, answer.ProviderID, answer.ProviderName, true)
+	return config, answer.ProviderID, answer.ProviderName, true, nil
 }
 
 // providerCachePut stores one resolution under the mutex.
-func (a *Activities) providerCachePut(key string, config llm.Config, providerID string, ok bool) {
+func (a *Activities) providerCachePut(key string, config llm.Config, providerID, providerName string, ok bool) {
 	a.providerCacheMu.Lock()
 	defer a.providerCacheMu.Unlock()
 	if a.providerCache == nil {
 		a.providerCache = map[string]providerCacheEntry{}
 	}
-	a.providerCache[key] = providerCacheEntry{config: config, providerID: providerID, ok: ok, fetchedAt: time.Now()}
+	a.providerCache[key] = providerCacheEntry{config: config, providerID: providerID, providerName: providerName, ok: ok, fetchedAt: time.Now()}
 }
 
 // workspaceErrorDetail extracts the message the workspace API reports in its
@@ -2138,7 +2153,7 @@ func (a *Activities) skillBuilderModel(ctx context.Context, project string) (*ll
 		}
 	}
 	if project != "" && a.WorkspaceURL != "" {
-		if config, _, ok, err := a.modelConfigFor(ctx, project, ""); err == nil && ok {
+		if config, _, _, ok, err := a.modelConfigFor(ctx, project, ""); err == nil && ok {
 			return llm.New(config), nil
 		}
 	}
