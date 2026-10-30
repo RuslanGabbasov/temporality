@@ -69,6 +69,7 @@ services:
       agent-kernel:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 40s
 
   temporal:
     image: temporalio/temporal:latest

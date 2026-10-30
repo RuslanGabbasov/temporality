@@ -532,8 +532,30 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.NotifyChannel, activity.RegisterOptions{Name: agent.ActivityNotifyChannel})
 	temporalWorker.RegisterActivityWithOptions(activities.CloseHumanRequest, activity.RegisterOptions{Name: agent.ActivityCloseHumanRequest})
 	registerExampleWorkflow(temporalWorker)
+	// Graceful drain on SIGTERM: temporalWorker.Run(worker.InterruptCh())
+	// stops polling and waits for in-flight activities — but unbounded, and
+	// docker SIGKILLs after its grace period. Cap the drain ourselves: after
+	// 25 seconds the worker is stopped hard and Temporal re-runs the
+	// in-flight activities on the next worker ( Attempt 2) instead of the run
+	// freezing until the 20-minute StartToClose expires.
 	workerDone := make(chan error, 1)
 	go func() { workerDone <- temporalWorker.Run(worker.InterruptCh()) }()
+	drainWorker := func() {
+		log.Info("temporal worker draining (25s cap)")
+		select {
+		case err := <-workerDone:
+			if err != nil {
+				log.Warn("temporal worker stopped with error", "error", err.Error())
+			}
+		case <-time.After(25 * time.Second):
+			log.Warn("temporal worker drain timed out; forcing stop — in-flight activities will re-run on the next worker")
+			temporalWorker.Stop()
+			select {
+			case <-workerDone:
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
 	gate, err := controlplane.NewGate(os.Getenv("KERNEL_AUTH_TOKENS"))
 	if err != nil {
 		log.Error("parse KERNEL_AUTH_TOKENS", "error", err)
@@ -7850,13 +7872,7 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
-	select {
-	case err := <-workerDone:
-		if err != nil {
-			log.Error("Temporal worker stopped", "error", err)
-		}
-	case <-ctx.Done():
-	}
+	drainWorker()
 }
 
 // stripKernelAPIProxyPrefix removes the leading "/kernel-api" proxy prefix

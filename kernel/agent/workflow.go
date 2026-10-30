@@ -1314,7 +1314,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// attempt fails after the timeout and the retry ladder takes over.
 		// Gated by version: the extra timeout field is part of the activity
 		// schedule command, so pre-gate histories must replay without it.
-		modelOpts := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
+		// HeartbeatTimeout turns «kernel was rebuilt mid-call» from a 20-minute
+		// freeze into a 90-second retry: a dead worker stops heartbeating, and
+		// Temporal re-runs the call on the live worker. A live worker keeps
+		// heartbeating through long streams, so a healthy slow call is safe.
+		modelOpts := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, HeartbeatTimeout: 90 * time.Second, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
 		if modelSchedStart == 1 {
 			modelOpts.ScheduleToStartTimeout = 5 * time.Minute
 		}
@@ -2293,7 +2297,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// finale can be as long a generation as any other turn, and deserves the
 	// same frozen-host recovery (fresh Temporal attempt after the machine
 	// wakes up instead of a dead run).
-	modelCtx := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
+	modelCtx := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, HeartbeatTimeout: 90 * time.Second, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
 	if err := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
 		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "model": input.Model, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
