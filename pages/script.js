@@ -46,11 +46,33 @@
 
   const viewer = document.getElementById('imageViewer');
   const viewerImage = document.getElementById('viewerImage');
+  const viewerVideo = document.getElementById('viewerVideo');
   const viewerClose = document.getElementById('viewerClose');
-  const hideViewer = () => { viewer.classList.remove('open'); viewer.setAttribute('aria-hidden', 'true'); viewerImage.removeAttribute('src'); document.body.style.overflow = ''; };
-  document.querySelectorAll('[data-lightbox="true"]').forEach((link) => link.addEventListener('click', (event) => {
-    event.preventDefault(); viewerImage.src = link.getAttribute('href'); viewerImage.alt = link.querySelector('img')?.alt || 'Temporality interface screenshot';
+  const hideViewer = () => {
+    viewer.classList.remove('open'); viewer.setAttribute('aria-hidden', 'true');
+    viewerImage.removeAttribute('src');
+    if (viewerVideo) { viewerVideo.pause(); viewerVideo.removeAttribute('src'); viewerVideo.load(); }
+    document.body.style.overflow = '';
+  };
+  const openViewer = (imageSrc, alt, videoSrc) => {
+    if (videoSrc) {
+      viewerImage.style.display = 'none';
+      if (viewerVideo) { viewerVideo.style.display = 'block'; viewerVideo.src = videoSrc; }
+    } else {
+      viewerImage.style.display = '';
+      viewerImage.src = imageSrc; viewerImage.alt = alt || 'Temporality interface screenshot';
+      if (viewerVideo) { viewerVideo.style.display = 'none'; viewerVideo.removeAttribute('src'); viewerVideo.load(); }
+    }
     viewer.classList.add('open'); viewer.setAttribute('aria-hidden', 'false'); document.body.style.overflow = 'hidden';
+  };
+  document.querySelectorAll('[data-lightbox="true"]').forEach((link) => link.addEventListener('click', (event) => {
+    event.preventDefault();
+    openViewer(link.getAttribute('href'), link.querySelector('img')?.alt || 'Temporality interface screenshot');
+  }));
+  // Hero video card: the lightbox plays the recording with controls, full size.
+  document.querySelectorAll('[data-video-lightbox]').forEach((card) => card.addEventListener('click', (event) => {
+    event.preventDefault();
+    openViewer('', card.getAttribute('aria-label') || 'Temporality knowledge map', card.getAttribute('data-video-lightbox'));
   }));
   viewerClose.addEventListener('click', hideViewer);
   viewer.addEventListener('click', (event) => { if (event.target === viewer) hideViewer(); });
@@ -77,30 +99,3 @@
   }
 })();
 
-// Ping-pong playback for hero videos: forward to the end, then reverse to
-// the start, forever — a looping demo that never visibly «restarts».
-document.querySelectorAll('video[data-pingpong="true"]').forEach((video) => {
-  let direction = 1
-  const step = () => {
-    if (video.paused || video.ended) return
-    const t = video.currentTime + direction * 0.033
-    if (t >= video.duration) { video.currentTime = video.duration; direction = -1 }
-    else if (t <= 0) { video.currentTime = 0; direction = 1 }
-    else video.currentTime = t
-    requestAnimationFrame(step)
-  }
-  const start = () => {
-    // Manual scrubbing (currentTime stepping) needs the whole file buffered:
-    // with preload the browser only fetches what a plain playback would, and
-    // every backward seek re-aborts the range request on file:// setups.
-    try { video.pause() } catch { /* already paused */ }
-    video.load()
-    video.addEventListener('canplaythrough', () => {
-      direction = 1
-      video.currentTime = 0
-      requestAnimationFrame(step)
-    }, { once: true })
-  }
-  if (video.readyState >= 4) start()
-  else video.addEventListener('canplaythrough', start, { once: true })
-})

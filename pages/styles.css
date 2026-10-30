@@ -7,12 +7,18 @@
 /* Real product screenshots */
 .real-hero-shot { min-width: 0; }
 .real-shot { position: relative; display: block; overflow: hidden; border: 1px solid rgba(237,232,223,.15); border-radius: 12px; background: #0a1715; box-shadow: 0 24px 70px rgba(0,0,0,.28); color: inherit; text-decoration: none; }
+button.real-shot { font: inherit; text-align: left; }
 .real-shot img { display: block; width: 100%; height: auto; transition: transform 240ms ease, filter 240ms ease; }
 .shot-link { display: block; }
 .real-shot:hover img { transform: scale(1.012); filter: brightness(1.05); }
 .hero-shot { max-height: 490px; }
 .hero-shot img { object-fit: contain; max-height: 490px; }
-.hero-video video { display: block; width: 100%; max-height: 490px; object-fit: contain; background: #0a1715; }
+/* The video card keeps the screenshot's card shape and CROPS the recording
+   to fill it (object-fit: cover): the raw capture is a wide strip, and a
+   wide strip in the hero reads as a banner, not as a product card. */
+.hero-video { display: block; width: 100%; aspect-ratio: 16 / 10.5; max-height: 490px; padding: 0; border: 1px solid rgba(237,232,223,.15); background: #0a1715; cursor: pointer; }
+.hero-video video { display: block; width: 100%; height: 100%; object-fit: cover; background: #0a1715; }
+.hero-video:hover video { filter: brightness(1.06); }
 .shot-expand { position: absolute; right: 14px; bottom: 14px; display: inline-flex; gap: 7px; align-items: center; padding: 8px 11px; border: 1px solid rgba(237,232,223,.2); border-radius: 7px; background: rgba(15,31,29,.88); color: #EDE8DF; font-size: 12px; opacity: 0; transform: translateY(4px); transition: opacity 180ms, transform 180ms; }
 .real-shot:hover .shot-expand, .real-shot:focus-visible .shot-expand { opacity: 1; transform: translateY(0); }
 .real-gallery { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; margin-top: 38px; align-items: start; }
