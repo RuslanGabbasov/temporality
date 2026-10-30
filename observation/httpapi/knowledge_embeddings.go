@@ -161,6 +161,17 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 			offset = parsed
 		}
 	}
+	// Validate the delta watermark up front — before the project branching can
+	// answer 501 for stores without the global enumeration.
+	var sinceFilter string
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("since must be RFC3339"))
+			return
+		}
+		sinceFilter = parsed.UTC().Format(time.RFC3339Nano)
+	}
 	projects := []string{}
 	if project != "" {
 		if _, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, project); !allowed {
@@ -283,6 +294,7 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 		return items[i].ID < items[j].ID
 	})
 	total := len(items)
+	fullTotal := total
 	// knowledgeTotal = knowledge items seen regardless of vectors: when it is
 	// non-zero but total is zero, the semantic layer has produced no vectors
 	// for this installation (embeddings model never loaded — Hugging Face
@@ -296,6 +308,23 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	for _, item := range items {
 		states[item.State]++
 	}
+	// Delta mode (since=RFC3339): only items CHANGED after the moment cross
+	// the wire — the browser keeps the corpus in IndexedDB and merges the
+	// tail. `states` above still describe the FULL embedded corpus (the
+	// client replaces its cached counts wholesale), and full_total lets the
+	// client detect vanished items (a visibility scope change can remove a
+	// cached point without any updated_at bump): when cache+delta does not
+	// add up to full_total, the client re-streams fully.
+	if sinceFilter != "" {
+		kept := make([]mapItem, 0, len(items))
+		for _, item := range items {
+			if item.UpdatedAt > sinceFilter {
+				kept = append(kept, item)
+			}
+		}
+		total = len(kept)
+		items = kept
+	}
 	if offset < len(items) {
 		end := offset + limit
 		if end > len(items) {
@@ -305,7 +334,7 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 	} else {
 		items = nil
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total, "knowledge_total": knowledgeTotal, "states": states, "project_errors": projectErrors})
+	writeJSON(w, 200, map[string]any{"items": items, "model": model, "total": total, "full_total": fullTotal, "knowledge_total": knowledgeTotal, "states": states, "project_errors": projectErrors})
 }
 
 // neighborStore is the vector-listing capability behind the neighbors lookup.

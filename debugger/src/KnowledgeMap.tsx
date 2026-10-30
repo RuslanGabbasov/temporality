@@ -176,8 +176,8 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // Stream diagnostics go to the console on purpose: «карта не грузится»
     // reports need the client-side trace to be diagnosable remotely.
     console.info('[knowledge-map] load start, project:', JSON.stringify(project), 'gen:', gen)
-    // Fresh cache → instant paint, no network. Retry passes ignoreCache:
-    // a retry that answers from the cache would be no retry at all.
+    // Fresh in-memory cache → instant paint, no network. Retry passes
+    // ignoreCache: a retry that answers from the cache would be no retry.
     if (!opts?.ignoreCache) {
       const cached = corpusCache.get(cacheKey(project))
       if (cached && Date.now() - cached.at < CORPUS_TTL_MS) {
@@ -192,60 +192,141 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     } else {
       corpusCache.delete(cacheKey(project))
     }
-    setLoading(true); setError('')
-    setProgress({ loaded: 0, total: null })
-    projectErrorsRef.current = []
-    try {
-      const accumulated: Array<import('./semanticMap').MapItem> = []
-      const seen = new Set<string>()
-      const BATCH = 100
-      let total: number | null = null
-      let knowledgeTotal: number | null = null
-      let states: Record<string, number> | null = null
-      // Guards against a journal older than offset-paging (it would replay
-      // the same first page forever): a hard page cap and a stall breaker —
-      // two consecutive pages with zero fresh items stop the stream. The cap
-      // is sized for 100-item pages (4k items) — the corpus outgrowing that
-      // renders progressively but stops streaming rather than spin forever.
-      const maxPages = 40
-      let stalled = 0
-      for (let offset = 0, pageIdx = 0; !stale() && pageIdx < maxPages && (total === null || offset < total); offset += BATCH, pageIdx++) {
-        const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: BATCH, offset })
-        if (stale()) return
-        if (typeof page.total === 'number') total = page.total
-        if (typeof page.knowledge_total === 'number') knowledgeTotal = page.knowledge_total
-        if (page.states) states = page.states
-        for (const pe of page.project_errors ?? []) if (!projectErrorsRef.current.includes(pe)) projectErrorsRef.current.push(pe)
-        const before = accumulated.length
-        const fresh = (page.items ?? []).filter((item) => !seen.has(item.id))
-        for (const item of page.items ?? []) seen.add(item.id)
-        accumulated.push(...fresh)
-        setItems([...accumulated])
-        setProgress({ loaded: accumulated.length, total: total ?? accumulated.length })
-        setKnowledgeTotal(knowledgeTotal)
-        if (states) setStates(states)
-        setProjectErrors([])
-        console.info('[knowledge-map] batch ok: offset', offset, 'page', (page.items ?? []).length, 'accumulated', accumulated.length, 'total', total)
-        if ((page.items ?? []).length === 0) break
-        if (accumulated.length === before && ++stalled >= 2) break
-      }
-      // Cache the corpus: the map unmounts on every dossier open/close and
-      // the fetch would otherwise replay on each return — a fresh cache
-      // paints the full map instantly and spends zero requests.
-      corpusCache.set(cacheKey(project), { at: Date.now(), items: accumulated, total, knowledgeTotal, states })
-    } catch (e) {
-      // A superseded gen must stay quiet — the newer load owns the UI state.
-      if (!stale()) {
-        setError(e instanceof Error ? e.message : 'Request failed')
-        setItems([])
-      }
-    } finally {
-      if (!stale()) {
-        setLoading(false)
-        setProgress(null)
-        setProjectErrors([...projectErrorsRef.current])
+    // The full streaming path — also the fallback whenever the IndexedDB
+    // delta path distrusts its cache (count mismatch, load error).
+    const streamFull = async () => {
+      setLoading(true); setError('')
+      setProgress({ loaded: 0, total: null })
+      projectErrorsRef.current = []
+      try {
+        const accumulated: Array<import('./semanticMap').MapItem> = []
+        const seen = new Set<string>()
+        const BATCH = 100
+        let total: number | null = null
+        let knowledgeTotal: number | null = null
+        let states: Record<string, number> | null = null
+        // Guards against a journal older than offset-paging (it would replay
+        // the same first page forever): a hard page cap and a stall breaker —
+        // two consecutive pages with zero fresh items stop the stream. The cap
+        // is sized for 100-item pages (4k items) — the corpus outgrowing that
+        // renders progressively but stops streaming rather than spin forever.
+        const maxPages = 40
+        let stalled = 0
+        for (let offset = 0, pageIdx = 0; !stale() && pageIdx < maxPages && (total === null || offset < total); offset += BATCH, pageIdx++) {
+          const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: BATCH, offset })
+          if (stale()) return
+          if (typeof page.total === 'number') total = page.total
+          if (typeof page.knowledge_total === 'number') knowledgeTotal = page.knowledge_total
+          if (page.states) states = page.states
+          for (const pe of page.project_errors ?? []) if (!projectErrorsRef.current.includes(pe)) projectErrorsRef.current.push(pe)
+          const before = accumulated.length
+          const fresh = (page.items ?? []).filter((item) => !seen.has(item.id))
+          for (const item of page.items ?? []) seen.add(item.id)
+          accumulated.push(...fresh)
+          setItems([...accumulated])
+          setProgress({ loaded: accumulated.length, total: total ?? accumulated.length })
+          setKnowledgeTotal(knowledgeTotal)
+          if (states) setStates(states)
+          setProjectErrors([])
+          console.info('[knowledge-map] batch ok: offset', offset, 'page', (page.items ?? []).length, 'accumulated', accumulated.length, 'total', total)
+          if ((page.items ?? []).length === 0) break
+          if (accumulated.length === before && ++stalled >= 2) break
+        }
+        // Cache the corpus: the map unmounts on every dossier open/close and
+        // the fetch would otherwise replay on each return — a fresh cache
+        // paints the full map instantly and spends zero requests.
+        corpusCache.set(cacheKey(project), { at: Date.now(), items: accumulated, total, knowledgeTotal, states })
+        // IndexedDB: the cross-session cache. The next cold mount paints from
+        // here and only fetches the delta.
+        if (accumulated.length) {
+          void import('./mapCorpusCache').then((cache) =>
+            cache.saveProject(project, accumulated, { states: states ?? {}, knowledgeTotal: knowledgeTotal ?? accumulated.length }))
+        }
+      } catch (e) {
+        // A superseded gen must stay quiet — the newer load owns the UI state.
+        if (!stale()) {
+          setError(e instanceof Error ? e.message : 'Request failed')
+          setItems([])
+        }
+      } finally {
+        if (!stale()) {
+          setLoading(false)
+          setProgress(null)
+          setProjectErrors([...projectErrorsRef.current])
+        }
       }
     }
+    // ── IndexedDB path: paint the cached corpus instantly, then fetch only
+    // what changed (since = cached max updated_at) under the same progress
+    // pill. full_total guards correctness: cache + delta must add up, else
+    // the full stream takes over (a visibility change removed cached points
+    // without any updated_at bump).
+    if (!opts?.ignoreCache) {
+      try {
+        const cache = await import('./mapCorpusCache').then((m) => m.loadProject(project))
+        if (stale()) return
+        if (cache && cache.items.length > 0 && cache.meta?.maxUpdatedAt) {
+          console.info('[knowledge-map] idb hydrate:', cache.items.length, 'items, cached at', new Date(cache.meta.at).toISOString())
+          // Cached dots paint instantly and skip the birth trail — the trail
+          // belongs to the delta arrivals.
+          const nowMs = performance.now()
+          for (const item of cache.items) appearedAtRef.current.set(item.id, nowMs)
+          setItems(cache.items)
+          setKnowledgeTotal(cache.meta.knowledgeTotal)
+          if (cache.meta.states && Object.keys(cache.meta.states).length) setStates(cache.meta.states)
+          setLoading(false)
+          const byId = new Map(cache.items.map((item) => [item.id, item]))
+          const deltaBatch = 200
+          let deltaTotal: number | null = null
+          let fullTotal: number | null = null
+          let deltaStates: Record<string, number> | null = null
+          let deltaKnowledgeTotal: number | null = null
+          let changed = 0
+          let vanishedChecked = false
+          let vanished = false
+          let pageErrors: string[] = []
+          for (let offset = 0, pageIdx = 0; !stale() && pageIdx < 100 && (deltaTotal === null || offset < deltaTotal); offset += deltaBatch, pageIdx++) {
+            const page = await observationApi.knowledgeEmbeddingMap({ project: project || undefined, limit: deltaBatch, offset, since: cache.meta.maxUpdatedAt })
+            if (stale()) return
+            if (typeof page.total === 'number') deltaTotal = page.total
+            if (typeof page.full_total === 'number') { fullTotal = page.full_total; vanishedChecked = true }
+            if (page.states) deltaStates = page.states
+            if (typeof page.knowledge_total === 'number') deltaKnowledgeTotal = page.knowledge_total
+            for (const pe of page.project_errors ?? []) pageErrors.push(pe)
+            const pageItems = page.items ?? []
+            changed += pageItems.length
+            for (const item of pageItems) byId.set(item.id, item)
+            const merged = [...byId.values()]
+            setItems(merged)
+            setProgress({ loaded: merged.length, total: cache.items.length + (deltaTotal ?? 0) })
+            if (deltaStates) setStates(deltaStates)
+            if (deltaKnowledgeTotal !== null) setKnowledgeTotal(deltaKnowledgeTotal)
+            if (pageItems.length === 0) break
+          }
+          if (stale()) return
+          const merged = [...byId.values()]
+          if (vanishedChecked && fullTotal !== null && merged.length !== fullTotal) {
+            // Cached points vanished server-side (scope/visibility change):
+            // the delta cannot express removals — re-stream the full corpus.
+            console.info('[knowledge-map] idb mismatch: merged', merged.length, 'vs full', fullTotal, '— full reload')
+            await streamFull()
+            return
+          }
+          // Fresh states/knowledge totals came with the delta; keep the last.
+          const finalStates = deltaStates ?? cache.meta.states ?? {}
+          const finalKnowledge = deltaKnowledgeTotal ?? cache.meta.knowledgeTotal
+          corpusCache.set(cacheKey(project), { at: Date.now(), items: merged, total: merged.length, knowledgeTotal: finalKnowledge, states: finalStates })
+          void import('./mapCorpusCache').then((m) => m.saveProject(project, merged, { states: finalStates, knowledgeTotal: finalKnowledge }))
+          setProjectErrors([...new Set(pageErrors)])
+          console.info('[knowledge-map] idb delta ok:', changed, 'changed, merged', merged.length)
+          return
+        }
+      } catch (e) {
+        console.info('[knowledge-map] idb path failed, full stream:', e instanceof Error ? e.message : String(e))
+        if (stale()) { /* fall through to streamFull */ } else return
+      }
+    }
+    await streamFull()
   }, [project])
 
   useEffect(() => { void load(); return () => { loadGen.current++ } }, [load])
