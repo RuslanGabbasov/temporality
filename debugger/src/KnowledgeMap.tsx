@@ -305,6 +305,9 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
           }
           if (stale()) return
           const merged = [...byId.values()]
+          // The delta path owns its own progress cleanup: streamFull's finally
+          // never runs here, and a pill left at «X из X» hangs forever.
+          if (!stale()) setProgress(null)
           if (vanishedChecked && fullTotal !== null && merged.length !== fullTotal) {
             // Cached points vanished server-side (scope/visibility change):
             // the delta cannot express removals — re-stream the full corpus.
