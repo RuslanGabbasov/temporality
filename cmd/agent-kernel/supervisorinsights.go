@@ -25,8 +25,18 @@ import (
 )
 
 // One insight per metric per window; the dedup window keeps a persisting
-// anomaly from re-journaling every pass.
+// anomaly from re-journaling every pass. Escalation cuts through the dedup:
+// a finding that DOUBLED against the last published one (or crossed the
+// absolute severe floor) is new information — staying silent for hours while
+// the provider keeps degrading reads as the supervisor not noticing.
 const supervisorInsightDedupWindow = 6 * time.Hour
+
+// Escalation: republish when the finding doubles vs the last published one.
+const supervisorInsightEscalateFactor = 2
+
+// Absolute severe floor for latency findings (p95 in ms): ten minutes of
+// provider p95 is actionable news no matter what the dedup window says.
+const supervisorInsightSevereLatencyMS = 10 * 60_000
 
 // runSupervisorInsightPass executes one detection pass. Model errors never
 // fail the pass — the template wording is the floor.
@@ -48,7 +58,7 @@ func runSupervisorInsightPass(ctx context.Context, log *slog.Logger, activities 
 	if len(anomalies) == 0 {
 		return
 	}
-	seen, err := fetchInsightMetrics(ctx, observationURL, journalToken, now.Add(-supervisorInsightDedupWindow))
+	seen, magnitudes, err := fetchInsightMetrics(ctx, observationURL, journalToken, now.Add(-supervisorInsightDedupWindow))
 	if err != nil {
 		log.Warn("supervisor insights: list recent", "error", err.Error())
 		return
@@ -59,15 +69,29 @@ func runSupervisorInsightPass(ctx context.Context, log *slog.Logger, activities 
 		client = nil // judge off — template wording
 	}
 	for _, anomaly := range anomalies {
-		if last, ok := seen[anomaly.Metric]; ok && now.Sub(last) < supervisorInsightDedupWindow {
-			continue
+		lastAt, published := seen[anomaly.Metric]
+		if published && now.Sub(lastAt) < supervisorInsightDedupWindow {
+			// Inside the dedup window — but a doubled finding (or one that
+			// crossed the severe floor) escalates immediately: «p95 вырос ещё
+			// на порядок» is new information, not a repeat.
+			lastMagnitude := magnitudes[anomaly.Metric]
+			escalated := anomaly.Magnitude > 0 && lastMagnitude > 0 && anomaly.Magnitude >= supervisorInsightEscalateFactor*lastMagnitude
+			if anomaly.Magnitude >= supervisorInsightSevereLatencyMS {
+				escalated = true
+			}
+			if !escalated {
+				continue
+			}
+			log.Info("supervisor insight escalates past the dedup window",
+				"metric", anomaly.Metric, "last", lastMagnitude, "now", anomaly.Magnitude)
 		}
 		explanation, recommendation := agent.ExplainAnomaly(ctx, client, anomaly)
-		if err := activities.PublishSupervisorInsight(ctx, anomaly.Metric, anomaly.Severity, anomaly.Title, anomaly.Current, anomaly.Baseline, explanation, recommendation); err != nil {
+		if err := activities.PublishSupervisorInsight(ctx, anomaly.Metric, anomaly.Severity, anomaly.Title, anomaly.Current, anomaly.Baseline, explanation, recommendation, anomaly.Magnitude); err != nil {
 			log.Warn("supervisor insights: publish", "metric", anomaly.Metric, "error", err.Error())
 			continue
 		}
 		seen[anomaly.Metric] = now
+		magnitudes[anomaly.Metric] = anomaly.Magnitude
 		log.Info("supervisor insight recorded", "metric", anomaly.Metric, "explanation", explanation)
 	}
 }
@@ -104,26 +128,26 @@ func fetchHealthStats(ctx context.Context, observationURL, journalToken string, 
 
 // fetchInsightMetrics maps metric → the newest insight time inside the
 // dedup window.
-func fetchInsightMetrics(ctx context.Context, observationURL, journalToken string, since time.Time) (map[string]time.Time, error) {
+func fetchInsightMetrics(ctx context.Context, observationURL, journalToken string, since time.Time) (map[string]time.Time, map[string]int64, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimSuffix(observationURL, "/")+"/v1/observations/events?type=supervisor.insight&limit=50", nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if journalToken != "" {
 		request.Header.Set("Authorization", "Bearer "+journalToken)
 	}
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("insight events %s", journalErrorSnippet(response.StatusCode, string(body)))
+		return nil, nil, fmt.Errorf("insight events %s", journalErrorSnippet(response.StatusCode, string(body)))
 	}
 	var page struct {
 		Events []struct {
@@ -132,9 +156,10 @@ func fetchInsightMetrics(ctx context.Context, observationURL, journalToken strin
 		} `json:"events"`
 	}
 	if err := json.Unmarshal(body, &page); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	seen := map[string]time.Time{}
+	magnitudes := map[string]int64{}
 	for _, event := range page.Events {
 		metric, _ := event.Data["metric"].(string)
 		if metric == "" {
@@ -145,7 +170,12 @@ func fetchInsightMetrics(ctx context.Context, observationURL, journalToken strin
 		}
 		if last, ok := seen[metric]; !ok || event.OccurredAt.After(last) {
 			seen[metric] = event.OccurredAt
+			// The newest event per metric carries the magnitude the escalation
+			// math compares against (older events keep their own values).
+			if magnitude, ok := event.Data["magnitude"].(float64); ok {
+				magnitudes[metric] = int64(magnitude)
+			}
 		}
 	}
-	return seen, nil
+	return seen, magnitudes, nil
 }

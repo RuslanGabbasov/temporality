@@ -30,11 +30,11 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'quality' | 'sagas' | 'knowledge' | 'supervisor' | 'users'
+type Tab = 'overview' | 'quality' | 'sagas' | 'supervisor' | 'users'
 // Every valid tab: the URL param and the last-tab memory validate against this
 // full set (the TAB_KEYS strip above it is only the initial-render order).
-const ALL_TABS: Tab[] = ['overview', 'quality', 'sagas', 'knowledge', 'supervisor', 'users']
-const TAB_KEYS: Tab[] = ['overview', 'quality', 'sagas', 'knowledge']
+const ALL_TABS: Tab[] = ['overview', 'quality', 'sagas', 'supervisor', 'users']
+const TAB_KEYS: Tab[] = ['overview', 'quality', 'sagas']
 // The last open tab survives reloads and revisits: returning to the
 // supervisor triage mid-investigation must not land back on the overview.
 const LAST_TAB_KEY = 'dashboard.tab'
@@ -275,7 +275,9 @@ export default function Dashboard({ project, setProject }: Props) {
     { key: 'overview', label: t('dashboard.tab_overview') ?? 'Overview' },
     { key: 'quality', label: t('dashboard.tab_quality') ?? 'Quality' },
     { key: 'sagas', label: t('dashboard.tab_sagas') ?? 'Sagas' },
-    { key: 'knowledge', label: t('dashboard.tab_knowledge') ?? 'Knowledge' },
+    // The knowledge observability tab was removed (an atavism next to the
+    // Knowledge explorer page): its patterns and historical filters live
+    // there, where investigation actually happens.
     // The supervisor surface (docs/supervisor-model.md §7): the administrator's
     // problem queue lives inside the dashboard, not as a separate page.
     { key: 'supervisor', label: t('dashboard.tab_supervisor') ?? 'Supervisor' },
@@ -630,7 +632,8 @@ export default function Dashboard({ project, setProject }: Props) {
 
       {tab === 'sagas' && <ProjectOverview project={project} />}
 
-      {tab === 'knowledge' && <Observability project={project} />}
+      // The knowledge observability view moved out with the knowledge tab —
+      // the Knowledge explorer page owns that surface now.
 
       {tab === 'supervisor' && <SupervisorPanels onPendingChange={setSupervisorPending} />}
 

@@ -45,6 +45,11 @@ type Anomaly struct {
 	// Recommend is the default next step; the model may replace it with a
 	// sharper one grounded in the same facts.
 	Recommend string
+	// Magnitude is the raw size of the finding (latency p95 in ms; 0 for
+	// count-based rules). The pass escalates past the dedup window when the
+	// finding doubles against the last published one — «ещё на порядок»
+	// must not wait six hours to be said.
+	Magnitude int64
 }
 
 // DetectAnomalies compares the current health window against the previous
@@ -149,21 +154,25 @@ func DetectAnomalies(current, baseline *observation.HealthStats) []Anomaly {
 		})
 	}
 
-	// Latency regression: p95 multiplied with an absolute floor.
+	// Latency regression: p95 multiplied with an absolute floor and a
+	// meaningful sample. A handful of calls cannot say anything about p95 —
+	// the previous user-visible wording already had to apologize for a
+	// 7-call baseline, which reads as noise, not as a finding.
 	for _, model := range current.Models {
 		base := baselineModel(baseline, model.Model)
-		if base.P95LatencyMS <= 0 || model.P95LatencyMS < 30_000 {
+		if base.P95LatencyMS <= 0 || model.P95LatencyMS < 30_000 || model.Calls < 20 {
 			continue
 		}
 		if model.P95LatencyMS < 3*base.P95LatencyMS {
 			continue
 		}
 		found = append(found, Anomaly{
-			Metric:   "latency_p95:" + model.Model,
-			Severity: InsightSeverityInfo,
-			Title:    fmt.Sprintf("p95 задержки модели %s вырос кратно", model.Model),
-			Current:  fmt.Sprintf("p95 %s", fmtDurationMS(model.P95LatencyMS)),
-			Baseline: fmt.Sprintf("p95 %s", fmtDurationMS(base.P95LatencyMS)),
+			Metric:    "latency_p95:" + model.Model,
+			Severity:  InsightSeverityInfo,
+			Title:     fmt.Sprintf("p95 задержки модели %s вырос кратно", model.Model),
+			Current:   fmt.Sprintf("p95 %s", fmtDurationMS(model.P95LatencyMS)),
+			Baseline:  fmt.Sprintf("p95 %s", fmtDurationMS(base.P95LatencyMS)),
+			Magnitude: model.P95LatencyMS,
 			Facts: []string{
 				fmt.Sprintf("current window: model %s: p95 %dms, p50 %dms, %d calls", model.Model, model.P95LatencyMS, model.P50LatencyMS, model.Calls),
 				fmt.Sprintf("previous window: model %s: p95 %dms, p50 %dms, %d calls", model.Model, base.P95LatencyMS, base.P50LatencyMS, base.Calls),
@@ -276,7 +285,7 @@ func ExplainAnomaly(ctx context.Context, model *llm.Client, a Anomaly) (explanat
 // PublishSupervisorInsight journals one anomaly explanation as a
 // supervisor.insight event; the problem queue lists them beside verdicts.
 // Best-effort by the caller.
-func (a *Activities) PublishSupervisorInsight(ctx context.Context, metric, severity, title, current, baseline, explanation, recommendation string) error {
+func (a *Activities) PublishSupervisorInsight(ctx context.Context, metric, severity, title, current, baseline, explanation, recommendation string, magnitude int64) error {
 	if a.Events == nil {
 		return nil
 	}
@@ -293,6 +302,7 @@ func (a *Activities) PublishSupervisorInsight(ctx context.Context, metric, sever
 			"title":          title,
 			"current":        current,
 			"baseline":       baseline,
+			"magnitude":      magnitude,
 			"explanation":    explanation,
 			"recommendation": recommendation,
 		},

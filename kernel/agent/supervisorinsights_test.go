@@ -25,8 +25,8 @@ func statsWindow(calls, failed, retries, runsFailed, pending int, p95 int64) *ob
 }
 
 func TestDetectAnomaliesRules(t *testing.T) {
-	current := statsWindow(10, 4, 0, 4, 4, 40_000)
-	baseline := statsWindow(10, 0, 0, 0, 0, 10_000)
+	current := statsWindow(24, 8, 0, 4, 4, 40_000) // 8/24 = 33% failure rate
+	baseline := statsWindow(24, 0, 0, 0, 0, 10_000)
 	anomalies := DetectAnomalies(current, baseline)
 	metrics := map[string]bool{}
 	for _, a := range anomalies {
@@ -37,6 +37,35 @@ func TestDetectAnomaliesRules(t *testing.T) {
 			t.Errorf("expected anomaly %q, got %v", want, metrics)
 		}
 	}
+}
+
+// A handful of calls cannot say anything about p95: the insight used to
+// apologize for a 7-call baseline inside its own text — that is noise, not a
+// finding. Latency needs a meaningful sample.
+func TestDetectAnomaliesLatencyNeedsSample(t *testing.T) {
+	current := statsWindow(10, 4, 0, 4, 4, 40_000)
+	baseline := statsWindow(10, 0, 0, 0, 0, 10_000)
+	for _, a := range DetectAnomalies(current, baseline) {
+		if a.Metric == "latency_p95:glm" {
+			t.Fatalf("latency anomaly on a 10-call sample must not fire")
+		}
+	}
+}
+
+// The latency finding carries its raw magnitude — the pass escalation math
+// compares it against the last published one.
+func TestDetectAnomaliesLatencyCarriesMagnitude(t *testing.T) {
+	current := statsWindow(24, 4, 0, 4, 4, 40_000)
+	baseline := statsWindow(24, 0, 0, 0, 0, 10_000)
+	for _, a := range DetectAnomalies(current, baseline) {
+		if a.Metric == "latency_p95:glm" {
+			if a.Magnitude != 40_000 {
+				t.Fatalf("magnitude = %d, want 40000 (the current p95)", a.Magnitude)
+			}
+			return
+		}
+	}
+	t.Fatal("latency anomaly expected")
 }
 
 func TestDetectAnomaliesQuietWhenSteady(t *testing.T) {
