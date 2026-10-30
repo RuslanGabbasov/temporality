@@ -667,6 +667,43 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
           : String(d.verdict ?? '')
       return { icon: '🧪', label: t('runs.event.eval_case_decided'), detail: [verdict, String(d.reviewed_by ?? '')].filter(Boolean).join(' · '), color: d.verdict === 'rejected' ? '#f7768e' : '#9ece6a' }
     }
+    case 'supervisor.verdict': {
+      // Supervisor queue verdicts (docs/supervisor-model.md): triage of a
+      // failed run (cause_class + recommendation) or a wave-B/C case review
+      // (case + recommendation). The summary is the reader's anchor either way.
+      const classKey = String(d.case ?? d.cause_class ?? '')
+      const kind = d.case ? t('runs.event.supervisor_case') : t('runs.event.supervisor_triage')
+      const known = d.case
+        ? t(`supervisor.case_${classKey}`)
+        : t(`supervisor.cause_${classKey}`)
+      const detailParts = [known !== `supervisor.${d.case ? 'case' : 'cause'}_${classKey}` ? known : classKey, String(d.summary ?? '')]
+      return {
+        icon: '🛰',
+        label: kind,
+        detail: detailParts.filter(Boolean).slice(0, 2).join(' · '),
+        color: '#bb9af7',
+      }
+    }
+    case 'supervisor.insight': {
+      const severity = String(d.severity ?? '')
+      const knownSeverity = t(`supervisor.severity_${severity}`)
+      return {
+        icon: '🛰',
+        label: t('runs.event.supervisor_insight'),
+        detail: [String(d.metric ?? ''), String(d.title ?? ''), knownSeverity !== `supervisor.severity_${severity}` ? knownSeverity : severity].filter(Boolean).slice(0, 2).join(' · '),
+        color: severity === 'critical' || severity === 'high' ? '#f7768e' : '#e0af68',
+      }
+    }
+    case 'model.call_failed': {
+      // The rejected provider call (route, masked credential) — the overview
+      // «Запрос → Ответ» button reads the same event.
+      return {
+        icon: '⛔',
+        label: t('runs.event.call_failed'),
+        detail: [String(d.route ?? ''), String(d.model ?? ''), `HTTP ${String(d.status ?? '?')}`].filter(Boolean).join(' · '),
+        color: '#f7768e',
+      }
+    }
     default:
       return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }
   }
