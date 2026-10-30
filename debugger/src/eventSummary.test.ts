@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { eventSummary, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
 import { foldDelegations } from './DelegationTree'
 import { foldPlans } from './PlanGraph'
+import { ru } from './locales/ru'
 import type { ObservationEvent } from './observationApi'
 
 const t = (key: string) => key
@@ -577,4 +578,35 @@ describe('restoreMarkdownLines', () => {
     const restored = restoreMarkdownLines('введение ### 1. Что сделано и проверено')
     expect(restored).toBe('введение\n### 1. Что сделано и проверено')
   })
+})
+
+// The overview's «last event» strip must never print a raw dotted event type:
+// every journaled lifecycle event localizes (the run.cancelled incident — a
+// terminated run showed the bare type because the summary had no case for it).
+describe('raw types never leak into the summary label', () => {
+  // ru.ts-backed translator: keys resolve to real labels, so a missing case
+  // (label === the dotted key === the raw type) fails the match below.
+  const ruT = (key: string) => ru[key] ?? key
+  const lifecycleTypes = [
+    'run.started', 'run.completed', 'run.failed', 'run.cancelled',
+    'turn.started', 'turn.completed',
+    'saga.registered', 'saga.attached', 'saga.detached', 'saga.renamed', 'saga.merged', 'saga.deleted',
+    'artifact.authored', 'artifact.updated', 'artifact.submitted',
+    'secret.issued', 'secret.denied',
+    'knowledge.proposed', 'knowledge.confirmed',
+    'hint.offered', 'hint.used',
+    'model.started', 'model.completed', 'model.attempt', 'model.call_failed', 'model.nudged',
+    'tool.started', 'tool.completed', 'tool.failed', 'tool.blocked',
+    'delegation.started', 'delegation.completed', 'delegation.failed',
+    'human.requested', 'human.answered', 'human.cancelled',
+    'approval.requested', 'approval.granted', 'approval.rejected', 'approval.auto_granted',
+    'hitl.verdict.recorded', 'operation.reconciled',
+    'agent.behavior', 'agent.summary', 'run.user_note',
+  ]
+    for (const type of lifecycleTypes) {
+    it(`localizes ${type}`, () => {
+      const summary = eventSummary(event(type, {}), ruT)
+      expect(summary.label).not.toMatch(/^[a-z_]+(\.[a-z_]+)+$/)
+    })
+  }
 })

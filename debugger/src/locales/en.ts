@@ -699,6 +699,7 @@ export const en: Record<string, string> = {
     'runs.event.run_started': 'Run started',
     'runs.event.run_completed': 'Run completed',
     'runs.event.run_failed': 'Run failed',
+    'runs.event.run_cancelled': 'Run cancelled',
     'runs.event.model_call': 'Model call',
     'runs.event.model_response': 'Model response',
     'runs.event.stream_regen': 'regenerated',
@@ -730,6 +731,9 @@ export const en: Record<string, string> = {
     'runs.event.secret_issued': 'Secret issued',
     'runs.event.secret_denied': 'Secret denied',
     'runs.event.artifact_read': 'Artifact read',
+    'runs.event.artifact_authored': 'Artifact authored by agent',
+    'runs.event.artifact_updated': 'Artifact updated',
+    'runs.event.artifact_submitted': 'Artifact submitted for review',
     'runs.event.skill_applied': 'Skill applied',
     'runs.event.extraction_started': 'Knowledge extraction',
     'runs.event.extraction_completed': 'Extraction finished',
@@ -781,6 +785,7 @@ export const en: Record<string, string> = {
 
     // Sagas (docs/sagas.md): saga_register / saga_attach tool events
     'runs.event.saga_registered': 'Saga registered',
+    'runs.event.saga_deleted': 'Saga deleted',
     'runs.event.saga_attached': 'Run attached to saga',
     'runs.event.saga_renamed': 'Saga renamed',
     'runs.event.saga_merged': 'Sagas merged',

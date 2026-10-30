@@ -199,6 +199,10 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '✓', label: t('runs.event.run_completed'), detail: `${d.turns ?? '?'} ${t('runs.turns')}`, color: '#9ece6a' }
     case 'run.failed':
       return { icon: '✗', label: t('runs.event.run_failed'), detail: explainKernelError(String(d.error ?? '')).cause.slice(0, 80), color: '#f7768e' }
+    case 'run.cancelled':
+      // Journaled by the terminate heal path and by workflow cancellation:
+      // the actor field names who stopped it, when present.
+      return { icon: '■', label: t('runs.event.run_cancelled'), detail: String(d.actor ?? ''), color: 'var(--tm-text-3)' }
     case 'run.user_note':
       // Mid-run chat addendum drained into the conversation (kernel.user_note).
       return { icon: '⤳', label: t('runs.event.user_note'), detail: t('runs.event.user_note_detail', { turn: String(d.turn ?? '?') }), color: 'var(--tm-teal)' }
@@ -580,10 +584,23 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       const size = bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${bytes} B`
       return { icon: '📄', label: t('runs.event.artifact_read'), detail: [String(d.title ?? ''), String(d.artifact_id ?? ''), size].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
     }
+    case 'artifact.authored':
+      // Authoring/revision/submit markers (docs/artifact-lifecycle.md): the
+      // title is the payload, the version pins which revision it was.
+      return { icon: '📄', label: t('runs.event.artifact_authored'), detail: [String(d.title ?? ''), d.version ? `v${d.version}` : ''].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
+    case 'artifact.updated':
+      return { icon: '📄', label: t('runs.event.artifact_updated'), detail: [String(d.title ?? ''), d.version ? `v${d.version}` : ''].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
+    case 'artifact.submitted':
+      return { icon: '📄', label: t('runs.event.artifact_submitted'), detail: [String(d.title ?? ''), d.review_id ? String(d.review_id) : '', d.version ? `v${d.version}` : ''].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
     case 'saga.registered': {
       // The title is what the reader recognises; the generated saga id only
       // matters as a short handle for saga_attach.
       return { icon: '🧭', label: t('runs.event.saga_registered'), detail: [String(d.title ?? ''), shortId(d.saga_id)].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
+    }
+    case 'saga.deleted': {
+      // Operator hygiene (docs/sagas.md §8): the grouping is retracted, its
+      // tasks fall back to the unbound pool — runs and history stay.
+      return { icon: '🧭', label: t('runs.event.saga_deleted'), detail: shortId(d.saga_id), color: 'var(--tm-text-3)' }
     }
     case 'saga.attached': {
       // The task answers "which run joined the saga"; the note (optional)

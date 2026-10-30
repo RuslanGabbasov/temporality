@@ -699,6 +699,7 @@ export const ru: Record<string, string> = {
     'runs.event.run_started': 'Запуск начат',
     'runs.event.run_completed': 'Запуск завершён',
     'runs.event.run_failed': 'Запуск завершился ошибкой',
+    'runs.event.run_cancelled': 'Запуск отменён',
     'runs.event.model_call': 'Вызов модели',
     'runs.event.model_response': 'Ответ модели',
     'runs.event.stream_regen': 'повторная генерация',
@@ -730,6 +731,9 @@ export const ru: Record<string, string> = {
     'runs.event.secret_issued': 'Секрет выдан',
     'runs.event.secret_denied': 'Секрет отклонён',
     'runs.event.artifact_read': 'Артефакт прочитан',
+    'runs.event.artifact_authored': 'Артефакт создан агентом',
+    'runs.event.artifact_updated': 'Артефакт обновлён',
+    'runs.event.artifact_submitted': 'Артефакт отправлен на согласование',
     'runs.event.skill_applied': 'Навык применён',
     'runs.event.extraction_started': 'Извлечение знаний',
     'runs.event.extraction_completed': 'Извлечение завершено',
@@ -781,6 +785,7 @@ export const ru: Record<string, string> = {
 
     // Sagas (docs/sagas.md): saga_register / saga_attach tool events
     'runs.event.saga_registered': 'Сага зарегистрирована',
+    'runs.event.saga_deleted': 'Сага удалена',
     'runs.event.saga_attached': 'Запуск привязан к саге',
     'runs.event.saga_renamed': 'Сага переименована',
     'runs.event.saga_merged': 'Саги объединены',
