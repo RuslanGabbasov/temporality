@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -59,9 +60,15 @@ type evaluationCaseResult struct {
 // RunSkillEvaluation loads the suite, runs every case against the requested
 // skill version and records the run. An empty version evaluates the current
 // revision. Returns a compact summary for the caller (tool or HTTP).
-func (a *Activities) RunSkillEvaluation(ctx context.Context, skillID, version string) (string, error) {
-	if a.Model == nil {
-		return "", fmt.Errorf("model client is not configured")
+func (a *Activities) RunSkillEvaluation(ctx context.Context, project, skillID, version string) (string, error) {
+	// The cases execute against a model, but NOT the env default: the
+	// judge/supervisor model (Agents → Quality settings) is the dedicated
+	// quality-work model, falling back to the project default. The env client
+	// is just the last resort — on provider-only installs it is unset, which
+	// used to make skill_evaluate unavailable to every agent.
+	evalModel, modelErr := a.evaluationModel(ctx, project)
+	if modelErr != nil {
+		return "", modelErr
 	}
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/skills/%s", a.WorkspaceURL, skillID), nil)
 	if err != nil {
@@ -135,7 +142,7 @@ func (a *Activities) RunSkillEvaluation(ctx context.Context, skillID, version st
 	results := make([]evaluationCaseResult, 0, len(suite.Cases))
 	passed, failed := 0, 0
 	for _, c := range suite.Cases {
-		result := a.runEvaluationCase(ctx, skill, markdown, c.Input, c.MustContain, c.MustNotContain)
+		result := a.runEvaluationCase(ctx, evalModel, skill, markdown, c.Input, c.MustContain, c.MustNotContain)
 		result.Name = c.Name
 		if result.Passed {
 			passed++
@@ -174,10 +181,31 @@ func (a *Activities) RunSkillEvaluation(ctx context.Context, skillID, version st
 	return summary.String(), nil
 }
 
+// evaluationModel resolves the model that executes skill evaluation cases:
+// the installation's judge/supervisor model first (the dedicated quality-work
+// model), then the project default, then the env client. Provider-only
+// installs (no env model) were locking agents out of skill_evaluate.
+func (a *Activities) evaluationModel(ctx context.Context, project string) (*llm.Client, error) {
+	if a.JudgeModel != nil {
+		if client, err := a.JudgeModel(ctx); err == nil && client != nil {
+			return client, nil
+		}
+	}
+	if project != "" && a.WorkspaceURL != "" {
+		if config, _, _, ok, err := a.modelConfigFor(ctx, project, ""); err == nil && ok {
+			return llm.New(config), nil
+		}
+	}
+	if a.Model != nil {
+		return a.Model, nil
+	}
+	return nil, errors.New("no model available for skill evaluation: pick a judge model in Agents → Quality settings, or set the project default model")
+}
+
 // runEvaluationCase executes one case: a grounded model call plus pattern
 // checks. A model failure fails the case (never the whole run) with the error
 // as the answer, so suite history stays comparable.
-func (a *Activities) runEvaluationCase(ctx context.Context, skill workspaceSkill, markdown, input string, mustContain, mustNotContain []string) evaluationCaseResult {
+func (a *Activities) runEvaluationCase(ctx context.Context, model *llm.Client, skill workspaceSkill, markdown, input string, mustContain, mustNotContain []string) evaluationCaseResult {
 	system := "You are executing a documented skill. Follow its procedure exactly and answer the task. Reply with the answer only.\n\n# Skill: " + skill.Name + "\n\n" + markdown
 	messages := []llm.Message{
 		{Role: "system", Content: system},
@@ -185,7 +213,7 @@ func (a *Activities) runEvaluationCase(ctx context.Context, skill workspaceSkill
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
-	completion, err := a.Model.Complete(callCtx, messages, nil)
+	completion, err := model.Complete(callCtx, messages, nil)
 	answer := completion.Content
 	if err != nil {
 		answer = "evaluation error: " + err.Error()
@@ -238,7 +266,7 @@ func (a *Activities) handleSkillEvaluate(ctx context.Context, request ToolReques
 		return ToolResult{Content: "error: skill_id is required"}, nil
 	}
 	version, _ := request.Arguments["version"].(string)
-	summary, err := a.RunSkillEvaluation(ctx, skillID, version)
+	summary, err := a.RunSkillEvaluation(ctx, request.Project, skillID, version)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}

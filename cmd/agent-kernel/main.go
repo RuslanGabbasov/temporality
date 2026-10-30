@@ -5241,7 +5241,8 @@ func main() {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 		defer cancel()
-		if _, err := activities.RunSkillEvaluation(ctx, skillID, req.Version); err != nil {
+		project := r.URL.Query().Get("project")
+		if _, err := activities.RunSkillEvaluation(ctx, project, skillID, req.Version); err != nil {
 			writeError(w, 422, err)
 			return
 		}

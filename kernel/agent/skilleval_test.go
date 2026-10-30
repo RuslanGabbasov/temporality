@@ -174,3 +174,66 @@ func TestSkillDiffCurrentVsDraft(t *testing.T) {
 		}
 	}
 }
+
+// Provider-only installs have no env model (TEMPORALITY_MODEL_* unset): the
+// evaluation model must come from the judge/supervisor model (Quality
+// settings) instead of failing with «model client is not configured».
+func TestSkillEvaluateUsesJudgeModelWhenEnvModelAbsent(t *testing.T) {
+	judge := fixedAnswerModel(t, "The service was deployed successfully and is healthy.")
+	skill := `{"id":"deploy-service","name":"Deploy service","version":"1.2.0","markdown":"## Purpose\nDeploy."}`
+	versions := `{"versions":[{"version":"1.2.0","status":"active"}]}`
+	suite := `{"cases":[{"name":"health check","input":"Deploy and verify","must_contain":["deployed"]}]}`
+	server, recorder := evalWorkspaceStub(t, skill, versions, suite)
+	outbox := &captureOutbox{}
+	activities := &Activities{
+		HTTP: server.Client(),
+		// NOTE: Model deliberately nil — the provider-only install shape.
+		JudgeModel: func(context.Context) (*llm.Client, error) {
+			return llm.New(llm.Config{BaseURL: judge.URL, Model: "judge-m"}), nil
+		},
+		WorkspaceURL: server.URL, WorkspaceToken: "internal",
+		Events: outbox, SourceID: "kernel",
+	}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		RunID: "run-eval", Project: "demo",
+		Name: "skill_evaluate", Arguments: map[string]any{"skill_id": "deploy-service"},
+	})
+	if err != nil {
+		t.Fatalf("skill_evaluate: %v", err)
+	}
+	if !strings.Contains(result.Content, "1 passed, 0 failed") {
+		t.Fatalf("the judge model must execute the suite, got %q", result.Content)
+	}
+	recorder.mu.Lock()
+	recorded := recorder.recorded
+	recorder.mu.Unlock()
+	if recorded == nil {
+		t.Fatal("evaluation run was not recorded")
+	}
+}
+
+// No judge model and no env model: the error must name the fix (Quality
+// settings / project default), not a bare «model client is not configured».
+func TestSkillEvaluateWithoutAnyModelNamesTheFix(t *testing.T) {
+	skill := `{"id":"deploy-service","name":"Deploy service","version":"1.2.0","markdown":"## Purpose\nDeploy."}`
+	versions := `{"versions":[{"version":"1.2.0","status":"active"}]}`
+	suite := `{"cases":[{"name":"health check","input":"Deploy and verify","must_contain":["deployed"]}]}`
+	server, _ := evalWorkspaceStub(t, skill, versions, suite)
+	activities := &Activities{
+		HTTP:         server.Client(),
+		WorkspaceURL: server.URL, WorkspaceToken: "internal",
+		SourceID: "kernel",
+	}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		RunID: "run-eval", Project: "demo",
+		Name: "skill_evaluate", Arguments: map[string]any{"skill_id": "deploy-service"},
+	})
+	if err != nil {
+		t.Fatalf("skill_evaluate: %v", err)
+	}
+	if !strings.Contains(result.Content, "Quality settings") && !strings.Contains(result.Content, "project default") {
+		t.Fatalf("the error must name the fix, got %q", result.Content)
+	}
+}
