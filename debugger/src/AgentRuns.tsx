@@ -451,21 +451,33 @@ export default function AgentRuns({ project }: { project: string }) {
     setTraceLimit((value) => value + TRACE_WINDOW_STEP)
   }, [])
   // The turn of the in-flight model call — what the ↻ nudge button targets.
-  const liveModelTurn = useMemo(() => {
+  // The call runs from its model.started until model.completed / a failure /
+  // the turn closes; the route marker (model.attempt, journaled ~100ms after
+  // the start) and its retries land INSIDE that window and must not end it —
+  // gating on «newest visible event is model.started» killed the live row
+  // milliseconds after every call began once routing markers shipped.
+  const liveModelEvent = useMemo(() => {
     if (!selectedLive) return undefined
-    const newest = [...trace.visible].reverse().find((event) => event.type === 'model.started' && runID(event) === selected)
-    return newest ? Number(newest.data?.turn ?? 0) || undefined : undefined
+    let started: ObservationEvent | undefined
+    for (const event of trace.visible) {
+      if (runID(event) !== selected) continue
+      if (event.type === 'model.started') started = event
+      else if (event.type === 'model.completed' || event.type === 'model.call_failed' || event.type === 'turn.completed' || event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') started = undefined
+    }
+    return started
   }, [selectedLive, trace.visible, selected])
+  const liveModelTurn = useMemo(() => {
+    if (!liveModelEvent) return undefined
+    return Number(liveModelEvent.data?.turn ?? 0) || undefined
+  }, [liveModelEvent])
 
-  // The live model-call row for the trace view: the newest visible event being
-  // this run's model.started means a call is in flight right now. The parts
-  // are assembled here (TraceLayers stays presentation-only): elapsed from the
-  // journal clock, then tokens/rate/statuses from the ephemeral token stream.
+  // The live model-call row for the trace view: this run has a model call in
+  // flight right now (liveModelEvent). The parts are assembled here
+  // (TraceLayers stays presentation-only): elapsed from the journal clock,
+  // then tokens/rate/statuses from the ephemeral token stream.
   const liveModelParts = useMemo(() => {
-    if (!selectedLive || !tokenMetrics) return []
-    const newest = trace.visible[trace.visible.length - 1]
-    if (!newest || newest.type !== 'model.started' || runID(newest) !== selected) return []
-    const elapsedMs = Math.max(0, nowTick - Date.parse(newest.occurred_at))
+    if (!selectedLive || !tokenMetrics || !liveModelEvent) return []
+    const elapsedMs = Math.max(0, nowTick - Date.parse(liveModelEvent.occurred_at))
     const parts = [formatDuration(elapsedMs)]
     if (!tokenMetrics.connected) {
       parts.push(tokenMetrics.reconnects > 0
@@ -487,7 +499,7 @@ export default function AgentRuns({ project }: { project: string }) {
       parts.push(t('runs.live.waiting_first_token'))
     }
     return parts
-  }, [selectedLive, tokenMetrics, trace.visible, selected, nowTick, t])
+  }, [selectedLive, tokenMetrics, liveModelEvent, nowTick, t])
 
   // §8: the trace filter/search state lives in the URL (trace* params) so a
   // link restores the exact filtered view; the existing run/view params stay
