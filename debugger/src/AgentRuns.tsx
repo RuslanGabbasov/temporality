@@ -626,6 +626,38 @@ export default function AgentRuns({ project }: { project: string }) {
       // filter may be the global "All projects". runEvents follows cursors to
       // the run's end: a single page would cut long runs and hide terminal
       // events (answered questions would never clear their cards).
+      //
+      // The SILENT refresh (10→30s poll) is a light tail pass instead of the
+      // full parades: one bounded page of the newest events — no cursor walk
+      // to the dawn of the run, no trajectory, no cost endpoints, no
+      // per-child fan-out. Those heavy pieces load on the switch (silent
+      // false) and on demand from the tabs, not on every poll tick.
+      if (silent) {
+        // Light tail pass: the newest page of this run's events merged into
+        // the already-loaded timeline, plus the result endpoint for the
+        // terminal state. No cursor walk, no trajectory, no costs, no
+        // per-child fan-out — those belong to the switch and the tabs.
+        const tailPage = await observationApi.events(undefined, undefined, undefined, undefined, { run, limit: 200, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] }))
+        const fresh = [...(tailPage.events ?? [])].reverse()
+        if (fresh.length > 0) {
+          setTimeline((prev) => {
+            const seen = new Set(prev.map((e) => `${e.source.id}:${e.event_id}`))
+            const extra = fresh.filter((e) => !seen.has(`${e.source.id}:${e.event_id}`))
+            if (extra.length === 0) return prev
+            return [...prev, ...extra].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
+          })
+        }
+        const failed = fresh.find((e) => e.type === 'run.failed')
+        const completed = fresh.find((e) => e.type === 'run.completed')
+        if (failed || completed) {
+          const answerPath = `/v1/agent/runs/${encodeURIComponent(run)}`
+          try {
+            const response = await fetch(`${KERNEL_API}${answerPath}`, { headers: authHeaders() })
+            if (response.ok) setResult(await response.json() as Record<string, unknown>)
+          } catch { /* the next tick retries */ }
+        }
+        return
+      }
       const runEventsAll = await runEvents(run)
       const root = runEventsAll.find((event) => event.type === 'run.started')
       const runProject = root?.context?.project ?? project.trim()
@@ -700,7 +732,9 @@ export default function AgentRuns({ project }: { project: string }) {
   useEffect(() => {
     if (!selected) return
     // Poll only the selected run's events, don't re-fetch the full run list
-    const timer = window.setInterval(() => { void loadRun(selected, true) }, 10000)
+    // 30s: the light tail pass is cheap, but a 10s cadence on a busy stand
+    // still multiplies into a steady hum of journal queries.
+    const timer = window.setInterval(() => { void loadRun(selected, true) }, 30000)
     return () => window.clearInterval(timer)
   }, [selected, loadRun])
   // Live journal tail: while the selected run is in flight, events arrive over
