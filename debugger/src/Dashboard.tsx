@@ -3,15 +3,12 @@ import { Button, Heading, InlineNotification, Tag, Tile } from '@carbon/react'
 import { observationApi, type HealthStats, type HealthModelStats, type ObservationEvent } from './observationApi'
 import {
   projectsOverview,
-  qualitySummary,
   operations,
   storageOverview,
   systemHealth,
   readiness,
   type ReadinessCheck,
   type ProjectsOverview,
-  type QualitySummary,
-  type QualitySummaryAgent,
   type StorageSnapshot,
   type SystemHealth,
   type SandboxContainerInfo,
@@ -30,11 +27,13 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'quality' | 'sagas' | 'supervisor' | 'users'
+type Tab = 'overview' | 'sagas' | 'supervisor' | 'users'
 // Every valid tab: the URL param and the last-tab memory validate against this
 // full set (the TAB_KEYS strip above it is only the initial-render order).
-const ALL_TABS: Tab[] = ['overview', 'quality', 'sagas', 'supervisor', 'users']
-const TAB_KEYS: Tab[] = ['overview', 'quality', 'sagas']
+// 'quality' was removed: the eval-loop table rendered all-dashes without
+// evaluation runs (see the tabs comment below).
+const ALL_TABS: Tab[] = ['overview', 'sagas', 'supervisor', 'users']
+const TAB_KEYS: Tab[] = ['overview', 'sagas']
 // The last open tab survives reloads and revisits: returning to the
 // supervisor triage mid-investigation must not land back on the overview.
 const LAST_TAB_KEY = 'dashboard.tab'
@@ -49,20 +48,6 @@ const WINDOWS: { key: string; ms: number; go: string }[] = [
 ]
 
 const REFRESH_MS = 30_000
-
-function verdictColor(verdict: string): string {
-  switch (verdict) {
-    case 'pass':
-      return 'var(--tm-success)'
-    case 'fail':
-      return 'var(--tm-danger)'
-    case 'error':
-    case 'unknown':
-      return 'var(--tm-warning)'
-    default:
-      return 'var(--tm-text-3)'
-  }
-}
 
 /** One clickable health-strip chip: a counter with a drill-down link. */
 function HealthChip({ label, value, title, danger, onClick }: { label: string; value: number | string; title?: string; danger?: boolean; onClick?: () => void }) {
@@ -140,7 +125,6 @@ export default function Dashboard({ project, setProject }: Props) {
   // refresh so the digest shows names; ids stay the fallback.
   const [userNames, setUserNames] = useState<Map<string, string>>(new Map())
   const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map())
-  const [quality, setQuality] = useState<QualitySummary | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
@@ -220,23 +204,9 @@ export default function Dashboard({ project, setProject }: Props) {
     return () => { cancelled = true }
   }, [])
 
-  const loadQuality = useCallback(async () => {
-    setBusy(true)
-    setError('')
-    try {
-      setQuality(await qualitySummary())
-      setUpdatedAt(new Date())
-    } catch (failure) {
-      setError(errorMessage(failure))
-    } finally {
-      setBusy(false)
-    }
-  }, [])
-
   useEffect(() => {
     if (tab === 'overview') void loadOverviewData()
-    if (tab === 'quality') void loadQuality()
-  }, [tab, loadOverviewData, loadQuality])
+  }, [tab, loadOverviewData])
 
   // Auto-refresh the live tab while it is visible; a hidden tab (background
   // window) must not keep hammering the journal.
@@ -281,11 +251,16 @@ export default function Dashboard({ project, setProject }: Props) {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: t('dashboard.tab_overview') ?? 'Overview' },
-    { key: 'quality', label: t('dashboard.tab_quality') ?? 'Quality' },
     { key: 'sagas', label: t('dashboard.tab_sagas') ?? 'Sagas' },
     // The knowledge observability tab was removed (an atavism next to the
     // Knowledge explorer page): its patterns and historical filters live
     // there, where investigation actually happens.
+    // The quality-loop tab was removed the same way: it only ever showed the
+    // eval-suite machinery (evaluation runs, gate counts, stale goldens) —
+    // with eval suites unused it rendered an all-dashes table. The live
+    // quality signal lives on the Supervisor tab; per-agent evaluations stay
+    // in the agent card's Evolution tab. The /quality/summary endpoint stays
+    // for when eval suites become supervisor-generated.
     // The supervisor surface (docs/supervisor-model.md §7): the administrator's
     // problem queue lives inside the dashboard, not as a separate page.
     { key: 'supervisor', label: t('dashboard.tab_supervisor') ?? 'Supervisor' },
@@ -306,19 +281,17 @@ export default function Dashboard({ project, setProject }: Props) {
               {t('dashboard.updated') ?? 'updated'} {updatedAt.toLocaleTimeString()}
             </span>
           )}
-          {(tab === 'overview' || tab === 'quality') && (
+          {(tab === 'overview') && (
             <>
-              {tab === 'overview' && (
-                <label className="toolbar-select">
-                  {t('dashboard.window') ?? 'Window'}
-                  <select value={windowIdx} onChange={(e) => setWindowIdx(Number(e.target.value))}>
-                    {WINDOWS.map((w, i) => (
-                      <option key={w.key} value={i}>{t(w.key) ?? w.key}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <button className="toolbar-btn" onClick={() => (tab === 'overview' ? void loadOverviewData() : void loadQuality())} disabled={busy} title={t('common.refresh') ?? 'Refresh'}>↻</button>
+              <label className="toolbar-select">
+                {t('dashboard.window') ?? 'Window'}
+                <select value={windowIdx} onChange={(e) => setWindowIdx(Number(e.target.value))}>
+                  {WINDOWS.map((w, i) => (
+                    <option key={w.key} value={i}>{t(w.key) ?? w.key}</option>
+                  ))}
+                </select>
+              </label>
+              <button className="toolbar-btn" onClick={() => void loadOverviewData()} disabled={busy} title={t('common.refresh') ?? 'Refresh'}>↻</button>
             </>
           )}
         </div>
@@ -634,10 +607,6 @@ export default function Dashboard({ project, setProject }: Props) {
         </>
       )}
 
-      {tab === 'quality' && (
-        <QualityTab quality={quality} busy={busy} t={t} navigate={navigate} />
-      )}
-
       {tab === 'sagas' && <ProjectOverview project={project} />}
 
       {tab === 'supervisor' && <SupervisorPanels onPendingChange={setSupervisorPending} />}
@@ -846,88 +815,6 @@ function meterWidth(ratio: number): string {
 
 const meterTrackStyle: CSSProperties = { height: '6px', borderRadius: '3px', background: 'var(--tm-border)', overflow: 'hidden' }
 const meterFillStyle: CSSProperties = { height: '100%', borderRadius: '3px' }
-
-function QualityTab({ quality, busy, t, navigate }: {
-  quality: QualitySummary | null
-  busy: boolean
-  t: (key: string, vars?: Record<string, string>) => string
-  navigate: (path: string) => void
-}) {
-  const loop = quality?.loop
-  const overrideHot = (loop?.override_rate ?? 0) > 0.05
-  return (
-    <>
-      <PanelHeader title={t('dashboard.quality_loop') ?? 'Quality loop'} hint={loop ? `${loop.window_days}d` : undefined} />
-      {loop ? (
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-          <HealthChip value={`✓ ${loop.gate_passed}`} label={t('dashboard.gate_passed') ?? 'gates passed'} />
-          <HealthChip value={`✗ ${loop.gate_blocked}`} label={t('dashboard.gate_blocked') ?? 'blocked'} danger />
-          <HealthChip
-            value={`${(loop.override_rate * 100).toFixed(1)}%`}
-            label={t('dashboard.override_rate') ?? 'overrides'}
-            danger={overrideHot}
-            title={overrideHot ? (t('dashboard.override_warn') ?? undefined) : `overridden: ${loop.gate_overridden}`}
-          />
-          <HealthChip
-            value={`${loop.judge_degraded_runs}/${loop.evaluation_runs}`}
-            label={t('dashboard.judge_degraded') ?? 'judge-degraded'}
-            danger={loop.judge_degraded_runs > 0}
-            title={t('dashboard.judge_degraded_hint') ?? undefined}
-          />
-        </div>
-      ) : !busy && (
-        <Tile style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('dashboard.no_quality') ?? 'No quality loop data'}</Tile>
-      )}
-
-      <PanelHeader title={t('dashboard.agents') ?? 'Agents'} hint={t('dashboard.agents_hint') ?? undefined} />
-      {quality && quality.agents.length > 0 ? (
-        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
-          <ColHead columns="minmax(9rem, 1.8fr) minmax(6rem, 1fr) minmax(3rem, 0.6fr) minmax(9rem, 1.6fr) minmax(4.5rem, 1fr) minmax(4rem, 0.8fr) minmax(4rem, 0.8fr)">
-            <span>{t('dashboard.col_agent') ?? 'Agent'}</span>
-            <span>{t('dashboard.col_project') ?? 'Project'}</span>
-            <span>v</span>
-            <span>{t('dashboard.col_last_eval') ?? 'Last evaluation'}</span>
-            <span>{t('dashboard.col_pass_rate') ?? 'pass rate'}</span>
-            <span title={t('dashboard.pending_hint') ?? undefined}>⚡</span>
-            <span title={t('dashboard.stale_hint') ?? undefined}>⌛</span>
-          </ColHead>
-          {quality.agents.map((a: QualitySummaryAgent) => (
-            <div key={a.agent_id} style={{ ...tableGrid("minmax(9rem, 1.8fr) minmax(6rem, 1fr) minmax(3rem, 0.6fr) minmax(9rem, 1.6fr) minmax(4.5rem, 1fr) minmax(4rem, 0.8fr) minmax(4rem, 0.8fr)"), fontSize: '0.8rem', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)', alignItems: 'center' }}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <button onClick={() => navigate('/agent-config')} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--tm-text)', cursor: 'pointer', font: 'inherit', textDecoration: 'underline dotted' }} title={a.agent_id}>
-                  {a.name || a.agent_id}
-                </button>
-              </span>
-              <span style={{ color: 'var(--tm-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.project || '—'}</span>
-              <span style={{ color: 'var(--tm-text-3)' }}>{a.definition_version || '—'}</span>
-              {a.last_evaluation ? (
-                <span style={{ whiteSpace: 'nowrap' }}>
-                  <Tag
-                    size="sm"
-                    style={{ background: 'transparent', border: `1px solid ${verdictColor(a.last_evaluation.verdict)}`, color: verdictColor(a.last_evaluation.verdict) }}
-                  >
-                    {t(`dashboard.verdict_${a.last_evaluation.verdict}`) !== `dashboard.verdict_${a.last_evaluation.verdict}` ? t(`dashboard.verdict_${a.last_evaluation.verdict}`) : a.last_evaluation.verdict}
-                  </Tag>
-                  <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.4rem', fontSize: '0.72rem' }}>
-                    {new Date(a.last_evaluation.at).toLocaleDateString()}
-                    {a.last_evaluation.judge_agreement != null && ` · 🧑‍⚖️ ${(a.last_evaluation.judge_agreement * 100).toFixed(0)}%`}
-                  </span>
-                </span>
-              ) : (
-                <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{t('dashboard.no_eval') ?? 'no runs'}</span>
-              )}
-              <span>{a.last_evaluation ? `${(a.last_evaluation.pass_rate * 100).toFixed(0)}%` : '—'}</span>
-              <span style={{ color: a.pending_proposals > 0 ? 'var(--tm-info)' : 'var(--tm-text-3)' }}>{a.pending_proposals > 0 ? a.pending_proposals : '—'}</span>
-              <span style={{ color: a.stale_goldens > 0 ? 'var(--tm-warning)' : 'var(--tm-text-3)' }}>{a.stale_goldens > 0 ? a.stale_goldens : '—'}</span>
-            </div>
-          ))}
-        </div>
-      ) : !busy && (
-        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.no_agents') ?? 'No agents visible'}</Tile>
-      )}
-    </>
-  )
-}
 
 /** Sandbox bubble cloud (dashboard): one ball per active sandbox container,
  *  size and color encode the integral resource load so the run hogging the
