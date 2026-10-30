@@ -24,7 +24,7 @@ import (
 
 // sagaEvent is one saga.* journal event relevant to bindings.
 type sagaEvent struct {
-	Type       string // saga.registered | saga.attached | saga.detached | saga.renamed | saga.merged
+	Type       string // saga.registered | saga.attached | saga.detached | saga.renamed | saga.merged | saga.deleted
 	SagaID     string
 	Title      string
 	Goal       string
@@ -52,7 +52,7 @@ func (a *Activities) fetchSagaEvents(ctx context.Context, project, taskID string
 		return nil, fmt.Errorf("project is required")
 	}
 	var all []sagaEvent
-	for _, eventType := range []string{"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged"} {
+	for _, eventType := range []string{"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged", "saga.deleted"} {
 		cursor := ""
 		for {
 			endpoint := fmt.Sprintf("%s/v1/observations/events?project=%s&type=%s&limit=500", a.TemporalityURL, url.QueryEscape(project), eventType)
@@ -328,7 +328,26 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 		registrationTime[ev.SagaID] = ev.OccurredAt
 	}
 	// Human renames override the registered title/goal; merged sources keep
-	// their row as a redirect to the surviving target.
+	// their row as a redirect to the surviving target. Deleted sagas leave
+	// the list entirely (operator hygiene for mistyped registrations).
+	deletedAt := map[string]time.Time{}
+	for _, ev := range events {
+		if ev.Type != "saga.deleted" {
+			continue
+		}
+		if prev, ok := deletedAt[ev.SagaID]; ok && prev.After(ev.OccurredAt) {
+			continue
+		}
+		deletedAt[ev.SagaID] = ev.OccurredAt
+	}
+	for sagaID := range sagas {
+		if deleted, ok := deletedAt[sagaID]; ok {
+			if reg, ok := registrationTime[sagaID]; ok && reg.After(deleted) {
+				continue // re-registered after the delete: alive again
+			}
+			delete(sagas, sagaID)
+		}
+	}
 	for sagaID, ev := range renames {
 		if saga := sagas[sagaID]; saga != nil {
 			if ev.Title != "" {
@@ -354,6 +373,17 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 	}
 	latest := map[string]taskBinding{}
 	for _, ev := range events {
+		if ev.Type == "saga.deleted" {
+			// Operator hygiene: the deleted saga's tasks fall back to the
+			// unbound pool (the delete carries no single task). An older
+			// binding loses to the delete; a later attach/registered wins.
+			for taskID, prev := range latest {
+				if prev.sagaID == ev.SagaID && !prev.at.After(ev.OccurredAt) {
+					delete(latest, taskID)
+				}
+			}
+			continue
+		}
 		if ev.Type != "saga.registered" && ev.Type != "saga.attached" && ev.Type != "saga.detached" {
 			continue
 		}

@@ -1227,6 +1227,34 @@ func sagaBindings(events []observation.Event) (map[string]string, map[string]*sa
 				}
 				merges[source] = merge{target: target, at: ev.OccurredAt}
 			}
+		case "saga.deleted":
+			// Operator hygiene: a mistyped or wrongly merged registration is
+			// removed from the projection — its bound tasks fall back to
+			// unbound, and a fresh saga.registered with the same id later
+			// resurrects it cleanly (the delete only carries the moment).
+			sagaID, _ := ev.Data["saga_id"].(string)
+			if sagaID == "" {
+				sagaID = ev.Context.Task
+			}
+			if sagaID == "" {
+				continue
+			}
+			if _, ok := sagas[sagaID]; !ok {
+				continue
+			}
+			if meta := sagas[sagaID]; meta.registeredAt != nil && meta.registeredAt.After(ev.OccurredAt) {
+				continue // a newer registration wins over an older delete
+			}
+			delete(sagas, sagaID)
+			delete(renames, sagaID)
+			if _, ok := merges[sagaID]; ok {
+				delete(merges, sagaID)
+			}
+			for taskID, b := range latest {
+				if b.sagaID == sagaID {
+					latest[taskID] = binding{detached: true, at: ev.OccurredAt}
+				}
+			}
 		}
 	}
 	for sagaID, item := range renames {

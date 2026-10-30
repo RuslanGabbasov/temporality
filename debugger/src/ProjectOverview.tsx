@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Heading, InlineNotification, Tag, Tile, Button, Stack, TextInput, TextArea, Select, SelectItem } from '@carbon/react'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
-import { projectBudget, sagaCreate, sagaRename, sagaMerge, taskSagaBind, type ProjectBudget, type SagaRollup, type TaskRollup } from './kernelApi'
+import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, type ProjectBudget, type SagaRollup, type TaskRollup } from './kernelApi'
 import ProjectRequired from './ProjectRequired'
 import AppModal from './Modal'
+import { useConfirm } from './ConfirmDialog'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration, approvalHint } from './eventSummary'
 
@@ -43,6 +44,25 @@ export default function ProjectOverview({ project }: Props) {
   const [formSaga, setFormSaga] = useState('')
   const [actionError, setActionError] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
+  const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
+
+  // Operator hygiene (docs/sagas.md §8): a mistyped registration or a wrongly
+  // merged saga is deleted — the bound tasks fall back to the unbound pool;
+  // runs, tasks and journal events are untouched. Confirm-guarded: the
+  // gesture is irreversible in the UI.
+  const deleteSaga = async (saga: SagaRollup) => {
+    const taskCount = (budget?.tasks ?? []).filter((task) => task.saga_id === saga.saga_id).length
+    const ok = await confirmDialog({
+      title: t('project.saga_delete_confirm', { name: saga.title || saga.saga_id }) ?? `Delete saga «${saga.title || saga.saga_id}»?`,
+      body: taskCount > 0
+        ? (t('project.saga_delete_body_tasks', { count: String(taskCount) }) ?? `${taskCount} bound task(s) will return to the unbound pool. Runs and journal history stay untouched.`)
+        : (t('project.saga_delete_body') ?? 'The saga grouping is removed. Runs, tasks and journal history stay untouched.'),
+      danger: true,
+      confirmLabel: t('project.saga_delete') ?? 'Delete',
+    })
+    if (!ok) return
+    await runAction(() => sagaDelete(project.trim(), saga.saga_id))
+  }
 
   const load = useCallback(async () => {
     if (!project.trim()) return
@@ -199,11 +219,18 @@ export default function ProjectOverview({ project }: Props) {
                         {merged && <Tag size="sm" type="cool-gray" title={saga.merged_into}>{t('project.saga_merged_into') ?? 'merged into'} → {sagaTitle(saga.merged_into!)}</Tag>}
                         {!merged && saga.running > 0 && <Tag type="cool-gray" size="sm">{pluralT(t, locale, 'runs.task_running_n', saga.running)}</Tag>}
                         {!merged && (
+                          <>
                           <button
                             onClick={() => openDialog({ kind: 'rename', saga }, { title: saga.title, goal: saga.goal })}
                             title={t('project.saga_rename') ?? 'Rename'}
                             style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
                           >✎</button>
+                          <button
+                            onClick={() => void deleteSaga(saga)}
+                            title={t('project.saga_delete') ?? 'Delete saga'}
+                            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
+                          >✕</button>
+                          </>
                         )}
                       </span>
                       <span>{saga.task_ids.length}</span>
@@ -437,6 +464,7 @@ export default function ProjectOverview({ project }: Props) {
           </Stack>
         </AppModal>
       )}
+      {confirmDialogNode}
     </div>
   )
 }

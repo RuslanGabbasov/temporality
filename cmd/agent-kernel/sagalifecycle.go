@@ -279,6 +279,34 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 		writeJSON(w, 200, map[string]any{"saga_id": sagaID, "merged_sources": sources, "status": "merged"})
 	})
 
+	// Delete a saga (docs/sagas.md §8): operator hygiene for a mistyped
+	// registration or a wrongly merged effort. Event-sourced deletion: one
+	// saga.deleted event — every projection (cost rollup, saga_list) forgets
+	// the saga, its bound tasks fall back to the unbound pool, and a fresh
+	// saga.registered with the same id later resurrects it cleanly. The
+	// underlying runs/tasks/journal events are untouched: this retracts the
+	// grouping, not the work.
+	mux.HandleFunc("POST /v1/workspace/sagas/{sagaID}/delete", func(w http.ResponseWriter, r *http.Request) {
+		project, ok := requireProject(w, r)
+		if !ok {
+			return
+		}
+		sagaID := r.PathValue("sagaID")
+		known, err := sagaRegisteredIDs(r.Context(), journalURL, os.Getenv("TEMPORALITY_API_TOKEN"), project)
+		if err != nil {
+			writeError(w, 502, fmt.Errorf("journal query failed: %w", err))
+			return
+		}
+		if !known[sagaID] {
+			writeError(w, 404, fmt.Errorf("saga %q is not registered in project %q", sagaID, project))
+			return
+		}
+		emitSagaLifecycleEvent(r.Context(), events, "saga.deleted", sagaID, project, "", requestUserID(r), map[string]any{
+			"saga_id": sagaID, "origin": "human-ui", "actor_id": requestUserID(r),
+		})
+		writeJSON(w, 200, map[string]any{"saga_id": sagaID, "status": "deleted"})
+	})
+
 	// Bind a task to a saga, re-bind it to another one, or detach (empty
 	// saga_id). The latest binding wins in every projection.
 	mux.HandleFunc("POST /v1/workspace/tasks/{taskID}/saga", func(w http.ResponseWriter, r *http.Request) {

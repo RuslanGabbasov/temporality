@@ -640,3 +640,44 @@ func TestDetectTeamEvolutionNeedsRepeatedPattern(t *testing.T) {
 		t.Fatalf("problem must name the pair: %q", signals[0].ObservedProblem)
 	}
 }
+
+// Deleting a saga (docs/sagas.md §8 operator hygiene) retracts the grouping:
+// the saga row disappears and its tasks fall back to the unbound pool. Runs
+// and their spend stay, now unbound. A re-registration after the delete
+// resurrects the saga cleanly.
+func TestSagaDeleteRetractsGroupingAndUnbindsTasks(t *testing.T) {
+	base := time.Now()
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	cfg, _ := ParsePrices("m:1.00:2.00")
+	api := NewCostAPI(cfg, "", "")
+	events := []observation.Event{
+		mk("run.started", "r1", "t1", base, map[string]any{"agent_id": "lead", "title": "Mistyped saga"}),
+		mk("run.completed", "r1", "t1", base.Add(5*time.Minute), nil),
+		mk("saga.registered", "r1", "t1", base.Add(1*time.Minute), map[string]any{"saga_id": "saga-typo-aaaaaa", "title": "Typo saga"}),
+		// The delete lands last: the grouping is retracted, the task unbinds.
+		mk("saga.deleted", "", "", base.Add(10*time.Minute), map[string]any{"saga_id": "saga-typo-aaaaaa"}),
+	}
+	got := api.aggregateProjectBudget("p", events)
+	if got.SagaCount != 0 || len(got.Sagas) != 0 {
+		t.Fatalf("the deleted saga must vanish from the rollup, got %d sagas", len(got.Sagas))
+	}
+	if len(got.Tasks) != 1 || got.Tasks[0].SagaID != "" {
+		t.Fatalf("the bound task must fall back to unbound, got %+v", got.Tasks)
+	}
+
+	// A re-registration after the delete resurrects the saga: the delete
+	// retracts the grouping as of its moment, not forever.
+	resurrected := append(append([]observation.Event{}, events...),
+		mk("saga.registered", "r2", "t1", base.Add(15*time.Minute), map[string]any{"saga_id": "saga-typo-aaaaaa", "title": "Typo saga, done right"}),
+		mk("saga.attached", "r2", "t1", base.Add(16*time.Minute), map[string]any{"saga_id": "saga-typo-aaaaaa"}),
+	)
+	got = api.aggregateProjectBudget("p", resurrected)
+	if got.SagaCount != 1 || len(got.Sagas) != 1 {
+		t.Fatalf("a post-delete re-registration must resurrect the saga, got %d", len(got.Sagas))
+	}
+	if got.Sagas[0].Title != "Typo saga, done right" || len(got.Sagas[0].TaskIDs) != 1 {
+		t.Fatalf("the resurrected saga must carry the new title and binding: %+v", got.Sagas[0])
+	}
+}

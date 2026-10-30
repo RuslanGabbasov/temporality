@@ -382,6 +382,10 @@ export function sagaMerge(project: string, targetSagaID: string, sourceSagaIDs: 
   return request(`/v1/workspace/sagas/${encodeURIComponent(targetSagaID)}/merge?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ source_saga_ids: sourceSagaIDs }) })
 }
 
+export function sagaDelete(project: string, sagaID: string): Promise<{ status: string }> {
+  return request(`/v1/workspace/sagas/${encodeURIComponent(sagaID)}/delete?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({}) })
+}
+
 export function taskSagaBind(project: string, taskID: string, sagaID: string): Promise<{ status: string }> {
   return request(`/v1/workspace/tasks/${encodeURIComponent(taskID)}/saga?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ saga_id: sagaID }) })
 }

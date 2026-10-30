@@ -167,6 +167,7 @@ API (`cmd/agent-kernel/sagalifecycle.go`, все writer-only, `?project=` обя
 | `POST /v1/workspace/sagas` | `title`, `goal?`, `task_id?` | `saga.registered` |
 | `POST /v1/workspace/sagas/{id}/rename` | `title?`, `goal?` (хотя бы одно) | `saga.renamed` |
 | `POST /v1/workspace/sagas/{id}/merge` | `source_saga_ids[]` | `saga.merged` |
+| `POST /v1/workspace/sagas/{id}/delete` | — | `saga.deleted` |
 | `POST /v1/workspace/tasks/{taskID}/saga` | `saga_id` (пустая — отвязать) | `saga.attached` / `saga.detached` |
 
 Правила проекции:
@@ -178,7 +179,13 @@ API (`cmd/agent-kernel/sagalifecycle.go`, все writer-only, `?project=` обя
   строками-перенаправлениями (`merged_into`) без задач и затрат;
   `saga_attach` к слитой саге отклоняется с подсказкой о цели;
 * **detach**: задача возвращается в пул «без саги», позднейший attach может
-  привязать её снова.
+  привязать её снова;
+* **delete** (гигиена оператора): криво созданная или неверно слитая сага
+  удаляется одним `saga.deleted` — обе проекции (rollup дашборда и
+  `saga_list`) забывают сагу, её задачи возвращаются в пул «без саги»;
+  раны, задачи и события журнала не трогаются (отклоняется группировка, не
+  работа). Повторная регистрация с тем же id после удаления чисто
+  воскрешает сагу. В UI — кнопка ✕ в строке саги с подтверждением.
 
 Существование саги проверяется по `saga.registered`-событиям журнала —
 другие типы сагу не создают.
