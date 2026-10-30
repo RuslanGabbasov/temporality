@@ -743,18 +743,25 @@ func (d *Docker) reapIdle() {
 	d.reapOrphans()
 }
 
-// SandboxMarkerLabel marks every container this runner ever created — the
-// orphan sweeper's ownership filter, independent of per-run request labels.
+// SandboxMarkerLabel marks every container this runner creates — observability
+// for humans; the orphan sweeper keys on the NAME prefix instead, because
+// containers created by kernels built before the marker existed carry no
+// label but always carry the sandbox name.
 const SandboxMarkerLabel = "temporality.sandbox"
+
+// SandboxNamePrefix is the deterministic name prefix of every sandbox
+// container this runner creates (see newSandboxContainerName). The orphan
+// sweeper lists docker by it: name covers the pre-marker orphans too.
+const SandboxNamePrefix = "temporality-sandbox-"
 
 // reapOrphans stops and removes sandbox containers the CURRENT process does
 // not know about. After a kernel rebuild the in-process run registry is
 // empty while the previous process's keep-alive containers keep running —
 // the idle reaper only walks the registry, so those orphans lived forever
-// (a day of rebuilds piled up 28 idle containers against 3 live runs).
-// Ownership = the marker label; age = docker's RunningFor against the same
-// idle TTL the registry reaper uses. Registry entries are protected even
-// when docker's list races ahead of it.
+// (a day of rebuilds piled up 34 idle containers against 3 live runs).
+// Ownership = the sandbox name prefix; age = docker's RunningFor against
+// the same idle TTL the registry reaper uses. Registry entries are
+// protected even when docker's list races ahead of it.
 func (d *Docker) reapOrphans() {
 	if d.idleTTL <= 0 {
 		return
@@ -769,18 +776,18 @@ func (d *Docker) reapOrphans() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	list, err := exec.CommandContext(ctx, d.Binary, "ps",
-		"--filter", "label="+SandboxMarkerLabel+"=1",
-		"--format", "{{.ID}}\t{{.RunningFor}}").CombinedOutput()
+		"--filter", "name="+SandboxNamePrefix,
+		"--format", "{{.ID}}\t{{.Names}}\t{{.RunningFor}}").CombinedOutput()
 	if err != nil {
 		return // listing must never break the reaper pass
 	}
 	for _, line := range strings.Split(string(list), "\n") {
-		fields := strings.SplitN(strings.TrimSpace(line), "\t", 2)
-		if len(fields) != 2 {
+		fields := strings.SplitN(strings.TrimSpace(line), "\t", 3)
+		if len(fields) != 3 {
 			continue
 		}
-		id, runningFor := fields[0], fields[1]
-		if known[id] {
+		id, name, runningFor := fields[0], fields[1], fields[2]
+		if known[name] || !strings.HasPrefix(name, SandboxNamePrefix) {
 			continue
 		}
 		if age, ok := dockerRunningForAge(runningFor); ok && age > d.idleTTL {
