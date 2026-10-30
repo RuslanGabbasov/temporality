@@ -42,6 +42,12 @@ type SandboxRunner interface {
 	// directory run_command mounts at /scratch (run-scoped scratch). The file
 	// tools use it to resolve /scratch/… paths without a container.
 	RunScratchDir(key string) string
+	// OperationState probes a background operation (docs/agent-async-operations.md).
+	// Used by the attach-on-retry path when a worker died mid-command.
+	OperationState(scratchKey, operationID string) (sandbox.OperationState, error)
+	// KillOperation terminates a background operation's process tree inside
+	// the run container (the kill_operation tool).
+	KillOperation(scratchKey, operationID string) (bool, error)
 }
 
 // sandboxConfigured reports whether a sandbox runner actually backs command
@@ -278,7 +284,14 @@ func (a *Activities) ToolDefs() []llm.ToolDef {
 var runCommandTool = llm.ToolDef{
 	Name:        "run_command",
 	Description: "Run a command in an isolated sandbox container. The working directory is /workspace — persistent storage shared by all agents and runs of this project: files saved there survive across sessions and it may already contain files from earlier work, so treat them as shared and do not remove what you did not create. /scratch is per-run scratch: files written there survive between the commands of this run and are wiped after the run — use it for multi-step file preparation and temp data; /tmp is ephemeral and disappears between calls. /cache persists toolchain caches across runs. Network access depends on agent configuration. Provide argv as an array.",
-	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer", "description": "Wall-clock cap for this command, up to 900 (15 min, the hard ceiling). Default 300. Test suites, builds and installs: pass 600+ explicitly instead of relying on the default"}}, "required": []string{"command"}},
+	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer", "description": "Wall-clock cap for this command, up to 900 (15 min, the hard ceiling). Default 300. Test suites, builds and installs: pass 600+ explicitly instead of relying on the default"}, "background": map[string]any{"type": "boolean", "description": "Run detached: the tool returns immediately with an operation id and the real result (exit code + output tail) arrives later as an automatic follow-up message. Use for long installs/builds/suites — keep working after starting one; you will be notified; kill_operation cancels it"}}, "required": []string{"command"}},
+}
+
+// killOperationTool cancels a background operation (docs/agent-async-operations.md).
+var killOperationTool = llm.ToolDef{
+	Name:        "kill_operation",
+	Description: "Terminate one of this run's background operations (a command started with run_command background=true). The completion notification will report its final state. Use when a long operation is no longer needed or blocks your plan.",
+	Parameters: map[string]any{"type": "object", "properties": map[string]any{"operation_id": map[string]any{"type": "string", "description": "The operation id the background start returned"}}, "required": []string{"operation_id"}},
 }
 
 // BuiltinToolDefs returns kernel tools plus the sandbox surface (run_command
@@ -288,6 +301,7 @@ func (a *Activities) BuiltinToolDefs() []llm.ToolDef {
 	defs := KernelTools()
 	if sandboxConfigured(a.Sandbox) {
 		defs = append(defs, runCommandTool)
+		defs = append(defs, killOperationTool)
 		defs = append(defs, fileToolDefs...)
 	}
 	return defs
@@ -1132,6 +1146,69 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if value, ok := request.Arguments["timeout_sec"].(float64); ok {
 			timeout = int(value)
 		}
+		background, _ := request.Arguments["background"].(bool)
+		if background {
+			// Docs/agent-async-operations.md: the command detaches into the run
+			// container and the RESULT arrives later as an automatic follow-up
+			// turn — the model keeps working meanwhile. The activity still runs
+			// the full duration (same console streaming, same behavior guard);
+			// the workflow holds its future instead of blocking the turn on it.
+			heartbeatDone := make(chan struct{})
+			defer close(heartbeatDone)
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-heartbeatDone:
+						return
+					case <-time.After(20 * time.Second):
+						activity.RecordHeartbeat(ctx)
+					}
+				}
+			}()
+			attempt := 1
+			if activity.IsActivity(ctx) {
+				attempt = int(activity.GetInfo(ctx).Attempt)
+			}
+			if attempt > 1 {
+				// The worker died mid-command. NEVER re-execute: a retried
+				// yarn install corrupts node_modules and burns the registry.
+				// Attach instead: wait for the exit-code file the wrapper
+				// writes (the process kept running in the run container).
+				scratchKey := sandbox.SanitizeScratchToken(request.Project) + "/" + sandbox.SanitizeScratchToken(request.RunID)
+				deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+				if timeout <= 0 {
+					deadline = time.Now().Add(time.Duration(sandbox.CommandTimeout(0)) * time.Second)
+				}
+				for {
+					if time.Now().After(deadline) {
+						return ToolResult{Content: fmt.Sprintf("error: background operation %s lost its worker and outlived its timeout — its state is unknown; re-run it if the effect is still needed", request.OperationID)}, nil
+					}
+					state, err := a.Sandbox.OperationState(scratchKey, request.OperationID)
+					if err == nil {
+						if state.Finished {
+							activity.GetLogger(ctx).Info("background operation attached after worker restart", "operation", request.OperationID, "exit", state.ExitCode)
+							exitCode := state.ExitCode
+							return ToolResult{Content: fmt.Sprintf("exit_code=%d\n(output not available: the worker restarted while the command ran)", exitCode), ExitCode: &exitCode}, nil
+						}
+						if !state.Running && !state.Alive {
+							// Killed (no exit-code file) or the wrapper died.
+							exitCode := 137
+							return ToolResult{Content: "exit_code=137\n(terminated: the process is gone and left no exit code)", ExitCode: &exitCode}, nil
+						}
+					} else if ctx.Err() != nil {
+						return ToolResult{}, ctx.Err()
+					}
+					select {
+					case <-ctx.Done():
+						return ToolResult{}, ctx.Err()
+					case <-time.After(3 * time.Second):
+						activity.RecordHeartbeat(ctx)
+					}
+				}
+			}
+		}
 		// Secrets resolve here — at the execution boundary: values go straight
 		// into the container environment and never enter the model context.
 		// The same values arm the behavior guard: after the command, the
@@ -1181,6 +1258,13 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if err != nil {
 			return ToolResult{}, err
 		}
+		if background {
+			// The wrapper records the pid and exit code in the run scratch:
+			// kill needs the pid, a worker restart needs the code (attach path
+			// above). Output still streams through the docker exec pipe.
+			sbReq.Command = sandbox.OpShellWrapper(request.OperationID, command)
+			sbReq.Env = append(sbReq.Env, sandbox.OpMarkerEnv(request.OperationID))
+		}
 		// Live console (v2-consolidated.md §6): when a registry and an
 		// operation id exist, stdout/stderr chunks stream into the in-memory
 		// tail buffer as the command runs — no journal write, no file, no
@@ -1203,6 +1287,28 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			content = disabledNotice + "\n" + content
 		}
 		return ToolResult{Content: content, ExitCode: &exitCode}, nil
+	case "kill_operation":
+		// Cancels one of THIS run's background operations (docs/agent-async-operations.md):
+		// the process tree is signalled inside the run container; the run_command
+		// activity watching the command resolves with the kill outcome and the
+		// regular completion notification tells the model what happened.
+		opID, _ := request.Arguments["operation_id"].(string)
+		opID = strings.TrimSpace(opID)
+		if opID == "" {
+			return ToolResult{}, temporal.NewNonRetryableApplicationError("operation_id is required", "InvalidToolArguments", nil)
+		}
+		if a.Sandbox == nil {
+			return ToolResult{Content: "error: sandbox is not configured"}, nil
+		}
+		scratchKey := sandbox.SanitizeScratchToken(request.Project) + "/" + sandbox.SanitizeScratchToken(request.RunID)
+		killed, err := a.Sandbox.KillOperation(scratchKey, opID)
+		if err != nil {
+			return ToolResult{Content: fmt.Sprintf("error: kill failed for %s: %v", opID, err)}, nil
+		}
+		if !killed {
+			return ToolResult{Content: fmt.Sprintf("Operation %s: no live process found (already finished or unknown id). Check the completion notifications.", opID)}, nil
+		}
+		return ToolResult{Content: fmt.Sprintf("Termination signalled to operation %s. Its completion notification will report the final state.", opID)}, nil
 	case "read_file":
 		return a.handleReadFile(request)
 	case "write_file":

@@ -17,6 +17,14 @@ import (
 type fileToolSandbox struct{ root string }
 
 func (f *fileToolSandbox) SandboxRoot() string { return f.root }
+func (f *fileToolSandbox) OperationState(scratchKey, operationID string) (sandbox.OperationState, error) {
+	return sandbox.OperationState{}, nil
+}
+
+func (f *fileToolSandbox) KillOperation(scratchKey, operationID string) (bool, error) {
+	return false, nil
+}
+
 func (f *fileToolSandbox) ResolveWorkspace(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("workspace is required")

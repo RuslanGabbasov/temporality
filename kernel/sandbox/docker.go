@@ -57,6 +57,14 @@ var maxTimeoutSeconds = func() int {
 	return value
 }()
 
+// CommandTimeout is the exported view of commandTimeout for callers outside
+// the package (the attach-on-retry path in the kernel activity).
+func CommandTimeout(requested int) int { return commandTimeout(requested) }
+
+// DefaultTimeout is the exported default sandbox command cap (seconds) — the
+// background-operation timeout when the model passes none.
+const DefaultTimeout = defaultTimeout
+
 func maxTimeout() int { return maxTimeoutSeconds }
 
 type Request struct {
@@ -119,6 +127,12 @@ type Runner interface {
 	// RunScratchDir maps a "<project>/<run>" scratch key onto the host
 	// directory the runner mounts at /scratch (run-scoped scratch).
 	RunScratchDir(key string) string
+	// OperationState probes a background operation (docs/agent-async-operations.md):
+	// running / finished (with exit code) / gone.
+	OperationState(scratchKey, operationID string) (OperationState, error)
+	// KillOperation terminates a background operation's process tree inside
+	// the run container. Reports whether a live tree was found and signalled.
+	KillOperation(scratchKey, operationID string) (bool, error)
 }
 
 type Docker struct {

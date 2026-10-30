@@ -337,6 +337,14 @@ type streamingSandbox struct{ root string }
 func (s *streamingSandbox) SandboxRoot() string                          { return s.root }
 func (s *streamingSandbox) ResolveWorkspace(path string) (string, error) { return path, nil }
 
+func (s *streamingSandbox) OperationState(scratchKey, operationID string) (sandbox.OperationState, error) {
+	return sandbox.OperationState{}, nil
+}
+
+func (s *streamingSandbox) KillOperation(scratchKey, operationID string) (bool, error) {
+	return false, nil
+}
+
 func (s *streamingSandbox) Execute(_ context.Context, request sandbox.Request) (sandbox.Result, error) {
 	if request.OnOutput != nil {
 		request.OnOutput("stdout", []byte("hello-from-command\n"))

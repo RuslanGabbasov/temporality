@@ -17,6 +17,14 @@ import (
 type contractSandbox struct{ root string }
 
 func (c *contractSandbox) SandboxRoot() string                       { return c.root }
+func (c *contractSandbox) OperationState(scratchKey, operationID string) (sandbox.OperationState, error) {
+	return sandbox.OperationState{}, nil
+}
+
+func (c *contractSandbox) KillOperation(scratchKey, operationID string) (bool, error) {
+	return false, nil
+}
+
 func (c *contractSandbox) ResolveWorkspace(p string) (string, error) { return p, nil }
 func (c *contractSandbox) Execute(context.Context, sandbox.Request) (sandbox.Result, error) {
 	return sandbox.Result{}, nil

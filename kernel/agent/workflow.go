@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/kernel/llm"
+	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/temporal"
@@ -1251,6 +1252,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// compute it once; a local computation issues no workflow commands and needs
 	// no GetVersion gate.
 	runTools := advertisedTools(&input)
+	// Background operations (docs/agent-async-operations.md): run_command calls
+	// with background=true start their RunTool activity here and the turn gets
+	// a synthetic «started» result immediately; the futures resolve later and
+	// each completion wakes the model with a batched notification. The map is
+	// workflow-local and rebuilt deterministically during replay (the
+	// ExecuteActivity calls are history records).
+	background := map[string]*backgroundOp{}
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
 		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
@@ -1374,6 +1382,24 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return result, noteErr
 				}
 				if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "reopened_by_note": true}); err != nil {
+					return result, err
+				}
+				continue
+			}
+			// Background operations (docs/agent-async-operations.md): the model
+			// is done, but detached commands still run — the run must NOT
+			// complete while they do. Wait for the first resolution (or a
+			// note), deliver the batched outcome report, and give the model
+			// another turn to act on it. The loop exits naturally once every
+			// operation has resolved and the model produces a final answer.
+			if len(background) > 0 {
+				usedTokens += completion.Usage.TotalTokens
+				usedCostUSD += modelCallCostUSD(input, completion.Usage)
+				messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content})
+				if _, waitErr := awaitBackgroundOps(ctx, activityCtx, state, &messages, background); waitErr != nil {
+					return result, waitErr
+				}
+				if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "reopened_by_background": true}); err != nil {
 					return result, err
 				}
 				continue
@@ -1984,6 +2010,28 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 							return result, planErr
 						}
 						toolResult.Content = content
+					} else if bgFlag, _ := call.Args["background"].(bool); call.Name == "run_command" && bgFlag {
+						// Approved background command (docs/agent-async-operations.md):
+						// the same detach as the normal path, after the grant.
+						timeoutSec := 0
+						if requested, ok := numericArg(call.Args["timeout_sec"]); ok && requested > 0 {
+							timeoutSec = int(requested)
+						}
+						if timeoutSec <= 0 {
+							timeoutSec = sandbox.DefaultTimeout
+						}
+						bgCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+							StartToCloseTimeout:    time.Duration(timeoutSec)*time.Second + 10*time.Minute,
+							ScheduleToCloseTimeout: time.Duration(timeoutSec)*time.Second + 15*time.Minute,
+							HeartbeatTimeout:       90 * time.Second,
+							RetryPolicy:            &temporal.RetryPolicy{MaximumAttempts: 1},
+						})
+						future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox})
+						if err := startTool(); err != nil {
+							return result, err
+						}
+						background[operationID] = &backgroundOp{future: future, command: compactJSON(call.Args["command"], 120), started: workflow.Now(ctx), timeoutSec: timeoutSec, turn: turn}
+						toolResult.Content = fmt.Sprintf("Started in background as operation %s. The result will arrive automatically as a follow-up message; use kill_operation to cancel it.", operationID)
 					} else if err := startTool(); err != nil {
 						return result, err
 					} else if err := startMCP(); err != nil {
@@ -2119,16 +2167,49 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					}
 				}
-				if err := startTool(); err != nil {
-					return result, err
+				startedBackground := false
+				if bgFlag, _ := call.Args["background"].(bool); call.Name == "run_command" && bgFlag {
+					// Async operation (docs/agent-async-operations.md): start the
+					// RunTool activity and return immediately — the synthetic
+					// result tells the model the operation id; the future stays
+					// in the registry until its completion notification. The
+					// tool.started row stays open in the trace (no completion
+					// yet) with the live console attached.
+					timeoutSec := 0
+					if requested, ok := numericArg(call.Args["timeout_sec"]); ok && requested > 0 {
+						timeoutSec = int(requested)
+					}
+					if timeoutSec <= 0 {
+						timeoutSec = sandbox.DefaultTimeout
+					}
+					bgCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+						StartToCloseTimeout: time.Duration(timeoutSec)*time.Second + 10*time.Minute,
+						ScheduleToCloseTimeout: time.Duration(timeoutSec)*time.Second + 15*time.Minute,
+						HeartbeatTimeout: 90 * time.Second,
+						// Never re-execute a detached install/build on retry: the
+						// attach path in RunTool handles a worker death instead.
+						RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1},
+					})
+					future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox})
+					if err := startTool(); err != nil {
+						return result, err
+					}
+					commandPreview := compactJSON(call.Args["command"], 120)
+					background[operationID] = &backgroundOp{future: future, command: commandPreview, started: workflow.Now(ctx), timeoutSec: timeoutSec, turn: turn}
+					toolResult.Content = fmt.Sprintf("Started in background as operation %s. Do not wait idle: continue with other work, and the result (exit code + output tail) will arrive automatically as a follow-up message. The operation times out after %d s. Use kill_operation to cancel it.", operationID, timeoutSec)
+					startedBackground = true
 				}
-				if err := startMCP(); err != nil {
-					return result, err
-				}
-				// Same wall-clock semantics as the approval path: scheduling,
-				// retries and execution in one number.
-				toolStarted := workflow.Now(ctx)
-				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
+				if !startedBackground {
+					if err := startTool(); err != nil {
+						return result, err
+					}
+					if err := startMCP(); err != nil {
+						return result, err
+					}
+					// Same wall-clock semantics as the approval path: scheduling,
+					// retries and execution in one number.
+					toolStarted := workflow.Now(ctx)
+					if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
 					failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 					failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -2158,6 +2239,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 				}
 			}
+		}
 			if !deferred {
 				// Deferred delegate calls skip the per-call tail: their tool message,
 				// executed entry and completion events land at await time instead.
@@ -2258,6 +2340,16 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// limited run still produces a handoff instead of silence. The status stays
 	// honest (turn_limit / time_limit / token_limit / budget_limit); events
 	// record that the answer came from a forced finale and why.
+	//
+	// Background operations first (docs/agent-async-operations.md): a finale
+	// must not strand detached commands mid-install — wait them out (each is
+	// bounded by its own timeout_sec) and journal the outcomes. No further
+	// model turns: the finale answer stands, the events carry the outcomes.
+	if len(background) > 0 {
+		if _, err := awaitBackgroundOps(ctx, activityCtx, state, &messages, background); err != nil {
+			return result, err
+		}
+	}
 	if forcedFinaleReason == "" {
 		forcedFinaleReason = "turn_limit"
 	}
@@ -2857,6 +2949,9 @@ var intakeDialogTools = map[string]bool{
 var policySafeTools = map[string]bool{
 	"echo": true, "remember": true, "remember_many": true, "request_approval": true, "ask_human": true,
 	"human_contacts": true, "list_triggers": true, "agents": true,
+	// Managing this run's own background operations is bookkeeping, not a side
+	// effect on the workspace (docs/agent-async-operations.md).
+	"kill_operation": true,
 	"skill_search": true, "skill_inspect": true, "skill_validate": true,
 	"skill_history": true, "skill_executions": true, "skill_memory": true,
 	"skill_diff": true, "skill_evaluate": true, "knowledge_lookup": true,
@@ -3053,6 +3148,127 @@ func pendingUserNotes(ctx workflow.Context) []UserNote {
 		}
 	}
 	return notes
+}
+
+// backgroundOp is one detached run_command in flight (docs/agent-async-operations.md):
+// the RunTool activity future plus the human-form bits the completion
+// notification needs. Everything here is rebuilt deterministically on replay.
+type backgroundOp struct {
+	future     workflow.Future
+	command    string
+	started    time.Time
+	timeoutSec int
+	turn       int
+}
+
+// awaitBackgroundOps blocks until at least one pending background operation
+// resolves (the RunTool activity finished — normally, failed or timed out)
+// or a user note arrives. Every resolved operation gets its deferred
+// tool.completed / tool.failed journal event here, and ONE batched
+// notification — the outcome fragment plus the still-running list — is
+// appended to the conversation so the next model turn can act on it.
+// Returns the wake reason: "completed" or "note".
+func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, state *eventState, messages *[]llm.Message, background map[string]*backgroundOp) (string, error) {
+	if len(background) == 0 {
+		return "", nil
+	}
+	// Fast path: everything already resolved (the activity finished while the
+	// turn was still executing) — no waiting, just the batch.
+	ready := 0
+	for _, op := range background {
+		if op.future.IsReady() {
+			ready++
+		}
+	}
+	workflow.GetLogger(ctx).Debug("background wait state", "pending", len(background), "ready", ready)
+	wakeReason := ""
+	if ready == 0 {
+		selector := workflow.NewSelector(ctx)
+		woken := workflow.NewChannel(ctx)
+		wakeReason := ""
+		for id, op := range background {
+			id, op := id, op
+			selector.AddFuture(op.future, func(workflow.Future) {
+				if wakeReason == "" {
+					wakeReason = "completed"
+				}
+				woken.Send(ctx, id)
+			})
+		}
+		selector.AddReceive(workflow.GetSignalChannel(ctx, UserNoteSignal), func(workflow.ReceiveChannel, bool) {
+			if wakeReason == "" {
+				wakeReason = "note"
+			}
+			woken.Send(ctx, "")
+		})
+		selector.Select(ctx)
+		var wakeID string
+		woken.Receive(ctx, &wakeID)
+	}
+	if wakeReason == "" {
+		wakeReason = "completed"
+	}
+
+	// Drain EVERY operation already resolved at wake time: the notification
+	// batch carries them all — one wake-up, one message, not one per op.
+	resolved := make([]string, 0, len(background))
+	for id, op := range background {
+		if op.future.IsReady() {
+			resolved = append(resolved, id)
+		}
+	}
+	slices.Sort(resolved)
+
+	lines := make([]string, 0, len(resolved)+2)
+	for _, id := range resolved {
+		op := background[id]
+		var toolResult ToolResult
+		activityErr := op.future.Get(ctx, &toolResult)
+		elapsed := workflow.Now(ctx).Sub(op.started).Round(time.Second)
+		if activityErr != nil {
+			detail := boundedFailureDetail(activityErr)
+			if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": id, "tool": "run_command", "error_type": "background_failed", "effect": "uncertain", "detail": detail}); err != nil {
+				return "", err
+			}
+			lines = append(lines, fmt.Sprintf("- %s FAILED after %s: %s", id, elapsed, detail))
+		} else {
+			exit := 0
+			if toolResult.ExitCode != nil {
+				exit = *toolResult.ExitCode
+			}
+			tail := toolResult.Content
+			if len(tail) > 1500 {
+				tail = tail[len(tail)-1500:]
+			}
+			if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": id, "tool": "run_command", "exit_code": exit, "background": true, "status": map[bool]string{true: "ok", false: "error"}[exit == 0], "output": compactJSON(toolResult.Content, 1000)}); err != nil {
+				return "", err
+			}
+			lines = append(lines, fmt.Sprintf("- %s finished: exit_code=%d (%s)\n  output tail:\n  %s", id, exit, elapsed, strings.ReplaceAll(tail, "\n", "\n  ")))
+		}
+		delete(background, id)
+	}
+	stillRunning := make([]string, 0, len(background))
+	for id, op := range background {
+		running := workflow.Now(ctx).Sub(op.started).Round(time.Second)
+		stillRunning = append(stillRunning, fmt.Sprintf("- %s `%s` (running %s, timeout %ds)", id, op.command, running, op.timeoutSec))
+	}
+	slices.Sort(stillRunning)
+
+	var message string
+	if len(lines) > 0 {
+		message = "[Background operations report]\n" + strings.Join(lines, "\n")
+		if len(stillRunning) > 0 {
+			message += "\n\nStill running in the background:\n" + strings.Join(stillRunning, "\n")
+		}
+		message += "\n\nIncorporate these results and continue."
+	} else {
+		// Woken by a note before any operation resolved: the note itself is
+		// appended by the caller's notes path; this marker keeps the wake
+		// visible in the conversation.
+		message = "[Background operations] Still running:\n" + strings.Join(stillRunning, "\n")
+	}
+	*messages = append(*messages, llm.Message{Role: "user", Content: message})
+	return wakeReason, nil
 }
 
 // runningPlanChildren lists the plan's still-running children: the awaited

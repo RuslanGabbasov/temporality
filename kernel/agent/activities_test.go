@@ -26,6 +26,14 @@ type recordingSandbox struct {
 func (r *recordingSandbox) SandboxRoot() string                          { return os.TempDir() }
 func (r *recordingSandbox) ResolveWorkspace(path string) (string, error) { return path, nil }
 
+func (r *recordingSandbox) OperationState(scratchKey, operationID string) (sandbox.OperationState, error) {
+	return sandbox.OperationState{}, nil
+}
+
+func (r *recordingSandbox) KillOperation(scratchKey, operationID string) (bool, error) {
+	return false, nil
+}
+
 func (r *recordingSandbox) Execute(_ context.Context, request sandbox.Request) (sandbox.Result, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

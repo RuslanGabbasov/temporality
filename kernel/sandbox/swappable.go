@@ -73,6 +73,20 @@ func (s *Swappable) SandboxRoot() string {
 	return ""
 }
 
+func (s *Swappable) OperationState(scratchKey, operationID string) (OperationState, error) {
+	if d, ok := s.Current().(*Docker); ok && d != nil {
+		return d.OperationState(scratchKey, operationID)
+	}
+	return OperationState{}, ErrNotConfigured
+}
+
+func (s *Swappable) KillOperation(scratchKey, operationID string) (bool, error) {
+	if d, ok := s.Current().(*Docker); ok && d != nil {
+		return d.KillOperation(scratchKey, operationID)
+	}
+	return false, ErrNotConfigured
+}
+
 func (s *Swappable) ResolveWorkspace(path string) (string, error) {
 	current := s.Current()
 	if current == nil {
