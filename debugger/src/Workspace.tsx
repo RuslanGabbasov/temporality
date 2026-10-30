@@ -460,7 +460,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   // rate, liveness (alive/stalled/reconnecting) and the pending tool's args
   // tail. Only the active conversation's running run is watched: the user can
   // only look at one chat at a time.
-  const activeRunningRunId = activeConv?.messages.find((m) => m.status === 'running' && m.runId)?.runId
+  // The LAST running message, not the first: a conversation that survived a
+  // dead run (crashed provider, forced stop) keeps the stale bubble's status
+  // 'running' forever — the first-match lookup would point the token channel
+  // at that dead run while the fresh run streams in the newer bubble.
+  const activeRunningMessages = activeConv?.messages.filter((m) => m.status === 'running' && m.runId) ?? []
+  const activeRunningRunId = activeRunningMessages.length > 0 ? activeRunningMessages[activeRunningMessages.length - 1].runId : undefined
   const tokenMetrics = useRunTokenMetrics(activeRunningRunId ?? '', !!activeRunningRunId)
 
   // Pending attachments belong to the active conversation — never leak them

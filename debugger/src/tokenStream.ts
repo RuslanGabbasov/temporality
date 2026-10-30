@@ -148,6 +148,7 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
     let disposed = false
     let es: EventSource | null = null
     let retryTimer: number | undefined
+    let openWatchdog: number | undefined
     let backoff = 1_000
 
     const touch = () => setMetrics({ ...meter.metrics(), connected: connectedRef.current, reconnects: reconnectsRef.current })
@@ -158,12 +159,26 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
       } catch { /* a malformed frame must not kill the stream */ }
     }
     const teardown = () => {
+      if (openWatchdog) window.clearTimeout(openWatchdog)
+      openWatchdog = undefined
       es?.close()
       es = null
     }
     const connect = () => {
       if (disposed) return
       es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/tokens${token ? `?token=${token}` : ''}`)
+      // A pending EventSource fires NEITHER open nor error when the browser is
+      // queuing the request (HTTP/1.1 caps ~6 connections per origin; a few
+      // open SSE tabs eat that) — without a watchdog the channel sits silent
+      // forever showing «канал не подключился». If the socket has not opened
+      // within 5s, tear it down and re-enter the backoff loop: the retry
+      // either catches a freed slot or keeps the label honest.
+      if (openWatchdog) window.clearTimeout(openWatchdog)
+      openWatchdog = window.setTimeout(() => {
+        if (disposed || connectedRef.current) return
+        teardown()
+        schedule()
+      }, 5000)
       es.addEventListener('snapshot', onFrame)
       es.addEventListener('delta', onFrame)
       es.addEventListener('done', () => {
@@ -176,6 +191,8 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
       // fires within one round-trip — before it, the channel is blind and the
       // caller must not read the silence as a thinking model.
       es.onopen = () => {
+        if (openWatchdog) window.clearTimeout(openWatchdog)
+        openWatchdog = undefined
         backoff = 1_000
         connectedRef.current = true
         touch()
