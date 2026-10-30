@@ -627,7 +627,7 @@ export const en: Record<string, string> = {
     'runs.call_report': 'Request → Response',
     'runs.call_report_title': 'Rejected provider call',
     'runs.call_report_route': 'Route',
-    'runs.call_report_hint': 'The same shape as the provider test dialog: where the call went and with which token (masked). A route of «env fallback» means no enabled provider declares the agent model — the call went to the env-configured provider instead.',
+    'runs.call_report_hint': 'Token is masked. «env fallback» = the agent model was not found in any enabled provider.',
     'runs.trace': 'Trace',
     'runs.events_count': '{{count}} events',
     'runs.trajectory': 'Trajectory',

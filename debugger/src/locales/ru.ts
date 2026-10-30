@@ -627,7 +627,7 @@ export const ru: Record<string, string> = {
     'runs.call_report': 'Запрос → Ответ',
     'runs.call_report_title': 'Отклонённый вызов провайдера',
     'runs.call_report_route': 'Маршрут',
-    'runs.call_report_hint': 'Тот же формат, что у проверки генерации: куда и с каким токеном (замаскирован) стучался вызов. Маршрут «env fallback» значит, что модель агента не заявлена ни в одном включённом провайдере — вызов ушёл к провайдеру из env-конфигурации.',
+    'runs.call_report_hint': 'Токен замаскирован. «env fallback» = модель агента не найдена ни в одном включённом провайдере.',
     'runs.trace': 'Трассировка',
     'runs.events_count': '{{count}} событий',
     'runs.trajectory': 'Траектория',
