@@ -740,6 +740,89 @@ func (d *Docker) reapIdle() {
 	for _, rc := range d.idleContainers(time.Now()) {
 		d.evictRunContainer(rc)
 	}
+	d.reapOrphans()
+}
+
+// SandboxMarkerLabel marks every container this runner ever created — the
+// orphan sweeper's ownership filter, independent of per-run request labels.
+const SandboxMarkerLabel = "temporality.sandbox"
+
+// reapOrphans stops and removes sandbox containers the CURRENT process does
+// not know about. After a kernel rebuild the in-process run registry is
+// empty while the previous process's keep-alive containers keep running —
+// the idle reaper only walks the registry, so those orphans lived forever
+// (a day of rebuilds piled up 28 idle containers against 3 live runs).
+// Ownership = the marker label; age = docker's RunningFor against the same
+// idle TTL the registry reaper uses. Registry entries are protected even
+// when docker's list races ahead of it.
+func (d *Docker) reapOrphans() {
+	if d.idleTTL <= 0 {
+		return
+	}
+	known := map[string]bool{}
+	d.runMu.Lock()
+	for _, rc := range d.runs {
+		known[rc.name] = true
+	}
+	d.runMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	list, err := exec.CommandContext(ctx, d.Binary, "ps",
+		"--filter", "label="+SandboxMarkerLabel+"=1",
+		"--format", "{{.ID}}\t{{.RunningFor}}").CombinedOutput()
+	if err != nil {
+		return // listing must never break the reaper pass
+	}
+	for _, line := range strings.Split(string(list), "\n") {
+		fields := strings.SplitN(strings.TrimSpace(line), "\t", 2)
+		if len(fields) != 2 {
+			continue
+		}
+		id, runningFor := fields[0], fields[1]
+		if known[id] {
+			continue
+		}
+		if age, ok := dockerRunningForAge(runningFor); ok && age > d.idleTTL {
+			_ = d.removeContainer(id)
+		}
+	}
+}
+
+// dockerRunningForAge parses docker ps RunningFor ("3 minutes ago",
+// "About a minute ago", "2 hours ago", "5 days ago") into a duration.
+func dockerRunningForAge(s string) (time.Duration, bool) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimSuffix(s, " ago")
+	s = strings.TrimPrefix(s, "about ")
+	fields := strings.Fields(s)
+	if len(fields) != 2 {
+		return 0, false
+	}
+	// "a minute ago" / "an hour ago": the article reads as 1.
+	n := 1
+	if fields[0] != "a" && fields[0] != "an" {
+		parsed, err := strconv.Atoi(fields[0])
+		if err != nil || parsed < 0 {
+			return 0, false
+		}
+		n = parsed
+	}
+	switch {
+	case strings.HasPrefix(fields[1], "second"):
+		return time.Duration(n) * time.Second, true
+	case strings.HasPrefix(fields[1], "minute"):
+		return time.Duration(n) * time.Minute, true
+	case strings.HasPrefix(fields[1], "hour"):
+		return time.Duration(n) * time.Hour, true
+	case strings.HasPrefix(fields[1], "day"):
+		return time.Duration(n) * 24 * time.Hour, true
+	case strings.HasPrefix(fields[1], "week"):
+		return time.Duration(n) * 7 * 24 * time.Hour, true
+	case strings.HasPrefix(fields[1], "month"):
+		return time.Duration(n) * 30 * 24 * time.Hour, true
+	}
+	return 0, false
 }
 
 // idleContainers picks the registry entries whose last command started
@@ -992,6 +1075,9 @@ func (d *Docker) runFlags(workspace string, request Request, name string, socket
 	for _, key := range slices.Sorted(maps.Keys(request.Labels)) {
 		args = append(args, "--label", key+"="+request.Labels[key])
 	}
+	// The permanent ownership marker: the orphan sweeper identifies every
+	// Temporality sandbox by it, independent of the per-run request labels.
+	args = append(args, "--label", SandboxMarkerLabel+"=1")
 	return args
 }
 

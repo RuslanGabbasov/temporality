@@ -164,9 +164,11 @@ func TestDockerArgumentsCarrySortedLabels(t *testing.T) {
 	if !strings.Contains(joined, want) {
 		t.Errorf("docker args missing sorted labels %q: %s", want, joined)
 	}
+	// An unlabeled request still carries the permanent ownership marker —
+	// the orphan sweeper identifies every sandbox by it.
 	noLabels := strings.Join(runner.arguments("/w", Request{Command: []string{"ls"}}, "n", nil), " ")
-	if strings.Contains(noLabels, "--label") {
-		t.Errorf("unlabeled request must not emit --label: %s", noLabels)
+	if !strings.Contains(noLabels, "--label "+SandboxMarkerLabel+"=1") {
+		t.Errorf("every sandbox must carry the ownership marker: %s", noLabels)
 	}
 }
 
@@ -649,5 +651,28 @@ func TestEnsureNetworkMemoizesInternalVerification(t *testing.T) {
 	// Presence probe + Internal verification on the first run, nothing after.
 	if inspects != 2 {
 		t.Fatalf("network inspect calls after two egress runs = %d, want 2 (memoized)", inspects)
+	}
+}
+
+func TestDockerRunningForAge(t *testing.T) {
+	cases := map[string]time.Duration{
+		"5 seconds ago":          5 * time.Second,
+		"42 seconds ago":         42 * time.Second,
+		"About a minute ago":     time.Minute,
+		"3 minutes ago":          3 * time.Minute,
+		"17 minutes ago":         17 * time.Minute,
+		"About an hour ago":      time.Hour,
+		"2 hours ago":            2 * time.Hour,
+		"5 days ago":             5 * 24 * time.Hour,
+		"2 weeks ago":            14 * 24 * time.Hour,
+	}
+	for input, want := range cases {
+		got, ok := dockerRunningForAge(input)
+		if !ok || got != want {
+			t.Errorf("dockerRunningForAge(%q) = %v/%v, want %v", input, got, ok, want)
+		}
+	}
+	if _, ok := dockerRunningForAge("nonsense"); ok {
+		t.Error("nonsense must not parse")
 	}
 }
