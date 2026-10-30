@@ -20,6 +20,11 @@ type MatrixInboundMessage struct {
 	Sender    string
 	Body      string
 	Timestamp time.Time
+	// ReplyTo is the conversation anchor of a threaded/replied message (the
+	// thread root event id via m.relates_to, or the replied-to event id via
+	// m.in_reply_to). A threaded answer names the conversation it belongs to
+	// — the reply matcher needs exactly that.
+	ReplyTo string
 	// File attachments (m.file/m.image/m.audio/m.video): URL is the mxc://
 	// content URI, Filename the original name. Text messages leave both empty.
 	URL      string
@@ -53,6 +58,20 @@ type matrixEventContent struct {
 	Body     string `json:"body"`
 	Filename string `json:"filename,omitempty"`
 	URL      string `json:"url,omitempty"`
+	// Threads (m.relates_to, rel_type=m.thread, event_id = the thread root)
+	// and plain replies (m.in_reply_to, event_id = the replied-to message).
+	// Modern Element sends threads as relates_to and keeps an m.in_reply_to
+	// fallback inside it for older clients.
+	RelatesTo struct {
+		RelType   string `json:"rel_type"`
+		EventID   string `json:"event_id"`
+		InReplyTo struct {
+			EventID string `json:"event_id"`
+		} `json:"m.in_reply_to"`
+	} `json:"m.relates_to"`
+	InReplyTo struct {
+		EventID string `json:"event_id"`
+	} `json:"m.in_reply_to"`
 }
 
 // ParseMatrixSync extracts room messages from a /sync response body. Text
@@ -73,6 +92,15 @@ func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 				continue
 			}
 			text := strings.TrimSpace(event.Content.Body)
+			// The thread root wins over the replied-to event: a threaded answer
+			// names its conversation, which is what the reply matcher matches.
+			replyTo := event.Content.RelatesTo.InReplyTo.EventID
+			if replyTo == "" && event.Content.RelatesTo.RelType == "m.thread" {
+				replyTo = event.Content.RelatesTo.EventID
+			}
+			if replyTo == "" && event.Content.InReplyTo.EventID != "" {
+				replyTo = event.Content.InReplyTo.EventID
+			}
 			if event.Content.MsgType == "m.text" {
 				if text == "" {
 					continue
@@ -83,6 +111,7 @@ func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 					Sender:    event.Sender,
 					Body:      text,
 					Timestamp: time.UnixMilli(event.OriginServerTS),
+					ReplyTo:   replyTo,
 				})
 				continue
 			}
@@ -104,6 +133,7 @@ func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 				Timestamp: time.UnixMilli(event.OriginServerTS),
 				URL:       event.Content.URL,
 				Filename:  name,
+				ReplyTo:   replyTo,
 			})
 		}
 	}
