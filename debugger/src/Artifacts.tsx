@@ -325,6 +325,15 @@ export default function Artifacts() {
     setShowForm(true)
   }
 
+  // The single edit action's label follows the state: an approved artifact is
+  // edited by opening a revision, a draft/rejected one edits in place, and
+  // an open revision continues its draft.
+  const editLabel = (status?: string, revisionEditable?: boolean) => {
+    if (status === 'approved' && revisionEditable) return t('artifacts.edit_revision_btn') ?? 'Edit revision'
+    if (status === 'approved') return t('artifacts.new_revision_btn') ?? 'New revision'
+    return t('artifacts.edit_btn') ?? 'Edit'
+  }
+
   const startEdit = async (a: Artifact) => {
     let content = a.content ?? ''
     let form: ArtifactForm = { ...a, content }
@@ -668,33 +677,32 @@ export default function Artifacts() {
                       {selected.id}{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
                     </p>
                   </div>
-                  <Stack orientation="horizontal" gap={2}>
-                    {(reviewable || (revisionOpen && revisionEditable)) && (
-                      <Button size="sm" onClick={() => {
-                        setSubmitReviewerTokens([])
-                        setSubmitNote('')
-                        setSubmitOpen(true)
-                        void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
-                      }}>
-                        {t('artifacts.submit_review') ?? 'Send to review'}
-                      </Button>
-                    )}
-                    {selected.status === 'approved' && !revisionOpen && (
-                      <Button size="sm" kind="secondary" renderIcon={Edit} onClick={() => void startEdit(selected)}>
-                        {t('artifacts.new_revision') ?? 'New revision'}
-                      </Button>
-                    )}
-                    {revisionOpen && revisionEditable && (
-                      <Button size="sm" kind="secondary" renderIcon={Edit} onClick={() => void startEdit(selected)}>
-                        {t('artifacts.edit_revision') ?? 'Edit revision'}
-                      </Button>
-                    )}
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'}
-                      disabled={selected.status === 'in_review'}
-                      title={selected.status === 'in_review' ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
-                      onClick={() => void startEdit(selected)} />
-                    <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
-                  </Stack>
+                  				<Stack orientation="horizontal" gap={2}>
+                  					{(reviewable || (revisionOpen && revisionEditable)) && (
+                  						<Button size="sm" onClick={() => {
+                  							setSubmitReviewerTokens([])
+                  							setSubmitNote('')
+                  							setSubmitOpen(true)
+                  							void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
+                  						}}>
+                  							{t('artifacts.submit_review') ?? 'Send to review'}
+                  						</Button>
+                  					)}
+                  					{/* ONE edit action for every state: in_review is locked; approved
+                  					 opens a new revision draft (the dialog header says so); draft/
+                  					 rejected edits in place. The two pencil buttons that used to sit
+                  					 here said different things for the same gesture — the dialog
+                  					 now carries the state-specific wording instead. */}
+                  					<Button
+                  						size="sm"
+                  						kind="secondary"
+                  						renderIcon={Edit}
+                  						disabled={(selected.status ?? '') === 'in_review'}
+                  						title={(selected.status ?? '') === 'in_review' ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+                  						onClick={() => void startEdit(selected)}
+					>{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
+					<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
+                  				</Stack>
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem', alignItems: 'center' }}>
