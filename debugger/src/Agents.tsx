@@ -14,6 +14,7 @@ import {
   Heading,
   Toggle,
   NumberInput,
+  Slider,
   Checkbox,
 
 } from '@carbon/react'
@@ -56,6 +57,25 @@ import { useT } from './i18n'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
+
+/** Temperature is a 0..1 float: a plain stepper NumberInput fights the
+ *  fraction (± buttons mislead, max=2 contradicted the range), so it renders
+ *  as a slider with the manual-input box — drag for a quick pick, type for
+ *  an exact value. */
+export function TemperatureControl({ value, onChange, label }: { value: number; onChange: (value: number) => void; label: string }) {
+  return (
+    <Slider
+      id="agent-temp"
+      labelText={label}
+      min={0}
+      max={1}
+      step={0.05}
+      value={typeof value === 'number' && Number.isFinite(value) ? value : 0}
+      onChange={({ value }) => onChange(typeof value === 'number' ? value : 0)}
+      hideTextInput={false}
+    />
+  )
+}
 
 /** Override panel for a gated-apply refusal: the operator read the proposal
  * and decides the gate's objection (empty suite, stale golden cases) is not a
@@ -2000,7 +2020,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             {formTab === 'params' && (
               <Stack gap={3}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
-                  <NumberInput id="agent-temp" label={t('agents.temperature') ?? 'Temperature'} value={form.temperature ?? 0} onChange={(_, { value }) => setForm({ ...form, temperature: typeof value === 'number' ? value : 0 })} min={0} max={2} step={0.1} />
+                  <TemperatureControl label={t('agents.temperature') ?? 'Temperature'} value={form.temperature ?? 0} onChange={(value) => setForm({ ...form, temperature: value })} />
                   <NumberInput id="agent-tokens" label={t('agents.max_tokens') ?? 'Max tokens'} value={form.max_tokens ?? 16384} onChange={(_, { value }) => setForm({ ...form, max_tokens: typeof value === 'number' ? value : 16384 })} min={64} max={1000000} />
                   <NumberInput id="agent-turns" label={t('agents.max_turns') ?? 'Max turns'} value={form.max_turns ?? 20} onChange={(_, { value }) => setForm({ ...form, max_turns: typeof value === 'number' ? value : 20 })} min={1} max={100} />
                 </div>
