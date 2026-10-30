@@ -1344,16 +1344,6 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   // button fetches the run's model.call_failed journal event on demand and
   // opens the same pair the provider test dialog shows.
   const [callReport, setCallReport] = useState<{ runId: string; event: ObservationEvent } | null>(null)
-  const [callReportBusy, setCallReportBusy] = useState('')
-  const openCallReport = async (runId: string) => {
-    setCallReportBusy(runId)
-    try {
-      const page = await observationApi.events(project || undefined, undefined, undefined, undefined, { run: runId, type: 'model.call_failed', limit: 5 })
-      const event = page.events[page.events.length - 1]
-      if (event) setCallReport({ runId, event })
-      else setError(message(new Error('no rejected provider call journaled for this run')))
-    } catch (f) { setError(message(f)) } finally { setCallReportBusy('') }
-  }
 
   const cancelRun = async (runId: string) => {
     try {
@@ -1716,12 +1706,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                           >{t('chat.branch') ?? 'Branch'}</button>
                         )}
                         {msg.status === 'failed' && msg.runId && activeConv && (
-                          <button
-                            onClick={() => void openCallReport(msg.runId!)}
-                            disabled={callReportBusy === msg.runId}
-                            style={{ background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px', color: 'var(--tm-danger)', cursor: callReportBusy === msg.runId ? 'wait' : 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
-                            title={t('runs.call_report_hint') ?? 'The rejected provider call: where and with which token'}
-                          >{callReportBusy === msg.runId ? '…' : (t('runs.call_report') ?? 'Запрос → Ответ')}</button>
+                          <CallReportButton runId={msg.runId} project={project} onOpen={(event) => setCallReport({ runId: msg.runId!, event })} />
                         )}
                       </div>
                     )}
@@ -1850,5 +1835,41 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         </AppModal>
       )}
     </div>
+  )
+}
+
+/** The «Запрос → Ответ» button for a failed chat run. Self-checking: it
+ *  fetches the run's model.call_failed event once and renders only when the
+ *  run actually carries one — failures that died of other causes (kernel
+ *  restart removed the workflow, turn limits) show no dead button. */
+function CallReportButton({ runId, project, onOpen }: {
+  runId: string
+  project: string
+  onOpen: (event: ObservationEvent) => void
+}) {
+  const { t } = useI18n()
+  const [event, setEvent] = useState<ObservationEvent | null>(null)
+  const [checked, setChecked] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void observationApi.events(project || undefined, undefined, undefined, undefined, { run: runId, type: 'model.call_failed', limit: 5 })
+      .then((page) => {
+        if (cancelled) return
+        const last = page.events[page.events.length - 1]
+        if (last) setEvent(last)
+        setChecked(true)
+      })
+      .catch(() => { if (!cancelled) setChecked(true) })
+    return () => { cancelled = true }
+  }, [runId, project])
+
+  if (!checked || !event) return null
+  return (
+    <button
+      onClick={() => onOpen(event)}
+      style={{ background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px', color: 'var(--tm-danger)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+      title={t('runs.call_report_hint') ?? 'The rejected provider call: where and with which token'}
+    >{t('runs.call_report') ?? 'Запрос → Ответ'}</button>
   )
 }
