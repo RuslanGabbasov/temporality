@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +46,11 @@ type Artifact struct {
 	OriginUser string `json:"origin_user,omitempty"` // creator (human path)
 	OriginRun  string `json:"origin_run,omitempty"`  // creating run (agent path)
 	SagaID     string `json:"saga_id,omitempty"`     // traceability, not access (visibility stays org-scoped)
+	// Contributors is everyone who put a hand on the artifact: the human
+	// creator, the run's agent, editors, the review requester, reviewers,
+	// tag editors. The author filter and suggestions search this set —
+	// agent-created artifacts carry an empty origin_user.
+	Contributors []string `json:"contributors,omitempty"`
 	// Tags are catalog labels (like real knowledge bases): free strings the
 	// registry filters by — topics, products, teams. Catalog metadata, not
 	// content: tagging never flips lifecycle state or bumps the version.
@@ -94,14 +100,14 @@ func (a *Artifact) normalize() {
 	a.SizeBytes = int64(len(a.Content))
 }
 
-const artifactColumns = `id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, org_unit_id, created_at, updated_at`
+const artifactColumns = `id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, contributors, org_unit_id, created_at, updated_at`
 
 func scanArtifact(row interface{ Scan(dest ...any) error }) (Artifact, error) {
 	var a Artifact
 	var orgUnitID, originUser, originRun, sagaID *string
 	if err := row.Scan(&a.ID, &a.Title, &a.Description, &a.Provider, &a.ExternalRef,
 		&a.Content, &a.ContentHash, &a.SizeBytes, &a.MimeType,
-		&a.Status, &a.Kind, &a.Version, &a.OriginType, &originUser, &originRun, &sagaID, &a.Tags, &orgUnitID, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.Status, &a.Kind, &a.Version, &a.OriginType, &originUser, &originRun, &sagaID, &a.Tags, &a.Contributors, &orgUnitID, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return a, ErrNotFound
 		}
@@ -139,14 +145,18 @@ func (s *Store) CreateArtifact(ctx context.Context, artifact *Artifact) error {
 	now := time.Now().UTC()
 	artifact.CreatedAt = now
 	artifact.UpdatedAt = now
+	initialContributors := artifact.Contributors
+	if artifact.OriginUser != "" && !slices.Contains(initialContributors, artifact.OriginUser) {
+		initialContributors = append([]string{artifact.OriginUser}, initialContributors...)
+	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_artifact (id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, org_unit_id, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		`INSERT INTO workspace_artifact (id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, contributors, org_unit_id, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
 		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
 		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
 		artifact.Status, artifact.Kind, artifact.Version, artifact.OriginType,
 		nullString(artifact.OriginUser), nullString(artifact.OriginRun), nullString(artifact.SagaID),
-		textArray(artifact.Tags), nullString(artifact.OrgUnitID), artifact.CreatedAt, artifact.UpdatedAt)
+		textArray(artifact.Tags), textArray(initialContributors), nullString(artifact.OrgUnitID), artifact.CreatedAt, artifact.UpdatedAt)
 	return err
 }
 
@@ -277,13 +287,14 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 		// carry meaning users search by, and titles alone don't cover them.
 		query += ` AND (title ILIKE $` + n + ` OR description ILIKE $` + n + ` OR id ILIKE $` + n + `)`
 	}
-	// Creator filter: origin_user is the human initiator on the human path
-	// (agent artifacts carry an empty origin_user and a run slug in origin_run
-	// — an agent filter needs a proper column, not a LIKE guess).
+	// Creator filter matches EVERYONE who put a hand on the artifact —
+	// origin_user and the contributors set (creator, agent, editors,
+	// reviewers). Agent artifacts carry an empty origin_user, so origin_user
+	// alone would find nothing for them.
 	if f.Author != "" {
-		args = append(args, f.Author)
+		args = append(args, "%"+f.Author+"%")
 		n := strconv.Itoa(len(args))
-		query += ` AND (origin_user ILIKE $` + n + `)`
+		query += ` AND (origin_user ILIKE $` + n + ` OR EXISTS (SELECT 1 FROM unnest(contributors) AS c WHERE c ILIKE $` + n + `))`
 	}
 	if f.CreatedAfter != nil {
 		args = append(args, *f.CreatedAfter)
@@ -320,7 +331,8 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 // lowercased and deduped — the listing filter narrows by lowercase tags, so
 // a mixed-case tag would silently never match. The artifact body is not
 // touched; versions and review rounds keep their history.
-func (s *Store) SetArtifactTags(ctx context.Context, id string, tags []string) (Artifact, error) {
+func (s *Store) SetArtifactTags(ctx context.Context, id, principal string, tags []string) (Artifact, error) {
+	defer func() { s.AddArtifactContributor(ctx, id, principal) }()
 	clean := make([]string, 0, len(tags))
 	seen := map[string]bool{}
 	for _, tag := range tags {
@@ -347,6 +359,20 @@ func (s *Store) SetArtifactTags(ctx context.Context, id string, tags []string) (
 		return Artifact{}, ErrNotFound
 	}
 	return artifacts[0], nil
+}
+
+// AddArtifactContributor appends one principal to the contributors set
+// (idempotent): every mutation path calls it with its actor so the «who put
+// a hand on this» list stays complete — the author filter and the
+// suggestions search it.
+func (s *Store) AddArtifactContributor(ctx context.Context, id, principal string) {
+	principal = strings.TrimSpace(principal)
+	if principal == "" {
+		return
+	}
+	_, _ = s.pool.Exec(ctx,
+		`UPDATE workspace_artifact SET contributors = (SELECT array_agg(DISTINCT x) FROM unnest(contributors || ARRAY[$2]) AS x) WHERE id = $1`,
+		id, principal)
 }
 
 // ListArtifactTags returns the distinct catalog tags visible to the org chain

@@ -127,6 +127,7 @@ func ValidateArtifactReviewers(reviewers []string) error {
 // a review round. Idempotent per version: an already open round for this
 // version returns as-is without touching state or creating a second row.
 func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, reviewers []string, mode, note, requestedBy string) (ArtifactReview, error) {
+	s.AddArtifactContributor(ctx, artifactID, requestedBy)
 	if err := ValidateArtifactReviewers(reviewers); err != nil {
 		return ArtifactReview{}, err
 	}
@@ -241,6 +242,11 @@ func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, rev
 // decision then lands under each of them. decidedBy is the concrete
 // principal, kept on every decision and in resolved_by.
 func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (ArtifactReview, Artifact, error) {
+	// Best-effort: the decision recording below is the source of truth; the
+	// contributor stamp just feeds the «who touched this» list.
+	_, _ = s.pool.Exec(ctx,
+		`UPDATE workspace_artifact SET contributors = (SELECT array_agg(DISTINCT x) FROM unnest(contributors || ARRAY[$2]) AS x)
+		 WHERE id = (SELECT artifact_id FROM workspace_artifact_review WHERE id = $1)`, reviewID, decidedBy)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return ArtifactReview{}, Artifact{}, err

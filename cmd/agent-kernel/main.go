@@ -6160,7 +6160,7 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		artifact, err := ws.SetArtifactTags(r.Context(), r.PathValue("artifactID"), req.Tags)
+		artifact, err := ws.SetArtifactTags(r.Context(), r.PathValue("artifactID"), requestUserID(r), req.Tags)
 		if err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)

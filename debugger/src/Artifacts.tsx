@@ -112,6 +112,11 @@ export default function Artifacts() {
   // The directory feeds the unified search's author suggestions; it is small
   // (a company roster), one load on mount is fine.
   useEffect(() => { workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([])) }, [])
+  const userNameOf = useCallback((id: string | undefined) => {
+    if (!id) return ''
+    const user = directory.find((u) => u.id === id || u.name === id)
+    return user ? (user.name || user.id) : id
+  }, [directory])
   const [submitReviewers, setSubmitReviewers] = useState('')
   const [submitNote, setSubmitNote] = useState('')
   const [decisionComment, setDecisionComment] = useState('')
@@ -220,7 +225,7 @@ export default function Artifacts() {
   const authorSuggest = useMemo(() => {
     const needle = searchDraft.trim().toLowerCase()
     if (needle.length < 2 || authorFilter) return []
-    const fromArtifacts = [...new Set(artifacts.map((a) => a.origin_user).filter(Boolean))] as string[]
+    const fromArtifacts = [...new Set(artifacts.flatMap((a) => [a.origin_user, ...(a.contributors ?? [])]).filter(Boolean))] as string[]
     const fromDirectory = (directory ?? []).map((u) => u.name).concat((directory ?? []).map((u) => u.email)).filter(Boolean) as string[]
     return [...new Set([...fromArtifacts, ...fromDirectory])]
       .filter((author) => author.toLowerCase().includes(needle))
@@ -545,7 +550,7 @@ export default function Artifacts() {
                 </div>
                 <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>
                   <label className="toolbar-select" title={t('artifacts.filter_status_label') ?? 'Status'} style={{ flex: 1, minWidth: 0 }}>
-                    <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                    <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ width: '100%' }}>
                       <option value="">{t('artifacts.filter_status_all') ?? `Status — all (${artifacts.length})`}</option>
                       {orderedStatuses.map((s) => (
                         <option key={s} value={s}>{statusLabel(s)} ({statusCounts[s] ?? 0})</option>
@@ -553,7 +558,7 @@ export default function Artifacts() {
                     </select>
                   </label>
                   <label className="toolbar-select" title={t('artifacts.filter_age_label') ?? 'Age'} style={{ flex: 1, minWidth: 0 }}>
-                    <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value as typeof ageFilter)}>
+                    <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value as typeof ageFilter)} style={{ width: '100%' }}>
                       <option value="">{t('artifacts.filter_age_all') ?? 'Any time'}</option>
                       <option value="week">{t('artifacts.filter_age_week') ?? 'This week'}</option>
                       <option value="month">{t('artifacts.filter_age_month') ?? 'This month'}</option>
@@ -566,6 +571,7 @@ export default function Artifacts() {
                       onChange={(e) => {
                         if (e.target.value && !tagFilter.includes(e.target.value)) setTagFilter([...tagFilter, e.target.value])
                       }}
+                      style={{ width: '100%' }}
                     >
                       <option value="">{tagFilter.length ? `${t('artifacts.filter_tags_label') ?? 'Tags'}: +${tagFilter.length}` : (t('artifacts.filter_tags_all') ?? 'Tags')}</option>
                       {tagOptions.filter(({ tag }) => !tagFilter.includes(tag)).map(({ tag, count }) => (
@@ -739,6 +745,23 @@ export default function Artifacts() {
                     {tagOptions.map(({ tag }) => <option key={tag} value={tag} />)}
                   </datalist>
                 </div>
+                {/* Everyone who put a hand on this: creator, the run's agent,
+                    editors, reviewers — the author filter searches the same
+                    set, so a name from here is one click to pin. */}
+                {(selected.contributors ?? []).length > 0 && (
+                  <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.45rem', display: 'flex', gap: '0.3rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span>{t('artifacts.contributors') ?? 'Прикладывали руку'}:</span>
+                    {(selected.contributors ?? []).map((person) => (
+                      <button
+                        key={person}
+                        type="button"
+                        title={t('artifacts.filter_author_label') ?? 'Author'}
+                        onClick={() => setAuthorFilter(person)}
+                        style={{ background: 'none', border: 'none', padding: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.72rem', textDecoration: 'underline dotted' }}
+                      >{userNameOf(person) || person}</button>
+                    ))}
+                  </div>
+                )}
 
                 {selected.description && (
                   <p style={{ color: 'var(--tm-text-2)', fontSize: '0.8rem', marginTop: '0.6rem', wordBreak: 'break-word' }}>{selected.description}</p>

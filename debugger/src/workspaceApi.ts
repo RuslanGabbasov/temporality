@@ -786,6 +786,7 @@ export interface Artifact {
   origin_type?: 'human' | 'agent'
   origin_user?: string
   origin_run?: string
+  contributors?: string[]
   saga_id?: string
   created_at: string
   updated_at: string
