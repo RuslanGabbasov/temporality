@@ -245,8 +245,10 @@ function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStat
     })
     for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1)
   }
-  // Journal returns oldest-first; show newest runs first.
-  for (const root of roots.reverse()) walk(root, 0)
+  // Show newest runs first. The caller's page order decides the direction:
+  // buildRunRows keeps the incoming order (the list loads desc = newest
+  // first) and only folds children under their parents.
+  for (const root of roots) walk(root, 0)
   return rows
 }
 
