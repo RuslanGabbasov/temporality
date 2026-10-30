@@ -1076,6 +1076,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
           providers={providers}
           sandboxProfiles={sandboxProfiles}
           secrets={secretsList.filter((s) => s.enabled !== false)}
+          mcpServers={mcpServers}
           onClose={() => setBulkOpen(false)}
           onApplied={() => {
             setBulkOpen(false)
@@ -2470,17 +2471,22 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     )
   }
 
-/** Bulk configuration dialog: apply one provider+model, sandbox profile
- *  and/or secrets set to MANY agents at once — «переключить всех с Xiaomi
- *  на z.ai» в два клика вместо шести обходов карточек. Only the checked
- *  sections are applied; every selected agent is read (GET) and written
- *  (PUT) whole, so skills/prompts/versions stay untouched and each agent
- *  keeps its own version history. */
-function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClose, onApplied, t }: {
+/** Bulk configuration dialog: apply one provider+model, sandbox profile,
+ *  secrets change or MCP servers to MANY agents at once — «переключить всех
+ *  с Xiaomi на z.ai» в два клика вместо шести обходов карточек. Only the
+ *  checked sections are applied; every selected agent is read (GET) and
+ *  written (PUT) whole, so skills/prompts/versions stay untouched and each
+ *  agent keeps its own version history. Collections (secrets, MCP servers)
+ *  apply in add or remove mode — «добавить всем» never wipes what an agent
+ *  already had. */
+const bulkInputStyle = { width: '100%', border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.8rem', padding: '0.4rem 0.6rem', outline: 'none' } as const
+
+function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpServers, onClose, onApplied, t }: {
   agentIds: string[]
   providers: Provider[]
   sandboxProfiles: SandboxProfile[]
   secrets: Secret[]
+  mcpServers: MCPServer[]
   onClose: () => void
   onApplied: () => void
   t: (key: string, vars?: Record<string, string>) => string
@@ -2492,6 +2498,9 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClos
   const [sandboxProfile, setSandboxProfile] = useState('')
   const [applySecrets, setApplySecrets] = useState(false)
   const [secretSet, setSecretSet] = useState<string[]>([])
+  const [applyMcp, setApplyMcp] = useState(false)
+  const [mcpAdd, setMcpAdd] = useState<string[]>([])
+  const [mcpRemove, setMcpRemove] = useState<string[]>([])
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [failures, setFailures] = useState<string[]>([])
   const [done, setDone] = useState(0)
@@ -2509,6 +2518,14 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClos
         if (applyModel) { patch.provider = providerId; patch.model = model }
         if (applySandbox) patch.sandbox_profile = sandboxProfile
         if (applySecrets) patch.secrets = secretSet
+        if (applyMcp) {
+          const current = full.mcp_servers ?? []
+          // add: append servers the agent does not have yet; remove: strip the
+          // chosen ones. The two lists are exclusive by construction (the UI
+          // moves a server between them).
+          const next = [...current.filter((s) => !mcpRemove.includes(s)), ...mcpAdd.filter((s) => !current.includes(s))]
+          patch.mcp_servers = next
+        }
         await workspaceApi.updateAgent(id, patch)
         ok++
       } catch {
@@ -2531,7 +2548,43 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClos
     </div>
   )
 
-  const selectStyle = { width: '100%' } as const
+  // A collection editor in add/remove mode: chips of every available server,
+  // three states per chip — stays / added (+) / removed (−).
+  const collectionEditor = (add: string[], remove: string[], onToggleAdd: (id: string) => void, onToggleRemove: (id: string) => void) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+      {mcpServers.map((server) => {
+        const added = add.includes(server.id)
+        const removed = remove.includes(server.id)
+        const had = false // per-agent state differs; the apply-time merge is what matters
+        const state: 'add' | 'remove' | 'keep' = added ? 'add' : removed ? 'remove' : 'keep'
+        const label = added ? `+ ${server.name}` : removed ? `− ${server.name}` : server.name
+        return (
+          <button
+            key={server.id}
+            type="button"
+            title={had ? (t('agents.bulk_present') ?? 'уже у агента') : (t('agents.bulk_absent') ?? 'у агента нет')}
+            onClick={() => {
+              // A chip flips add → remove → keep in one cycle; had-items start
+              // at keep, others at absent-keep too.
+              if (added) { onToggleAdd(server.id); onToggleRemove(server.id) }
+              else if (removed) { onToggleRemove(server.id) }
+              else { onToggleAdd(server.id) }
+            }}
+            style={{
+              background: added ? 'var(--tm-success, #5e887a)' : removed ? 'var(--tm-danger)' : 'transparent',
+              border: `1px solid ${added ? 'var(--tm-success, #5e887a)' : removed ? 'var(--tm-danger)' : 'var(--tm-border)'}`,
+              borderRadius: 999,
+              color: added || removed ? '#fff' : 'var(--tm-text-2)',
+              cursor: 'pointer', fontSize: '0.72rem', padding: '0.15rem 0.5rem',
+              opacity: had && !added && !removed ? 0.85 : 1,
+            }}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
 
   return (
     <AppModal onClose={onClose} panelStyle={{ width: '560px', maxHeight: '85vh', overflowY: 'auto' }}>
@@ -2542,11 +2595,11 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClos
 
       {section(applyModel, () => setApplyModel(!applyModel), t('agents.bulk_model') ?? 'Провайдер и модель', (
         <div style={{ display: 'flex', gap: '0.4rem' }}>
-          <select value={providerId} onChange={(e) => { setProviderId(e.target.value); setModel('') }} style={{ ...selectStyle, flex: 1 }}>
+          <select value={providerId} onChange={(e) => { setProviderId(e.target.value); setModel('') }} style={{ ...bulkInputStyle, flex: 1 }}>
             <option value="">{t('agents.bulk_pick_provider') ?? 'Провайдер…'}</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <select value={model} onChange={(e) => setModel(e.target.value)} disabled={!providerId} style={{ ...selectStyle, flex: 1 }}>
+          <select value={model} onChange={(e) => setModel(e.target.value)} disabled={!providerId} style={{ ...bulkInputStyle, flex: 1 }}>
             <option value="">{t('agents.bulk_pick_model') ?? 'Модель…'}</option>
             {providerModels.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
@@ -2554,13 +2607,13 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClos
       ))}
 
       {section(applySandbox, () => setApplySandbox(!applySandbox), t('agents.bulk_sandbox') ?? 'Профиль песочницы', (
-        <select value={sandboxProfile} onChange={(e) => setSandboxProfile(e.target.value)} style={selectStyle}>
+        <select value={sandboxProfile} onChange={(e) => setSandboxProfile(e.target.value)} style={bulkInputStyle}>
           <option value="">{t('agents.bulk_pick_sandbox') ?? 'Профиль…'}</option>
           {sandboxProfiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       ))}
 
-      {section(applySecrets, () => setApplySecrets(!applySecrets), t('agents.bulk_secrets') ?? 'Доступ к секретам (заменить набор)', (
+      {section(applySecrets, () => setApplySecrets(!applySecrets), t('agents.bulk_secrets_add') ?? 'Секреты: добавить выбранные всем', (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
           {secrets.map((s) => {
             const on = secretSet.includes(s.name)
@@ -2577,6 +2630,17 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClos
           })}
         </div>
       ))}
+
+      {section(applyMcp, () => setApplyMcp(!applyMcp), t('agents.bulk_mcp') ?? 'MCP-серверы: добавить/убрать', (
+        <div>
+          <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.35rem' }}>
+            {t('agents.bulk_mcp_hint') ?? '+ добавит сервер всем, − уберёт у всех, без пометки — не тронет.'}
+          </p>
+          {collectionEditor(mcpAdd, mcpRemove,
+            (id) => { setMcpAdd((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]); setMcpRemove((prev) => prev.filter((x) => x !== id)) },
+            (id) => { setMcpRemove((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]); setMcpAdd((prev) => prev.filter((x) => x !== id)) })}
+        </div>
+      ) )}
 
       {progress && (
         <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>
@@ -2600,7 +2664,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, onClos
         </Button>
         <Button
           onClick={() => void apply()}
-          disabled={(!applyModel && !applySandbox && !applySecrets) || (!!progress && progress.done < progress.total)}
+          disabled={(!applyModel && !applySandbox && !applySecrets && !applyMcp) || (!!progress && progress.done < progress.total)}
         >
           {progress && progress.done < progress.total
             ? (t('agents.bulk_applying') ?? 'Применяю…')
