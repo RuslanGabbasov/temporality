@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
 import {
   Button,
   TextInput,
@@ -70,6 +70,7 @@ export default function Artifacts() {
   // Creator and age filters: «my artifacts» and the new / this-week /
   // this-month presets — a 10k registry is unnavigable without them.
   const [authorFilter, setAuthorFilter] = useState('')
+  const [searchFocused, setSearchFocused] = useState(false)
   const [ageFilter, setAgeFilter] = useState<'' | 'week' | 'month' | 'quarter'>('')
   // Approvals inbox: open review rounds addressed to the caller, one tab.
   const [inboxMode, setInboxMode] = useState(false)
@@ -108,6 +109,9 @@ export default function Artifacts() {
   // opens the submit dialog.
   const [submitReviewerTokens, setSubmitReviewerTokens] = useState<string[]>([])
   const [directory, setDirectory] = useState<User[]>([])
+  // The directory feeds the unified search's author suggestions; it is small
+  // (a company roster), one load on mount is fine.
+  useEffect(() => { workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([])) }, [])
   const [submitReviewers, setSubmitReviewers] = useState('')
   const [submitNote, setSubmitNote] = useState('')
   const [decisionComment, setDecisionComment] = useState('')
@@ -208,6 +212,20 @@ export default function Artifacts() {
 
   // Debounced server search: keystrokes land 300ms apart, not per keypress.
   const [searchDraft, setSearchDraft] = useState('')
+
+  // Unified search suggestions: typing a name offers matching authors to pin
+  // as a filter (distinct origin_user values of the currently visible
+  // artifacts + the user directory's names/emails). The query itself keeps
+  // searching titles — the suggestion only appears while it matches someone.
+  const authorSuggest = useMemo(() => {
+    const needle = searchDraft.trim().toLowerCase()
+    if (needle.length < 2 || authorFilter) return []
+    const fromArtifacts = [...new Set(artifacts.map((a) => a.origin_user).filter(Boolean))] as string[]
+    const fromDirectory = (directory ?? []).map((u) => u.name).concat((directory ?? []).map((u) => u.email)).filter(Boolean) as string[]
+    return [...new Set([...fromArtifacts, ...fromDirectory])]
+      .filter((author) => author.toLowerCase().includes(needle))
+      .slice(0, 5)
+  }, [searchDraft, artifacts, directory, authorFilter])
   useEffect(() => {
     const timer = setTimeout(() => setServerQuery(searchDraft), 300)
     return () => clearTimeout(timer)
@@ -486,76 +504,53 @@ export default function Artifacts() {
           ) : (
             <>
               <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
-                <div style={{ marginBottom: '0.5rem' }}>
-                  <ListFilter value={searchDraft} onChange={setSearchDraft} placeholder={t('artifacts.search_placeholder') ?? 'Search by name…'} />
-                </div>
-                {tagFilter.length > 0 && (
-                  <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                    {tagFilter.map((tag) => (
-                      <button key={tag} type="button" onClick={() => setTagFilter(tagFilter.filter((x) => x !== tag))} style={chipStyle(true)}>
-                        {tag} ✕
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem' }}>
-                  <button type="button" onClick={() => setStatusFilter('')} style={chipStyle(statusFilter === '')}>
-                    {t('inbound.filter_all') ?? 'All'} · {artifacts.length}
-                  </button>
-                  {orderedStatuses.map((s) => (
-                    <button key={s} type="button" onClick={() => setStatusFilter(statusFilter === s ? '' : s)} style={chipStyle(statusFilter === s)}>
-                      {statusLabel(s)} · {statusCounts[s]}
-                    </button>
-                  ))}
-                </div>
-                {tagOptions.length > 0 && (
-                  <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)' }}>
-                    {tagOptions.map(({ tag, count }) => {
-                      const on = tagFilter.includes(tag)
-                      return (
+                {/* Two rows, the whole filter surface: (1) unified search with
+                    suggestions — a query searches title/id/description, and
+                    typing offers the matching authors to pin as a filter;
+                    (2) status / age / tags combos. Provider and org moved out:
+                    where the bytes live is a machine detail, and the org scope
+                    is already enforced by visibility. */}
+                <div style={{ position: 'relative', marginBottom: '0.4rem' }}>
+                  <input
+                    value={searchDraft}
+                    onChange={(e) => setSearchDraft(e.target.value)}
+                    onFocus={() => setSearchFocused(true)}
+                    onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
+                    placeholder={t('artifacts.search_placeholder') ?? 'Search by name, id, author…'}
+                    style={{ width: '100%', border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.8rem', padding: '0.35rem 0.6rem', outline: 'none' }}
+                  />
+                  {searchFocused && authorSuggest.length > 0 && (
+                    <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', zIndex: 3, overflow: 'hidden' }}>
+                      {authorSuggest.map((author) => (
                         <button
-                          key={tag}
+                          key={author}
                           type="button"
-                          title={t('artifacts.tag_filter_hint', { count: String(count) }) ?? `${count} artifacts`}
-                          onClick={() => setTagFilter(on ? tagFilter.filter((x) => x !== tag) : [...tagFilter, tag])}
-                          style={chipStyle(on)}
+                          onClick={() => { setAuthorFilter(author); setSearchDraft('') }}
+                          style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', padding: '0.35rem 0.6rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem', textAlign: 'left' }}
                         >
-                          #{tag} · {count}
+                          👤 {author}
+                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', marginLeft: 'auto' }}>{t('artifacts.suggest_author') ?? 'author'}</span>
                         </button>
-                      )
-                    })}
-                  </div>
-                )}
-                {/* Label-free selects: the first option doubles as the label
-                    («Все источники» / «Все подразделения»), the full name is on
-                    hover — the whole filter block stays one compact row. */}
-                <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.6rem' }}>
-                  <label className="toolbar-select" title={t('artifacts.filter_provider_label') ?? 'Source'} style={{ flex: 1, minWidth: 0 }}>
-                    <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} style={{ width: '100%' }}>
-                      <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
-                      <option value="builtin">{providerLabel('builtin')}</option>
-                      <option value="url">{providerLabel('url')}</option>
-                    </select>
-                  </label>
-                  {org.units.length > 0 && (
-                    <label className="toolbar-select" title={t('artifacts.filter_org_label') ?? 'Unit'} style={{ flex: 1, minWidth: 0 }}>
-                      <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
-                        <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
-                        {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                      </select>
-                    </label>
+                      ))}
+                    </div>
+                  )}
+                  {authorFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setAuthorFilter('')}
+                      title={t('artifacts.filter_author_label') ?? 'Author'}
+                      style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)', background: 'var(--tm-surface-3, rgba(127,127,127,.15))', border: 'none', borderRadius: 999, color: 'var(--tm-text)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.05rem 0.45rem' }}
+                    >👤 {authorFilter} ✕</button>
                   )}
                 </div>
-                {/* Creator and age: the presets a 10k registry actually gets
-                    navigated by — «my artifacts this week» is two clicks. */}
-                <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.6rem' }}>
-                  <label className="toolbar-select" title={t('artifacts.filter_author_label') ?? 'Author'} style={{ flex: 1, minWidth: 0 }}>
-                    <input
-                      value={authorFilter}
-                      onChange={(e) => setAuthorFilter(e.target.value)}
-                      placeholder={t('artifacts.filter_author_label') ?? 'Author…'}
-                      style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'inherit', fontSize: 'inherit' }}
-                    />
+                <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                  <label className="toolbar-select" title={t('artifacts.filter_status_label') ?? 'Status'} style={{ flex: 1, minWidth: 0 }}>
+                    <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                      <option value="">{t('artifacts.filter_status_all') ?? `Status — all (${artifacts.length})`}</option>
+                      {orderedStatuses.map((s) => (
+                        <option key={s} value={s}>{statusLabel(s)} ({statusCounts[s] ?? 0})</option>
+                      ))}
+                    </select>
                   </label>
                   <label className="toolbar-select" title={t('artifacts.filter_age_label') ?? 'Age'} style={{ flex: 1, minWidth: 0 }}>
                     <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value as typeof ageFilter)}>
@@ -565,7 +560,29 @@ export default function Artifacts() {
                       <option value="quarter">{t('artifacts.filter_age_quarter') ?? 'Last 3 months'}</option>
                     </select>
                   </label>
+                  <label className="toolbar-select" title={t('artifacts.filter_tags_label') ?? 'Tags'} style={{ flex: 1.4, minWidth: 0 }}>
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value && !tagFilter.includes(e.target.value)) setTagFilter([...tagFilter, e.target.value])
+                      }}
+                    >
+                      <option value="">{tagFilter.length ? `${t('artifacts.filter_tags_label') ?? 'Tags'}: +${tagFilter.length}` : (t('artifacts.filter_tags_all') ?? 'Tags')}</option>
+                      {tagOptions.filter(({ tag }) => !tagFilter.includes(tag)).map(({ tag, count }) => (
+                        <option key={tag} value={tag}>#{tag} ({count})</option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
+                {tagFilter.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', paddingBottom: '0.5rem' }}>
+                    {tagFilter.map((tag) => (
+                      <button key={tag} type="button" onClick={() => setTagFilter(tagFilter.filter((x) => x !== tag))} style={chipStyle(true)}>
+                        #{tag} ✕
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div style={{ paddingRight: '0.15rem' }}>
                 {visibleArtifacts.map((a) => (
