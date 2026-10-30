@@ -1388,12 +1388,22 @@ func main() {
 			return
 		}
 		if terminateErr != nil {
-			// A workflow Temporal does not know is already gone — the common case
-			// being a stand whose Temporal volume was rebuilt while the journal
-			// kept older runs. Those zombies stay 'running' in lists forever and
-			// every stop press 409s. Heal instead: journal the terminal event and
-			// settle the workspace status, answer success.
-			if !strings.Contains(terminateErr.Error(), "not found") && !strings.Contains(terminateErr.Error(), "NotFound") {
+			// A workflow Temporality does not need to terminate is already gone
+			// OR already terminal: the common cases being a stand whose Temporal
+			// volume was rebuilt while the journal kept older runs, and a run
+			// whose workflow actually finished (or was cancelled) while its
+			// status row stayed 'running' — terminate answers «already
+			// completed» for those. Both heal instead of 409-ing forever:
+			// journal the terminal event, settle the workspace status, answer
+			// success.
+			detail := strings.ToLower(terminateErr.Error())
+			healed := strings.Contains(detail, "not found") ||
+				strings.Contains(detail, "already completed") ||
+				strings.Contains(detail, "already closed") ||
+				strings.Contains(detail, "already canceled") ||
+				strings.Contains(detail, "already cancelled")
+			log.Warn("terminate heal check", "run", runID, "error", terminateErr.Error(), "healed", healed)
+			if !healed {
 				writeError(w, 409, terminateErr)
 				return
 			}

@@ -551,7 +551,7 @@ export default function AgentRuns({ project }: { project: string }) {
   const stopRun = async (row: RunRow) => {
     setBusy(true)
     try {
-      await workspaceApi.terminateRun(row.id, row.project ?? project ?? '')
+      await workspaceApi.terminateRun(row.id, row.project ?? project ?? '', row.sourceId)
     } catch { /* the silent refresh picks the terminal state up either way */ }
     setConfirmStop('')
     await loadRuns(true, true)

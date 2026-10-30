@@ -1372,8 +1372,8 @@ export const workspaceApi = {
   // Force stop (docs/agent-delegation.md §runs ops): TerminateWorkflow kills
   // even a workflow stuck failing its determinism check; the endpoint
   // journals the terminal run.cancelled itself.
-  terminateRun: (runId: string, project: string) =>
-    request<{ run_id: string; status: string }>(`/v1/agent/runs/${encodeURIComponent(runId)}/terminate?project=${encodeURIComponent(project)}`, { method: 'POST' }),
+  terminateRun: (runId: string, project: string, sourceId?: string) =>
+    request<{ run_id: string; status: string }>(`/v1/agent/runs/${encodeURIComponent(runId)}/terminate?project=${encodeURIComponent(project)}${sourceId ? `&source_id=${encodeURIComponent(sourceId)}` : ''}`, { method: 'POST' }),
   // Mid-run user note (kernel.user_note signal): the message is appended to
   // the RUNNING run's conversation at the nearest turn boundary instead of
   // starting a parallel run. A 409 means the run is already terminal — the
