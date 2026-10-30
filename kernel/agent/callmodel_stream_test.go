@@ -331,3 +331,31 @@ func TestCallModelStreamTimeoutFallsBackAfterTwoStreamDeaths(t *testing.T) {
 		t.Fatalf("markers = %v, %v", outbox.events[0].Data["reason"], outbox.events[1].Data["reason"])
 	}
 }
+
+// A retried activity re-runs routing and re-emits its markers. If two
+// emissions share an event_id, the second differs only in OccurredAt — the
+// journal reads that as «same id, different content», rejects it, and the
+// poison row wedges the whole outbox queue behind it (2026-10-30: 12.8k
+// rejected route markers froze delivery for two days). Marker ids must be
+// occurrence-unique.
+func TestModelMarkerIdsAreOccurrenceUnique(t *testing.T) {
+	activities := &Activities{Events: &capturedOutbox{}, SourceID: "kernel"}
+	request := ModelRequest{RunID: "run-poison", Project: "p", Turn: 3}
+
+	activities.emitModelRoute(context.Background(), request, "7", "provider prov-1 · model mimo")
+	activities.emitModelRoute(context.Background(), request, "7", "provider prov-1 · model mimo")
+	activities.emitModelAttempt(context.Background(), request, 1, "7", "activity_retry", 0, "")
+	activities.emitModelAttempt(context.Background(), request, 1, "7", "activity_retry", 0, "")
+
+	outbox := activities.Events.(*capturedOutbox)
+	if len(outbox.events) != 4 {
+		t.Fatalf("enqueued markers = %d, want 4", len(outbox.events))
+	}
+	seen := map[string]bool{}
+	for _, event := range outbox.events {
+		if seen[event.EventID] {
+			t.Fatalf("duplicate event id %q — the journal would poison the outbox on the second emission", event.EventID)
+		}
+		seen[event.EventID] = true
+	}
+}

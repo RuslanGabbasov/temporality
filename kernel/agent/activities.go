@@ -859,9 +859,14 @@ func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, rou
 			if report.ResponseHeaders == nil {
 				report.ResponseHeaders = map[string]string{}
 			}
-			eventID := fmt.Sprintf("%s/model-call-failed/%d/a%d/turn-%d", eventScope(a.SourceID, request.Project, request.RunID), code, attempt, request.Turn)
+			now := time.Now().UTC()
+			// The nanosecond suffix makes the id occurrence-unique: a redelivered
+			// activity task re-runs the attempt and would otherwise re-emit the same
+			// event_id with a fresh OccurredAt — the journal reads that as «same id,
+			// different content» and poisons the outbox queue behind it.
+			eventID := fmt.Sprintf("%s/model-call-failed/%d/a%d/turn-%d/%d", eventScope(a.SourceID, request.Project, request.RunID), code, attempt, request.Turn, now.UnixNano())
 			event := observation.Event{
-				Schema: observation.Schema, EventID: eventID, OccurredAt: time.Now().UTC(),
+				Schema: observation.Schema, EventID: eventID, OccurredAt: now,
 				Source:  observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
 				Context: observation.Context{Project: request.Project, Run: request.RunID, Actor: observation.Actor{ID: "system", Type: "agent"}},
 				Type:    "model.call_failed",
@@ -904,14 +909,19 @@ func boundedAttemptError(err error) string {
 // event outbox. The deterministic workflow numbers its own events
 // sequentially (scope/event/NNNNNN); these activity-side markers live under a
 // separate namespace keyed by the Temporal scheduled event id + attempt, so
-// they never collide with the workflow sequence and stay idempotent across
-// outbox redeliveries (the journal dedups by event_id). Best-effort by
-// design: an outbox failure must not fail the model call itself.
+// they never collide with the workflow sequence. The nanosecond suffix makes
+// each execution occurrence its own event: re-running the same attempt (task
+// redelivery) must not re-emit the same event_id with a fresh OccurredAt —
+// the journal would reject it as «same id, different content» and wedge the
+// outbox behind the poison row. Outbox redeliveries of an already-enqueued
+// row stay idempotent: the row's payload is frozen at enqueue time.
+// Best-effort by design: an outbox failure must not fail the model call itself.
 func (a *Activities) emitModelAttempt(ctx context.Context, request ModelRequest, attempt int, activityID string, reason string, streamMs int64, streamErr string) {
 	if a.Events == nil || request.RunID == "" {
 		return
 	}
-	eventID := fmt.Sprintf("%s/model-attempt/%s/%d", eventScope(a.SourceID, request.Project, request.RunID), activityID, attempt)
+	now := time.Now().UTC()
+	eventID := fmt.Sprintf("%s/model-attempt/%s/%d/%d", eventScope(a.SourceID, request.Project, request.RunID), activityID, attempt, now.UnixNano())
 	if reason == "stream_fallback" {
 		eventID += "/fallback"
 	}
@@ -923,7 +933,7 @@ func (a *Activities) emitModelAttempt(ctx context.Context, request ModelRequest,
 		data["error"] = streamErr
 	}
 	event := observation.Event{
-		Schema: observation.Schema, EventID: eventID, OccurredAt: time.Now().UTC(),
+		Schema: observation.Schema, EventID: eventID, OccurredAt: now,
 		Source:  observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
 		Context: observation.Context{Project: request.Project, Run: request.RunID, Actor: observation.Actor{ID: "system", Type: "agent"}},
 		Type:    "model.attempt", Data: data,
@@ -946,9 +956,13 @@ func (a *Activities) emitModelRoute(ctx context.Context, request ModelRequest, a
 	if a.Events == nil || request.RunID == "" || route == "" {
 		return
 	}
-	eventID := fmt.Sprintf("%s/model-attempt/%s/route/%s", eventScope(a.SourceID, request.Project, request.RunID), activityID, strings.ReplaceAll(route, " ", "-"))
+	// Occurrence-unique id (see emitModelAttempt): an activity retry re-runs
+	// routing, and even the same route must not collide with the first
+	// emission's event_id — only OccurredAt differs, which poisons the queue.
+	now := time.Now().UTC()
+	eventID := fmt.Sprintf("%s/model-attempt/%s/route/%s/%d", eventScope(a.SourceID, request.Project, request.RunID), activityID, strings.ReplaceAll(route, " ", "-"), now.UnixNano())
 	event := observation.Event{
-		Schema: observation.Schema, EventID: eventID, OccurredAt: time.Now().UTC(),
+		Schema: observation.Schema, EventID: eventID, OccurredAt: now,
 		Source:  observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
 		Context: observation.Context{Project: request.Project, Run: request.RunID, Actor: observation.Actor{ID: "system", Type: "agent"}},
 		Type:    "model.attempt", Data: map[string]any{"turn": request.Turn, "model": request.Model, "reason": "routed", "route": route},
