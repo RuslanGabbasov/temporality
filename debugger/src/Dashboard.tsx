@@ -632,9 +632,6 @@ export default function Dashboard({ project, setProject }: Props) {
 
       {tab === 'sagas' && <ProjectOverview project={project} />}
 
-      // The knowledge observability view moved out with the knowledge tab —
-      // the Knowledge explorer page owns that surface now.
-
       {tab === 'supervisor' && <SupervisorPanels onPendingChange={setSupervisorPending} />}
 
       {tab === 'users' && <UsersTab />}
