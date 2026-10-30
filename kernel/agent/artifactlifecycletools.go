@@ -80,12 +80,18 @@ func (a *Activities) handleArtifactCreate(ctx context.Context, request ToolReque
 	return ToolResult{Content: string(encoded)}, nil
 }
 
-// handleArtifactUpdate edits a draft/rejected artifact in place; editing an
-// approved artifact opens its next version as a draft; in_review is locked.
+// handleArtifactUpdate edits a draft/rejected artifact in place; an approved
+// artifact is opened as a new revision draft via new_version=true (POST
+// /revision) and then goes through artifact_submit → human review; in_review
+// is locked.
 func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	artifactID := artifactStringArg(request, "artifact_id")
 	if artifactID == "" {
 		return ToolResult{Content: "error: artifact_id is required"}, nil
+	}
+	newVersion, _ := request.Arguments["new_version"].(bool)
+	if newVersion {
+		return a.handleArtifactNewVersion(ctx, request, artifactID)
 	}
 	payload := map[string]any{
 		"title":       artifactStringArg(request, "title"),
@@ -110,7 +116,13 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
 	if status >= 400 {
-		return ToolResult{Content: fmt.Sprintf("error: artifact update failed (HTTP %d): %s", status, truncate(body, 600))}, nil
+		bodyText := truncate(body, 600)
+		if status == 409 && strings.Contains(bodyText, "approved") {
+			// The classic «новая редакция» case: name the controlled path
+			// instead of a bare refusal.
+			return ToolResult{Content: "error: this artifact is approved — pass new_version=true to open a revision draft, then submit it for re-approval with artifact_submit"}, nil
+		}
+		return ToolResult{Content: fmt.Sprintf("error: artifact update failed (HTTP %d): %s", status, bodyText)}, nil
 	}
 	var updated struct {
 		ID      string `json:"id"`
@@ -120,6 +132,43 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 	_ = json.Unmarshal([]byte(body), &updated)
 	encoded, _ := json.Marshal(map[string]any{
 		"artifact_id": updated.ID, "status": updated.Status, "version": updated.Version,
+	})
+	return ToolResult{Content: string(encoded)}, nil
+}
+
+// handleArtifactNewVersion opens a new revision of an APPROVED artifact
+// (docs/artifact-lifecycle.md §5): the approved version stays live while the
+// revision is a draft; the model then submits it for re-approval with
+// artifact_submit. The approval decision remains human.
+func (a *Activities) handleArtifactNewVersion(ctx context.Context, request ToolRequest, artifactID string) (ToolResult, error) {
+	payload := map[string]any{
+		"title":       artifactStringArg(request, "title"),
+		"description": artifactStringArg(request, "description"),
+		"kind":        artifactStringArg(request, "kind"),
+		"content":     artifactStringArg(request, "content"),
+		"mime_type":   artifactStringArg(request, "mime_type"),
+	}
+	body, status, err := a.workspaceDo(ctx, http.MethodPost,
+		fmt.Sprintf("%s/v1/workspace/artifacts/%s/revision", a.WorkspaceURL, url.PathEscape(artifactID)), payload)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: revision failed (HTTP %d): %s", status, truncate(body, 600))}, nil
+	}
+	var revision struct {
+		ID      string `json:"id"`
+		Status  string `json:"status"`
+		Version int    `json:"version"`
+	}
+	_ = json.Unmarshal([]byte(body), &revision)
+	a.emitArtifactLifecycleToolEvent(ctx, request, "artifact.updated", artifactID, map[string]any{
+		"artifact_id": artifactID, "new_version": true, "version": revision.Version, "status": revision.Status,
+	})
+	encoded, _ := json.Marshal(map[string]any{
+		"artifact_id": artifactID, "status": revision.Status, "version": revision.Version,
+		"live_version_stays": "approved — the revision serves nobody until approved",
+		"next":              "artifact_submit hands the revision to human re-approval",
 	})
 	return ToolResult{Content: string(encoded)}, nil
 }

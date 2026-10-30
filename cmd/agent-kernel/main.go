@@ -6388,6 +6388,85 @@ func main() {
 		updated.Content = ""
 		writeJSON(w, 200, updated)
 	})
+
+	// POST /revision opens a new revision of an APPROVED artifact (docs/artifact-lifecycle.md
+	// §5 «новая редакция»): the approved version stays live, the edit lands as a
+	// draft next version that goes through artifact_submit → review like any
+	// draft. This is the CONTROLLED agent path to re-approval — the hard
+	// refusal on agent edits of approved artifacts (the PUT branch above) stays;
+	// what changed is that an agent may now explicitly open a revision draft and
+	// hand it to human review, the decision itself remains human. Idempotent:
+	// an already-open draft revision is updated in place (rejected reopens).
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/revision", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		id := r.PathValue("artifactID")
+		var req artifactRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		current, err := ws.GetArtifactRange(r.Context(), id, 0, 0)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if current.Status != workspace.ArtifactApproved {
+			writeError(w, 409, fmt.Errorf("revision applies to approved artifacts only: %s is %s — edit a draft with PUT", id, current.Status))
+			return
+		}
+		artifact, err := req.toArtifact(current.ID)
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		// Unnamed fields inherit the approved version: a revision is about the
+		// BODY (and optionally title/description) — not a metadata rewrite.
+		if req.Title == "" {
+			artifact.Title = current.Title
+		}
+		if req.Description == "" {
+			artifact.Description = current.Description
+		}
+		if req.Kind == "" {
+			artifact.Kind = current.Kind
+		}
+		if req.SagaID == nil {
+			artifact.SagaID = current.SagaID
+		}
+		artifact.OrgUnitID = current.OrgUnitID
+		if req.Content == "" {
+			writeError(w, 422, fmt.Errorf("content is required: a revision without a body would silently re-approve the old text"))
+			return
+		}
+		if err := ws.SaveArtifactNewVersion(r.Context(), artifact); err != nil {
+			if errors.Is(err, workspace.ErrArtifactLocked) {
+				writeError(w, 409, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		actor := requestUserID(r)
+		_ = ws.RecordAccessAudit(r.Context(), actor, workspace.AuditArtifactUpdated, "artifact", artifact.ID, map[string]any{
+			"title": artifact.Title, "new_version": true, "from_version": current.Version, "actor": actor,
+		})
+		emitArtifactLifecycleEvent(r.Context(), events, "artifact.updated", artifact.ID, map[string]any{
+			"artifact_id": artifact.ID, "version": current.Version + 1, "new_version": true, "from_version": current.Version, "actor": actor,
+		})
+		updated, _ := ws.GetArtifactRange(r.Context(), artifact.ID, 0, 0)
+		updated.Content = ""
+		writeJSON(w, 200, updated)
+	})
 	mux.HandleFunc("DELETE /v1/workspace/artifacts/{artifactID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
 			return
