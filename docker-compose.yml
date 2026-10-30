@@ -14,6 +14,11 @@ services:
     # first heavy-100 had no other witness). The extension still needs a
     # one-time "CREATE EXTENSION pg_stat_statements;" after this changes.
     command: postgres -c shared_preload_libraries=pg_stat_statements
+    # Memory ceiling (docs/operations.md): an OOM must kill ONE container
+    # (which restarts) instead of the host kernel shooting a random process.
+    # postgres page cache is reclaimable; the limit only bounds real RSS.
+    mem_limit: 6g
+    memswap_limit: 7g
     # The whole stack crash-loops without the database: it must survive host
     # and daemon restarts like the services depending on it.
     restart: unless-stopped
@@ -55,10 +60,13 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
+    mem_limit: 2g
+    memswap_limit: 2500m
     restart: unless-stopped
 
   debugger:
     image: ghcr.io/ruslangabbasov/temporality/debugger:${TEMPORALITY_VERSION:-latest}
+    mem_limit: 256m
     ports:
       - "3000:80"
     extra_hosts:
@@ -74,6 +82,11 @@ services:
   temporal:
     image: temporalio/temporal:latest
     container_name: temporality-dev
+    # The single biggest RSS in the stack (dev server, one process, big
+    # workflow histories): bounded so a growth spike kills and restarts this
+    # container instead of the host. SQLite persistence survives the restart.
+    mem_limit: 6g
+    memswap_limit: 7g
     depends_on:
       temporal-data-init:
         condition: service_completed_successfully
@@ -107,6 +120,7 @@ services:
   # must stay enabled in searxng-settings.yml — the kernel parses format=json.
   searxng:
     image: searxng/searxng:latest
+    mem_limit: 1g
     volumes:
       - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
     ports:
@@ -124,6 +138,7 @@ services:
   # that fetches URLs on its own. The kernel joins both networks.
   lightpanda:
     image: lightpanda/browser:latest
+    mem_limit: 1g
     # advertise-host whitelists the docker-dns name for the CDP websocket
     # Host check (DNS-rebinding protection): the kernel dials lightpanda:9222.
     command: ["/bin/lightpanda", "serve", "--host", "0.0.0.0", "--port", "9222", "--advertise-host", "lightpanda", "--log_level", "info"]
@@ -288,6 +303,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    # The kernel runs every tool activity, the console registry and the token
+    # bus in one process: bounded (observed steady-state ~1–1.5 GiB) so a leak
+    # kills the container, not the host. Runs live in Temporal, restart is safe.
+    mem_limit: 4g
+    memswap_limit: 5g
     restart: unless-stopped
 
   # Egress proxy (docs/agent-behavior-monitoring.md §7): the only container
@@ -312,6 +332,7 @@ services:
     networks:
       - egress-internal
       - egress-out
+    mem_limit: 512m
     restart: unless-stopped
 
   # Nightly backup loop (docs/user/administration.md «Резервное копирование»):
