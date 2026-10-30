@@ -3149,3 +3149,17 @@ button.header-nav-link {
   overflow-y: auto;
   color: var(--tm-text-2);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Temperature slider (agents → Параметры, #agent-temp): Carbon's
+// slider reserves 1rem padding above and below the track — ~24px
+// taller than the NumberInputs it shares a grid row with, so the
+// row sat crooked. Tighten to the input's visual height; the thumb
+// (14px) still fits with a grab margin.
+// ═══════════════════════════════════════════════════════════════
+#agent-temp .cds--slider {
+  padding: 0.25rem 0;
+}
+#agent-temp .cds--slider-container {
+  align-items: baseline;
+}
