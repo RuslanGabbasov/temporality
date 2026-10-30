@@ -14,6 +14,8 @@ import { workspaceApi, type Agent, type UploadedFile, ApiError } from './workspa
 import { runCost, taskCost, KERNEL_API, whoami, type Whoami } from './kernelApi'
 import { authHeaders } from './api'
 import Markdown, { linkifyWorkspacePaths } from './Markdown'
+import { CallReportView } from './AgentRuns'
+import { observationApi, type ObservationEvent } from './observationApi'
 import HumanForm, { normalizeFormValues, validateFormValues, type FormSchema } from './HumanForm'
 import { useRunTokenMetrics } from './tokenStream'
 import DelegationTree from './DelegationTree'
@@ -1330,6 +1332,21 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     }
   }
 
+  // The rejected provider call behind a failed chat run: the «запрос → ответ»
+  // button fetches the run's model.call_failed journal event on demand and
+  // opens the same pair the provider test dialog shows.
+  const [callReport, setCallReport] = useState<{ runId: string; event: ObservationEvent } | null>(null)
+  const [callReportBusy, setCallReportBusy] = useState('')
+  const openCallReport = async (runId: string) => {
+    setCallReportBusy(runId)
+    try {
+      const page = await observationApi.events(project || undefined, undefined, undefined, undefined, { run: runId, type: 'model.call_failed', limit: 5 })
+      const event = page.events[page.events.length - 1]
+      if (event) setCallReport({ runId, event })
+      else setError(message(new Error('no rejected provider call journaled for this run')))
+    } catch (f) { setError(message(f)) } finally { setCallReportBusy('') }
+  }
+
   const cancelRun = async (runId: string) => {
     try {
       await workspaceApi.cancelRun(runId)
@@ -1690,6 +1707,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                             title={t('chat.branch_title') ?? 'Branch conversation from this point'}
                           >{t('chat.branch') ?? 'Branch'}</button>
                         )}
+                        {msg.status === 'failed' && msg.runId && activeConv && (
+                          <button
+                            onClick={() => void openCallReport(msg.runId!)}
+                            disabled={callReportBusy === msg.runId}
+                            style={{ background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px', color: 'var(--tm-danger)', cursor: callReportBusy === msg.runId ? 'wait' : 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+                            title={t('runs.call_report_hint') ?? 'The rejected provider call: where and with which token'}
+                          >{callReportBusy === msg.runId ? '…' : (t('runs.call_report') ?? 'Запрос → Ответ')}</button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1805,6 +1830,15 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
               <Button kind="secondary" onClick={() => setShowNewChat(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={createConversation}>{t('action.create') ?? 'Create'}</Button>
             </div>
+        </AppModal>
+      )}
+
+      {callReport && (
+        <AppModal onClose={() => setCallReport(null)} panelStyle={{ width: '640px' }}>
+          <CallReportView event={callReport.event} t={t} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
+            <Button kind="secondary" onClick={() => setCallReport(null)}>{t('action.close') ?? 'Close'}</Button>
+          </div>
         </AppModal>
       )}
     </div>
