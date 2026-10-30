@@ -6,6 +6,13 @@ Temporality — среда исполнения и контур управлен
 задачи на Temporal, полная трасса работы, права и подтверждения — и накопление
 опыта, который возвращается в следующие запуски.
 
+<p align="center">
+  <a href="https://ruslangabbasov.github.io/temporality/assets/knowledge-expantions.mp4">
+    <video src="pages/assets/knowledge-expantions.mp4" autoplay muted loop playsinline width="100%"></video>
+  </a>
+  <em>Карта знаний: база знаний выкладывается на карту по смысловому сходству — грузится на глазах, кластеры собираются сами.</em>
+</p>
+
 ```text
 Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge / Hints
      ▲                      │                         │

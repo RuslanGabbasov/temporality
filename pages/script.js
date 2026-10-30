@@ -76,3 +76,31 @@
       .catch(() => { /* keep the static fallback */ });
   }
 })();
+
+// Ping-pong playback for hero videos: forward to the end, then reverse to
+// the start, forever — a looping demo that never visibly «restarts».
+document.querySelectorAll('video[data-pingpong="true"]').forEach((video) => {
+  let direction = 1
+  const step = () => {
+    if (video.paused || video.ended) return
+    const t = video.currentTime + direction * 0.033
+    if (t >= video.duration) { video.currentTime = video.duration; direction = -1 }
+    else if (t <= 0) { video.currentTime = 0; direction = 1 }
+    else video.currentTime = t
+    requestAnimationFrame(step)
+  }
+  const start = () => {
+    // Manual scrubbing (currentTime stepping) needs the whole file buffered:
+    // with preload the browser only fetches what a plain playback would, and
+    // every backward seek re-aborts the range request on file:// setups.
+    try { video.pause() } catch { /* already paused */ }
+    video.load()
+    video.addEventListener('canplaythrough', () => {
+      direction = 1
+      video.currentTime = 0
+      requestAnimationFrame(step)
+    }, { once: true })
+  }
+  if (video.readyState >= 4) start()
+  else video.addEventListener('canplaythrough', start, { once: true })
+})
