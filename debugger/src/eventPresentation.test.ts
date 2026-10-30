@@ -192,6 +192,20 @@ describe('details layer (§4.2)', () => {
     const details = eventDetails(modelEvent('tool.started', { tool: 'run_command', arguments: JSON.stringify({ command: ['x'.repeat(500)] }) }), t)
     expect(details.argumentLines[0].value.length).toBeLessThanOrEqual(300)
   })
+
+  it('makes the human verdict expandable and shows what the human said', () => {
+    const row = timelineRow(modelEvent('hitl.verdict.recorded', {
+      type: 'accepted', answered_by: 'user:ivan',
+      response: 'Берём вариант Б, но с оговоркой про кэш',
+      question: 'Какой вариант закладываем в план?',
+    }), RU, t)
+    expect(row.hasDetails).toBe(true)
+    expect(row.fact).toContain('Берём вариант Б')
+    const details = eventDetails(modelEvent('hitl.verdict.recorded', {
+      type: 'accepted', response: 'Берём вариант Б, но с оговоркой про кэш',
+    }), t)
+    expect(details.result).toContain('оговоркой про кэш')
+  })
 })
 
 describe('raw layer (§4.3, K-1, P-2)', () => {

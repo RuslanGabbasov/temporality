@@ -50,7 +50,7 @@ type artifactLifecycleStore interface {
 	CreateHumanRequest(ctx context.Context, r *workspace.HumanRequest) error
 	SetHumanRequestThreadRef(ctx context.Context, id, threadRef string) error
 	AddHumanRequestDeliveries(ctx context.Context, requestID string, deliveries []workspace.HumanRequestDelivery) error
-	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, error)
+	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, bool, error)
 }
 
 // artifactLifecycleOutbox is the durable-outbox surface for lifecycle events.
@@ -299,7 +299,7 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			// closes with the round: a later chat reply finds it answered and
 			// the inbox stops counting the round as waiting. ErrNotFound is the
 			// normal case for web-only rounds — they never got a row.
-			if _, cerr := ws.AnswerHumanRequest(r.Context(), artifactReviewRequestID(review.ID), decisionResponse(approve, strings.TrimSpace(req.Comment))+" (ui)", principal); cerr != nil && !errors.Is(cerr, workspace.ErrNotFound) {
+			if _, _, cerr := ws.AnswerHumanRequest(r.Context(), artifactReviewRequestID(review.ID), decisionResponse(approve, strings.TrimSpace(req.Comment))+" (ui)", principal); cerr != nil && !errors.Is(cerr, workspace.ErrNotFound) {
 				slog.Warn("close review channel row", "review", review.ID, "error", cerr)
 			}
 			writeJSON(w, 200, map[string]any{"review": review, "artifact": artifact})

@@ -185,14 +185,14 @@ func (f *fakeArtifactLifecycleStore) AddHumanRequestDeliveries(_ context.Context
 	return nil
 }
 
-func (f *fakeArtifactLifecycleStore) AnswerHumanRequest(_ context.Context, id, response, answeredBy string) (workspace.HumanRequest, error) {
+func (f *fakeArtifactLifecycleStore) AnswerHumanRequest(_ context.Context, id, response, answeredBy string) (workspace.HumanRequest, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.answeredRows == nil {
 		f.answeredRows = map[string]string{}
 	}
 	f.answeredRows[id] = answeredBy + ": " + response
-	return workspace.HumanRequest{ID: id, Status: workspace.HumanStatusAnswered, Response: response, AnsweredBy: answeredBy}, nil
+	return workspace.HumanRequest{ID: id, Status: workspace.HumanStatusAnswered, Response: response, AnsweredBy: answeredBy}, true, nil
 }
 
 func (f *fakeArtifactLifecycleStore) CancelHumanRequest(_ context.Context, id, _ string) error {

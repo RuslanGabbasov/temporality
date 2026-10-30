@@ -342,9 +342,13 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
         : d.type === 'corrected' ? t('runs.event.hitl_verdict_corrected')
           : d.type === 'rejected' ? t('runs.event.hitl_verdict_rejected')
             : squash(d.type),
+      squash(d.response).slice(0, 80),
       squash(d.answered_by),
     ].filter(Boolean).join(' · '),
     status: d.type === 'rejected' ? 'error' : 'ok',
+    // The response text renders in the details layer — the folded row only
+    // previews it; the reader must be able to open the decision.
+    hasDetails: true,
   }),
   // ── §5.6 knowledge / hints (rows stay minimal — §5 folds the bulk into
   // the hints aggregate; a row still renders when the group is unfolded) ──
@@ -639,7 +643,7 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   }
   const exitCode = d.exit_code
   const exitFailed = typeof exitCode === 'number' && exitCode !== 0
-  const resultValue = d.output ?? d.result ?? d.answer
+  const resultValue = d.output ?? d.result ?? d.answer ?? d.response
   return {
     actor: tool || squash(d.model) || squash(d.agent_id) || '',
     argumentLines,

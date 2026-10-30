@@ -1219,11 +1219,14 @@ func main() {
 				response = approval.Reason
 			}
 			if closeStatus == "answered" {
-				row, cerr := ws.AnswerHumanRequest(r.Context(), approval.OperationID, response, actor)
+				row, transitioned, cerr := ws.AnswerHumanRequest(r.Context(), approval.OperationID, response, actor)
 				closeErr = cerr
-				if cerr == nil {
+				if cerr == nil && transitioned {
 					// Terminal transition with a verdict → hitl.verdict.recorded
 					// (specs/quality-loop.md §9) through the durable outbox.
+					// Only the REAL transition emits: the workflow's close
+					// activity races us to the same row and must not journal
+					// the verdict a second time.
 					emitHitlVerdict(r.Context(), events, row)
 				}
 			} else {
@@ -7104,11 +7107,15 @@ func main() {
 		var err error
 		switch body.Status {
 		case "answered":
-			row, aErr := ws.AnswerHumanRequest(r.Context(), id, body.Response, body.ActorID)
+			row, transitioned, aErr := ws.AnswerHumanRequest(r.Context(), id, body.Response, body.ActorID)
 			if aErr == nil {
-				// Terminal transition with a verdict → hitl.verdict.recorded
-				// (specs/quality-loop.md §9) through the durable outbox.
-				emitHitlVerdict(r.Context(), events, row)
+				if transitioned {
+					// Terminal transition with a verdict → hitl.verdict.recorded
+					// (specs/quality-loop.md §9) through the durable outbox.
+					// A re-close (the approval path got here first) stays silent:
+					// the verdict is already journaled by the winner.
+					emitHitlVerdict(r.Context(), events, row)
+				}
 				err = ws.RecordAccessAudit(r.Context(), body.ActorID, workspace.AuditHumanAnswered, "human_request", id, map[string]any{"response": body.Response})
 			} else {
 				err = aErr
@@ -10109,6 +10116,11 @@ func emitHitlVerdict(ctx context.Context, events hitlOutbox, req workspace.Human
 			"type":          verdictType,
 			"source":        workspace.VerdictSourceHumanRequest,
 			"answered_by":   req.AnsweredBy,
+			// The response IS the decision — without it the trace row explains
+			// that a decision happened but not what the human actually said.
+			"response":   req.Response,
+			"question":   req.Question,
+			"request_id": req.ID,
 		},
 	}
 	if err := events.Enqueue(ctx, item); err != nil {

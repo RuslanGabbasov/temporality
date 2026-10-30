@@ -31,7 +31,7 @@ type formlinkStore interface {
 	GetFormLink(ctx context.Context, token string) (workspace.FormLink, error)
 	MarkFormLinkAnswered(ctx context.Context, token string) error
 	GetHumanRequest(ctx context.Context, id string) (workspace.HumanRequest, error)
-	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, error)
+	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, bool, error)
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
 }
 
@@ -126,7 +126,7 @@ func RegisterFormLinkRoutes(mux *http.ServeMux, ws *workspace.Store, gate *contr
 			return
 		}
 		const actor = "form-link"
-		if _, err := ws.AnswerHumanRequest(r.Context(), link.OperationID, canonical, actor); err != nil {
+		if _, _, err := ws.AnswerHumanRequest(r.Context(), link.OperationID, canonical, actor); err != nil {
 			writeError(w, 409, err)
 			return
 		}

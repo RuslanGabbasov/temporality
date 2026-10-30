@@ -196,26 +196,34 @@ func (s *Store) SetHumanRequestThreadRef(ctx context.Context, id, threadRef stri
 // pending/delivered rows can be answered — a late answer after expiry is
 // recorded but does not resurrect the wait. For team requests the first
 // answer wins: later answers find the row closed and change nothing.
-func (s *Store) AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (HumanRequest, error) {
+//
+// The second return value reports a REAL transition (the row actually moved
+// pending/delivered → answered). The approval endpoint and the workflow's
+// close activity race to close the same row; a nil error alone would emit a
+// hitl.verdict.recorded from BOTH — the duplicate «Решение человека» pair in
+// the trace. Only the winner journals the verdict.
+func (s *Store) AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (HumanRequest, bool, error) {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE human_request
-		 SET status = 'answered', response = $2, answered_by = $3, answered_at = now()
-		 WHERE id = $1 AND status IN ('pending','delivered')`,
+			 SET status = 'answered', response = $2, answered_by = $3, answered_at = now()
+			 WHERE id = $1 AND status IN ('pending','delivered')`,
 		id, response, answeredBy)
 	if err != nil {
-		return HumanRequest{}, err
+		return HumanRequest{}, false, err
 	}
-	if tag.RowsAffected() > 0 {
+	transitioned := tag.RowsAffected() > 0
+	if transitioned {
 		// Team fan-out: the first answer wins, the other members' copies close.
 		s.supersedeDeliveries(ctx, id)
 	}
-	if tag.RowsAffected() == 0 {
+	if !transitioned {
 		// Either unknown id or already closed; distinguish for the caller.
 		if _, err := s.GetHumanRequest(ctx, id); err != nil {
-			return HumanRequest{}, err
+			return HumanRequest{}, false, err
 		}
 	}
-	return s.GetHumanRequest(ctx, id)
+	row, err := s.GetHumanRequest(ctx, id)
+	return row, transitioned, err
 }
 
 // CancelHumanRequest marks an open request cancelled (the human declined to

@@ -127,7 +127,7 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 	}
 
 	// Close the row as answered so the inbox badge drops immediately.
-	if _, err := l.store.AnswerHumanRequest(ctx, artifactReviewRequestID(reviewID), decisionResponse(approve, comment), actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+	if _, _, err := l.store.AnswerHumanRequest(ctx, artifactReviewRequestID(reviewID), decisionResponse(approve, comment), actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 		l.log.Warn("artifact review reply close row", "review", reviewID, "error", err)
 	}
 

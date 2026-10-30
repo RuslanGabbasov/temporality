@@ -84,7 +84,7 @@ type channelInboundLoop struct {
 type channelInboundStore interface {
 	ListHumanRequests(ctx context.Context, project, status, resolvedUser string, onlyOpen bool) ([]workspace.HumanRequest, error)
 	ListOpenHumanRequestDeliveries(ctx context.Context) ([]workspace.HumanRequestDelivery, error)
-	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, error)
+	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, bool, error)
 	CancelHumanRequest(ctx context.Context, id, actor string) error
 	SetHumanRequestThreadRef(ctx context.Context, id, threadRef string) error
 	ListUsers(ctx context.Context) ([]workspace.User, error)
@@ -365,10 +365,13 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 		if err := l.store.CancelHumanRequest(ctx, reply.Ask.RequestID, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 			l.log.Warn("channel reply cancel request", "operation", reply.Ask.RequestID, "error", err)
 		}
-	} else if row, err := l.store.AnswerHumanRequest(ctx, reply.Ask.RequestID, response, actor); err == nil {
+	} else if row, transitioned, err := l.store.AnswerHumanRequest(ctx, reply.Ask.RequestID, response, actor); err == nil {
 		// Terminal transition with a verdict → hitl.verdict.recorded
-		// (specs/quality-loop.md §9) through the durable outbox.
-		emitHitlVerdict(ctx, l.events, row)
+		// (specs/quality-loop.md §9) through the durable outbox. A reply that
+		// lost the race (the web answer already closed the row) stays silent.
+		if transitioned {
+			emitHitlVerdict(ctx, l.events, row)
+		}
 	} else if !errors.Is(err, workspace.ErrNotFound) {
 		l.log.Warn("channel reply answer request", "operation", reply.Ask.RequestID, "error", err)
 	}

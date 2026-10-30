@@ -60,14 +60,14 @@ func (s *fakeInboundStore) ListOpenHumanRequestDeliveries(context.Context) ([]wo
 	return s.deliveries, nil
 }
 
-func (s *fakeInboundStore) AnswerHumanRequest(_ context.Context, id, response, _ string) (workspace.HumanRequest, error) {
+func (s *fakeInboundStore) AnswerHumanRequest(_ context.Context, id, response, _ string) (workspace.HumanRequest, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.answered == nil {
 		s.answered = map[string]string{}
 	}
 	s.answered[id] = response
-	return workspace.HumanRequest{ID: id}, nil
+	return workspace.HumanRequest{ID: id}, true, nil
 }
 
 func (s *fakeInboundStore) CancelHumanRequest(_ context.Context, id, _ string) error {
