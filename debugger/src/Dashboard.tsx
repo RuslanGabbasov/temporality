@@ -155,42 +155,50 @@ export default function Dashboard({ project, setProject }: Props) {
   const navigate = (path: string) => { window.history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
 
   const loadOverviewData = useCallback(async () => {
-    setBusy(true)
     setError('')
+    // Incremental load: every slice lands independently into its own state,
+    // so the dashboard renders the fast parts at once and fills the slow
+    // ones (operations ~3s, health ~5s) as they arrive — instead of the old
+    // Promise.all that held the whole render hostage to the slowest request.
+    // Already-loaded slices stay on screen and refresh in place.
     const since = new Date(Date.now() - window_.ms).toISOString()
-    try {
-      const [stats, projects, ops, storageSnap, syshealthSnap, startedPage, ready, usersPage, agentsPage] = await Promise.all([
-        observationApi.healthStats(undefined, since),
-        projectsOverview(window_.go),
-        operations().catch(() => null),
-        storageOverview().catch(() => null),
-        systemHealth().catch(() => null),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
-        readiness().catch(() => null),
-        workspaceApi.listUsers().catch(() => ({ users: [] })),
-        workspaceApi.listAllAgents().catch(() => ({ agents: [] })),
-      ])
-      setHealth(stats)
-      setOverview(projects)
-      setOpsCount(ops ? ops.count : null)
-      setStorage(storageSnap)
-      setSyshealth(syshealthSnap)
-      setToolReadiness(ready?.checks ?? null)
-      const titles = new Map<string, string>()
-      for (const event of startedPage.events) {
-        const run = event.context?.run ?? ''
-        const title = event.data?.title
-        if (run && typeof title === 'string' && title.trim()) titles.set(run, title.trim())
-      }
-      setRunTitles(titles)
-      setUserNames(new Map((usersPage.users ?? []).map((u) => [u.id, u.name])))
-      setAgentNames(new Map((agentsPage.agents ?? []).map((a) => [a.id, a.name])))
-      setUpdatedAt(new Date())
-    } catch (failure) {
-      setError(errorMessage(failure))
-    } finally {
-      setBusy(false)
-    }
+    let alive = true
+    const land = <T,>(setter: (value: T) => void, promise: Promise<T>, fallback: T): Promise<void> =>
+      promise.then((value) => { if (alive) setter(value ?? fallback) }).catch(() => { if (alive) setter(fallback) })
+
+    const jobs: Array<Promise<void>> = []
+
+    // Fast skeleton first: project rollup, titles, users, agents.
+    jobs.push(land(setOverview, projectsOverview(window_.go), null))
+    jobs.push(land((titles: Map<string, string>) => setRunTitles(titles),
+      observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200 }).then((page) => {
+        const titles = new Map<string, string>()
+        for (const event of page.events) {
+          const run = event.context?.run ?? ''
+          const title = event.data?.title
+          if (run && typeof title === 'string' && title.trim()) titles.set(run, title.trim())
+        }
+        return titles
+      }), new Map()))
+    jobs.push(land((users: Map<string, string>) => setUserNames(users),
+      workspaceApi.listUsers().then((page) => new Map((page.users ?? []).map((u) => [u.id, u.name]))), new Map()))
+    jobs.push(land((names: Map<string, string>) => setAgentNames(names),
+      workspaceApi.listAllAgents().then((page) => new Map((page.agents ?? []).map((a) => [a.id, a.name]))), new Map()))
+    jobs.push(land((checks) => setToolReadiness(checks), readiness().then((r) => r?.checks ?? null), null))
+
+    // Slow slices: health (~5s), operations (~3s), storage, system health.
+    jobs.push(land(setHealth, observationApi.healthStats(undefined, since), null))
+    jobs.push(land((ops) => setOpsCount(ops ? ops.count : null), operations().catch(() => null), null))
+    jobs.push(land(setStorage, storageOverview().catch(() => null), null))
+    jobs.push(land(setSyshealth, systemHealth().catch(() => null), null))
+
+    // The refresh pulse spins until the slowest slice lands; slices that
+    // arrived earlier are already on screen.
+    setBusy(true)
+    await Promise.all(jobs)
+    if (!alive) return
+    setUpdatedAt(new Date())
+    setBusy(false)
   }, [window_.go, window_.ms])
 
   // Seed the supervisor badge once: unresolved = verdicts minus acknowledgements
