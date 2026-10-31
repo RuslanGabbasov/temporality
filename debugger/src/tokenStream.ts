@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isOffline, waitOnline } from './onlineWait'
 
 /** Live-progress metrics for an in-flight model call. Tokens are not durable
  * facts, so these are estimates from the ephemeral SSE stream (the same
@@ -211,6 +212,14 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
       if (disposed) return
       reconnectsRef.current += 1
       touch()
+      // Offline (laptop slept, network switched): instant-fail retries would
+      // hammer a dead socket for hours — wait for 'online' instead.
+      if (isOffline()) {
+        void waitOnline().then(() => {
+          if (!disposed) connect()
+        })
+        return
+      }
       retryTimer = window.setTimeout(connect, backoff)
       backoff = Math.min(backoff * 2, 30_000)
     }

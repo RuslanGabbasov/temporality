@@ -591,6 +591,35 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     return () => window.clearInterval(timer)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Wake-from-sleep heal (docs/resilience-and-scale.md): a laptop that slept
+  // mid-run wakes with dead SSE sockets that STILL sit in streamRef — the
+  // plain mount-reconnect sees has(conv.id) and skips, the run ended hours
+  // ago, and the bubble stays «running» next to stale retry lines forever.
+  // On every return to visibility, rebuild the streams for running messages
+  // (tail=1 re-attaches cheaply; a finished run's server closes right after
+  // the replay and fetchFinalAnswer lands the terminal status) and re-run the
+  // terminal check.
+  useEffect(() => {
+    const heal = () => {
+      if (document.visibilityState !== 'visible') return
+      for (const conv of conversations) {
+        for (const msg of conv.messages) {
+          if (msg.status === 'running' && msg.runId) {
+            // Re-subscribe from the tail: a finished run's server closes right
+            // after the replay and fetchFinalAnswer lands the terminal
+            // status; an actually-live run just continues streaming.
+            const old = streamRef.current.get(conv.id)
+            if (old) { old.close(); streamRef.current.delete(conv.id) }
+            streamRun(msg.runId, conv.id, { tail: true })
+            void fetchFinalAnswer(msg.runId, conv.id)
+          }
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', heal)
+    return () => document.removeEventListener('visibilitychange', heal)
+  }, [conversations]) // heal uses the fresh conversation list on every change
+
   const loadAllAgents = useCallback(async () => {
     try {
       const data = await workspaceApi.listAllAgents()

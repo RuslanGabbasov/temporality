@@ -4,6 +4,8 @@
  * type and silently drop any type added later. Parsing the stream directly
  * keeps the live trace agnostic to new event types. */
 
+import { waitOnline, isOffline } from './onlineWait'
+
 export interface JournalFrame {
   event: string
   data: string
@@ -74,6 +76,16 @@ export function subscribeRunJournal(runId: string, onEvent: (frame: JournalFrame
   }
   const schedule = () => {
     if (signal.aborted) return
+    // Offline (laptop slept through a network switch): retrying into a dead
+    // socket fails instantly and the backoff loop hammers away for hours —
+    // hundreds of dead requests bury the network log. Wait for 'online'
+    // instead; it reconnects within a beat of the network returning.
+    if (isOffline()) {
+      void waitOnline(signal).then(() => {
+        if (!signal.aborted) connect()
+      })
+      return
+    }
     const delay = backoff
     backoff = Math.min(backoff * 2, 30_000)
     const timer = window.setTimeout(connect, delay)

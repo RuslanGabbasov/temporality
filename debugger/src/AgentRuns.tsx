@@ -810,7 +810,17 @@ export default function AgentRuns({ project }: { project: string }) {
   // delegated children) fresh without touching the current selection.
   useEffect(() => {
     const timer = window.setInterval(() => { void loadRuns(true, true) }, 15000)
-    return () => window.clearInterval(timer)
+    // Wake-from-sleep: the interval froze overnight while runs finished — one
+    // immediate refresh on return to visibility re-syncs the list (and the
+    // open run's tail pass follows on its own 30s cadence).
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void loadRuns(true, true)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [loadRuns])
   // Agents power the delegation tree node names; they rarely change.
   useEffect(() => {
