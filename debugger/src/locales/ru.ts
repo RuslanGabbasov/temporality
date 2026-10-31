@@ -874,6 +874,8 @@ export const ru: Record<string, string> = {
     'runs.console.unavailable': 'Вывод недоступен',
     'runs.console.saved_copy': 'Сохранённый вывод (из журнала, обрезан до 1 КБ):',
     'runs.console.waiting': 'Ожидание вывода…',
+    'runs.console.lost': 'вывод недоступен',
+    'runs.console.lost_hint': 'вывод недоступен: воркер перезапустился во время команды — остаётся только код выхода, он придёт в уведомлении операции.',
     'runs.console.empty': 'Вывода нет.',
     'runs.console.to_tail': 'К хвосту вывода',
     'runs.console.search_hint': 'Поиск по выводу — только в пределах загруженного буфера (история не хранится).',

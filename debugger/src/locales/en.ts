@@ -874,6 +874,8 @@ export const en: Record<string, string> = {
     'runs.console.unavailable': 'Output unavailable',
     'runs.console.saved_copy': 'Saved output (from the journal, capped at 1 KB):',
     'runs.console.waiting': 'Waiting for output…',
+    'runs.console.lost': 'output unavailable',
+    'runs.console.lost_hint': 'Output unavailable: the worker restarted while the command ran — only the exit code remains, it arrives in the operation notification.',
     'runs.console.empty': 'No output.',
     'runs.console.to_tail': 'To output tail',
     'runs.console.search_hint': 'Output search covers only the loaded buffer (history is not stored).',

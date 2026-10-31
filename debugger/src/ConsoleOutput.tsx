@@ -88,11 +88,13 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
   const t = useT()
   const [state, setState] = useState<ConsoleState | null>(null)
   const [savedOutput, setSavedOutput] = useState<string | null>(null)
+  const [lostOutput, setLostOutput] = useState(false)
   const [copied, setCopied] = useState(false)
   const [followPaused, setFollowPaused] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const retryRef = useRef<number | null>(null)
+  const missesRef = useRef(0)
 
   const stop = useCallback(() => {
     abortRef.current?.abort()
@@ -118,11 +120,14 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
     if (!operationId) return
     if (document.hidden) return
     stop()
+    missesRef.current = 0
+    setLostOutput(false)
     const controller = new AbortController()
     abortRef.current = controller
     fetchConsoleTail(operationId, project, controller.signal)
       .then((tail) => {
         if (controller.signal.aborted) return
+        missesRef.current = 0
         setState(tail)
         if (!live || tail.done) return
         subscribeConsoleStream(operationId, project, applyFrame, controller.signal, { tail: true })
@@ -132,8 +137,13 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
         const failureMessage = failure instanceof Error ? failure.message : String(failure)
         // A 404 tail on a LIVE run is expected before the first output chunk
         // lands (and right after a kernel restart wiped the buffers): retry
-        // shortly instead of declaring the console dead.
+        // shortly instead of declaring the console dead. After a few misses
+        // in a row the console stops pretending to wait: the operation's
+        // output pipe lived in the old worker — the exit code still arrives
+        // in the completion notification. Retries continue quietly.
         if (live && failureMessage.includes('404')) {
+          missesRef.current += 1
+          if (missesRef.current >= 3) setLostOutput(true)
           retryRef.current = window.setTimeout(() => setVisibleTick((value) => value + 1), 2000)
           return
         }
@@ -219,8 +229,10 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
       {/* One-line status header: live dot / exit code, saved-copy marker,
           copy action. Everything else was noise. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.25rem 0.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        {streamLive ? (
+        {streamLive && !lostOutput ? (
           <span style={{ color: '#7dcfff', fontSize: '0.68rem', flexShrink: 0 }}>⌁ {t('runs.console.live') ?? 'live'}</span>
+        ) : lostOutput ? (
+          <span style={{ color: '#565f89', fontSize: '0.68rem', flexShrink: 0 }}>␥ {t('runs.console.lost') ?? 'вывод недоступен'}</span>
         ) : state?.done ? (
           <span style={{ color: state.exitCode ? '#f7768e' : '#9ece6a', fontSize: '0.68rem', flexShrink: 0 }}>{t('runs.console.exited', { code: String(state.exitCode ?? 0) })}</span>
         ) : savedOutput ? (
@@ -249,7 +261,11 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
         style={{ maxHeight: '12rem', overflowY: 'auto', padding: '0.45rem 0.6rem', fontSize: '0.72rem', lineHeight: 1.5, fontFamily: '"SFMono-Regular", Consolas, monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0, color: '#c0caf5' }}
       >
         {!hasContent
-          ? <span style={{ color: '#565f89' }}>{streamLive ? (t('runs.console.waiting') ?? 'Waiting for output…') : (t('runs.console.empty') ?? '(no output)')}</span>
+          ? <span style={{ color: '#565f89' }}>{lostOutput
+            ? (t('runs.console.lost_hint') ?? 'вывод недоступен: воркер перезапустился во время команды — остаётся только код выхода, он придёт в уведомлении')
+            : streamLive
+              ? (t('runs.console.waiting') ?? 'Ожидание вывода…')
+              : (t('runs.console.empty') ?? '(no output)')}</span>
           : (savedOutput
             ? renderAnsiLines(shown)
             : merged.map((line, index) => (

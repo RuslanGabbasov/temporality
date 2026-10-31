@@ -35,6 +35,7 @@ import {
 } from './kernelApi'
 import TraceLayers from './TraceLayers'
 import ConsoleOutput from './ConsoleOutput'
+import { ActorSuggestFilter } from './ActorSuggestFilter'
 import HumanForm, { type FormSchema } from './HumanForm'
 import { runStatusLabel, runningBackgroundOps } from './eventPresentation'
 import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
@@ -397,21 +398,19 @@ export default function AgentRuns({ project }: { project: string }) {
   const userNameOf = useCallback((id: string | undefined) => (id ? (users.get(id)?.name ?? id) : ''), [users])
   const org = useOrgUnits()
 
-  // Initiator suggest: directory users matching the typed fragment, limited
-  // to those who actually appear as actors in the loaded window (the filter
-  // works over this list; suggesting everyone would offer empty results).
-  // Initiator suggest: actors of the loaded window (people) plus their org
-  // units — suggesting every user would offer empty results, so people come
-  // from the actors set; units from those actors' directory entries.
-  const initiatorSuggest = useMemo(() => {
-    const needle = initiatorDraft.trim().toLowerCase()
-    if (!needle || initiatorPick) return []
+  // Initiator suggest (ActorSuggestFilter's options callback): people are the
+  // loaded window's ACTORS (suggesting everyone would offer empty results),
+  // units come from those actors' directory entries plus every org unit whose
+  // name matches — the unit filter matches the actor's org membership.
+  const initiatorSuggest = useCallback((needle: string) => {
+    const needleLower = needle.toLowerCase()
+    if (!needleLower) return []
     const actorIDs = new Set(rows.map((row) => row.actor ?? '').filter(Boolean))
     const out: Array<{ kind: 'user' | 'unit'; id: string; name: string }> = []
     const unitIDs = new Set<string>()
     for (const [id, info] of users) {
       if (!actorIDs.has(id)) continue
-      if (info.name.toLowerCase().includes(needle) || id.toLowerCase().includes(needle)) {
+      if (info.name.toLowerCase().includes(needleLower) || id.toLowerCase().includes(needleLower)) {
         out.push({ kind: 'user', id, name: info.name })
       }
       if (info.OrgUnitID) unitIDs.add(info.OrgUnitID)
@@ -419,13 +418,12 @@ export default function AgentRuns({ project }: { project: string }) {
     }
     for (const unit of org.units ?? []) {
       const haystack = `${unit.name} ${unit.id}`.toLowerCase()
-      if (needle && !haystack.includes(needle)) continue
       if (unitIDs.has(unit.id) || out.some((p) => p.id === unit.id)) continue
-      out.push({ kind: 'unit', id: unit.id, name: unit.name || unit.id })
+      if (haystack.includes(needleLower)) out.push({ kind: 'unit', id: unit.id, name: unit.name || unit.id })
       if (out.length >= 8) break
     }
     return out
-  }, [initiatorDraft, initiatorPick, rows, users, org.units])
+  }, [rows, users, org.units])
 
   // A run row stays visible when it matches the filter or one of its delegated
   // children does, so searching for a child keeps its parent chain.
