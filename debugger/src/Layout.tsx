@@ -305,11 +305,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
         // fall back to events.
         let openQuestions = 0
         try {
-          const data = await workspaceApi.listHumanRequests({ onlyOpen: true })
+          const data = await workspaceApi.listHumanRequests({ onlyOpen: true, workflowOnly: true })
           openQuestions = (data.requests ?? []).length
         } catch {
           try {
-            const data = await workspaceApi.listHumanRequests({ project, onlyOpen: true })
+            const data = await workspaceApi.listHumanRequests({ project, onlyOpen: true, workflowOnly: true })
             openQuestions = (data.requests ?? []).length
           } catch {
             const asked = await collect('human.requested')

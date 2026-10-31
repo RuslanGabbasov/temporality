@@ -7114,23 +7114,40 @@ func main() {
 			}
 		}
 		var requests []workspace.HumanRequest
+		// workflow=1 — the ask-counter grain (runs tab badges, the header
+		// badge): channel-notification rows (artifact review notices) never
+		// count as «the run is waiting for a human». Absent — the full listing
+		// the channel reply matcher and the notices inbox read.
+		workflowOnly := r.URL.Query().Get("workflow") == "1"
 		if project := r.URL.Query().Get("project"); project != "" {
 			var err error
-			requests, err = ws.ListHumanRequests(r.Context(), project, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			if workflowOnly {
+				requests, err = ws.ListHumanRequestsWorkflowOnly(r.Context(), project, nil, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			} else {
+				requests, err = ws.ListHumanRequests(r.Context(), project, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			}
 			if err != nil {
 				writeError(w, 500, err)
 				return
 			}
 		} else if visible, all := principal.AllowedProjects(); all {
 			var err error
-			requests, err = ws.ListHumanRequests(r.Context(), "", r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			if workflowOnly {
+				requests, err = ws.ListHumanRequestsWorkflowOnly(r.Context(), "", nil, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			} else {
+				requests, err = ws.ListHumanRequests(r.Context(), "", r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			}
 			if err != nil {
 				writeError(w, 500, err)
 				return
 			}
 		} else {
 			var err error
-			requests, err = ws.ListHumanRequestsInProjects(r.Context(), visible, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			if workflowOnly {
+				requests, err = ws.ListHumanRequestsWorkflowOnly(r.Context(), "", visible, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			} else {
+				requests, err = ws.ListHumanRequestsInProjects(r.Context(), visible, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			}
 			if err != nil {
 				writeError(w, 500, err)
 				return

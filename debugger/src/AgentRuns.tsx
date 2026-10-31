@@ -680,7 +680,7 @@ export default function AgentRuns({ project }: { project: string }) {
       // no project, no run) — they live in the artifacts/channels surfaces,
       // and marking them here produced phantom «asks you» badges.
       try {
-        const open = await workspaceApi.listHumanRequests({ project: scope, onlyOpen: true })
+        const open = await workspaceApi.listHumanRequests({ project: scope, onlyOpen: true, workflowOnly: true })
         setQuestionRuns(new Set((open.requests ?? [])
           .map((request) => request.run_id)
           .filter((id) => id && !id.startsWith('artifact-review/'))))

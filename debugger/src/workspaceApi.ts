@@ -1707,12 +1707,15 @@ export const workspaceApi = {
     request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
 
   // Human-in-the-loop requests (docs/org-structure.md §28, §37)
-  listHumanRequests: (params?: { project?: string; status?: string; user?: string; onlyOpen?: boolean }) => {
+  listHumanRequests: (params?: { project?: string; status?: string; user?: string; onlyOpen?: boolean; workflowOnly?: boolean }) => {
     const query = new URLSearchParams()
     if (params?.project) query.set('project', params.project)
     if (params?.status) query.set('status', params.status)
     if (params?.user) query.set('user', params.user)
     if (params?.onlyOpen) query.set('open', '1')
+    // workflow=1 — the ask-counter grain: channel notices (artifact review
+    // rounds) share the table and must not count as «the run asks you».
+    if (params?.workflowOnly) query.set('workflow', '1')
     const suffix = query.size > 0 ? `?${query.toString()}` : ''
     return request<{ requests: HumanRequest[] }>(`/v1/workspace/human-requests${suffix}`)
   },

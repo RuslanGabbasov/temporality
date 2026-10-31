@@ -352,11 +352,24 @@ func (s *Store) GetHumanRequest(ctx context.Context, id string) (HumanRequest, e
 // ListHumanRequests returns requests filtered by project and/or status and/or
 // the resolved recipient, newest first. nil filter values are skipped.
 func (s *Store) ListHumanRequests(ctx context.Context, project, status, resolvedUser string, onlyOpen bool) ([]HumanRequest, error) {
+	return s.listHumanRequests(ctx, project, nil, status, resolvedUser, onlyOpen, false)
+}
+
+// listHumanRequests is the shared open-listing query. workflowOnly drops the
+// channel-notification rows (artifact review notices, id artifact-review/…)
+// that share this table: they «wait for a human» too, but the consumers that
+// count AGENT asks (the runs tab, the header badge) must not see them — the
+// review notices surface in artifacts/channels instead.
+func (s *Store) listHumanRequests(ctx context.Context, project string, projects []string, status, resolvedUser string, onlyOpen, workflowOnly bool) ([]HumanRequest, error) {
 	query := `SELECT ` + humanRequestColumns + ` FROM human_request WHERE 1=1`
 	args := []any{}
 	if project != "" {
 		args = append(args, project)
 		query += ` AND project_id = $` + strconv.Itoa(len(args))
+	}
+	if projects != nil {
+		args = append(args, textListArg(projects))
+		query += ` AND project_id = ANY($` + strconv.Itoa(len(args)) + `)`
 	}
 	if status != "" {
 		args = append(args, status)
@@ -368,6 +381,9 @@ func (s *Store) ListHumanRequests(ctx context.Context, project, status, resolved
 	}
 	if onlyOpen {
 		query += ` AND status IN ('pending','delivered')`
+	}
+	if workflowOnly {
+		query += ` AND run_id NOT LIKE 'artifact-review/%'`
 	}
 	query += ` ORDER BY created_at DESC LIMIT 200`
 	rows, err := s.pool.Query(ctx, query, args...)
@@ -392,38 +408,13 @@ func (s *Store) ListHumanRequests(ctx context.Context, project, status, resolved
 // an empty non-nil slice matches nothing — the caller answers for a principal
 // who sees no projects and must not see everyone else's rows instead.
 func (s *Store) ListHumanRequestsInProjects(ctx context.Context, projects []string, status, resolvedUser string, onlyOpen bool) ([]HumanRequest, error) {
-	query := `SELECT ` + humanRequestColumns + ` FROM human_request WHERE 1=1`
-	args := []any{}
-	if projects != nil {
-		args = append(args, textListArg(projects))
-		query += ` AND project_id = ANY($` + strconv.Itoa(len(args)) + `)`
-	}
-	if status != "" {
-		args = append(args, status)
-		query += ` AND status = $` + strconv.Itoa(len(args))
-	}
-	if resolvedUser != "" {
-		args = append(args, resolvedUser)
-		query += ` AND resolved_user = $` + strconv.Itoa(len(args))
-	}
-	if onlyOpen {
-		query += ` AND status IN ('pending','delivered')`
-	}
-	query += ` ORDER BY created_at DESC LIMIT 200`
-	rows, err := s.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := []HumanRequest{}
-	for rows.Next() {
-		r, err := scanHumanRequest(rows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, r)
-	}
-	return result, rows.Err()
+	return s.listHumanRequests(ctx, "", projects, status, resolvedUser, onlyOpen, false)
+}
+
+// ListHumanRequestsWorkflowOnly is the open-asks listing for ask counters:
+// channel-notification rows (artifact review notices) never count.
+func (s *Store) ListHumanRequestsWorkflowOnly(ctx context.Context, project string, projects []string, status, resolvedUser string, onlyOpen bool) ([]HumanRequest, error) {
+	return s.listHumanRequests(ctx, project, projects, status, resolvedUser, onlyOpen, true)
 }
 
 // ListHumanRequestsByRun returns every request of one run, oldest first —
