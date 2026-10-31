@@ -539,7 +539,7 @@ func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, u
 		// the inbox has 500'd from birth with «column reference "id" is
 		// ambiguous», which the user saw as an always-empty review queue.
 		`SELECT r.id, r.artifact_id, r.artifact_version, r.reviewers, r.mode, r.status, r.note, r.requested_by, r.requested_at, r.decisions, r.resolved_by, r.resolved_at, r.reminded_at, r.escalated_at, a.id, a.title, a.kind, a.status, a.version,
-			COALESCE(a.origin_type, ''), COALESCE(a.origin_user, ''), a.origin_run, a.tags, a.created_at, a.updated_at, COALESCE(a.org_unit_id, '')
+			COALESCE(a.origin_type, ''), COALESCE(a.origin_user, ''), COALESCE(a.origin_run, ''), a.tags, a.created_at, a.updated_at, COALESCE(a.org_unit_id, '')
 			 FROM workspace_artifact_review r
 			 JOIN workspace_artifact a ON a.id = r.artifact_id
 			 WHERE r.status = 'open'
