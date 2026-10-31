@@ -553,9 +553,12 @@ func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, u
 	for rows.Next() {
 		var entry ArtifactInboxEntry
 		var orgUnit string
-		var tags []byte
+		// Tags scan straight into the []string field (a text[] column): a []byte
+		// dest makes pgx refuse the array (the scan error the stand showed once
+		// the ambiguous-column SQL was fixed — the old SQL failed earlier, so
+		// this line never executed in production before).
 		review, err := scanArtifactReviewInto(rows, []any{&entry.ArtifactID, &entry.ArtifactTitle, &entry.Kind, &entry.Status, &entry.Version,
-			&entry.OriginType, &entry.OriginUser, &entry.OriginRun, &tags, &entry.CreatedAt, &entry.UpdatedAt, &orgUnit})
+			&entry.OriginType, &entry.OriginUser, &entry.OriginRun, &entry.Tags, &entry.CreatedAt, &entry.UpdatedAt, &orgUnit})
 		if err != nil {
 			return nil, err
 		}
@@ -572,9 +575,6 @@ func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, u
 		// org scope is about catalog browsing, not about who owes a decision).
 		if len(entry.Matched) == 0 && units != nil && orgUnit != "" && !slices.Contains(units, orgUnit) {
 			continue
-		}
-		if len(tags) > 0 {
-			_ = json.Unmarshal(tags, &entry.Tags)
 		}
 		result = append(result, entry)
 	}
