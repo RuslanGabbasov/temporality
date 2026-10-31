@@ -3251,7 +3251,10 @@ func main() {
 			return
 		}
 		input := agent.RunInput{}
-		applyAgentConfig(r.Context(), ws, &a, &input)
+		if cfgErr := applyAgentConfig(r.Context(), ws, &a, &input); cfgErr != nil {
+			writeError(w, 409, cfgErr)
+			return
+		}
 		applyProjectModel(r.Context(), ws, project, &input)
 		// The delegated run inherits the org position of the delegating chain:
 		// the parent's actor unit (actor_id is passed by ResolveAgent) plus the
@@ -3466,7 +3469,10 @@ func main() {
 		if tail := fetchPriorAttemptTail(r.Context(), observationURL, journalToken, task.ID, ws); tail != "" {
 			input.PriorTail = tail
 		}
-		applyAgentConfig(r.Context(), ws, agentCfg, &input)
+		if cfgErr := applyAgentConfig(r.Context(), ws, agentCfg, &input); cfgErr != nil {
+			writeError(w, 409, cfgErr)
+			return
+		}
 		applyProjectModel(r.Context(), ws, task.ProjectID, &input)
 		if req.Model != "" {
 			input.Model = req.Model
@@ -6619,7 +6625,10 @@ func main() {
 			writeError(w, 500, aErr)
 			return
 		}
-		applyAgentConfig(r.Context(), ws, triggerAgent, &input)
+		if cfgErr := applyAgentConfig(r.Context(), ws, triggerAgent, &input); cfgErr != nil {
+			writeError(w, 409, cfgErr)
+			return
+		}
 		applyProjectModel(r.Context(), ws, projectID, &input)
 		// Policy (§24) applies before fire-time authorization: a run the policy
 		// already forbids (model allowlist) is a rejection, not a silent drop.
@@ -6783,7 +6792,10 @@ func main() {
 					slog.Error("resolve trigger agent", "trigger", t.ID, "error", aErr)
 					continue
 				}
-				applyAgentConfig(context.Background(), ws, triggerAgent, &input)
+				if cfgErr := applyAgentConfig(context.Background(), ws, triggerAgent, &input); cfgErr != nil {
+					slog.Error("trigger agent has no provider", "trigger", t.ID, "agent", triggerAgent.Name, "error", cfgErr)
+					continue
+				}
 				applyProjectModel(context.Background(), ws, t.ProjectID, &input)
 				// Policy (§24): a forbidden run never starts; the fire is logged.
 				policyErr := applyRunPolicy(context.Background(), ws, costPrices, t.ProjectID, "", t.OrgUnitID, &input)
@@ -8874,20 +8886,22 @@ func validateAgentSandboxProfile(ctx context.Context, ws *workspace.Store, value
 	return nil
 }
 
-func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) {
+func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) error {
 	if a == nil {
-		return
+		return nil
 	}
 	if a.Model != "" {
 		input.Model = a.Model
 	}
-	// The agent's explicit provider binding is the routing contract: the run
-	// must call THAT provider (docs/agents.md §routing) — not the first
-	// provider found declaring the same model name (a duplicate-model
-	// conflict elsewhere must not hijack the run).
-	if a.Provider != "" {
-		input.ProviderID = a.Provider
+	// The agent's explicit provider binding is the routing contract (docs/agents.md
+	// §routing): the run must call THAT provider. An agent WITHOUT a provider is
+	// not runnable — its model name would route to whichever provider happens
+	// to declare it first (the duplicate-model hijack) or to the env legacy
+	// default. The 409 names the fix: set the provider in the agent card.
+	if a.Provider == "" {
+		return fmt.Errorf("agent %q has no provider configured — open its card and pick one; provider-less agents are not runnable", a.Name)
 	}
+	input.ProviderID = a.Provider
 	// The agent card's turn budget is part of the enforced run configuration:
 	// honoring it here carries the configured budget through every path that
 	// resolves an agent (task runs, triggers, delegation via run-config)
@@ -8976,6 +8990,7 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	// values are resolved per tool call at the execution boundary, so a rotated
 	// value applies mid-run and nothing secret persists in the workflow.
 	input.Secrets = a.Secrets
+	return nil
 }
 
 // applyAgentDefaults merges an agent card into a run input coming from a

@@ -1208,6 +1208,11 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
                     <span>{a.model || (t('agents.no_model') ?? 'no model')}</span>
                     {a.provider && <span>· {providers.find((p) => p.id === a.provider)?.name ?? a.provider}</span>}
+                    {!a.provider && (
+                      <span style={{ color: 'var(--tm-danger)' }} title={t('agents.no_provider_hint') ?? 'Без провайдера агент не запускается — выберите провайдера в карточке'}>
+                        · ⚠ {t('agents.no_provider') ?? 'без провайдера'}
+                      </span>
+                    )}
                     {a.labels?.builtin === 'true' && <span>· {t('agents.builtin_tag') ?? 'builtin'}</span>}
                     {!!a.definition_version && <span>· v{a.definition_version}</span>}
                   </div>

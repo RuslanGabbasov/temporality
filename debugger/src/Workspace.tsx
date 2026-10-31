@@ -1864,13 +1864,20 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
               value={newChatAgentId}
               onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewChatAgentId(e.target.value)}
             >
-              {defaultAgentId && (
-                <SelectItem value="" text={`${t('chat.project_default') ?? 'Project default'} (${allAgents.find((a) => a.id === defaultAgentId)?.name ?? defaultAgentId})`} />
-              )}
-              {allAgents.filter((a) => a.id !== defaultAgentId && (!a.project_id || a.project_id === project)).map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
+              {defaultAgentId && (() => {
+                const def = allAgents.find((a) => a.id === defaultAgentId)
+                if (!def?.provider) return null // a provider-less default agent is not runnable — the hint below explains
+                return <SelectItem value="" text={`${t('chat.project_default') ?? 'Project default'} (${def.name})`} />
+              })()}
+              {allAgents.filter((a) => a.id !== defaultAgentId && a.provider && (!a.project_id || a.project_id === project)).map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
             </Select>
             {!defaultAgentId && (
               <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.5rem 0 0' }}>{t('chat.no_default_hint') ?? 'This project has no default agent yet — set one on the Agents page.'}</p>
+            )}
+            {allAgents.some((a) => !a.provider && a.id !== defaultAgentId && (!a.project_id || a.project_id === project)) && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.5rem 0 0' }}>
+                {t('chat.no_provider_hidden') ?? 'Агенты без указанного провайдера скрыты — укажите провайдер в карточке агента, чтобы выбрать их здесь.'}
+              </p>
             )}
             <div className="form-actions">
               <Button kind="secondary" onClick={() => setShowNewChat(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
