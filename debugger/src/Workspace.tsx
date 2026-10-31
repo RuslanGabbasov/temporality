@@ -1727,17 +1727,24 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                             >{t('chat.stop') ?? 'Stop'}</button>
                           )}
                           {msg.runId && (
-                            /* A NAMED new tab on purpose: the run is still
-                               streaming here — the chat keeps its live view
-                               while the trace opens next to it. The fixed
-                               name reuses the same tab on repeated clicks
-                               instead of piling up a heavy runs page per
-                               click (each copy polls, streams and renders
-                               the full trace on its own). */
+                            /* The trace is a VIEW of the /agents route, not a
+                               separate document: navigate in place through
+                               the app router (pushState + popstate, the same
+                               pattern every internal link uses) — no full
+                               page reload, no tab pile-up. The run keeps
+                               running server-side; Back returns to the chat
+                               and the conversation reloads with its stream
+                               resumed. An href stays on the anchor so
+                               middle-click / open-in-new-tab still works
+                               for those who want a parallel tab. */
                             <a
                               href={runTraceUrl(project, msg.runId)}
-                              target="temporality-runs"
-                              rel="noopener"
+                              onClick={(e: React.MouseEvent) => {
+                                e.preventDefault()
+                                const url = runTraceUrl(project, msg.runId!)
+                                window.history.pushState(null, '', url)
+                                window.dispatchEvent(new PopStateEvent('popstate'))
+                              }}
                               style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', textDecoration: 'none', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}
                               title={t('chat.trace_title') ?? 'Open the run trace'}
                             >{t('chat.trace') ?? 'Trace'}</a>
