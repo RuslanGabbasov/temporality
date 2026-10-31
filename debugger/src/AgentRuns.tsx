@@ -296,13 +296,12 @@ export default function AgentRuns({ project }: { project: string }) {
   const [confirmStop, setConfirmStop] = useState('')
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
-  // Filter row (docs/agents.md §runs-list): initiator with a directory
-  // suggest (typing filters by substring, picking a suggestion pins the
-  // exact user id), an org-unit of the initiator, and status — all
-  // client-side over the loaded newest-100 window.
+  // Filter row (docs/agents.md §runs-list): ONE initiator field — a suggest
+  // over directory users AND org units (typing matches both; picking a user
+  // pins the exact actor id, picking a unit matches the actor's unit), plus
+  // status — all client-side over the loaded newest-100 window.
   const [initiatorDraft, setInitiatorDraft] = useState('')
-  const [initiatorID, setInitiatorID] = useState('')
-  const [initiatorUnit, setInitiatorUnit] = useState('')
+  const [initiatorPick, setInitiatorPick] = useState<{ kind: 'user' | 'unit'; id: string; name: string } | null>(null)
   // 'waiting' is a virtual status: a live run paused on a human answer
   // (questionRuns) — not a journal status.
   const [statusFilter, setStatusFilter] = useState<RunStatus | 'waiting' | ''>('')
@@ -400,20 +399,32 @@ export default function AgentRuns({ project }: { project: string }) {
   // Initiator suggest: directory users matching the typed fragment, limited
   // to those who actually appear as actors in the loaded window (the filter
   // works over this list; suggesting everyone would offer empty results).
+  // Initiator suggest: actors of the loaded window (people) plus their org
+  // units — suggesting every user would offer empty results, so people come
+  // from the actors set; units from those actors' directory entries.
   const initiatorSuggest = useMemo(() => {
     const needle = initiatorDraft.trim().toLowerCase()
-    if (!needle || initiatorID) return []
-    const actors = new Set(rows.map((row) => row.actor ?? '').filter(Boolean))
-    const out: Array<{ id: string; name: string; OrgUnitID: string }> = []
+    if (!needle || initiatorPick) return []
+    const actorIDs = new Set(rows.map((row) => row.actor ?? '').filter(Boolean))
+    const out: Array<{ kind: 'user' | 'unit'; id: string; name: string }> = []
+    const unitIDs = new Set<string>()
     for (const [id, info] of users) {
-      if (!actors.has(id)) continue
+      if (!actorIDs.has(id)) continue
       if (info.name.toLowerCase().includes(needle) || id.toLowerCase().includes(needle)) {
-        out.push({ id, name: info.name, OrgUnitID: info.OrgUnitID })
+        out.push({ kind: 'user', id, name: info.name })
       }
+      if (info.OrgUnitID) unitIDs.add(info.OrgUnitID)
       if (out.length >= 5) break
     }
+    for (const unit of org.units ?? []) {
+      const haystack = `${unit.name} ${unit.id}`.toLowerCase()
+      if (needle && !haystack.includes(needle)) continue
+      if (unitIDs.has(unit.id) || out.some((p) => p.id === unit.id)) continue
+      out.push({ kind: 'unit', id: unit.id, name: unit.name || unit.id })
+      if (out.length >= 8) break
+    }
     return out
-  }, [initiatorDraft, initiatorID, rows, users])
+  }, [initiatorDraft, initiatorPick, rows, users, org.units])
 
   // A run row stays visible when it matches the filter or one of its delegated
   // children does, so searching for a child keeps its parent chain.
@@ -429,14 +440,13 @@ export default function AgentRuns({ project }: { project: string }) {
     const initiator = initiatorDraft.trim().toLowerCase()
     for (const row of rows) {
       const actorName = userNameOf(row.actor)
-      const matchesInitiator = initiatorID
-        ? row.actor === initiatorID
+      const matchesInitiator = initiatorPick
+        ? (initiatorPick.kind === 'user' ? row.actor === initiatorPick.id : users.get(row.actor ?? '')?.OrgUnitID === initiatorPick.id)
         : !initiator || actorName.toLowerCase().includes(initiator) || (row.actor ?? '').toLowerCase().includes(initiator)
-      const matchesUnit = !initiatorUnit || users.get(row.actor ?? '')?.OrgUnitID === initiatorUnit
-      			const matchesStatus = !statusFilter || (statusFilter === 'waiting'
+      const matchesStatus = !statusFilter || (statusFilter === 'waiting'
       				? questionRuns.has(row.id) && row.status === 'running'
       				: row.status === statusFilter)
-      selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && matchesInitiator && matchesUnit && matchesStatus && (!opsOnly || opRunIds.ids.has(row.id)))
+      selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && matchesInitiator && matchesStatus && (!opsOnly || opRunIds.ids.has(row.id)))
     }
     const subtreeMatch = (id: string): boolean => {
       const match = selfMatch.get(id) ?? false
@@ -444,7 +454,7 @@ export default function AgentRuns({ project }: { project: string }) {
       return (childrenOf.get(id) ?? []).some((child) => subtreeMatch(child))
     }
     return rows.filter((row) => subtreeMatch(row.id))
-  }, [rows, filter, initiatorDraft, initiatorID, initiatorUnit, statusFilter, questionRuns, opsOnly, opRunIds, userNameOf, users])
+  }, [rows, filter, initiatorDraft, initiatorPick, statusFilter, questionRuns, opsOnly, opRunIds, userNameOf, users, org.units])
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
@@ -1045,28 +1055,27 @@ export default function AgentRuns({ project }: { project: string }) {
                 <div style={{ position: 'relative', flex: 1, minWidth: '10rem' }}>
                   <input
                     value={initiatorDraft}
-                    onChange={(e) => { setInitiatorDraft(e.target.value); setInitiatorID('') }}
+                    onChange={(e) => { setInitiatorDraft(e.target.value); setInitiatorPick(null) }}
                     placeholder={t('runs.filter_initiator') ?? 'Инициатор…'}
                     title={t('runs.filter_initiator_hint') ?? 'Имя или id инициатора (кто запустил ран)'}
-                    style={{ width: '100%', background: 'var(--tm-bg)', border: `1px solid ${initiatorID ? 'var(--tm-teal)' : 'var(--tm-border)'}`, borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.55rem', outline: 'none' }}
+                    style={{ width: '100%', background: 'var(--tm-bg)', border: `1px solid ${initiatorPick ? 'var(--tm-teal)' : 'var(--tm-border)'}`, borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.55rem', outline: 'none' }}
                   />
                   {initiatorSuggest.length > 0 && (
                     <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', zIndex: 3, overflow: 'hidden' }}>
-                      {initiatorSuggest.map((person) => (
+                      {initiatorSuggest.map((pick) => (
                         <button
-                          key={person.id}
+                          key={`${pick.kind}:${pick.id}`}
                           type="button"
-                          onClick={() => { setInitiatorDraft(person.name); setInitiatorID(person.id) }}
+                          onClick={() => { setInitiatorDraft(pick.name); setInitiatorPick(pick) }}
                           style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', padding: '0.35rem 0.6rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem', textAlign: 'left' }}
                         >
-                          👤 {person.name}
-                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', marginLeft: 'auto' }}>{org.nameOf?.(person.OrgUnitID) ?? person.OrgUnitID ?? ''}</span>
+                          {pick.kind === 'user' ? '👤' : '🏢'} {pick.name}
+                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', marginLeft: 'auto' }}>{pick.kind === 'user' ? (t('runs.filter_kind_user') ?? 'сотрудник') : (t('runs.filter_kind_unit') ?? 'подразделение')}</span>
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
-                <OrgUnitSelect id="runs-initiator-unit" size="sm" hideLabel label={t('runs.filter_unit') ?? 'Орг-единица инициатора'} org={org} value={initiatorUnit} onChange={setInitiatorUnit} />
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as RunStatus | '')}
@@ -1080,9 +1089,9 @@ export default function AgentRuns({ project }: { project: string }) {
                   <option value="failed">{t('status.failed') ?? 'failed'}</option>
                   <option value="cancelled">{t('status.cancelled') ?? 'cancelled'}</option>
                 </select>
-                {(initiatorDraft || initiatorID || initiatorUnit || statusFilter) && (
+                {(initiatorDraft || initiatorPick || statusFilter) && (
                   <button
-                    onClick={() => { setInitiatorDraft(''); setInitiatorID(''); setInitiatorUnit(''); setStatusFilter('') }}
+                    onClick={() => { setInitiatorDraft(''); setInitiatorPick(null); setStatusFilter('') }}
                   title={t('common.clear_filters') ?? 'Сбросить фильтры'}
                     style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.25rem 0.4rem', lineHeight: 1 }}
                   >✕</button>
