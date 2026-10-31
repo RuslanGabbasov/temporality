@@ -75,7 +75,11 @@ export default function Artifacts() {
   const [searchFocused, setSearchFocused] = useState(false)
   const [ageFilter, setAgeFilter] = useState<'' | 'week' | 'month' | 'quarter'>('')
   // Approvals inbox: open review rounds addressed to the caller, one tab.
-  const [inboxMode, setInboxMode] = useState(false)
+  // It OPENS by default when there is anything to decide (the reader came
+  // for their queue; the catalog is the browsing surface) — the inbox loads
+  // once at mount for the count, and the tab flips back to the catalog as
+  // soon as the user makes a choice or the queue turns out empty.
+  const [inboxMode, setInboxMode] = useState(true)
   const [inbox, setInbox] = useState<ArtifactInboxEntry[] | null>(null)
   const [inboxBusy, setInboxBusy] = useState(false)
   // Tag editor state + the caller's role (tags drive shared filters, so only
@@ -190,10 +194,20 @@ export default function Artifacts() {
       const page = await workspaceApi.artifactInbox()
       setInbox(page.entries ?? [])
       setError('')
-    } catch (f) { setInbox([]); setError(message(f)) }
-    finally { setInboxBusy(false) }
+      // The inbox is the default tab ONLY while there is something to decide:
+      // an empty queue flips back to the catalog automatically (once per
+      // load — a manual switch back to the inbox stays put until reload).
+      if ((page.entries ?? []).length === 0) setInboxMode(false)
+    } catch (f) {
+      setInbox([])
+      setError(message(f))
+      // A broken inbox must not hold the default tab hostage either.
+      setInboxMode(false)
+    } finally { setInboxBusy(false) }
   }, [])
-  useEffect(() => { if (inboxMode) void loadInbox() }, [inboxMode, loadInbox])
+  // Load on mount (the default tab is the inbox) and on every manual switch
+  // to it — decisions made elsewhere (chat/agent) must unstick the rows.
+  useEffect(() => { void loadInbox() }, [loadInbox, inboxMode])
 
   const firstLoadRef = useRef(true)
   useEffect(() => {
