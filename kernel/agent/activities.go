@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1688,12 +1689,63 @@ func (a *Activities) handleDeleteTrigger(ctx context.Context, request ToolReques
 // The provider may not silently redirect to a different one that happens to
 // declare the same model name. Refusals (unknown provider, disabled, model
 // not declared, credential unresolvable) surface as loud, actionable errors.
+//
+// Transport-level failures (connection refused, timeouts — the kernel's own
+// HTTP listener down during a stack restart while the Temporal worker already
+// polls) retry here SILENTLY: no journal markers, no chat noise — the retry
+// window just bridges the restart gap. Only a failure of every attempt
+// surfaces, with the plain routing error (the Temporal retry ladder on top
+// stays as is).
 func (a *Activities) modelConfigForPinned(ctx context.Context, project, providerID, model string) (llm.Config, string, error) {
 	endpoint := fmt.Sprintf("%s/v1/workspace/model-config?model=%s&project=%s&provider=%s", a.WorkspaceURL, url.QueryEscape(model), url.QueryEscape(project), url.QueryEscape(providerID))
-	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return llm.Config{}, "", fmt.Errorf("provider %q routing failed: %w", providerID, err)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+		if err == nil {
+			return a.pinnedConfigFrom(body, status, providerID, model)
+		}
+		// Non-transport answers (4xx/5xx bodies) are definitive — retrying a
+		// 409 "provider disabled" would only add latency to an actionable error.
+		if !isTransportError(err) || ctx.Err() != nil || time.Now().Add(routingRetryBackoff).After(deadline) {
+			return llm.Config{}, "", fmt.Errorf("provider %q routing failed: %w", providerID, err)
+		}
+		select {
+		case <-ctx.Done():
+			return llm.Config{}, "", fmt.Errorf("provider %q routing failed: %w", providerID, ctx.Err())
+		case <-time.After(routingRetryBackoff):
+		}
 	}
+}
+
+// routingRetryBackoff is the silent retry pause between pinned-routing
+// transport attempts: long enough to bridge a container restart's listener
+// gap, short enough that a dead endpoint fails inside the activity's normal
+// retry ladder without dragging the run.
+const routingRetryBackoff = 2 * time.Second
+
+// isTransportError reports whether the workspaceDo failure is a transport-
+// level one (connection refused/reset, timeout, no route) worth a silent
+// retry — as opposed to a server ANSWER (an HTTP status), which is definitive.
+func isTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "Client.Timeout") ||
+		strings.Contains(msg, "broken pipe")
+}
+
+// pinnedConfigFrom decodes the model-config answer into the pinned llm.Config,
+// mapping HTTP answers to the loud, actionable routing errors (no retries —
+// these are definitive answers, not transport noise).
+func (a *Activities) pinnedConfigFrom(body string, status int, providerID, model string) (llm.Config, string, error) {
 	if status == http.StatusNotFound {
 		return llm.Config{}, "", fmt.Errorf("the agent's provider %q does not serve model %q (or is not visible to this project) — fix the provider's model list or pick another model", providerID, model)
 	}
