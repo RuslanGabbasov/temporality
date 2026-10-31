@@ -430,32 +430,27 @@ func TestSagaRenameMergeDetachProjection(t *testing.T) {
 	}
 
 	got := api.aggregateProjectBudget("p", events)
-	if got.SagaCount != 2 || got.TaskCount != 3 {
-		t.Fatalf("unexpected counts: %+v", got)
+	if got.SagaCount != 1 || got.TaskCount != 3 {
+		t.Fatalf("merge is a rebind: the source saga must be gone (1 saga), got: %+v", got)
 	}
-	var real, draft SagaRollup
+	var real SagaRollup
 	for _, saga := range got.Sagas {
-		switch saga.SagaID {
-		case "saga-real-bbbbbb":
+		if saga.SagaID == "saga-real-bbbbbb" {
 			real = saga
-		case "saga-draft-aaaaaa":
-			draft = saga
 		}
 	}
-	// Merge moved T1's spend onto the target alongside its own T2; the source
-	// keeps a redirect row.
+	// Merge is a rebind: T1's spend moved onto the target, the source saga
+	// ceased to exist (no redirect row is kept).
 	if len(real.TaskIDs) != 2 || real.TaskIDs[0] != "T1" || real.TaskIDs[1] != "T2" {
 		t.Fatalf("merge must re-project T1 onto the target, got %v", real.TaskIDs)
 	}
 	if real.TotalTokens != (100+20)+(200+40) {
 		t.Fatalf("target saga must own both tasks' spend, got %d", real.TotalTokens)
 	}
-	if draft.MergedInto != "saga-real-bbbbbb" || len(draft.TaskIDs) != 0 || draft.TotalTokens != 0 {
-		t.Fatalf("merged source must be an empty redirect, got %+v", draft)
-	}
-	// Rename overrode the registered title and added a goal.
-	if draft.Title != "Spec effort" || draft.Goal != "one spec to rule them all" {
-		t.Fatalf("rename must override meta, got %+v", draft)
+	// The renamed source title is gone with the source; the target's own
+	// registration title remains.
+	if real.Title != "Real saga" {
+		t.Fatalf("target title must survive, got %q", real.Title)
 	}
 	// Detach dropped T3 from every saga; it stays in the project rollup.
 	for _, task := range got.Tasks {

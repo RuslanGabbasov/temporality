@@ -310,44 +310,72 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
-	resolveMerge := sagaMerges(events)
+	// Merge is a REBIND (docs/sagas.md §8): the sources' bindings move to the
+	// target at merge time and each source ceases to exist — no redirect rows.
+	// The journal's per-type queries are not globally chronological, so both
+	// the survival rule and the binding rewrite compare by timestamps.
+	mergedAt := map[string]time.Time{}      // source → when it was merged away
+	mergeTargets := map[string]string{}     // source → surviving target
+	mergeTimeline := []struct {
+		source, target string
+		at             time.Time
+	}{}
 	renames := sagaRenames(events)
+	deletedAt := map[string]time.Time{}
 	sagas := map[string]*sagaSummary{}
 	registrationTime := map[string]time.Time{}
 	for _, ev := range events {
-		if ev.Type != "saga.registered" {
-			continue
-		}
-		if existing, ok := sagas[ev.SagaID]; ok {
-			if existing.Title == "" {
-				existing.Title = ev.Title
+		switch ev.Type {
+		case "saga.registered":
+			if prev, ok := mergedAt[ev.SagaID]; ok && !ev.OccurredAt.After(prev) {
+				continue // registered before it was merged away: not a revival
 			}
-			continue
+			if existing, ok := sagas[ev.SagaID]; ok {
+				if existing.Title == "" {
+					existing.Title = ev.Title
+				}
+				continue
+			}
+			sagas[ev.SagaID] = &sagaSummary{SagaID: ev.SagaID, Title: ev.Title, Goal: ev.Goal, Tasks: []string{}, Registered: ev.OccurredAt.Format(time.RFC3339), ByRun: ev.RunID}
+			registrationTime[ev.SagaID] = ev.OccurredAt
+		case "saga.renamed":
+			// Folded by sagaRenames below — nothing to do here.
+			_ = ev
+		case "saga.deleted":
+			if prev, ok := deletedAt[ev.SagaID]; ok && prev.After(ev.OccurredAt) {
+				continue
+			}
+			deletedAt[ev.SagaID] = ev.OccurredAt
+		case "saga.merged":
+			// ev.SagaID is the TARGET; the sources ride in ev.Sources.
+			target := ev.SagaID
+			if target == "" {
+				continue
+			}
+			for _, source := range ev.Sources {
+				if prev, ok := mergedAt[source]; ok && !prev.After(ev.OccurredAt) {
+					continue
+				}
+				mergedAt[source] = ev.OccurredAt
+				mergeTargets[source] = target
+				mergeTimeline = append(mergeTimeline, struct {
+					source, target string
+					at             time.Time
+				}{source, target, ev.OccurredAt})
+			}
 		}
-		sagas[ev.SagaID] = &sagaSummary{SagaID: ev.SagaID, Title: ev.Title, Goal: ev.Goal, Tasks: []string{}, Registered: ev.OccurredAt.Format(time.RFC3339), ByRun: ev.RunID}
-		registrationTime[ev.SagaID] = ev.OccurredAt
 	}
-	// Human renames override the registered title/goal; merged sources keep
-	// their row as a redirect to the surviving target. Deleted sagas leave
-	// the list entirely (operator hygiene for mistyped registrations).
-	deletedAt := map[string]time.Time{}
-	for _, ev := range events {
-		if ev.Type != "saga.deleted" {
-			continue
-		}
-		if prev, ok := deletedAt[ev.SagaID]; ok && prev.After(ev.OccurredAt) {
-			continue
-		}
-		deletedAt[ev.SagaID] = ev.OccurredAt
-	}
+	// The saga list: registered-and-alive sagas only. Deleted or merged-away
+	// sources are not rows at all; a post-merge re-registration revives.
 	for sagaID := range sagas {
-		if deleted, ok := deletedAt[sagaID]; ok {
-			if reg, ok := registrationTime[sagaID]; ok && reg.After(deleted) {
-				continue // re-registered after the delete: alive again
-			}
+		if deleted, ok := deletedAt[sagaID]; ok && !registrationTime[sagaID].After(deleted) {
+			delete(sagas, sagaID)
+		}
+		if merged, ok := mergedAt[sagaID]; ok && !registrationTime[sagaID].After(merged) {
 			delete(sagas, sagaID)
 		}
 	}
+	// Human renames override the registered title/goal.
 	for sagaID, ev := range renames {
 		if saga := sagas[sagaID]; saga != nil {
 			if ev.Title != "" {
@@ -358,34 +386,26 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 			}
 		}
 	}
-	for sagaID, saga := range sagas {
-		if target := resolveMerge(sagaID); target != sagaID {
-			saga.MergedInto = target
-		}
-	}
 	// The task→saga projection: the latest binding per task wins (a re-attach
 	// moves the task, a detach unbinds it), mirroring the cost rollup.
 	// Comparison is by time — the merged event list is not globally
-	// chronological. Bindings to merged sources follow the merge to its target.
+	// chronological. A merge rebinds every task still on a source onto the
+	// target at merge time; bindings created after the merge cannot point at
+	// the source (saga_attach refuses merged sources).
 	type taskBinding struct {
 		sagaID string
 		at     time.Time
 	}
 	latest := map[string]taskBinding{}
+	// Non-merge events first, in whatever order the journal gave them: the
+	// per-task "latest wins by time" comparison below does not care.
 	for _, ev := range events {
 		if ev.Type == "saga.deleted" {
-			// Operator hygiene: the delete retracts the saga's ROW. Its tasks
-			// follow the merge to the surviving target when there was one
-			// (accounting must not lose history because an operator cleaned up
-			// the redirect row); a plain deleted saga drops its tasks to the
-			// unbound pool. An older binding loses to the delete; a later
-			// attach/registered wins.
-			target := resolveMerge(ev.SagaID)
 			for taskID, prev := range latest {
 				if prev.sagaID != ev.SagaID || prev.at.After(ev.OccurredAt) {
 					continue
 				}
-				if target != "" && target != ev.SagaID {
+				if target, ok := mergeTargets[ev.SagaID]; ok && target != ev.SagaID {
 					latest[taskID] = taskBinding{sagaID: target, at: ev.OccurredAt}
 				} else {
 					delete(latest, taskID)
@@ -396,22 +416,50 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 		if ev.Type != "saga.registered" && ev.Type != "saga.attached" && ev.Type != "saga.detached" {
 			continue
 		}
+		if prev, ok := latest[ev.TaskID]; ok && prev.at.After(ev.OccurredAt) {
+			continue
+		}
+		binding := taskBinding{sagaID: ev.SagaID, at: ev.OccurredAt}
 		if ev.Type != "saga.detached" {
 			if _, registered := registrationTime[ev.SagaID]; !registered {
 				continue // a binding to an unknown saga has no effect
 			}
+		} else {
+			binding.sagaID = ""
 		}
-		if prev, ok := latest[ev.TaskID]; ok && prev.at.After(ev.OccurredAt) {
+		latest[ev.TaskID] = binding
+	}
+	// Merge rebinds, oldest merge first: every binding that points at a
+	// source (or at a source merged earlier in the same pass) and whose
+	// binding time predates the merge moves onto the target.
+	mergePass := make([]struct {
+		source, target string
+		at             time.Time
+	}, 0, len(mergeTimeline))
+	seenMerge := map[string]bool{}
+	for _, m := range mergeTimeline {
+		key := m.source + "→" + m.target
+		if seenMerge[key] {
 			continue
 		}
-		latest[ev.TaskID] = taskBinding{sagaID: ev.SagaID, at: ev.OccurredAt}
+		seenMerge[key] = true
+		mergePass = append(mergePass, m)
+	}
+	sort.Slice(mergePass, func(i, j int) bool { return mergePass[i].at.Before(mergePass[j].at) })
+	for _, m := range mergePass {
+		for taskID, prev := range latest {
+			if prev.sagaID == m.source && !prev.at.After(m.at) {
+				latest[taskID] = taskBinding{sagaID: m.target, at: m.at}
+			}
+		}
 	}
 	for taskID, binding := range latest {
 		if binding.sagaID == "" {
 			continue // detached: back to the unbound pool
 		}
-		target := resolveMerge(binding.sagaID)
-		if saga := sagas[target]; saga != nil {
+		// Merge rebinds already re-pointed sources at their targets above —
+		// no further resolution needed here.
+		if saga := sagas[binding.sagaID]; saga != nil {
 			saga.Tasks = append(saga.Tasks, taskID)
 		}
 	}

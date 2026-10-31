@@ -93,8 +93,6 @@ export default function ProjectOverview({ project }: Props) {
   const unboundShown = 8
   const tasksOf = useCallback((sagaID: string) => (budget?.tasks ?? []).filter((task) => task.saga_id === sagaID), [budget])
   const liveSagas = useMemo(() => (budget?.sagas ?? []).filter((saga) => !saga.merged_into), [budget])
-  const mergedRows = useMemo(() => (budget?.sagas ?? []).filter((saga) => saga.merged_into), [budget])
-  const [showMerged, setShowMerged] = useState(false)
   const sagaTitle = useCallback((sagaID: string) => {
     const saga = (budget?.sagas ?? []).find((s) => s.saga_id === sagaID)
     return saga ? (saga.title || saga.saga_id) : sagaID
@@ -162,35 +160,25 @@ export default function ProjectOverview({ project }: Props) {
             )}
           </div>
 
-          {/* Explicit sagas: one row per registered effort, expandable to its tasks. */}
+          {/* Explicit sagas: one row per registered effort, expandable to its tasks.
+              Merged redirect rows are not rendered at all: their tasks and spend
+              live in the target saga, the redirect carries no information the
+              operator needs — the merge just makes the source disappear. */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
             <Heading style={{ fontSize: '0.95rem' }}>{t('project.sagas') ?? 'Sagas'}</Heading>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              {mergedRows.length > 0 && (
-                <Button
-                  size="sm"
-                  kind="ghost"
-                  aria-pressed={showMerged}
-                  onClick={() => setShowMerged((value) => !value)}
-                  title={t('project.saga_merged_hint') ?? 'Redirect rows: their tasks and spend already live in the target saga'}
-                >
-                  {showMerged ? t('project.saga_merged_hide') ?? 'Hide merged' : `${t('project.saga_merged_show') ?? 'Show merged'} (${mergedRows.length})`}
-                </Button>
-              )}
-              {liveSagas.length >= 2 && (
-                <Button
-                  size="sm"
-                  kind="ghost"
-                  disabled={selected.size < 1}
-                  title={selected.size < 2 ? (t('project.saga_merge_select') ?? 'Select two or more sagas') : undefined}
-                  onClick={() => openDialog({ kind: 'merge', sources: [...selected] })}
-                >
-                  {t('project.saga_merge') ?? 'Merge'}{selected.size > 0 ? ` (${selected.size})` : ''}
-                </Button>
-              )}
-            </div>
+            {liveSagas.length >= 2 && (
+              <Button
+                size="sm"
+                kind="ghost"
+                disabled={selected.size < 1}
+                title={selected.size < 2 ? (t('project.saga_merge_select') ?? 'Select two or more sagas') : undefined}
+                onClick={() => openDialog({ kind: 'merge', sources: [...selected] })}
+              >
+                {t('project.saga_merge') ?? 'Merge'}{selected.size > 0 ? ` (${selected.size})` : ''}
+              </Button>
+            )}
           </div>
-          {liveSagas.length === 0 && mergedRows.length === 0 ? (
+          {liveSagas.length === 0 ? (
             <Tile style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('project.no_sagas') ?? 'No sagas registered yet'}</Tile>
           ) : (
             <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '1rem' }}>
@@ -208,21 +196,18 @@ export default function ProjectOverview({ project }: Props) {
                 <span style={{ color: 'var(--tm-text-3)' }} title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
                 <span style={{ color: 'var(--tm-text-3)' }}>👤 {t('runs.approvals_col') ?? 'Approvals'}</span>
               </div>
-              {(showMerged ? budget.sagas : liveSagas).map((saga) => {
-                const merged = !!saga.merged_into
+              {liveSagas.map((saga) => {
                 return (
-                  <div key={saga.saga_id} style={{ borderTop: '1px solid var(--tm-border)', opacity: merged ? 0.55 : 1 }}>
+                  <div key={saga.saga_id} style={{ borderTop: '1px solid var(--tm-border)' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}>
                       <span style={{ display: 'flex', alignItems: 'center' }}>
-                        {!merged && (
-                          <input
-                            type="checkbox"
-                            checked={selected.has(saga.saga_id)}
-                            onChange={(e) => toggleSelected(saga.saga_id, e.target.checked)}
-                            title={t('project.saga_merge') ?? 'Merge'}
-                            style={{ accentColor: 'var(--tm-accent, #f97316)' }}
-                          />
-                        )}
+                        <input
+                          type="checkbox"
+                          checked={selected.has(saga.saga_id)}
+                          onChange={(e) => toggleSelected(saga.saga_id, e.target.checked)}
+                          title={t('project.saga_merge') ?? 'Merge'}
+                          style={{ accentColor: 'var(--tm-accent, #f97316)' }}
+                        />
                       </span>
                       <button
                         onClick={() => setOpenSaga(openSaga === saga.saga_id ? null : saga.saga_id)}
@@ -232,32 +217,21 @@ export default function ProjectOverview({ project }: Props) {
                         {tasksOf(saga.saga_id).length > 0 && (openSaga === saga.saga_id ? <ChevronDown size={12} /> : <ChevronRight size={12} />)}
                       </button>
                       <span style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', minWidth: 0 }} title={(saga.goal ? saga.goal + '\n' : '') + saga.saga_id}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: merged ? 'line-through' : 'none' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {saga.title || saga.saga_id}
                         </span>
-                        {merged && <Tag type="cool-gray" size="sm" title={saga.merged_into}>{t('project.saga_merged_into') ?? 'merged into'} → {sagaTitle(saga.merged_into!)}</Tag>}
-                        {merged && (
-                          <button
-                            onClick={() => void deleteSaga(saga)}
-                            title={t('project.saga_delete') ?? 'Delete saga'}
-                            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
-                          >✕</button>
-                        )}
-                        {!merged && saga.running > 0 && <Tag type="cool-gray" size="sm">{pluralT(t, locale, 'runs.task_running_n', saga.running)}</Tag>}
-                        {!merged && (
-                          <>
-                          <button
-                            onClick={() => openDialog({ kind: 'rename', saga }, { title: saga.title, goal: saga.goal })}
+
+                        {saga.running > 0 && <Tag type="cool-gray" size="sm">{pluralT(t, locale, 'runs.task_running_n', saga.running)}</Tag>}
+                        <button
+                          onClick={() => openDialog({ kind: 'rename', saga }, { title: saga.title, goal: saga.goal })}
                             title={t('project.saga_rename') ?? 'Rename'}
                             style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
-                          >✎</button>
-                          <button
-                            onClick={() => void deleteSaga(saga)}
-                            title={t('project.saga_delete') ?? 'Delete saga'}
-                            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
-                          >✕</button>
-                          </>
-                        )}
+                        >✎</button>
+                        <button
+                          onClick={() => void deleteSaga(saga)}
+                          title={t('project.saga_delete') ?? 'Delete saga'}
+                          style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
+                        >✕</button>
                       </span>
                       <span>{saga.task_ids.length}</span>
                       <span>{saga.run_count}</span>

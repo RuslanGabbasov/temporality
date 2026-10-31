@@ -1113,7 +1113,6 @@ func (a *CostAPI) aggregateTask(project, taskID string, events []observation.Eve
 type sagaMeta struct {
 	sagaID       string
 	title, goal  string
-	mergedInto   string
 	registeredBy string
 	registeredAt *time.Time
 }
@@ -1132,10 +1131,10 @@ func sagaEventTask(ev observation.Event) string {
 // Bindings compare by time, not journal arrival order (merged type queries are
 // not globally chronological), and the latest binding per task wins — a
 // re-attach moves the task to another saga, a saga.detached drops it back to
-// unbound. Renames override meta by the same last-wins rule. Merges re-project
-// every binding of the source saga onto its target and mark the source
-// mergedInto (chains resolve to the final target). Bindings to unknown saga
-// ids have no effect.
+// unbound. Renames override meta by the same last-wins rule. A merge is a
+// REBIND: the sources' bindings move onto the target immediately and the
+// sources cease to exist as sagas — no redirect rows, no chains to resolve.
+// Bindings to unknown saga ids have no effect.
 func sagaBindings(events []observation.Event) (map[string]string, map[string]*sagaMeta) {
 	bindings := map[string]string{}
 	sagas := map[string]*sagaMeta{}
@@ -1150,11 +1149,6 @@ func sagaBindings(events []observation.Event) (map[string]string, map[string]*sa
 		at          time.Time
 	}
 	renames := map[string]rename{}
-	type merge struct {
-		target string
-		at     time.Time
-	}
-	merges := map[string]merge{}
 	applyBinding := func(taskID, sagaID string, at time.Time) {
 		if taskID == "" {
 			return
@@ -1212,8 +1206,15 @@ func sagaBindings(events []observation.Event) (map[string]string, map[string]*sa
 			item.goal, _ = ev.Data["goal"].(string)
 			renames[sagaID] = item
 		case "saga.merged":
+			// Merge is a REBIND (docs/sagas.md §8): the sources' tasks move to
+			// the target right here, and each source ceases to exist as a saga
+			// — no redirect rows, nothing to clean up later. A source
+			// re-registered afterwards starts fresh.
 			target, _ := ev.Data["saga_id"].(string)
 			if target == "" {
+				continue
+			}
+			if _, known := sagas[target]; !known {
 				continue
 			}
 			sources, _ := ev.Data["source_saga_ids"].([]any)
@@ -1222,10 +1223,13 @@ func sagaBindings(events []observation.Event) (map[string]string, map[string]*sa
 				if source == "" || source == target {
 					continue
 				}
-				if prev, ok := merges[source]; ok && prev.at.After(ev.OccurredAt) {
-					continue
+				delete(sagas, source)
+				delete(renames, source)
+				for taskID, b := range latest {
+					if b.sagaID == source && !b.at.After(ev.OccurredAt) {
+						latest[taskID] = binding{sagaID: target, at: ev.OccurredAt}
+					}
 				}
-				merges[source] = merge{target: target, at: ev.OccurredAt}
 			}
 		case "saga.deleted":
 			// Operator hygiene: a mistyped or wrongly merged registration is
@@ -1247,15 +1251,11 @@ func sagaBindings(events []observation.Event) (map[string]string, map[string]*sa
 			}
 			delete(sagas, sagaID)
 			delete(renames, sagaID)
-			// A merged source keeps its redirect: the tasks bound to it follow
-			// the merge to the surviving target, so deleting the redirect ROW
-			// must not retract their accounting from that target. Only a plain
-			// (unmerged) deleted saga unbinds its tasks.
-			if _, wasMerged := merges[sagaID]; !wasMerged {
-				for taskID, b := range latest {
-					if b.sagaID == sagaID {
-						latest[taskID] = binding{detached: true, at: ev.OccurredAt}
-					}
+			// Its tasks fall to the unbound pool (a merged source is already
+			// gone — merge rebound them, so this only affects plain sagas).
+			for taskID, b := range latest {
+				if b.sagaID == sagaID {
+					latest[taskID] = binding{detached: true, at: ev.OccurredAt}
 				}
 			}
 		}
@@ -1270,31 +1270,12 @@ func sagaBindings(events []observation.Event) (map[string]string, map[string]*sa
 			}
 		}
 	}
-	// Merge chains: a target merged further on resolves to its final target.
-	resolve := func(sagaID string) string {
-		seen := map[string]bool{}
-		for {
-			next, ok := merges[sagaID]
-			if !ok || seen[sagaID] {
-				break
-			}
-			seen[sagaID] = true
-			sagaID = next.target
-		}
-		return sagaID
-	}
-	for _, meta := range sagas {
-		if merge, ok := merges[meta.sagaID]; ok {
-			meta.mergedInto = resolve(merge.target)
-		}
-	}
 	for taskID, b := range latest {
 		if b.detached || b.sagaID == "" {
 			continue
 		}
-		target := resolve(b.sagaID)
-		if _, known := sagas[target]; known {
-			bindings[taskID] = target
+		if _, known := sagas[b.sagaID]; known {
+			bindings[taskID] = b.sagaID
 		}
 	}
 	return bindings, sagas
@@ -1384,7 +1365,7 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 	// registration stays visible.
 	for sagaID, meta := range sagaMetas {
 		rollup := SagaRollup{
-			SagaID: sagaID, Title: meta.title, Goal: meta.goal, MergedInto: meta.mergedInto,
+			SagaID: sagaID, Title: meta.title, Goal: meta.goal,
 			RegisteredByRun: meta.registeredBy, RegisteredAt: meta.registeredAt,
 			TaskIDs: []string{}, Approvals: ApprovalStats{},
 		}
