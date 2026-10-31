@@ -374,11 +374,20 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 	latest := map[string]taskBinding{}
 	for _, ev := range events {
 		if ev.Type == "saga.deleted" {
-			// Operator hygiene: the deleted saga's tasks fall back to the
-			// unbound pool (the delete carries no single task). An older
-			// binding loses to the delete; a later attach/registered wins.
+			// Operator hygiene: the delete retracts the saga's ROW. Its tasks
+			// follow the merge to the surviving target when there was one
+			// (accounting must not lose history because an operator cleaned up
+			// the redirect row); a plain deleted saga drops its tasks to the
+			// unbound pool. An older binding loses to the delete; a later
+			// attach/registered wins.
+			target := resolveMerge(ev.SagaID)
 			for taskID, prev := range latest {
-				if prev.sagaID == ev.SagaID && !prev.at.After(ev.OccurredAt) {
+				if prev.sagaID != ev.SagaID || prev.at.After(ev.OccurredAt) {
+					continue
+				}
+				if target != "" && target != ev.SagaID {
+					latest[taskID] = taskBinding{sagaID: target, at: ev.OccurredAt}
+				} else {
 					delete(latest, taskID)
 				}
 			}

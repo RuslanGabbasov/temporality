@@ -681,3 +681,34 @@ func TestSagaDeleteRetractsGroupingAndUnbindsTasks(t *testing.T) {
 		t.Fatalf("the resurrected saga must carry the new title and binding: %+v", got.Sagas[0])
 	}
 }
+
+// Deleting a MERGED source retracts only the redirect row: the tasks stay
+// bound to (and their spend stays rolled up in) the surviving target saga —
+// an operator cleaning up a merge must not erase the target's accounting.
+func TestSagaDeleteMergedSourceKeepsTargetAccounting(t *testing.T) {
+	cfg, _ := ParsePrices("m:1.00:2.00")
+	api := NewCostAPI(cfg, "", "")
+	base := time.Now()
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	events := []observation.Event{
+		mk("run.started", "r1", "t1", base, map[string]any{"agent_id": "lead"}),
+		mk("model.completed", "r1", "t1", base.Add(1*time.Minute), map[string]any{"model": "m", "prompt_tokens": 100, "completion_tokens": 10}),
+		mk("saga.registered", "r1", "t1", base.Add(1*time.Minute), map[string]any{"saga_id": "saga-src-aaaaaa", "title": "Source"}),
+		mk("saga.registered", "r2", "t2", base.Add(2*time.Minute), map[string]any{"saga_id": "saga-tgt-bbbbbb", "title": "Target"}),
+		mk("saga.merged", "r2", "", base.Add(3*time.Minute), map[string]any{"saga_id": "saga-tgt-bbbbbb", "source_saga_ids": []any{"saga-src-aaaaaa"}}),
+		// Operator deletes the merged SOURCE row: t1 must stay in the target.
+		mk("saga.deleted", "r9", "", base.Add(10*time.Minute), map[string]any{"saga_id": "saga-src-aaaaaa"}),
+	}
+	got := api.aggregateProjectBudget("p", events)
+	if len(got.Sagas) != 1 || got.Sagas[0].SagaID != "saga-tgt-bbbbbb" {
+		t.Fatalf("the source row must vanish, target must remain: %+v", got.Sagas)
+	}
+	if len(got.Sagas[0].TaskIDs) != 1 || got.Sagas[0].TaskIDs[0] != "t1" {
+		t.Fatalf("t1 must stay bound to the target after the source delete: %v", got.Sagas[0].TaskIDs)
+	}
+	if got.Sagas[0].TotalTokens != 110 {
+		t.Fatalf("target must keep the merged task's spend: %+v", got.Sagas[0])
+	}
+}

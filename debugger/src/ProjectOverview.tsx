@@ -21,6 +21,8 @@ type Dialog =
   | { kind: 'merge'; sources: string[] }
   | { kind: 'attach'; task: TaskRollup }
   | { kind: 'create'; task: TaskRollup }
+  | { kind: 'bulk-attach'; tasks: string[] }
+  | { kind: 'bulk-create'; tasks: string[] }
 
 /**
  * Project overview (docs/sagas.md): the analysis page for everything tied to
@@ -37,6 +39,8 @@ export default function ProjectOverview({ project }: Props) {
   const [busy, setBusy] = useState(false)
   const [openSaga, setOpenSaga] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // Bulk selection of unbound tasks (attach-to-saga / create-saga-from-selection).
+  const [unboundBulk, setUnboundBulk] = useState<Set<string>>(new Set())
   const [dialog, setDialog] = useState<Dialog | null>(null)
   // Form state shared by the dialogs; reset on open.
   const [formTitle, setFormTitle] = useState('')
@@ -89,6 +93,8 @@ export default function ProjectOverview({ project }: Props) {
   const unboundShown = 8
   const tasksOf = useCallback((sagaID: string) => (budget?.tasks ?? []).filter((task) => task.saga_id === sagaID), [budget])
   const liveSagas = useMemo(() => (budget?.sagas ?? []).filter((saga) => !saga.merged_into), [budget])
+  const mergedRows = useMemo(() => (budget?.sagas ?? []).filter((saga) => saga.merged_into), [budget])
+  const [showMerged, setShowMerged] = useState(false)
   const sagaTitle = useCallback((sagaID: string) => {
     const saga = (budget?.sagas ?? []).find((s) => s.saga_id === sagaID)
     return saga ? (saga.title || saga.saga_id) : sagaID
@@ -159,19 +165,32 @@ export default function ProjectOverview({ project }: Props) {
           {/* Explicit sagas: one row per registered effort, expandable to its tasks. */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
             <Heading style={{ fontSize: '0.95rem' }}>{t('project.sagas') ?? 'Sagas'}</Heading>
-            {liveSagas.length >= 2 && (
-              <Button
-                size="sm"
-                kind="ghost"
-                disabled={selected.size < 1}
-                title={selected.size < 2 ? (t('project.saga_merge_select') ?? 'Select two or more sagas') : undefined}
-                onClick={() => openDialog({ kind: 'merge', sources: [...selected] })}
-              >
-                {t('project.saga_merge') ?? 'Merge'}{selected.size > 0 ? ` (${selected.size})` : ''}
-              </Button>
-            )}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {mergedRows.length > 0 && (
+                <Button
+                  size="sm"
+                  kind="ghost"
+                  aria-pressed={showMerged}
+                  onClick={() => setShowMerged((value) => !value)}
+                  title={t('project.saga_merged_hint') ?? 'Redirect rows: their tasks and spend already live in the target saga'}
+                >
+                  {showMerged ? t('project.saga_merged_hide') ?? 'Hide merged' : `${t('project.saga_merged_show') ?? 'Show merged'} (${mergedRows.length})`}
+                </Button>
+              )}
+              {liveSagas.length >= 2 && (
+                <Button
+                  size="sm"
+                  kind="ghost"
+                  disabled={selected.size < 1}
+                  title={selected.size < 2 ? (t('project.saga_merge_select') ?? 'Select two or more sagas') : undefined}
+                  onClick={() => openDialog({ kind: 'merge', sources: [...selected] })}
+                >
+                  {t('project.saga_merge') ?? 'Merge'}{selected.size > 0 ? ` (${selected.size})` : ''}
+                </Button>
+              )}
+            </div>
           </div>
-          {budget.sagas.length === 0 ? (
+          {liveSagas.length === 0 && mergedRows.length === 0 ? (
             <Tile style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('project.no_sagas') ?? 'No sagas registered yet'}</Tile>
           ) : (
             <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '1rem' }}>
@@ -189,7 +208,7 @@ export default function ProjectOverview({ project }: Props) {
                 <span style={{ color: 'var(--tm-text-3)' }} title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
                 <span style={{ color: 'var(--tm-text-3)' }}>👤 {t('runs.approvals_col') ?? 'Approvals'}</span>
               </div>
-              {budget.sagas.map((saga) => {
+              {(showMerged ? budget.sagas : liveSagas).map((saga) => {
                 const merged = !!saga.merged_into
                 return (
                   <div key={saga.saga_id} style={{ borderTop: '1px solid var(--tm-border)', opacity: merged ? 0.55 : 1 }}>
@@ -216,7 +235,14 @@ export default function ProjectOverview({ project }: Props) {
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: merged ? 'line-through' : 'none' }}>
                           {saga.title || saga.saga_id}
                         </span>
-                        {merged && <Tag size="sm" type="cool-gray" title={saga.merged_into}>{t('project.saga_merged_into') ?? 'merged into'} → {sagaTitle(saga.merged_into!)}</Tag>}
+                        {merged && <Tag type="cool-gray" size="sm" title={saga.merged_into}>{t('project.saga_merged_into') ?? 'merged into'} → {sagaTitle(saga.merged_into!)}</Tag>}
+                        {merged && (
+                          <button
+                            onClick={() => void deleteSaga(saga)}
+                            title={t('project.saga_delete') ?? 'Delete saga'}
+                            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
+                          >✕</button>
+                        )}
                         {!merged && saga.running > 0 && <Tag type="cool-gray" size="sm">{pluralT(t, locale, 'runs.task_running_n', saga.running)}</Tag>}
                         {!merged && (
                           <>
@@ -282,15 +308,59 @@ export default function ProjectOverview({ project }: Props) {
           {/* Tasks outside any saga: same accounting, no explicit effort behind them.
               Newest first, capped: a long-lived project accretes hundreds of
               unbound tasks — the block should show the LIVE tail, not the landfill. */}
-          <Heading style={{ fontSize: '0.95rem', marginBottom: '0.4rem' }}>
-            {t('project.unbound') ?? 'Tasks without a saga'} ({unbound.length})
-          </Heading>
+          {/* Tasks outside any saga: same accounting, no explicit effort behind them.
+              Newest first, capped: a long-lived project accretes hundreds of
+              unbound tasks — the block should show the LIVE tail, not the landfill.
+              Bulk-first management: checkboxes + one toolbar (attach to a chosen
+              saga / create a saga from the selection) instead of two buttons
+              duplicated on every row. */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
+            <Heading style={{ fontSize: '0.95rem', marginBottom: 0 }}>
+              {t('project.unbound') ?? 'Tasks without a saga'} ({unbound.length})
+            </Heading>
+            {unbound.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                {unboundBulk.size > 0 && (
+                  <>
+                    <Button size="sm" kind="ghost" disabled={liveSagas.length === 0} title={liveSagas.length === 0 ? (t('project.saga_none') ?? 'No sagas in the project yet — create one') : undefined} onClick={() => openDialog({ kind: 'bulk-attach', tasks: [...unboundBulk] })}>
+                      {t('project.saga_attach_n') ?? 'Attach to saga'} ({unboundBulk.size})
+                    </Button>
+                    <Button size="sm" kind="ghost" onClick={() => openDialog({ kind: 'bulk-create', tasks: [...unboundBulk] })}>
+                      {t('project.saga_create_n') ?? 'Create saga'} ({unboundBulk.size})
+                    </Button>
+                  </>
+                )}
+                <Button size="sm" kind="ghost" disabled={unboundBulk.size === unbound.length} onClick={() => setUnboundBulk(new Set(unbound.map((task) => task.task_id)))}>
+                  {t('project.unbound_select_all') ?? 'Select all'}
+                </Button>
+                {unboundBulk.size > 0 && (
+                  <Button size="sm" kind="ghost" onClick={() => setUnboundBulk(new Set())}>
+                    {t('supervisor.bulk_clear') ?? 'Clear'}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
           {unbound.length === 0 ? (
             <Tile style={{ color: 'var(--tm-text-3)' }}>{t('project.no_unbound') ?? 'Every task belongs to a saga'}</Tile>
           ) : (
             <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
               {(showAllUnbound ? unbound : unbound.slice(0, unboundShown)).map((task) => (
-                <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(10rem, 2.2fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr) minmax(11rem, auto)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.6rem minmax(10rem, 2.2fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={unboundBulk.has(task.task_id)}
+                      onChange={(e) => {
+                        const next = new Set(unboundBulk)
+                        if (e.target.checked) next.add(task.task_id)
+                        else next.delete(task.task_id)
+                        setUnboundBulk(next)
+                      }}
+                      style={{ accentColor: 'var(--tm-amber)' }}
+                      title={t('project.saga_attach') ?? 'Attach to saga'}
+                    />
+                  </span>
                   <span title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {task.title || task.task_id}
                     {task.running > 0 && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{pluralT(t, locale, 'runs.task_running_n', task.running)}</Tag>}
@@ -302,22 +372,14 @@ export default function ProjectOverview({ project }: Props) {
                   <span>{task.total_tokens.toLocaleString()}</span>
                   <span>{task.total_cost_usd > 0 ? `$${task.total_cost_usd.toFixed(2)}` : '—'}</span>
                   <span title={t('dashboard.human_col_hint') ?? undefined} style={{ whiteSpace: 'nowrap' }}>
-                    {(task.human?.hab_seconds ?? 0) > 0 || (task.human?.hwt_seconds ?? 0) > 0
-                      ? <>🧠 {formatDuration((task.human?.hab_seconds ?? 0) * 1000)} · ⏳ {formatDuration((task.human?.hwt_seconds ?? 0) * 1000)}</>
-                      : '—'}
+                        {(task.human?.hab_seconds ?? 0) > 0 || (task.human?.hwt_seconds ?? 0) > 0
+                          ? <>🧠 {formatDuration((task.human?.hab_seconds ?? 0) * 1000)} · ⏳ {formatDuration((task.human?.hwt_seconds ?? 0) * 1000)}</>
+                          : '—'}
                   </span>
                   <span title={approvalHint(t, task.approvals, task.human)} style={{ whiteSpace: 'nowrap' }}>
-                    {task.approvals.requested > 0
-                      ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms)}</>
-                      : '—'}
-                  </span>
-                  <span style={{ display: 'flex', gap: '0.25rem', whiteSpace: 'nowrap' }}>
-                    <Button size="sm" kind="ghost" onClick={() => openDialog({ kind: 'attach', task }, { sagaID: liveSagas[0]?.saga_id })} disabled={liveSagas.length === 0} title={liveSagas.length === 0 ? (t('project.saga_none') ?? 'No sagas in the project yet — create one') : undefined}>
-                      {t('project.saga_attach') ?? 'Attach to saga'}
-                    </Button>
-                    <Button size="sm" kind="ghost" onClick={() => openDialog({ kind: 'create', task }, { title: task.title })}>
-                      {t('project.saga_create') ?? 'Create saga'}
-                    </Button>
+                        {task.approvals.requested > 0
+                          ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms)}</>
+                          : '—'}
                   </span>
                 </div>
               ))}
@@ -458,6 +520,86 @@ export default function ProjectOverview({ project }: Props) {
             <div className="form-actions" style={{ marginTop: 0 }}>
               <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button size="sm" disabled={actionBusy || !formTitle.trim()} onClick={() => void runAction(() => sagaCreate(project.trim(), { title: formTitle.trim(), goal: formGoal.trim() || undefined, task_id: dialog.task.task_id }))}>
+                {t('action.save') ?? 'Create'}
+              </Button>
+            </div>
+          </Stack>
+        </AppModal>
+      )}
+
+      {/* Bulk attach: N unbound tasks → one existing saga (docs/sagas.md §8). */}
+      {dialog?.kind === 'bulk-attach' && (
+        <AppModal onClose={() => setDialog(null)} panelStyle={{ width: '480px' }}>
+          <Heading style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>{t('project.saga_attach_title') ?? 'Attach task to saga'}</Heading>
+          <Stack gap={4}>
+            <div style={{ fontSize: '0.85rem', color: 'var(--tm-text-2)' }}>
+              {pluralT(t, locale, 'project.unbound_tasks_n', dialog.tasks.length)}
+            </div>
+            <Select
+              id="bulk-attach-target"
+              labelText={t('project.saga_merge_target') ?? 'Merge into'}
+              value={formSaga}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormSaga(e.target.value)}
+            >
+              <option value="">{t('project.saga_pick') ?? 'Выберите сагу…'}</option>
+              {liveSagas.map((s) => <SelectItem key={s.saga_id} value={s.saga_id} text={s.title || s.saga_id} />)}
+            </Select>
+            {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
+            <div className="form-actions" style={{ marginTop: 0 }}>
+              <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button
+                size="sm"
+                disabled={actionBusy || !formSaga}
+                onClick={() => void runAction(async () => {
+                  for (const taskID of dialog.tasks) {
+                    await taskSagaBind(project.trim(), taskID, formSaga)
+                  }
+                })}
+              >
+                {t('project.saga_attach') ?? 'Attach to saga'}
+              </Button>
+            </div>
+          </Stack>
+        </AppModal>
+      )}
+
+      {/* Bulk create: one new saga from N unbound tasks (docs/sagas.md §8).
+          The saga is created first, then every selected task binds to it — a
+          failed bind keeps the saga (retryable from the same dialog state). */}
+      {dialog?.kind === 'bulk-create' && (
+        <AppModal onClose={() => setDialog(null)} panelStyle={{ width: '480px' }}>
+          <Heading style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>{t('project.saga_create_title') ?? 'New saga'}</Heading>
+          <Stack gap={4}>
+            <div style={{ fontSize: '0.85rem', color: 'var(--tm-text-2)' }}>
+              {pluralT(t, locale, 'project.unbound_tasks_n', dialog.tasks.length)}
+            </div>
+            <TextInput
+              id="saga-bulk-create-title"
+              labelText={t('project.saga_title_label') ?? 'Title'}
+              value={formTitle}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormTitle(e.target.value)}
+              autoFocus
+            />
+            <TextArea
+              id="saga-bulk-create-goal"
+              labelText={t('project.saga_goal_label') ?? 'Goal (optional)'}
+              value={formGoal}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormGoal(e.target.value)}
+              rows={2}
+            />
+            {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
+            <div className="form-actions" style={{ marginTop: 0 }}>
+              <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button
+                size="sm"
+                disabled={actionBusy || !formTitle.trim()}
+                onClick={() => void runAction(async () => {
+                  const created = await sagaCreate(project.trim(), { title: formTitle.trim(), goal: formGoal.trim() || undefined })
+                  for (const taskID of dialog.tasks) {
+                    await taskSagaBind(project.trim(), taskID, created.saga_id)
+                  }
+                })}
+              >
                 {t('action.save') ?? 'Create'}
               </Button>
             </div>

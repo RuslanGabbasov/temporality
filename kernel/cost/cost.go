@@ -1247,12 +1247,15 @@ func sagaBindings(events []observation.Event) (map[string]string, map[string]*sa
 			}
 			delete(sagas, sagaID)
 			delete(renames, sagaID)
-			if _, ok := merges[sagaID]; ok {
-				delete(merges, sagaID)
-			}
-			for taskID, b := range latest {
-				if b.sagaID == sagaID {
-					latest[taskID] = binding{detached: true, at: ev.OccurredAt}
+			// A merged source keeps its redirect: the tasks bound to it follow
+			// the merge to the surviving target, so deleting the redirect ROW
+			// must not retract their accounting from that target. Only a plain
+			// (unmerged) deleted saga unbinds its tasks.
+			if _, wasMerged := merges[sagaID]; !wasMerged {
+				for taskID, b := range latest {
+					if b.sagaID == sagaID {
+						latest[taskID] = binding{detached: true, at: ev.OccurredAt}
+					}
 				}
 			}
 		}
