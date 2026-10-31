@@ -77,6 +77,10 @@ type RunInput struct {
 	// Runs list with bare agent names (runtitle fallback ladder).
 	Title                  string        `json:"title,omitempty"`
 	Model                  string        `json:"model,omitempty"`
+	// ProviderID pins the agent's explicitly chosen provider: routing must go
+	// to THAT provider (verifying it serves the model), not to the first
+	// provider found declaring the same model name. Empty = search by model.
+	ProviderID             string        `json:"provider_id,omitempty"`
 	MaxTurns               int           `json:"max_turns,omitempty"`
 	Tools                  []llm.ToolDef `json:"tools,omitempty"`
 	ApprovalTools          []string      `json:"approval_tools,omitempty"`
@@ -233,6 +237,10 @@ type RunResult struct {
 
 type ModelRequest struct {
 	Model    string        `json:"model"`
+	// ProviderID pins the agent's explicitly chosen provider (docs/agents.md
+	// §routing): when set, routing must serve from THAT provider — no silent
+	// first-match search across other providers declaring the same model.
+	ProviderID string      `json:"provider_id,omitempty"`
 	Messages []llm.Message `json:"messages"`
 	Tools    []llm.ToolDef `json:"tools"`
 	// RunID + Turn enable live token streaming through the ephemeral TokenBus;
@@ -1295,7 +1303,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// rewrite or drop earlier entries. Provider prompt caching (keyed by
 		// PromptCacheKey) relies on the prefix being byte-stable across turns;
 		// mutating history would silently invalidate the cache and reset billing.
-		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: runTools, RunID: input.RunID, Turn: turn, Project: input.Project, PromptCacheKey: input.TaskID}
+		modelReq := ModelRequest{Model: input.Model, ProviderID: input.ProviderID, Messages: turnMessages, Tools: runTools, RunID: input.RunID, Turn: turn, Project: input.Project, PromptCacheKey: input.TaskID}
 		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": turn, "model": input.Model}); err != nil {
 			return result, err
 		}
@@ -2390,7 +2398,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// same frozen-host recovery (fresh Temporal attempt after the machine
 	// wakes up instead of a dead run).
 	modelCtx := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, HeartbeatTimeout: 90 * time.Second, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
-	if err := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finale); err != nil {
+	if err := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, ProviderID: input.ProviderID, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
 		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "model": input.Model, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 			return result, eventErr
@@ -2419,7 +2427,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 		var finaleRetry llm.Completion
-		if retryErr := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finaleRetry); retryErr != nil {
+		if retryErr := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, ProviderID: input.ProviderID, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finaleRetry); retryErr != nil {
 			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "empty_answer_retry": true, "error_type": "activity_failed", "error": boundedFailureDetail(retryErr)}); eventErr != nil {
 				return result, eventErr
 			}

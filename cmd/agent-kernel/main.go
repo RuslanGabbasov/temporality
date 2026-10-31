@@ -4380,6 +4380,10 @@ func main() {
 			return
 		}
 		project := strings.TrimSpace(r.URL.Query().Get("project"))
+		// provider pins the agent's explicit choice (docs/agents.md §routing):
+		// only that provider is a candidate — a duplicate-model match on any
+		// other provider must not hijack a pinned call.
+		pinnedProvider := strings.TrimSpace(r.URL.Query().Get("provider"))
 		// Scope routing to the project's org units; an empty (non-nil) slice
 		// keeps ListProvidersVisible filtering to global providers only — a
 		// project without org links must not borrow providers from random
@@ -4409,6 +4413,12 @@ func main() {
 						disabledHit = true
 					}
 				}
+				continue
+			}
+			// A pinned call only considers its own provider: the first-match
+			// search across unrelated providers is exactly the hijack the pin
+			// exists to prevent.
+			if pinnedProvider != "" && p.ID != pinnedProvider {
 				continue
 			}
 			for _, m := range p.Models {
@@ -8870,6 +8880,13 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	}
 	if a.Model != "" {
 		input.Model = a.Model
+	}
+	// The agent's explicit provider binding is the routing contract: the run
+	// must call THAT provider (docs/agents.md §routing) — not the first
+	// provider found declaring the same model name (a duplicate-model
+	// conflict elsewhere must not hijack the run).
+	if a.Provider != "" {
+		input.ProviderID = a.Provider
 	}
 	// The agent card's turn budget is part of the enforced run configuration:
 	// honoring it here carries the configured budget through every path that

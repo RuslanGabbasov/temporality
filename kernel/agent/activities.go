@@ -686,7 +686,22 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		// only when no provider claims the model do we fall back to the env
 		// config with the model name swapped in — the pre-routing behavior.
 		routed := false
-		if a.WorkspaceURL != "" {
+		if a.WorkspaceURL != "" && request.ProviderID != "" {
+			// The agent pins its provider (docs/agents.md §routing): serve from
+			// THAT provider or fail loudly. A duplicate-model conflict on some
+			// other provider must not silently hijack the run, and an env
+			// fallback must not mask the pin either — the operator explicitly
+			// chose this provider/model pair.
+			pinnedConfig, pName, perr := a.modelConfigForPinned(ctx, request.Project, request.ProviderID, request.Model)
+			if perr != nil {
+				return llm.Completion{}, perr
+			}
+			client = llm.New(pinnedConfig)
+			routed = true
+			routeProvider = request.ProviderID
+			routeProviderName = pName
+		}
+		if !routed && a.WorkspaceURL != "" {
 			config, providerID, providerName, ok, err := a.modelConfigFor(ctx, request.Project, request.Model)
 			if err != nil {
 				// Transient lookup failure (workspace unreachable, 5xx): do not
@@ -1631,6 +1646,58 @@ func (a *Activities) handleDeleteTrigger(ctx context.Context, request ToolReques
 // nil error is the clean negative "no provider serves this model" answer
 // (cached); a non-nil error is a transport/server failure the caller may
 // retry or fall back from.
+// modelConfigForPinned resolves the config STRICTLY from the named provider:
+// the agent card pins provider + model, and routing must honor the pin.
+// The provider may not silently redirect to a different one that happens to
+// declare the same model name. Refusals (unknown provider, disabled, model
+// not declared, credential unresolvable) surface as loud, actionable errors.
+func (a *Activities) modelConfigForPinned(ctx context.Context, project, providerID, model string) (llm.Config, string, error) {
+	endpoint := fmt.Sprintf("%s/v1/workspace/model-config?model=%s&project=%s&provider=%s", a.WorkspaceURL, url.QueryEscape(model), url.QueryEscape(project), url.QueryEscape(providerID))
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return llm.Config{}, "", fmt.Errorf("provider %q routing failed: %w", providerID, err)
+	}
+	if status == http.StatusNotFound {
+		return llm.Config{}, "", fmt.Errorf("the agent's provider %q does not serve model %q (or is not visible to this project) — fix the provider's model list or pick another model", providerID, model)
+	}
+	if status == http.StatusConflict {
+		return llm.Config{}, "", fmt.Errorf("the agent's provider %q is disabled — enable it in Providers", providerID)
+	}
+	if status >= 400 {
+		return llm.Config{}, "", fmt.Errorf("provider %q routing failed (HTTP %d): %s", providerID, status, truncate(body, 300))
+	}
+	var answer struct {
+		ProviderID   string `json:"provider_id"`
+		ProviderName string `json:"provider_name"`
+		BaseURL      string `json:"base_url"`
+		APIKey       string `json:"api_key"`
+		Model        string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(body), &answer); err != nil {
+		return llm.Config{}, "", fmt.Errorf("provider %q routing decode: %w", providerID, err)
+	}
+	if answer.BaseURL == "" || answer.Model == "" {
+		return llm.Config{}, "", fmt.Errorf("provider %q routing response incomplete for model %q", providerID, model)
+	}
+	config := llm.Config{BaseURL: answer.BaseURL, APIKey: answer.APIKey, Model: answer.Model}
+	if envConfig, err := llm.ConfigFromEnv(); err == nil {
+		config.Temperature = envConfig.Temperature
+		config.Timeout = envConfig.Timeout
+		config.StreamIdleTimeout = envConfig.StreamIdleTimeout
+		config.StreamNoProgressTimeout = envConfig.StreamNoProgressTimeout
+		config.StreamFirstTokenTimeout = envConfig.StreamFirstTokenTimeout
+		config.MaxOutputTokens = envConfig.MaxOutputTokens
+		config.Reasoning = envConfig.Reasoning
+	} else {
+		config.Timeout = 180 * time.Second
+		config.StreamIdleTimeout = 90 * time.Second
+		config.StreamNoProgressTimeout = 4 * time.Minute
+		config.StreamFirstTokenTimeout = 2 * time.Minute
+		config.MaxOutputTokens = 16384
+	}
+	return config, answer.ProviderName, nil
+}
+
 func (a *Activities) modelConfigFor(ctx context.Context, project, model string) (config llm.Config, providerID, providerName string, ok bool, err error) {
 	key := project + "|" + model
 	a.providerCacheMu.Lock()
