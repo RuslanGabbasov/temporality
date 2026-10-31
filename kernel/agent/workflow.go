@@ -2021,13 +2021,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					} else if bgFlag, _ := call.Args["background"].(bool); call.Name == "run_command" && bgFlag {
 						// Approved background command (docs/agent-async-operations.md):
 						// the same detach as the normal path, after the grant.
+						// The detached budget applies: background default/ceiling — the
+						// sandbox clamps the actual command anyway, the clamp here
+						// only keeps the activity window and the reported timeout
+						// honest when the model passes a huge timeout_sec.
 						timeoutSec := 0
 						if requested, ok := numericArg(call.Args["timeout_sec"]); ok && requested > 0 {
 							timeoutSec = int(requested)
 						}
-						if timeoutSec <= 0 {
-							timeoutSec = sandbox.DefaultTimeout
-						}
+						timeoutSec = sandbox.CommandTimeoutBackground(timeoutSec)
 						bgCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 							StartToCloseTimeout:    time.Duration(timeoutSec)*time.Second + 10*time.Minute,
 							ScheduleToCloseTimeout: time.Duration(timeoutSec)*time.Second + 15*time.Minute,
@@ -2187,9 +2189,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					if requested, ok := numericArg(call.Args["timeout_sec"]); ok && requested > 0 {
 						timeoutSec = int(requested)
 					}
-					if timeoutSec <= 0 {
-						timeoutSec = sandbox.DefaultTimeout
-					}
+					// Detached budget (docs/agent-async-operations.md): background
+					// default 900s / ceiling 1h — the sandbox clamps the real command,
+					// this clamp keeps the activity window and the tool's reported
+					// timeout honest when the model passes a huge timeout_sec.
+					timeoutSec = sandbox.CommandTimeoutBackground(timeoutSec)
 					bgCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 						StartToCloseTimeout: time.Duration(timeoutSec)*time.Second + 10*time.Minute,
 						ScheduleToCloseTimeout: time.Duration(timeoutSec)*time.Second + 15*time.Minute,

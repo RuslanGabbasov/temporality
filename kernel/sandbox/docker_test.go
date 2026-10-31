@@ -464,6 +464,43 @@ func TestMaxTimeoutStaysBelowActivityBudget(t *testing.T) {
 	}
 }
 
+// Detached commands live on their own budget (docs/agent-async-operations.md):
+// default 900s / ceiling 3600s vs the foreground 300s/900s — detaching exists
+// for the long installs and suites the 15-minute foreground ceiling kills.
+func TestBackgroundCommandTimeoutBudget(t *testing.T) {
+	if got := commandTimeout(0, true); got != DefaultBackgroundTimeout {
+		t.Fatalf("a background command without timeout_sec must default to %d, got %d", DefaultBackgroundTimeout, got)
+	}
+	if got := commandTimeout(0, false); got != defaultTimeout {
+		t.Fatalf("the foreground default must stay %d, got %d", defaultTimeout, got)
+	}
+	if got := commandTimeout(7200, true); got != maxBackgroundTimeout() {
+		t.Fatalf("a huge background timeout_sec must clamp to the background ceiling (%d), got %d", maxBackgroundTimeout(), got)
+	}
+	if got := commandTimeout(7200, false); got != maxTimeout() {
+		t.Fatalf("a huge foreground timeout_sec must clamp to the foreground ceiling (%d), got %d", maxTimeout(), got)
+	}
+	// The ceiling must never drop below the foreground one (env validation).
+	if maxBackgroundTimeout() < maxTimeout() {
+		t.Fatalf("background ceiling %d below the foreground ceiling %d", maxBackgroundTimeout(), maxTimeout())
+	}
+	// The exported views agree with the internal resolution.
+	if CommandTimeoutBackground(0) != commandTimeout(0, true) || CommandTimeout(0) != commandTimeout(0, false) {
+		t.Fatal("exported timeout views must match the internal resolution")
+	}
+}
+
+// The background ceiling rides a WIDER activity window than the foreground
+// one: the workflow gives a detached command timeout + 10 minutes of
+// StartToClose, so even a full-hour command fits without a StartToClose kill.
+func TestBackgroundCeilingFitsBackgroundActivityWindow(t *testing.T) {
+	const bgWindowHeadRoom = 10 * 60 // keep in sync with the workflow's bgCtx StartToClose (+10m)
+	window := maxBackgroundTimeout() + bgWindowHeadRoom
+	if maxBackgroundTimeout() > window-60 {
+		t.Fatalf("background ceiling %ds leaves less than a minute of head room in its %ds activity window", maxBackgroundTimeout(), window)
+	}
+}
+
 func TestDockerSocketMountAddsSocketGroupAccess(t *testing.T) {
 	// DooD passthrough: the socket volume plus a supplementary group carrying
 	// the socket's own gid — the sandbox user gains exactly the access the

@@ -285,7 +285,7 @@ func (a *Activities) ToolDefs() []llm.ToolDef {
 var runCommandTool = llm.ToolDef{
 	Name:        "run_command",
 	Description: "Run a command in an isolated sandbox container. The working directory is /workspace — persistent storage shared by all agents and runs of this project: files saved there survive across sessions and it may already contain files from earlier work, so treat them as shared and do not remove what you did not create. /scratch is per-run scratch: files written there survive between the commands of this run and are wiped after the run — use it for multi-step file preparation and temp data; /tmp is ephemeral and disappears between calls. /cache persists toolchain caches across runs. Network access depends on agent configuration. Provide argv as an array.",
-	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer", "description": "Wall-clock cap for this command, up to 900 (15 min, the hard ceiling). Default 300. Test suites, builds and installs: pass 600+ explicitly instead of relying on the default"}, "background": map[string]any{"type": "boolean", "description": "Run detached: the tool returns immediately with an operation id and the real result (exit code + output tail) arrives later as an automatic follow-up message. Use for long installs/builds/suites — keep working after starting one; you will be notified; kill_operation cancels it"}}, "required": []string{"command"}},
+	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer", "description": "Wall-clock cap for this command. Default 300. Foreground ceiling: 900 (15 min). With background: true the budget stretches: default 900, ceiling 3600 (1 hour) — long installs, builds and test suites belong in the background, pass timeout_sec up to 3600 instead of splitting or retrying them"}, "background": map[string]any{"type": "boolean", "description": "Run detached: the tool returns immediately with an operation id and the real result (exit code + output tail) arrives later as an automatic follow-up message. Use for long installs/builds/suites — keep working after starting one; you will be notified; kill_operation cancels it. A detached command may run up to 3600 s (1 hour) — pass timeout_sec explicitly when you expect more than 15 minutes"}}, "required": []string{"command"}},
 }
 
 // killOperationTool cancels a background operation (docs/agent-async-operations.md).
@@ -1330,6 +1330,9 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			// The wrapper records the pid and exit code in the run scratch:
 			// kill needs the pid, a worker restart needs the code (attach path
 			// above). Output still streams through the docker exec pipe.
+			// Background marks the detached budget: 900s default / 1h ceiling
+			// instead of the foreground 300s / 15 minutes.
+			sbReq.Background = true
 			sbReq.Command = sandbox.OpShellWrapper(request.OperationID, command)
 			sbReq.Env = append(sbReq.Env, sandbox.OpMarkerEnv(request.OperationID))
 		}
@@ -1497,10 +1500,11 @@ const backgroundAttachNotice = "(attached after a worker restart — the live ou
 // empty, and Done delivers the exit code when the probe resolves.
 func (a *Activities) attachBackgroundOperation(ctx context.Context, request ToolRequest, timeout int) (ToolResult, error) {
 	scratchKey := sandbox.SanitizeScratchToken(request.Project) + "/" + sandbox.SanitizeScratchToken(request.RunID)
+	// The attach wait uses the detached budget: the caller's timeout_sec
+	// clamped to the background ceiling (1h), the background default (900s)
+	// when the model passed none — never the foreground 15-minute budgets.
+	timeout = sandbox.CommandTimeoutBackground(timeout)
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	if timeout <= 0 {
-		deadline = time.Now().Add(time.Duration(sandbox.CommandTimeout(0)) * time.Second)
-	}
 	if a.Console != nil && request.OperationID != "" {
 		a.Console.Hook(request.Project, request.OperationID)
 		a.Console.Write(request.Project, request.OperationID, "stdout", []byte(backgroundAttachNotice))

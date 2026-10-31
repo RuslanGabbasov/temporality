@@ -58,20 +58,59 @@ var maxTimeoutSeconds = func() int {
 }()
 
 // CommandTimeout is the exported view of commandTimeout for callers outside
-// the package (the attach-on-retry path in the kernel activity).
-func CommandTimeout(requested int) int { return commandTimeout(requested) }
+// the package — the FOREGROUND budget (the attach path uses the background
+// variant for detached commands).
+func CommandTimeout(requested int) int { return commandTimeout(requested, false) }
+
+// CommandTimeoutBackground is the exported background-command budget: the
+// detached ceiling applies (the workflow's activity window and the attach
+// deadline both derive from it).
+func CommandTimeoutBackground(requested int) int { return commandTimeout(requested, true) }
 
 // DefaultTimeout is the exported default sandbox command cap (seconds) — the
-// background-operation timeout when the model passes none.
+// foreground-operation timeout when the model passes none.
 const DefaultTimeout = defaultTimeout
 
+// DefaultBackgroundTimeout is the detached-command default (docs/agent-
+// async-operations.md): a background install/build the model started without
+// an explicit timeout_sec gets the old foreground ceiling — 15 minutes is a
+// sane detached default, while the background CEILING stretches to an hour.
+const DefaultBackgroundTimeout = 900
+
 func maxTimeout() int { return maxTimeoutSeconds }
+
+// maxBackgroundTimeoutSeconds caps one DETACHED (background: true) sandbox
+// command. One hour: detaching exists exactly for the long installs, builds
+// and suites that outgrow the 15-minute foreground ceiling — keeping that
+// ceiling for the detached path would make background: true pointless for
+// the very workloads it was added for. Overridable per deployment
+// (KERNEL_BG_TOOL_MAX_SECONDS); the floor is the foreground ceiling, and the
+// run_tool activity window (timeout + 10 min head room) must stay above it.
+var maxBackgroundTimeoutSeconds = func() int {
+	const fallback = 3600
+	raw := strings.TrimSpace(os.Getenv("KERNEL_BG_TOOL_MAX_SECONDS"))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < maxTimeoutSeconds {
+		return fallback
+	}
+	return value
+}()
+
+func maxBackgroundTimeout() int { return maxBackgroundTimeoutSeconds }
 
 type Request struct {
 	Workspace      string
 	Command        []string
 	TimeoutSeconds int
-	ReadOnly       bool
+	// Background marks a detached command (docs/agent-async-operations.md):
+	// it gets the background default (900s) and the background ceiling (1h)
+	// instead of the foreground 300s/15-minute budgets, and the wrapper runs
+	// with the pid/code bookkeeping in the run scratch.
+	Background bool
+	ReadOnly   bool
 	Network        string // "" (use Docker default), "none", "bridge"
 	// Env carries injected environment variables (KEY=VALUE) for this command —
 	// e.g. agent-granted secrets resolved at the execution boundary. They pass
@@ -256,14 +295,23 @@ func newDocker(image, root string, createRoot bool) (*Docker, error) {
 }
 
 // commandTimeout resolves the effective per-command budget: the request's
-// value, the 300s default when the model passed none, capped at the ceiling.
-func commandTimeout(requested int) int {
+// value, the default when the model passed none (300s foreground / 900s
+// detached), capped at the ceiling — the foreground 15-minute cap for regular
+// commands, the one-hour background cap for detached ones.
+func commandTimeout(requested int, background bool) int {
 	timeout := requested
 	if timeout <= 0 {
 		timeout = defaultTimeout
+		if background {
+			timeout = DefaultBackgroundTimeout
+		}
 	}
-	if timeout > maxTimeout() {
-		timeout = maxTimeout()
+	ceiling := maxTimeout()
+	if background {
+		ceiling = maxBackgroundTimeout()
+	}
+	if timeout > ceiling {
+		timeout = ceiling
 	}
 	return timeout
 }
@@ -435,7 +483,7 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 		}
 	}
 	network := d.effectiveNetwork(request)
-	timeout := commandTimeout(request.TimeoutSeconds)
+	timeout := commandTimeout(request.TimeoutSeconds, request.Background)
 	if request.ScratchKey == "" {
 		// No stable run identity to reuse a container against (direct runner
 		// callers, unit-test harnesses): the one-shot lifecycle stays.
