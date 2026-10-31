@@ -150,11 +150,19 @@ export default function ProjectOverview({ project }: Props) {
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'baseline', color: 'var(--tm-text-2)', fontSize: '0.85rem', marginBottom: '1rem', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem' }}>
             <span><strong style={{ color: 'var(--tm-text)' }}>{budget.task_count}</strong> {pluralT(t, locale, 'project.tasks_n', budget.task_count)}</span>
             <span><strong style={{ color: 'var(--tm-text)' }}>{budget.saga_count}</strong> {pluralT(t, locale, 'project.sagas_n', budget.saga_count)}</span>
-            <span><strong style={{ color: 'var(--tm-text)' }}>{budget.run_count}</strong> {pluralT(t, locale, 'runs.task_runs_n', budget.run_count)}</span>
+            {/* runs.task_runs_n templates carry {{count}} (they render standalone
+                in rollup rows) — the strip already prints the number, so reuse
+                would duplicate it. Plural word keys instead. */}
+            <span><strong style={{ color: 'var(--tm-text)' }}>{budget.run_count}</strong> {pluralT(t, locale, 'project.runs_word', budget.run_count)}</span>
             <span>⏱ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration(budget.elapsed_ms)}</strong> {t('runs.task_elapsed') ?? 'elapsed'}</span>
             <span>⚒ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration(budget.active_ms)}</strong> {t('runs.task_active') ?? 'active'}</span>
             <span><strong style={{ color: 'var(--tm-text)' }}>{budget.total_tokens.toLocaleString()}</strong> {t('runs.tokens') ?? 'tokens'}</span>
             {budget.total_cost_usd > 0 && <span><strong style={{ color: 'var(--tm-text)' }}>${budget.total_cost_usd.toFixed(2)}</strong></span>}
+            {(budget.human?.hab_seconds ?? 0) > 0 || (budget.human?.hwt_seconds ?? 0) > 0 ? (
+              <span title={t('dashboard.human_col_hint') ?? undefined}>
+                🧠 <strong style={{ color: 'var(--tm-text)' }}>{formatDuration((budget.human?.hab_seconds ?? 0) * 1000)}</strong> · ⏳ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration((budget.human?.hwt_seconds ?? 0) * 1000)}</strong>
+              </span>
+            ) : null}
             {budget.approvals.requested > 0 && (
               <span title={approvalHint(t, budget.approvals)}>👤 {budget.approvals.granted + budget.approvals.rejected}/{budget.approvals.requested}{(budget.approvals.pending ?? 0) > 0 ? ` · ⏳${budget.approvals.pending}` : ''}</span>
             )}

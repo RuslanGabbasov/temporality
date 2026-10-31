@@ -358,6 +358,7 @@ export interface ProjectBudget {
   total_tokens: number
   total_cost_usd: number
   approvals: ApprovalStats
+  human?: HumanStats
   sagas: SagaRollup[]
   tasks: TaskRollup[]
 }
