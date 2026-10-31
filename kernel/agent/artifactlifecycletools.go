@@ -46,6 +46,10 @@ func (a *Activities) handleArtifactCreate(ctx context.Context, request ToolReque
 		"kind":        "work",
 		"saga_id":     artifactStringArg(request, "saga_id"),
 		"origin_run":  request.RunID,
+		// The run's human starter rides along: the workspace stamps them into
+		// contributors, so the author/org-unit filters can find agent-authored
+		// work (origin_user stays empty on the agent path).
+		"actor": request.ActorID,
 	}
 	if kind := artifactStringArg(request, "kind"); kind != "" {
 		payload["kind"] = kind
@@ -97,6 +101,7 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 		"title":       artifactStringArg(request, "title"),
 		"description": artifactStringArg(request, "description"),
 		"kind":        artifactStringArg(request, "kind"),
+		"actor":       request.ActorID,
 	}
 	// PUT writes saga_id as sent: only pass it when the caller named it, so an
 	// update that never mentions the saga keeps the stored link (and passing
@@ -142,11 +147,12 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 // artifact_submit. The approval decision remains human.
 func (a *Activities) handleArtifactNewVersion(ctx context.Context, request ToolRequest, artifactID string) (ToolResult, error) {
 	payload := map[string]any{
-		"title":       artifactStringArg(request, "title"),
+		"title":     artifactStringArg(request, "title"),
 		"description": artifactStringArg(request, "description"),
-		"kind":        artifactStringArg(request, "kind"),
-		"content":     artifactStringArg(request, "content"),
-		"mime_type":   artifactStringArg(request, "mime_type"),
+		"kind":      artifactStringArg(request, "kind"),
+		"content":   artifactStringArg(request, "content"),
+		"mime_type": artifactStringArg(request, "mime_type"),
+		"actor":     request.ActorID,
 	}
 	body, status, err := a.workspaceDo(ctx, http.MethodPost,
 		fmt.Sprintf("%s/v1/workspace/artifacts/%s/revision", a.WorkspaceURL, url.PathEscape(artifactID)), payload)
@@ -195,6 +201,7 @@ func (a *Activities) handleArtifactSubmit(ctx context.Context, request ToolReque
 		"reviewers": reviewers,
 		"mode":      artifactStringArg(request, "mode"),
 		"note":      artifactStringArg(request, "note"),
+		"actor":     request.ActorID,
 	}
 	body, status, err := a.workspaceDo(ctx, http.MethodPost,
 		fmt.Sprintf("%s/v1/workspace/artifacts/%s/submit", a.WorkspaceURL, url.PathEscape(artifactID)), payload)

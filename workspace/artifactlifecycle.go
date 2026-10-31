@@ -432,7 +432,10 @@ func MatchArtifactReviewers(principal string, users []User, units []OrgUnit, ent
 	for _, entry := range entries {
 		switch {
 		case entry == "project_owner":
-			if self.Role == "admin" {
+			// EqualFold: role values arrive from directory sync and may carry
+			// casing ("Admin"), the role: branch below already matches loosely —
+			// the project_owner degradation must not be stricter than role:admin.
+			if strings.EqualFold(self.Role, "admin") {
 				matched = append(matched, entry)
 			}
 		case strings.HasPrefix(entry, "role:"):
@@ -531,13 +534,17 @@ func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, u
 		allUnits = nil // degrade: membership matching still works
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+artifactReviewColumns+`, a.id, a.title, a.kind, a.status, a.version,
+		// The review columns carry the r. prefix: id and status exist in BOTH
+		// joined tables, and a bare reference is ambiguous (SQLSTATE 42702) —
+		// the inbox has 500'd from birth with «column reference "id" is
+		// ambiguous», which the user saw as an always-empty review queue.
+		`SELECT r.id, r.artifact_id, r.artifact_version, r.reviewers, r.mode, r.status, r.note, r.requested_by, r.requested_at, r.decisions, r.resolved_by, r.resolved_at, r.reminded_at, r.escalated_at, a.id, a.title, a.kind, a.status, a.version,
 			COALESCE(a.origin_type, ''), COALESCE(a.origin_user, ''), a.origin_run, a.tags, a.created_at, a.updated_at, COALESCE(a.org_unit_id, '')
-		 FROM workspace_artifact_review r
-		 JOIN workspace_artifact a ON a.id = r.artifact_id
-		 WHERE r.status = 'open'
-		 ORDER BY r.requested_at DESC
-		 LIMIT 500`)
+			 FROM workspace_artifact_review r
+			 JOIN workspace_artifact a ON a.id = r.artifact_id
+			 WHERE r.status = 'open'
+			 ORDER BY r.requested_at DESC
+			 LIMIT 500`)
 	if err != nil {
 		return nil, err
 	}
@@ -578,11 +585,13 @@ func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, u
 // title and org unit, oldest first — the sweep's working set.
 func (s *Store) ListOpenArtifactReviews(ctx context.Context) ([]StaleArtifactReview, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+artifactReviewColumns+`, a.title, COALESCE(a.org_unit_id, '')
-		 FROM workspace_artifact_review r
-		 JOIN workspace_artifact a ON a.id = r.artifact_id
-		 WHERE r.status = 'open'
-		 ORDER BY r.requested_at`)
+		// r. prefix — same ambiguity as the inbox (id/status exist in both
+		// joined tables, SQLSTATE 42702).
+		`SELECT r.id, r.artifact_id, r.artifact_version, r.reviewers, r.mode, r.status, r.note, r.requested_by, r.requested_at, r.decisions, r.resolved_by, r.resolved_at, r.reminded_at, r.escalated_at, a.title, COALESCE(a.org_unit_id, '')
+			 FROM workspace_artifact_review r
+			 JOIN workspace_artifact a ON a.id = r.artifact_id
+			 WHERE r.status = 'open'
+			 ORDER BY r.requested_at`)
 	if err != nil {
 		return nil, err
 	}

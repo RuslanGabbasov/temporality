@@ -180,13 +180,17 @@ export default function Artifacts() {
   useEffect(() => { void load() }, [load])
 
   // Approvals inbox: loaded on tab open and refreshed with the list — the
-  // decisions made elsewhere (chat/agent) must unstick the rows here.
+  // decisions made elsewhere (chat/agent) must unstick the rows here. A
+  // failure lands in the shared error banner: an empty inbox must be
+  // distinguishable from a broken one (the ambiguous-column SQL bug read as
+  // «you have nothing to review» for weeks).
   const loadInbox = useCallback(async () => {
     setInboxBusy(true)
     try {
       const page = await workspaceApi.artifactInbox()
       setInbox(page.entries ?? [])
-    } catch { setInbox([]) }
+      setError('')
+    } catch (f) { setInbox([]); setError(message(f)) }
     finally { setInboxBusy(false) }
   }, [])
   useEffect(() => { if (inboxMode) void loadInbox() }, [inboxMode, loadInbox])

@@ -81,6 +81,10 @@ type artifactSubmitRequest struct {
 	Reviewers []string `json:"reviewers"`
 	Mode      string   `json:"mode"` // all (default) | any
 	Note      string   `json:"note"`
+	// Actor is the run's human starter (agent tool submits): it replaces the
+	// kernel service identity as the round's requester, so the contributor
+	// stamp and the «requested by me» inbox rule name the human.
+	Actor string `json:"actor"`
 }
 
 type artifactReviewDecisionRequest struct {
@@ -154,6 +158,12 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			return
 		}
 		requestedBy := requestUserID(r)
+		// An agent submit attributes the round to the run's human starter: the
+		// kernel service id in requested_by is bookkeeping noise everywhere it
+		// renders (inbox «requested by me», contributor stamp).
+		if isKernelInternal(r) && req.Actor != "" {
+			requestedBy = req.Actor
+		}
 		// Agent submits carry the run in origin_run — that is the quota owner.
 		// Humans are not rate-limited by the agent budget.
 		if isKernelInternal(r) && artifact.OriginRun != "" {

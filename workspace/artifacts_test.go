@@ -128,6 +128,12 @@ func TestMatchArtifactReviewers(t *testing.T) {
 	require.Contains(t, matched, "ivan petrov")
 	require.Contains(t, matched, "role:WRITER")
 	require.Contains(t, matched, "org:CORE")
+
+	// project_owner matches the admin role case-insensitively too: directory
+	// syncs and hand-typed rows carry "Admin"/"ADMIN" — the degradation must
+	// not be stricter than the role: branch.
+	capsUsers := []User{{ID: "boss", Name: "Boss", Role: "Admin", Active: true}}
+	require.Contains(t, MatchArtifactReviewers("boss", capsUsers, nil, []string{"project_owner"}), "project_owner")
 }
 
 // CheckArtifactRefsApproved names the offending manifest references: drafts

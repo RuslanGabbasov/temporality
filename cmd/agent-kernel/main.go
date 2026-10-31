@@ -6301,6 +6301,12 @@ func main() {
 				writeError(w, 422, errors.New("origin_run is required for agent-created artifacts"))
 				return
 			}
+			// Attribution: the run's human starter goes into contributors — the
+			// author/author-unit filters match contributors, and agent artifacts
+			// carry no origin_user of their own.
+			if req.Actor != "" && !slices.Contains(artifact.Contributors, req.Actor) {
+				artifact.Contributors = append(artifact.Contributors, req.Actor)
+			}
 		} else {
 			artifact.Status = workspace.ArtifactApproved
 			artifact.OriginType = "human"
@@ -6449,6 +6455,11 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		// Agent tool edits stamp the run's human starter into contributors —
+		// the author filters match contributors, not just origin_user.
+		if isKernelInternal(r) {
+			ws.AddArtifactContributor(r.Context(), artifact.ID, req.Actor)
+		}
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactUpdated, "artifact", artifact.ID, map[string]any{"title": artifact.Title})
 		updated, _ := ws.GetArtifactRange(r.Context(), artifact.ID, 0, 0)
 		updated.Content = ""
@@ -6521,6 +6532,11 @@ func main() {
 			}
 			writeError(w, 500, err)
 			return
+		}
+		// Revision opened by an agent tool: attribute the run's human starter
+		// (same contributors stamp as the create path).
+		if isKernelInternal(r) {
+			ws.AddArtifactContributor(r.Context(), artifact.ID, req.Actor)
 		}
 		actor := requestUserID(r)
 		_ = ws.RecordAccessAudit(r.Context(), actor, workspace.AuditArtifactUpdated, "artifact", artifact.ID, map[string]any{
@@ -9356,6 +9372,11 @@ type artifactRequest struct {
 	SagaID      *string `json:"saga_id"` // saga link; nil = keep on edit, "" = detach
 	OriginRun   string  `json:"origin_run"`
 	OrgUnitID   string  `json:"org_unit_id"` // only set on create; updates keep the stored binding
+	// Actor is the run's human starter, sent by the agent artifact tools.
+	// The kernel service identity has no author of its own: without it
+	// agent-authored artifacts carry no attribution, and the author /
+	// author-unit filters cannot find them.
+	Actor string `json:"actor"`
 	// Tags are catalog labels: normalized (trimmed, deduped, lowercased by
 	// normalize()) and filtered with AND semantics in the list endpoint.
 	Tags []string `json:"tags,omitempty"`
