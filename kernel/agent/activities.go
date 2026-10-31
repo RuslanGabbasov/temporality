@@ -23,6 +23,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
+	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/sdk/activity"
@@ -2575,6 +2576,25 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 	if strings.TrimSpace(description) == "" {
 		return ToolResult{Content: "error: description is required"}, nil
 	}
+	// Optional artifact references: registry documents the skill points at
+	// (artifact_search / skill_inspect ids). Validated against the registry
+	// below — a hallucinated id never reaches the manifest.
+	var artifactRefs []skills.ArtifactRef
+	if raw, ok := request.Arguments["artifact_refs"].([]any); ok {
+		for _, item := range raw {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := entry["id"].(string)
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			note, _ := entry["note"].(string)
+			artifactRefs = append(artifactRefs, skills.ArtifactRef{ID: id, Note: strings.TrimSpace(note)})
+		}
+	}
 	model, modelErr := a.skillBuilderModel(ctx, request.Project)
 	if modelErr != nil {
 		return ToolResult{Content: "error: " + modelErr.Error()}, nil
@@ -2620,6 +2640,38 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 	}
 	manifestMap["id"] = id
 	delete(manifestMap, "version") // server picks the version, never the model
+	// Artifact references: validate every id against the registry and merge
+	// into the manifest. Hallucinated or non-approved ids are dropped with a
+	// report — the model learns which refs survived without a failed save.
+	if len(artifactRefs) > 0 {
+		var kept []skills.ArtifactRef
+		var dropped []string
+		for _, ref := range artifactRefs {
+			body, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/artifacts/%s", a.WorkspaceURL, url.PathEscape(ref.ID)), nil)
+			var approved bool
+			if err == nil && status == 200 {
+				var row struct {
+					Artifact struct{ Status string `json:"status"` } `json:"artifact"`
+				}
+				if json.Unmarshal([]byte(body), &row) == nil && row.Artifact.Status == "approved" {
+					approved = true
+				}
+			}
+			if approved {
+				kept = append(kept, ref)
+			} else {
+				dropped = append(dropped, ref.ID)
+			}
+		}
+		artifactRefs = kept
+		if len(artifactRefs) > 0 {
+			manifestMap["artifacts"] = artifactRefs
+		}
+		if len(dropped) > 0 {
+			// Surfaced in the tool answer below, not silently swallowed.
+			changeSummary += " (artifact refs dropped as missing/unapproved: " + strings.Join(dropped, ", ") + ")"
+		}
+	}
 	normalizedManifest, err := json.Marshal(manifestMap)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
@@ -2694,6 +2746,13 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 		"action":    action,
 		"next_step": "a human must review and apply the draft in the Skills UI before the skill becomes available to agents",
 		"questions": draft.Questions,
+	}
+	if len(artifactRefs) > 0 {
+		ids := make([]string, 0, len(artifactRefs))
+		for _, ref := range artifactRefs {
+			ids = append(ids, ref.ID)
+		}
+		response["artifact_refs"] = ids
 	}
 	encoded, _ := json.Marshal(response)
 	return ToolResult{Content: string(encoded)}, nil

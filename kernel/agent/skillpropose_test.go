@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -55,7 +56,7 @@ func skillModelStub(t *testing.T, draftJSON string) *httptest.Server {
 // the recorder exposes the captured create/propose payloads and any PUT call.
 func skillWorkspaceStub(t *testing.T, exists func() bool) (*httptest.Server, *skillProposeRecorder) {
 	t.Helper()
-	recorder := &skillProposeRecorder{}
+	recorder := &skillProposeRecorder{approvedArtifacts: map[string]bool{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorder.mu.Lock()
 		defer recorder.mu.Unlock()
@@ -66,6 +67,14 @@ func skillWorkspaceStub(t *testing.T, exists func() bool) (*httptest.Server, *sk
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "code-review", "version": "1.2.0"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/workspace/artifacts/"):
+			// The artifact-ref validation GET: approved only for ids in this set.
+			id := strings.TrimPrefix(r.URL.Path, "/v1/workspace/artifacts/")
+			if recorder.approvedArtifacts[id] {
+				_ = json.NewEncoder(w).Encode(map[string]any{"artifact": map[string]any{"id": id, "status": "approved"}})
+			} else {
+			http.NotFound(w, r)
+			}
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/workspace/skills":
 			_ = json.NewDecoder(r.Body).Decode(&recorder.created)
 			w.WriteHeader(201)
@@ -90,6 +99,8 @@ type skillProposeRecorder struct {
 	created  map[string]any
 	proposed map[string]any
 	putPaths []string
+	// approvedArtifacts backs the propose-time artifact-ref validation GET.
+	approvedArtifacts map[string]bool
 }
 
 func (r *skillProposeRecorder) snapshots() (created, proposed map[string]any, putPaths []string) {
@@ -216,5 +227,65 @@ func TestSkillProposeExistingSkillProposesDraftVersion(t *testing.T) {
 	}
 	if len(outbox.byType("skill.proposed")) != 1 {
 		t.Fatalf("skill.proposed events = %d, want 1", len(outbox.byType("skill.proposed")))
+	}
+}
+
+// The artifact_refs argument: approved ids land in the manifest, hallucinated
+// or unapproved ids are dropped with a note in change_summary — the model
+// learns what survived without a failed save.
+func TestSkillProposeValidatesArtifactRefs(t *testing.T) {
+	model := skillModelStub(t, proposeDraftJSON)
+	server, recorder := skillWorkspaceStub(t, func() bool { return false })
+	recorder.mu.Lock()
+	recorder.approvedArtifacts["ref-ui-ux-guidelines"] = true
+	recorder.mu.Unlock()
+	outbox := &captureOutbox{}
+	activities := &Activities{
+		HTTP: server.Client(), Model: llm.New(llm.Config{BaseURL: model.URL, Model: "m"}),
+		WorkspaceURL: server.URL, WorkspaceToken: "internal",
+		Events: outbox, SourceID: "kernel",
+	}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		RunID: "run-77", OperationID: "run-77/turn/03/call-2", Project: "demo",
+		Name: "skill_propose",
+		Arguments: map[string]any{
+			"description": "Review pull requests",
+			"artifact_refs": []any{
+				map[string]any{"id": "ref-ui-ux-guidelines", "note": "style rules"},
+				map[string]any{"id": "hallucinated-doc"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("skill_propose: %v", err)
+	}
+	created, _, _ := recorder.snapshots()
+	if created == nil {
+		t.Fatal("create payload missing")
+	}
+	manifestYAML, _ := created["manifest_yaml"].(string)
+	var manifest struct {
+		Artifacts []struct {
+			ID   string `json:"id"`
+			Note string `json:"note"`
+		} `json:"artifacts"`
+	}
+	if err := json.Unmarshal([]byte(manifestYAML), &manifest); err != nil {
+		t.Fatalf("manifest_yaml must parse: %v", err)
+	}
+	if len(manifest.Artifacts) != 1 || manifest.Artifacts[0].ID != "ref-ui-ux-guidelines" {
+		t.Fatalf("only the approved ref must survive, got %+v", manifest.Artifacts)
+	}
+	if manifest.Artifacts[0].Note != "style rules" {
+		t.Fatalf("the note must ride the ref, got %+v", manifest.Artifacts[0])
+	}
+	parsed := decodeToolJSON(t, result.Content)
+	refs, _ := parsed["artifact_refs"].([]any)
+	if len(refs) != 1 || refs[0] != "ref-ui-ux-guidelines" {
+		t.Fatalf("the answer must report the surviving refs, got %v", parsed["artifact_refs"])
+	}
+	if summary, _ := created["change_summary"].(string); !strings.Contains(summary, "hallucinated-doc") {
+		t.Fatalf("change_summary must name the dropped ref, got %q", summary)
 	}
 }

@@ -56,7 +56,11 @@ type draftCompletion struct {
 	} `json:"runtime"`
 	Preconditions  []string `json:"preconditions"`
 	Postconditions []string `json:"postconditions"`
-	Evidence       struct {
+	Artifacts      []struct {
+		ID   string `json:"id"`
+		Note string `json:"note"`
+	} `json:"artifacts"`
+	Evidence struct {
 		Required []string `json:"required"`
 	} `json:"evidence"`
 	Evaluation struct {
@@ -92,6 +96,7 @@ Schema:
   "preconditions":  ["states that must hold before execution"],
   "postconditions": ["states that must hold after execution"],
   "evidence": { "required": ["artifacts or observations that must be recorded as proof"] },
+  "artifacts": [ { "id": "registry artifact id", "note": "when this reference document matters" } ],
   "evaluation": { "suite": "skill-id/default" },
   "questions": [ { "field": "manifest path the question refers to", "question": "a concrete clarifying question for the user" } ]
 }
@@ -99,6 +104,7 @@ Schema:
 Rules:
 - Omit sections you cannot infer rather than inventing values: use empty objects/arrays.
 - "tools" and "runtime.mcp" must only reference names from the available tools and servers list.
+- "artifacts": include ONLY ids the user description explicitly names (or that obviously exist in the registry per the description); a wrong id breaks the skill save. When the description references a document by name, use its registry id if recognizable, otherwise omit artifacts.
 - Every tool you list must plausibly be needed by the procedure.
 - Ask at most 3 short questions, and only when the answer changes the contract.
 - Write the markdown instructions in the same language as the user description.`
@@ -224,6 +230,25 @@ func parseDraftCompletion(content string) (SkillDraft, error) {
 	}
 	if len(parsed.Preconditions) > 0 {
 		manifest["preconditions"] = parsed.Preconditions
+	}
+	// Reference artifacts: ids ride the manifest unvalidated at draft time —
+	// the saving endpoint (skill propose / UI apply) enforces the approved-only
+	// invariant (workspace.ArtifactRefsApproved).
+	if len(parsed.Artifacts) > 0 {
+		refs := make([]map[string]any, 0, len(parsed.Artifacts))
+		for _, ref := range parsed.Artifacts {
+			if strings.TrimSpace(ref.ID) == "" {
+				continue
+			}
+			entry := map[string]any{"id": strings.TrimSpace(ref.ID)}
+			if strings.TrimSpace(ref.Note) != "" {
+				entry["note"] = strings.TrimSpace(ref.Note)
+			}
+			refs = append(refs, entry)
+		}
+		if len(refs) > 0 {
+			manifest["artifacts"] = refs
+		}
 	}
 	if len(parsed.Postconditions) > 0 {
 		manifest["postconditions"] = parsed.Postconditions
