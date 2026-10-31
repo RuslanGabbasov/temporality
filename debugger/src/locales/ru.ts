@@ -939,6 +939,8 @@ export const ru: Record<string, string> = {
     'agents.temperature': 'Температура',
     'agents.max_tokens': 'Макс. токенов',
     'agents.max_turns': 'Макс. ходов',
+    'agents.turn_restarts': 'Продолжать при упоре в лимит ходов',
+    'agents.turn_restarts_hint': 'Если ран завершился только из-за лимита ходов, он автоматически продолжится новым раном с полным бюджетом ходов (в трейсе — run.restarted). 0 = выключено.',
     'agents.sandbox_profile': 'Профиль песочницы',
     'agents.sandbox_default': 'По умолчанию (образ инсталляции)',
     'agents.approval_mode': 'Уровень контроля',

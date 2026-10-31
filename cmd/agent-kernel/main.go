@@ -2542,7 +2542,7 @@ func main() {
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 			Skills: req.Skills, MCPServers: req.MCPServers, Secrets: req.Secrets, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
-			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
+			MaxTurns: req.MaxTurns, TurnLimitRestarts: req.TurnLimitRestarts, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
 			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
 		}
 		if a.Definition != nil {
@@ -2596,7 +2596,7 @@ func main() {
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 			Skills: req.Skills, MCPServers: req.MCPServers, Secrets: req.Secrets, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
-			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
+			MaxTurns: req.MaxTurns, TurnLimitRestarts: req.TurnLimitRestarts, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
 			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
 		}
 		prev, prevErr := ws.GetAgent(r.Context(), a.ID)
@@ -8974,6 +8974,11 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	if a.MaxTurns != nil && *a.MaxTurns > 0 {
 		input.MaxTurns = *a.MaxTurns
 	}
+	// The auto-continuation switch is enforced config too: every run path
+	// (task runs, triggers, delegation) inherits the agent's restart budget.
+	if a.TurnLimitRestarts != nil && *a.TurnLimitRestarts > 0 {
+		input.TurnLimitRestarts = *a.TurnLimitRestarts
+	}
 	if a.SystemPrompt != "" {
 		input.SystemPrompt = a.SystemPrompt
 	}
@@ -9077,6 +9082,9 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 	}
 	if input.MaxTurns == 0 && a.MaxTurns != nil && *a.MaxTurns > 0 {
 		input.MaxTurns = *a.MaxTurns
+	}
+	if input.TurnLimitRestarts == 0 && a.TurnLimitRestarts != nil && *a.TurnLimitRestarts > 0 {
+		input.TurnLimitRestarts = *a.TurnLimitRestarts
 	}
 	// Card-granted network rides in as a default: the caller's bare false
 	// (zero value) means "unset", and — matching every other run path —

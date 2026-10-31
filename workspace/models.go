@@ -420,6 +420,10 @@ type Agent struct {
 	// Execution limits
 	MaxTurns     *int    `json:"max_turns,omitempty"`
 	ApprovalMode *string `json:"approval_mode,omitempty"` // auto, prompt, manual
+	// TurnLimitRestarts (docs/agent-async-operations.md): how many times a run
+	// of this agent auto-restarts with a fresh turn budget when it finishes by
+	// exhausting its turns (status turn_limit). nil/0 = off — the honest stop.
+	TurnLimitRestarts *int `json:"turn_limit_restarts,omitempty"`
 	// Egress allowlist (docs/agent-behavior-monitoring.md §7): network
 	// destinations (domains, globs, CIDRs, host:port) the agent may reach
 	// beyond the public internet. Private addresses are denied by default —
@@ -722,6 +726,7 @@ type CreateAgentRequest struct {
 	NetworkAccess  *bool    `json:"network_access,omitempty"`
 	ReadOnly       *bool    `json:"read_only,omitempty"`
 	MaxTurns       *int     `json:"max_turns,omitempty"`
+	TurnLimitRestarts *int  `json:"turn_limit_restarts,omitempty"`
 	ApprovalMode   *string  `json:"approval_mode,omitempty"`
 	// EgressAllowlist (docs/agent-behavior-monitoring.md §7): destinations the
 	// agent may reach beyond the public internet. Entries: domain, *.glob,

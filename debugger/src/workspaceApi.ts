@@ -149,6 +149,10 @@ export interface Agent {
   network_access?: boolean
   read_only?: boolean
   max_turns?: number
+  /** Auto-continuation switch (docs/agent-async-operations.md): how many
+   *  times a turn-limit-exhausted run restarts with a fresh turn budget.
+   *  0/absent = off. */
+  turn_limit_restarts?: number
   approval_mode: string
   /** Egress allowlist (docs/agent-behavior-monitoring.md §7): destinations
    *  beyond the public internet, enforced by the egress proxy. */

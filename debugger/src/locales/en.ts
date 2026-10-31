@@ -939,6 +939,8 @@ export const en: Record<string, string> = {
     'agents.temperature': 'Temperature',
     'agents.max_tokens': 'Max tokens',
     'agents.max_turns': 'Max turns',
+    'agents.turn_restarts': 'Continue past the turn limit',
+    'agents.turn_restarts_hint': 'When a run finishes only because it hit the turn limit, it automatically continues as a new run with a fresh full budget (run.restarted in the trace). 0 = off.',
     'agents.sandbox_profile': 'Sandbox profile',
     'agents.sandbox_default': 'Default (installation image)',
     'agents.approval_mode': 'Control level',

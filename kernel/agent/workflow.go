@@ -167,6 +167,16 @@ type RunInput struct {
 	// context — the team scratch directory, run-scoped knowledge hints — reaches
 	// the whole tree. Empty for runs outside a team.
 	TeamRootRunID string `json:"team_root_run_id,omitempty"`
+	// TurnLimitRestarts is the auto-continuation switch (agent config): when
+	// the run hits the turn limit with budget left, the workflow spawns a
+	// continuation child run (a fresh full turn budget, the conversation tail
+	// as the prior-tail block) this many times before finishing honestly as
+	// turn_limit. 0 = off.
+	TurnLimitRestarts int `json:"turn_limit_restarts,omitempty"`
+	// RestartAttempt counts the continuation chain: 0 = original run, 1..N =
+	// spawned continuations (the run id gains an -r2/-r3 suffix and the trace
+	// shows run.restarted between the attempts).
+	RestartAttempt int `json:"restart_attempt,omitempty"`
 }
 
 // subtreeTotals accumulates the spend of a run's child runs as their results
@@ -2347,6 +2357,31 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if err := dropUserNotes(ctx, activityCtx, state, input.MaxTurns); err != nil {
 		return result, err
 	}
+	// Auto-continuation (agent config turn_limit_restarts): a run that spent
+	// its whole turn budget on progress (not a policy stop, not a mid-work
+	// answer) restarts as a CHILD run with a fresh full turn budget and the
+	// conversation tail as its prior-tail block — 100 turns regularly fall
+	// short on large tasks, and a model that forgets to delegate should not
+	// strand the task. The chain is finite (the config count) and each child
+	// carries RestartAttempt+1, so the trace shows run.restarted between the
+	// attempts. Here forcedFinaleReason is still empty for the pure turn-budget
+	// case (policy stops carry their own reason string and never restart —
+	// the resource is gone, a child would inherit the same exhausted budget).
+	if forcedFinaleReason == "" && input.TurnLimitRestarts > 0 {
+		child, spawnErr := startTurnLimitContinuation(ctx, activityCtx, state, input, &messages, result)
+		if spawnErr != nil {
+			return result, spawnErr
+		}
+		if child != nil {
+			// The continuation's outcome IS this run's outcome: the human reads
+			// one chain whose terminal status is honest (completed, or turn_limit
+			// again when the whole chain ran dry). Totals sum honestly.
+			child.TotalTokens += result.TotalTokens
+			child.CostUSD += result.CostUSD
+			child.Turns += result.Turns
+			return *child, nil
+		}
+	}
 	// Deterministic finale: the model spent every turn on tool calls, or a policy
 	// limit (time/tokens/budget) stopped the loop. One more model call without
 	// tools must turn the accumulated conversation into a final answer, so a
@@ -2470,6 +2505,128 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	startKnowledgeExtraction(ctx, activityCtx, state, input)
 	return result, nil
+}
+
+// startTurnLimitContinuation spawns the continuation child run for the
+// turn_limit auto-restart (RunInput.TurnLimitRestarts) and WAITS for its
+// result — the parent's outcome becomes the child's, so the run list shows
+// one chain ending in an honest final status. nil (with a nil error) means
+// the continuation could not start: the caller finishes the run with its own
+// turn_limit result (already honest), the spawn failure is journaled.
+func startTurnLimitContinuation(ctx workflow.Context, activityCtx workflow.Context, state *eventState, input RunInput, messages *[]llm.Message, result RunResult) (*RunResult, error) {
+	attempt := input.RestartAttempt + 1
+	childRunID := fmt.Sprintf("%s-r%d", input.RunID, attempt)
+	child := input
+	child.RunID = childRunID
+	child.RestartAttempt = attempt
+	child.TurnLimitRestarts = input.TurnLimitRestarts - 1
+	child.Prompt = continuationPrompt(input, attempt)
+	child.PriorTail = conversationTail(*messages, continuationTailBudget)
+	// The continuation is NOT a delegation: same depth, same org position, and
+	// the child inherits everything else verbatim (model, provider pin,
+	// sandbox, secrets, skills, budgets) — the config switch belongs to the
+	// agent definition, so both attempts run the same configuration.
+	child.ParentRunID = input.RunID
+	child.ParentFrameID = state.frame
+	child.ParentEventID = state.previousEventID
+	if err := emit(activityCtx, state, "run.restarted", map[string]any{
+		"attempt": attempt, "child_run_id": childRunID,
+		"turns_spent": result.Turns, "remaining_restarts": child.TurnLimitRestarts,
+		"tail_chars": len(child.PriorTail),
+	}); err != nil {
+		return nil, err
+	}
+	// Same shape as the delegation launch: the child's durable workflow id,
+	// the parent waits on the child's result. Default ParentClosePolicy would
+	// terminate the child if the parent ever died before it — ABANDON keeps
+	// the continuation alive as an independent run instead.
+	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+		WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID),
+		ParentClosePolicy: enums.PARENT_CLOSE_POLICY_ABANDON,
+	})
+	childFuture := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", child)
+	var childExec workflow.Execution
+	if startErr := childFuture.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err := emit(activityCtx, state, "run.restart_failed", map[string]any{
+			"attempt": attempt, "child_run_id": childRunID, "error": boundedFailureDetail(startErr),
+		}); err != nil {
+			return nil, err
+		}
+		return nil, nil // finish honestly with the parent's own turn_limit
+	}
+	var childResult RunResult
+	if err := childFuture.Get(ctx, &childResult); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// A crashed continuation fails the chain honestly: the parent reports
+		// the child's failure instead of pretending the task completed.
+		result.Status = "failed"
+		result.Answer = "The continuation run " + childRunID + " failed: " + boundedFailureDetail(err)
+		return &result, nil
+	}
+	return &childResult, nil
+}
+
+// continuationTailBudget caps the prior-tail block handed to the continuation
+// run: enough of the conversation's last exchanges to resume precisely, not
+// enough to double the token bill of a fresh attempt.
+const continuationTailBudget = 4000
+
+// continuationPrompt builds the continuation run's opening prompt: the
+// original request plus an explicit resume instruction — the model must
+// continue the interrupted work, not restart it from scratch.
+func continuationPrompt(input RunInput, attempt int) string {
+	var b strings.Builder
+	b.WriteString("[Auto-continuation ")
+	b.WriteString(strconv.Itoa(attempt))
+	b.WriteString("] The previous attempt of this task spent its whole turn budget on progress and was interrupted mid-work. Your system context carries the tail of that attempt — read it, verify the current state of the work where needed, and CONTINUE from where it stopped. Do not redo completed work; finish the task and deliver the final answer.\n\nOriginal task:\n")
+	b.WriteString(truncate(input.Prompt, 4000))
+	return b.String()
+}
+
+// conversationTail renders the tail of the run's own conversation into a
+// compact system block for the continuation run: newest-first budget filling
+// (assistant answers and tool results, each clipped), oldest entries drop
+// first. Empty when there is nothing worth carrying over.
+func conversationTail(messages []llm.Message, budget int) string {
+	var parts []string
+	used := 0
+	for i := len(messages) - 1; i >= 0 && used < budget; i-- {
+		m := messages[i]
+		role := ""
+		switch m.Role {
+		case "assistant":
+			role = "assistant"
+		case "tool":
+			role = "tool result"
+		case "user":
+			role = "task"
+		default:
+			continue // system blocks stay private to the old attempt
+		}
+		text := strings.TrimSpace(m.Content)
+		if text == "" {
+			continue
+		}
+		clip := 600
+		if role == "tool result" {
+			clip = 400
+		}
+		if len(text) > clip {
+			text = text[:clip] + "…"
+		}
+		part := role + ": " + strings.ReplaceAll(text, "\n", " ")
+		if used+len(part) > budget {
+			part = part[:budget-used] + "…"
+		}
+		parts = append([]string{part}, parts...)
+		used += len(part)
+	}
+	return strings.Join(parts, "\n")
 }
 
 // runTitleAndHints resolves the two startup side quests of a root run — the

@@ -2029,6 +2029,19 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   <NumberInput id="agent-tokens" label={t('agents.max_tokens') ?? 'Max tokens'} value={form.max_tokens ?? 16384} onChange={(_, { value }) => setForm({ ...form, max_tokens: typeof value === 'number' ? value : 16384 })} min={64} max={1000000} />
                   <NumberInput id="agent-turns" label={t('agents.max_turns') ?? 'Max turns'} value={form.max_turns ?? 20} onChange={(_, { value }) => setForm({ ...form, max_turns: typeof value === 'number' ? value : 20 })} min={1} max={100} />
                 </div>
+                <div>
+                  <NumberInput
+                    id="agent-turn-restarts"
+                    label={t('agents.turn_restarts') ?? 'Продолжать при упоре в лимит ходов'}
+                    value={form.turn_limit_restarts ?? 0}
+                    onChange={(_, { value }) => setForm({ ...form, turn_limit_restarts: typeof value === 'number' ? Math.min(5, Math.max(0, value)) : 0 })}
+                    min={0}
+                    max={5}
+                  />
+                  <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
+                    {t('agents.turn_restarts_hint') ?? 'Если ран завершился только из-за лимита ходов, он автоматически продолжится новым раном с полным бюджетом ходов (в трейсе — run.restarted). 0 = выключено.'}
+                  </p>
+                </div>
                 <Select id="agent-sandbox" labelText={t('agents.sandbox_profile') ?? 'Sandbox profile'} value={form.sandbox_profile ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_profile: e.target.value })}>
                   <SelectItem value="" text={t('agents.sandbox_default') ?? 'Default (installation image)'} />
                   {sandboxProfiles.map((p) => (
@@ -2530,6 +2543,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
   const [bulkTemp, setBulkTemp] = useState(0.7)
   const [bulkMaxTokens, setBulkMaxTokens] = useState(16384)
   const [bulkMaxTurns, setBulkMaxTurns] = useState(20)
+  const [bulkTurnRestarts, setBulkTurnRestarts] = useState(0)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [failures, setFailures] = useState<string[]>([])
   const [done, setDone] = useState(0)
@@ -2559,6 +2573,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
           patch.temperature = bulkTemp
           patch.max_tokens = bulkMaxTokens
           patch.max_turns = bulkMaxTurns
+          patch.turn_limit_restarts = bulkTurnRestarts
         }
         await workspaceApi.updateAgent(id, patch)
         ok++
@@ -2702,6 +2717,18 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
               max={100}
               step={1}
               onChange={(e) => setBulkMaxTurns(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+              style={bulkInputStyle}
+            />
+          </div>
+          <div style={{ flex: '1 1 45%', minWidth: 0 }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.turn_restarts') ?? 'Продолжать при упоре в лимит ходов'}</label>
+            <input
+              type="number"
+              value={bulkTurnRestarts}
+              min={0}
+              max={5}
+              step={1}
+              onChange={(e) => setBulkTurnRestarts(Math.min(5, Math.max(0, Math.floor(Number(e.target.value) || 0))))}
               style={bulkInputStyle}
             />
           </div>

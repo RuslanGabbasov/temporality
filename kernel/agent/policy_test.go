@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -115,6 +116,99 @@ func TestAgentRunPolicyTokenBudgetStopsRunWithForcedFinale(t *testing.T) {
 	require.NotEmpty(t, modelRequests)
 	require.Empty(t, modelRequests[len(modelRequests)-1].Tools)
 	require.Equal(t, -1, indexEvent(events, "tool.started"), "no tool may run after the budget is exhausted")
+}
+
+// The auto-continuation switch (docs/agent-async-operations.md): a run that
+// exhausted its turns on progress restarts as a child with a fresh budget and
+// the conversation tail; the parent's outcome becomes the child's. Only the
+// pure turn_limit case restarts — policy stops (time/tokens/budget) finish
+// honestly without a child.
+func TestAgentRunTurnLimitRestartsIntoChildCompletion(t *testing.T) {
+	env, recorded, _ := registerPolicyEnv(t, func(_ int, request ModelRequest) (llm.Completion, error) {
+		if len(request.Tools) == 0 {
+			return llm.Completion{Content: "final answer of the continuation"}, nil
+		}
+		// The continuation child sees the resume instruction and finishes the
+		// task with a plain answer — the chain completes honestly.
+		if strings.Contains(request.Messages[len(request.Messages)-1].Content, "Auto-continuation") {
+			return llm.Completion{Content: "final answer of the continuation", Usage: llm.Usage{TotalTokens: 20}}, nil
+		}
+		// The original run burns its budget on tool calls — progress, not a stop.
+		return llm.Completion{
+			Usage:     llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_command", Args: map[string]any{"command": []any{"ls"}}}},
+		}, nil
+	})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "restart-root", Project: "repo-a", Prompt: "big task", MaxTurns: 2, TurnLimitRestarts: 2})
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	// The chain completed through the continuation: the outcome is honest and final.
+	require.Equal(t, "completed", result.Status)
+	require.Equal(t, "final answer of the continuation", result.Answer)
+	// The result carries the TERMINAL run of the chain (the continuation that
+	// actually answered — here the grandchild, since the child's final-turn
+	// system reminder made it spend one more turn on tools first).
+	require.Contains(t, result.RunID, "restart-root-r")
+	require.NotEqual(t, "restart-root", result.RunID)
+	events := *recorded
+	restarted, ok := eventByType(events, "run.restarted")
+	require.True(t, ok, "run.restarted must be recorded")
+	require.Equal(t, "restart-root-r1", restarted.Data["child_run_id"])
+	require.Equal(t, float64(1), restarted.Data["attempt"])
+	// No policy stop fired: only the pure turn_limit case restarts.
+	_, limitFired := eventByType(events, "policy.limit")
+	require.False(t, limitFired)
+}
+
+// The continuation chain is finite: when the config allows one restart and
+// the child ALSO exhausts its turns (no restarts left), the chain ends with
+// the honest turn_limit outcome.
+func TestAgentRunTurnLimitRestartsChainExhaustsHonestly(t *testing.T) {
+	env, recorded, _ := registerPolicyEnv(t, func(_ int, request ModelRequest) (llm.Completion, error) {
+		if len(request.Tools) == 0 {
+			return llm.Completion{Content: "whatever the finale can salvage"}, nil
+		}
+		return llm.Completion{
+			Usage:     llm.Usage{TotalTokens: 15},
+			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_command", Args: map[string]any{"command": []any{"ls"}}}},
+		}, nil
+	})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "chain-root", Project: "repo-a", Prompt: "huge task", MaxTurns: 1, TurnLimitRestarts: 1})
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "turn_limit", result.Status)
+	// Exactly ONE continuation was spawned (the config count bounds the chain).
+	spawns := 0
+	for _, e := range *recorded {
+		if e.Type == "run.restarted" {
+			spawns++
+		}
+	}
+	require.Equal(t, 1, spawns)
+}
+
+// Policy stops never restart: the resource is gone, a fresh run would
+// inherit the same exhausted budget.
+func TestAgentRunTokenLimitDoesNotRestart(t *testing.T) {
+	env, recorded, _ := registerPolicyEnv(t, func(_ int, request ModelRequest) (llm.Completion, error) {
+		if len(request.Tools) == 0 {
+			return llm.Completion{Content: "partial report"}, nil
+		}
+		return llm.Completion{
+			Usage:     llm.Usage{PromptTokens: 120, CompletionTokens: 30, TotalTokens: 150},
+			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_command", Args: map[string]any{"command": []any{"ls"}}}},
+		}, nil
+	})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "token-root", Project: "repo-a", Prompt: "work", MaxTurns: 6, TokenBudget: 100, TurnLimitRestarts: 3})
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "token_limit", result.Status)
+	for _, e := range *recorded {
+		require.NotEqual(t, "run.restarted", e.Type, "a token-limit stop must never spawn a continuation")
+	}
 }
 
 // A USD budget is scored from the run-config-resolved model prices.

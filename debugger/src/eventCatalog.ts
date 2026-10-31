@@ -49,6 +49,8 @@ export const EVENT_CATALOG: EventMeta[] = [
   E('runs', 'run.completed', 'Запуск завершён', 'Ран успешно завершился; в данных — ходы, токены, стоимость.', 'Run completed', 'The run finished successfully; data carries turns, tokens and cost.'),
   E('runs', 'run.failed', 'Запуск упал', 'Ран завершился ошибкой (модель, инструмент, политика или лимит).', 'Run failed', 'The run ended with an error (model, tool, policy or budget limit).'),
   E('runs', 'run.cancelled', 'Запуск отменён', 'Ран отменён пользователем или системой.', 'Run cancelled', 'The run was cancelled by the user or the system.'),
+  E('runs', 'run.restarted', 'Автопродолжение запущено', 'Ран упёрся в лимит ходов и продолжился новым раном с полным бюджетом (включалка агента «продолжать при исчерпании ходов»).', 'Auto-continuation started', 'The run exhausted its turn budget and continued as a new run with a fresh budget (the agent\'s turn-limit restart switch).'),
+  E('runs', 'run.restart_failed', 'Автопродолжение не стартовало', 'Запуск продолжающего рана не удался — исходный ран завершён со своим turn_limit.', 'Auto-continuation failed to start', 'Spawning the continuation run failed — the original run finished with its own turn_limit.'),
   E('runs', 'turn.started', 'Ход начат', 'Агент начал очередной ход внутри рана.', 'Turn started', 'The agent started another turn within the run.'),
   E('runs', 'turn.completed', 'Ход завершён', 'Ход агента завершился.', 'Turn completed', 'The agent turn finished.'),
   E('runs', 'agent.summary', 'Итоговый ответ агента', 'Финальный текстовый ответ рана для пользователя.', 'Agent summary', "The run's final text answer for the user."),
