@@ -1055,35 +1055,23 @@ export default function AgentRuns({ project }: { project: string }) {
                 </div>
               </div>
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
-              {/* Filter row: initiator (directory suggest pins the exact user;
-                  free text substring-matches) and status — ONE line, no wrap:
-                  the sidebar column is narrow and a wrapped select read as a
-                  second filter row (docs/agents.md §runs-list). Client-side
-                  over the loaded newest-100 window. */}
+              {/* Filter row: initiator (the universal person-or-unit suggest —
+                  ActorSuggestFilter: people from the loaded window's actors,
+                  units from their directory entries; a pinned user matches the
+                  exact actor id, a pinned unit matches the actor's org unit)
+                  and status — ONE line, no wrap (docs/agents.md §runs-list).
+                  Client-side over the loaded newest-100 window. */}
               <div style={{ display: 'flex', gap: '0.35rem', margin: '0.35rem 0 0.1rem', alignItems: 'center', position: 'relative', flexWrap: 'nowrap' }}>
                 <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-                  <input
-                    value={initiatorDraft}
-                    onChange={(e) => { setInitiatorDraft(e.target.value); setInitiatorPick(null) }}
+                  <ActorSuggestFilter
+                    pick={initiatorPick}
+                    onPick={(value) => { setInitiatorPick(value); if (!value) setInitiatorDraft('') }}
+                    onDraftChange={setInitiatorDraft}
+                    options={(needle) => initiatorSuggest(needle)}
                     placeholder={t('runs.filter_initiator') ?? 'Инициатор…'}
                     title={t('runs.filter_initiator_hint') ?? 'Имя или id инициатора (кто запустил ран)'}
-                    style={{ width: '100%', background: 'var(--tm-bg)', border: `1px solid ${initiatorPick ? 'var(--tm-teal)' : 'var(--tm-border)'}`, borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.55rem', outline: 'none', minWidth: 0 }}
+                    kindLabels={{ user: t('runs.filter_kind_user') ?? 'сотрудник', unit: t('runs.filter_kind_unit') ?? 'подразделение' }}
                   />
-                  {initiatorSuggest.length > 0 && (
-                    <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', zIndex: 3, overflow: 'hidden' }}>
-                      {initiatorSuggest.map((pick) => (
-                        <button
-                          key={`${pick.kind}:${pick.id}`}
-                          type="button"
-                          onClick={() => { setInitiatorDraft(pick.name); setInitiatorPick(pick) }}
-                          style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', padding: '0.35rem 0.6rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem', textAlign: 'left' }}
-                        >
-                          {pick.kind === 'user' ? '👤' : '🏢'} {pick.name}
-                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', marginLeft: 'auto' }}>{pick.kind === 'user' ? (t('runs.filter_kind_user') ?? 'сотрудник') : (t('runs.filter_kind_unit') ?? 'подразделение')}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 <select
                   value={statusFilter}
@@ -1106,11 +1094,6 @@ export default function AgentRuns({ project }: { project: string }) {
                   >✕</button>
                 )}
               </div>
-              {rows.length >= RUNS_LIMIT && (
-                <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0.4rem 0 0' }}>
-                  {t('runs.list_window_hint') ?? `Показаны последние ${RUNS_LIMIT} запусков. Более старые ищите в Таймлайне — оттуда есть переход к рану.`}
-                </p>
-              )}
             </div>
             <Stack gap={1}>
               {rows.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}

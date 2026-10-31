@@ -617,7 +617,6 @@ export const ru: Record<string, string> = {
     'runs.filter_status_waiting': 'ждёт человека',
     'runs.filter_unit': 'Орг-единица инициатора',
     'runs.filter_status_all': 'Все статусы',
-    'runs.list_window_hint': 'Показаны последние 100 запусков. Более старые ищите в Таймлайне — оттуда есть переход к рану.',
     'common.clear_filters': 'Сбросить фильтры',
     'runs.project_col': 'проект',
     'runs.answer': 'Ответ агента',

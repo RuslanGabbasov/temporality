@@ -617,7 +617,6 @@ export const en: Record<string, string> = {
     'runs.filter_status_waiting': 'waiting for human',
     'runs.filter_unit': 'Initiator org unit',
     'runs.filter_status_all': 'All statuses',
-    'runs.list_window_hint': 'Showing the latest 100 runs. Older ones — search the Timeline and jump to the run from there.',
     'common.clear_filters': 'Clear filters',
     'runs.project_col': 'project',
     'runs.answer': 'Agent Answer',
