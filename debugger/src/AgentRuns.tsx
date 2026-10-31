@@ -60,6 +60,10 @@ const RUN_VIEWS: RunView[] = ['overview', 'trace', 'trajectory', 'budget']
  *  render only when a row is expanded. */
 export const TRACE_WINDOW = 50
 export const TRACE_WINDOW_STEP = 50
+// The runs list loads the newest RUNS_LIMIT runs (docs/agents.md §runs-list):
+// deeper history belongs to the Timeline, which finds a concrete run and
+// links here. Filters work over this loaded window.
+export const RUNS_LIMIT = 100
 
 /** Newest `limit` rows of `rows`, newest first (the trace renders in this
  *  order; index 0 stays the live-model row). Exported so the NFR-5 window
@@ -291,6 +295,10 @@ export default function AgentRuns({ project }: { project: string }) {
   const [confirmStop, setConfirmStop] = useState('')
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
+  // Filter row (docs/agents.md §runs-list): initiator (name or id) and
+  // status — client-side over the loaded newest-100 window.
+  const [initiatorFilter, setInitiatorFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState<RunStatus | ''>('')
   // Runs with an open human question (human_request entity, §28) — marks the
   // asking run in the list so the inbox is navigable. Older kernels without
   // the endpoint simply show no markers.
@@ -370,6 +378,16 @@ export default function AgentRuns({ project }: { project: string }) {
     for (const list of opsByRun.values()) for (const op of list) map.set(op.operation_id, op)
     return map
   }, [opsByRun])
+  // Run initiators: rows carry the actor id from the event context; the
+  // directory turns it into a name. Failures leave ids — still traceable.
+  const [users, setUsers] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    workspaceApi.listUsers().then((data) => {
+      setUsers(new Map((data.users ?? []).map((u) => [u.id, u.name])))
+    }).catch(() => { /* ids stay */ })
+  }, [])
+  const userNameOf = useCallback((id: string | undefined) => (id ? (users.get(id) ?? id) : ''), [users])
+
   // A run row stays visible when it matches the filter or one of its delegated
   // children does, so searching for a child keeps its parent chain.
   const visibleRuns = useMemo(() => {
@@ -381,14 +399,20 @@ export default function AgentRuns({ project }: { project: string }) {
       childrenOf.set(row.parent, list)
     }
     const selfMatch = new Map<string, boolean>()
-    for (const row of rows) selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && (!opsOnly || opRunIds.ids.has(row.id)))
+    const initiator = initiatorFilter.trim().toLowerCase()
+    for (const row of rows) {
+      const actorName = userNameOf(row.actor)
+      const matchesInitiator = !initiator || actorName.toLowerCase().includes(initiator) || (row.actor ?? '').toLowerCase().includes(initiator)
+      const matchesStatus = !statusFilter || row.status === statusFilter
+      selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && matchesInitiator && matchesStatus && (!opsOnly || opRunIds.ids.has(row.id)))
+    }
     const subtreeMatch = (id: string): boolean => {
       const match = selfMatch.get(id) ?? false
       if (match) return true
       return (childrenOf.get(id) ?? []).some((child) => subtreeMatch(child))
     }
     return rows.filter((row) => subtreeMatch(row.id))
-  }, [rows, filter, opsOnly, opRunIds])
+  }, [rows, filter, initiatorFilter, statusFilter, opsOnly, opRunIds, userNameOf])
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
@@ -577,29 +601,18 @@ export default function AgentRuns({ project }: { project: string }) {
     if (!silent) setError('')
     try {
       void refreshOps()
-      // Fresh-first: the journal pages OLDEST-first by default, so a flat
-      // page silently dropped every run newer than the page window — on a
-      // grown stand a live run simply did not exist in the list. desc puts
-      // the newest runs on the first page, which is what a runs list means.
-      const startedPage = await observationApi.events(scope, undefined, undefined, undefined, { type: 'run.started', limit: 500, order: 'desc' })
-      // Terminal events give every list row (roots and delegated children
-      // alike) its status tag without opening each run. run.cancelled matters
-      // as much: without it a cancelled run shows "running" forever. The
-      // journal pages OLDEST-first, so a flat limit=500 page would silently
-      // drop the NEWEST terminal events once a type outgrows the page —
-      // freshly terminated runs would stay «running» forever. Each terminal
-      // type walks cursors to the newest end instead.
+      // Fresh-first, bounded (docs/agents.md §runs-list): the list shows the
+      // newest RUNS_LIMIT runs — a 5–7s load over thousands of journal events
+      // served nobody; deeper digging goes through the Timeline, which finds
+      // a concrete run and links here. desc puts the newest runs first.
+      const startedPage = await observationApi.events(scope, undefined, undefined, undefined, { type: 'run.started', limit: RUNS_LIMIT, order: 'desc' })
+      // Terminal events give every list row its status tag without opening
+      // each run. One desc page per type covers the newest slice — matching
+      // the bounded list above (the old oldest-first 4-page walk silently
+      // kept the OLDEST events once a type outgrew the window).
       const newestTypedEvents = async (type: string): Promise<ObservationEvent[]> => {
-        const collected: ObservationEvent[] = []
-        let cursor: string | undefined
-        for (let page = 0; page < 4; page++) {
-          const pageData = await observationApi.events(scope, cursor, undefined, undefined, { type, limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], next_cursor: '' }))
-          collected.push(...(pageData.events ?? []))
-          cursor = pageData.next_cursor
-          if (!cursor) break
-        }
-        // Keep the NEWEST slice if the type outgrew even the walk.
-        return collected.slice(-500)
+        const pageData = await observationApi.events(scope, undefined, undefined, undefined, { type, limit: RUNS_LIMIT * 3, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] }))
+        return pageData.events ?? []
       }
       const [completedEvents, failedEvents, cancelledEvents] = await Promise.all([
         newestTypedEvents('run.completed'),
@@ -826,15 +839,6 @@ export default function AgentRuns({ project }: { project: string }) {
   useEffect(() => {
     workspaceApi.listAllAgents().then((page) => setAgents(page.agents)).catch(() => { /* names fall back to ids */ })
   }, [])
-  // Run initiators: rows carry the actor id from the event context; the
-  // directory turns it into a name. Failures leave ids — still traceable.
-  const [users, setUsers] = useState<Map<string, string>>(new Map())
-  useEffect(() => {
-    workspaceApi.listUsers().then((data) => {
-      setUsers(new Map((data.users ?? []).map((u) => [u.id, u.name])))
-    }).catch(() => { /* ids stay */ })
-  }, [])
-  const userNameOf = useCallback((id: string | undefined) => (id ? (users.get(id) ?? id) : ''), [users])
   // The selected run's own project: detail endpoints (result, approval,
   // nudge, knowledge doubt actions) need it even when the header filter is the
   // global "All projects". Falls back to the filter for run ids the list
@@ -1001,6 +1005,41 @@ export default function AgentRuns({ project }: { project: string }) {
                 </div>
               </div>
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
+              {/* Filter row: initiator + status (docs/agents.md §runs-list).
+                  Works over the loaded newest-100 window client-side. */}
+              <div style={{ display: 'flex', gap: '0.4rem', margin: '0.35rem 0 0.1rem', alignItems: 'center' }}>
+                <input
+                  value={initiatorFilter}
+                  onChange={(e) => setInitiatorFilter(e.target.value)}
+                  placeholder={t('runs.filter_initiator') ?? 'Инициатор…'}
+                  title={t('runs.filter_initiator_hint') ?? 'Имя или id инициатора (кто запустил ран)'}
+                  style={{ flex: 1, minWidth: 0, background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.55rem', outline: 'none' }}
+                />
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as RunStatus | '')}
+                  title={t('runs.filter_status') ?? 'Статус'}
+                  style={{ background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.4rem', outline: 'none' }}
+                >
+                  <option value="">{t('runs.filter_status_all') ?? 'Все статусы'}</option>
+                  <option value="running">{t('status.running') ?? 'running'}</option>
+                  <option value="completed">{t('status.completed') ?? 'completed'}</option>
+                  <option value="failed">{t('status.failed') ?? 'failed'}</option>
+                  <option value="cancelled">{t('status.cancelled') ?? 'cancelled'}</option>
+                </select>
+                {(initiatorFilter || statusFilter) && (
+                  <button
+                    onClick={() => { setInitiatorFilter(''); setStatusFilter('') }}
+                  title={t('common.clear_filters') ?? 'Сбросить фильтры'}
+                    style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.25rem 0.4rem', lineHeight: 1 }}
+                  >✕</button>
+                )}
+              </div>
+              {rows.length >= RUNS_LIMIT && (
+                <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0.4rem 0 0' }}>
+                  {t('runs.list_window_hint') ?? `Показаны последние ${RUNS_LIMIT} запусков. Более старые ищите в Таймлайне — оттуда есть переход к рану.`}
+                </p>
+              )}
             </div>
             <Stack gap={1}>
               {rows.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}
