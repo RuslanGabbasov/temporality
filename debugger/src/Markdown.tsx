@@ -58,8 +58,34 @@ function pathFromFilesUrl(href: string): string | null {
   }
 }
 
+// A blockquote line immediately followed by a table line (no blank line
+// between) makes CommonMark fold the WHOLE table into the quote as lazy
+// continuation — agents emit this shape now and then and the table renders as
+// one giant quoted paragraph (artifact ref-ui-ux-guidelines-web-p1). The fix
+// is one blank line after the quote; pure, exported for tests.
+export function normalizeBlockquoteTable(content: string): string {
+  const lines = content.split('\n')
+  const out: string[] = []
+  let inCode = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\s*(```|~~~)/.test(line)) inCode = !inCode
+    out.push(line)
+    if (inCode) continue
+    const isQuote = /^\s*>\s?\S/.test(line)
+    const next = lines[i + 1]
+    const nextIsTable = next !== undefined && /^\s*\|/.test(next)
+    const nextNotBlank = next !== undefined && next.trim() !== ''
+    if (isQuote && nextNotBlank && nextIsTable) {
+      out.push('')
+    }
+  }
+  return out.join('\n')
+}
+
 export default function Markdown({ content, onFile }: { content: string; onFile?: (path: string) => void }) {
-  const segments = content.includes('```mermaid') ? splitMermaidSegments(content) : null
+  const normalized = normalizeBlockquoteTable(content)
+  const segments = normalized.includes('```mermaid') ? splitMermaidSegments(normalized) : null
   if (segments) {
     return <div className="markdown-body">
       {segments.map((segment, index) => segment.kind === 'mermaid'
@@ -67,7 +93,7 @@ export default function Markdown({ content, onFile }: { content: string; onFile?
         : <MarkdownSegment key={`t${index}`} content={segment.text} onFile={onFile} />)}
     </div>
   }
-  return <div className="markdown-body"><MarkdownSegment content={content} onFile={onFile} /></div>
+  return <div className="markdown-body"><MarkdownSegment content={normalized} onFile={onFile} /></div>
 }
 
 function MarkdownSegment({ content, onFile }: { content: string; onFile?: (path: string) => void }) {

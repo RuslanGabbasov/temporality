@@ -46,6 +46,31 @@ describe('Markdown', () => {
     expect(html).toContain('<strong>passed</strong>')
   })
 
+  // The ref-ui-ux-guidelines-web-p1 defect: a blockquote line glued to the
+  // table header folded the whole table into one giant quote. The renderer
+  // normalizes the missing blank line so the table renders as a table.
+  it('separates a blockquote glued to a table so the table renders', () => {
+    const content = '> Источник: ui-ux-pro-max-skill\n| Category | Do | Don\'t |\n|---|---|---|\n| Nav | smooth | none |'
+    const html = renderToStaticMarkup(<Markdown content={content} />)
+    expect(html).toContain('<table>')
+    expect(html).toContain('<th>Category</th>')
+    expect(html).toContain('<blockquote>')
+  })
+
+  it('does not touch tables already separated from blockquotes', () => {
+    const content = '> note\n\n| A | B |\n|---|---|\n| 1 | 2 |'
+    const html = renderToStaticMarkup(<Markdown content={content} />)
+    expect(html).toContain('<table>')
+    const quoteCount = (html.match(/<blockquote>/g) ?? []).length
+    expect(quoteCount).toBe(1)
+  })
+
+  it('does not split a quote whose next line continues the quote text', () => {
+    const content = '> line one\n> line two\n\n| A | B |\n|---|---|\n| 1 | 2 |'
+    const html = renderToStaticMarkup(<Markdown content={content} />)
+    expect(html).toContain('<table>')
+  })
+
   it('does not render embedded raw HTML', () => {
     const html = renderToStaticMarkup(<Markdown content={'<script>alert("x")</script>\n\n[docs](https://example.com)'} />)
     expect(html).not.toContain('<script>')
