@@ -538,9 +538,12 @@ func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, u
 		if len(entry.Matched) == 0 && !isRequester {
 			continue
 		}
-		// Org visibility mirrors the artifact listing: an unassigned row is
-		// installation-wide, otherwise it must sit on the caller's unit path.
-		if units != nil && orgUnit != "" && !slices.Contains(units, orgUnit) {
+		// Org visibility mirrors the artifact listing — EXCEPT for explicitly
+		// matched reviewers: a named reviewer (user:/role:/project_owner)
+		// was personally asked to decide this round; an org binding on the
+		// artifact must not hide their queue entry (the requester chose them,
+		// org scope is about catalog browsing, not about who owes a decision).
+		if len(entry.Matched) == 0 && units != nil && orgUnit != "" && !slices.Contains(units, orgUnit) {
 			continue
 		}
 		if len(tags) > 0 {

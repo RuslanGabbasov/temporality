@@ -166,6 +166,25 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			writeError(w, artifactSubmitErrorStatus(err), err)
 			return
 		}
+		// The submit answer tells the agent WHO was actually reachable: group
+		// entries (project_owner, org:, role:) resolve against the user
+		// directory here, and an entry that resolved to nobody is reported in
+		// reviewers_unresolved — a round whose reviewers nobody matches can
+		// never be decided, and the model must know that now, not after the
+		// operators ask why nothing is happening.
+		users, uErr := ws.ListUsers(r.Context())
+		resolvedIDs, unresolved := []string{}, []string{}
+		if uErr == nil {
+			targets, covered := expandArtifactReviewersDetailed(req.Reviewers, users)
+			for _, u := range targets {
+				resolvedIDs = append(resolvedIDs, u.ID)
+			}
+			for _, entry := range req.Reviewers {
+				if !covered[entry] {
+					unresolved = append(unresolved, entry)
+				}
+			}
+		}
 		_ = ws.RecordAccessAudit(r.Context(), requestedBy, workspace.AuditArtifactReviewRequested, "artifact", artifactID, map[string]any{
 			"review_id": review.ID, "reviewers": req.Reviewers, "mode": review.Mode, "version": artifact.Version,
 		})
@@ -183,7 +202,15 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 				notify.NotifyArtifactReviewRequested(notifyCtx, artifact, review)
 			}()
 		}
-		writeJSON(w, 202, review)
+		// The review fields stay top-level (the UI reads them directly); the
+		// resolution report rides beside them for the agent tool result.
+		writeJSON(w, 202, map[string]any{
+			"id": review.ID, "artifact_id": review.ArtifactID, "artifact_version": review.ArtifactVersion,
+			"reviewers": review.Reviewers, "mode": review.Mode, "status": review.Status,
+			"note": review.Note, "requested_by": review.RequestedBy, "requested_at": review.RequestedAt,
+			"reviewers_resolved": resolvedIDs,
+			"reviewers_unresolved": unresolved,
+		})
 	})
 
 	// Review rounds of one artifact, newest first: the UI panel reads this.

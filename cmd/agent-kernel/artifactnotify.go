@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -235,7 +234,16 @@ func firstPostedThread(delivered []reviewNoticeDelivery) string {
 // project_owner → installation admins, user:/bare → the named user.
 // Deduplicated by id, deterministic order.
 func expandArtifactReviewers(entries []string, users []workspace.User) []workspace.User {
+	matched, _ := expandArtifactReviewersDetailed(entries, users)
+	return matched
+}
+
+// expandArtifactReviewersDetailed also reports which entries resolved to at
+// least one active user — the submit answer carries this so the agent sees a
+// «project_owner resolved to nobody» BEFORE the round hangs undecidable.
+func expandArtifactReviewersDetailed(entries []string, users []workspace.User) ([]workspace.User, map[string]bool) {
 	matched := make([]workspace.User, 0, len(users))
+	covered := map[string]bool{}
 	seen := map[string]bool{}
 	add := func(u workspace.User) {
 		if u.Active && !seen[u.ID] {
@@ -244,6 +252,7 @@ func expandArtifactReviewers(entries []string, users []workspace.User) []workspa
 		}
 	}
 	for _, entry := range entries {
+		before := len(matched)
 		switch {
 		case strings.HasPrefix(entry, "org:"):
 			unit := strings.TrimSpace(strings.TrimPrefix(entry, "org:"))
@@ -276,9 +285,11 @@ func expandArtifactReviewers(entries []string, users []workspace.User) []workspa
 				}
 			}
 		}
+		if len(matched) > before {
+			covered[entry] = true
+		}
 	}
-	sort.Slice(matched, func(i, j int) bool { return matched[i].ID < matched[j].ID })
-	return matched
+	return matched, covered
 }
 
 // reviewerDeliveryChannel applies the ask_human policy (pickChannel): the

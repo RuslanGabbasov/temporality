@@ -6146,6 +6146,29 @@ func main() {
 				filter.Author = raw
 			}
 		}
+		// author_unit: every active member of the org unit counts as the author
+		// (the combined «person or unit» filter pick resolves to this). Same
+		// exact-match identifier set as the author branch.
+		if raw := strings.TrimSpace(r.URL.Query().Get("author_unit")); raw != "" {
+			if users, uErr := ws.ListUsers(r.Context()); uErr == nil {
+				ids := map[string]bool{}
+				for _, u := range users {
+					if !u.Active || u.OrgUnitID != raw {
+						continue
+					}
+					ids[u.ID] = true
+					if u.Name != "" {
+						ids[u.Name] = true
+					}
+					if u.Email != "" {
+						ids[u.Email] = true
+					}
+				}
+				for id := range ids {
+					filter.AuthorIDs = append(filter.AuthorIDs, id)
+				}
+			}
+		}
 		// CreatedAt window: the new / this-week / this-month presets.
 		if raw := strings.TrimSpace(r.URL.Query().Get("created_after")); raw != "" {
 			if parsed, err := time.Parse(time.RFC3339, raw); err == nil {

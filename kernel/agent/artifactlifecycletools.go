@@ -168,7 +168,7 @@ func (a *Activities) handleArtifactNewVersion(ctx context.Context, request ToolR
 	encoded, _ := json.Marshal(map[string]any{
 		"artifact_id": artifactID, "status": revision.Status, "version": revision.Version,
 		"live_version_stays": "approved — the revision serves nobody until approved",
-		"next":              "artifact_submit hands the revision to human re-approval",
+		"next":               "artifact_submit hands the revision to human re-approval",
 	})
 	return ToolResult{Content: string(encoded)}, nil
 }
@@ -205,19 +205,26 @@ func (a *Activities) handleArtifactSubmit(ctx context.Context, request ToolReque
 		return ToolResult{Content: fmt.Sprintf("error: artifact submit failed (HTTP %d): %s", status, truncate(body, 600))}, nil
 	}
 	var review struct {
-		ID              string `json:"id"`
-		ArtifactVersion int    `json:"artifact_version"`
-		Mode            string `json:"mode"`
-		Status          string `json:"status"`
+		ID                  string   `json:"id"`
+		ArtifactVersion     int      `json:"artifact_version"`
+		Mode                string   `json:"mode"`
+		Status              string   `json:"status"`
+		ReviewersResolved   []string `json:"reviewers_resolved"`
+		ReviewersUnresolved []string `json:"reviewers_unresolved"`
 	}
 	_ = json.Unmarshal([]byte(body), &review)
 	a.emitArtifactLifecycleToolEvent(ctx, request, "artifact.submitted", artifactID, map[string]any{
 		"artifact_id": artifactID, "review_id": review.ID, "version": review.ArtifactVersion, "reviewers": reviewers,
 	})
+	// The resolution report is the honest half of the answer: a group entry
+	// (project_owner, org:, role:) that matched nobody means the round can
+	// never be decided — the model must re-submit to a concrete user NOW.
 	encoded, _ := json.Marshal(map[string]any{
 		"artifact_id": artifactID, "review_id": review.ID, "version": review.ArtifactVersion,
 		"mode": review.Mode, "status": review.Status,
-		"note": "a human resolves the review; artifact_approve does not exist — watch inbox/notifications for the decision",
+		"notified_user_ids":    review.ReviewersResolved,
+		"unresolved_reviewers": review.ReviewersUnresolved,
+		"note":                 "a human resolves the review; artifact_approve does not exist — watch inbox/notifications for the decision. If unresolved_reviewers is non-empty, re-submit with a concrete user:<id> instead.",
 	})
 	return ToolResult{Content: string(encoded)}, nil
 }
