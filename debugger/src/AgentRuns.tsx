@@ -1056,17 +1056,18 @@ export default function AgentRuns({ project }: { project: string }) {
               </div>
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
               {/* Filter row: initiator (directory suggest pins the exact user;
-                  free text substring-matches), the initiator's org unit, and
-                  status (docs/agents.md §runs-list) — client-side over the
-                  loaded newest-100 window. */}
-              <div style={{ display: 'flex', gap: '0.4rem', margin: '0.35rem 0 0.1rem', alignItems: 'center', position: 'relative', flexWrap: 'wrap' }}>
-                <div style={{ position: 'relative', flex: 1, minWidth: '10rem' }}>
+                  free text substring-matches) and status — ONE line, no wrap:
+                  the sidebar column is narrow and a wrapped select read as a
+                  second filter row (docs/agents.md §runs-list). Client-side
+                  over the loaded newest-100 window. */}
+              <div style={{ display: 'flex', gap: '0.35rem', margin: '0.35rem 0 0.1rem', alignItems: 'center', position: 'relative', flexWrap: 'nowrap' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
                   <input
                     value={initiatorDraft}
                     onChange={(e) => { setInitiatorDraft(e.target.value); setInitiatorPick(null) }}
                     placeholder={t('runs.filter_initiator') ?? 'Инициатор…'}
                     title={t('runs.filter_initiator_hint') ?? 'Имя или id инициатора (кто запустил ран)'}
-                    style={{ width: '100%', background: 'var(--tm-bg)', border: `1px solid ${initiatorPick ? 'var(--tm-teal)' : 'var(--tm-border)'}`, borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.55rem', outline: 'none' }}
+                    style={{ width: '100%', background: 'var(--tm-bg)', border: `1px solid ${initiatorPick ? 'var(--tm-teal)' : 'var(--tm-border)'}`, borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.55rem', outline: 'none', minWidth: 0 }}
                   />
                   {initiatorSuggest.length > 0 && (
                     <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', zIndex: 3, overflow: 'hidden' }}>
@@ -1088,11 +1089,11 @@ export default function AgentRuns({ project }: { project: string }) {
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as RunStatus | '')}
                   title={t('runs.filter_status') ?? 'Статус'}
-                  style={{ background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.4rem', outline: 'none' }}
+                  style={{ background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.72rem', padding: '0.35rem 0.25rem', outline: 'none', flexShrink: 0, maxWidth: '9.5rem' }}
                 >
                   <option value="">{t('runs.filter_status_all') ?? 'Все статусы'}</option>
                   <option value="running">{t('status.running') ?? 'running'}</option>
-                  <option value="waiting">{t('runs.filter_status_waiting') ?? 'ждёт ответа человека'}</option>
+                  <option value="waiting">{t('runs.filter_status_waiting') ?? 'ждёт человека'}</option>
                   <option value="completed">{t('status.completed') ?? 'completed'}</option>
                   <option value="failed">{t('status.failed') ?? 'failed'}</option>
                   <option value="cancelled">{t('status.cancelled') ?? 'cancelled'}</option>

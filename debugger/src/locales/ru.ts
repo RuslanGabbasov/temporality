@@ -614,7 +614,7 @@ export const ru: Record<string, string> = {
     'runs.filter_kind_unit': 'подразделение',
     'runs.filter_initiator_hint': 'Имя или id инициатора (кто запустил ран)',
     'runs.filter_status': 'Статус',
-    'runs.filter_status_waiting': 'ждёт ответа человека',
+    'runs.filter_status_waiting': 'ждёт человека',
     'runs.filter_unit': 'Орг-единица инициатора',
     'runs.filter_status_all': 'Все статусы',
     'runs.list_window_hint': 'Показаны последние 100 запусков. Более старые ищите в Таймлайне — оттуда есть переход к рану.',
