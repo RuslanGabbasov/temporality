@@ -254,9 +254,9 @@ func (s *Store) CancelHumanRequest(ctx context.Context, id, actor string) error 
 func (s *Store) ExpireHumanRequests(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
 		`UPDATE human_request
-		 SET status = 'expired'
-		 WHERE status IN ('pending','delivered') AND expires_at IS NOT NULL AND expires_at < now()
-		 RETURNING id`)
+			 SET status = 'expired'
+			 WHERE status IN ('pending','delivered') AND expires_at IS NOT NULL AND expires_at < now()
+			 RETURNING id`)
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +273,48 @@ func (s *Store) ExpireHumanRequests(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	s.supersedeDeliveries(ctx, ids...)
+
+	// Terminal-run hygiene (the 26-stale-asks incident): an ask whose RUN is
+	// already over (crashed, failed, cancelled) can never be answered — the
+	// workflow that would close it is gone. Cancel such rows so badges and
+	// the waiting filter stop counting ghost questions. Best-effort sweep,
+	// same cadence as the deadline pass above.
+	ghostIds, gErr := s.cancelAsksOfTerminalRuns(ctx)
+	if gErr != nil {
+		return ids, gErr
+	}
+	return append(ids, ghostIds...), nil
+}
+
+// cancelAsksOfTerminalRuns closes open asks whose workspace_run row reached
+// a terminal status. Returns the closed request ids.
+func (s *Store) cancelAsksOfTerminalRuns(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`UPDATE human_request h
+			 SET status = 'cancelled', answered_by = 'system-sweep', answered_at = now()
+			 FROM workspace_run r
+			 WHERE h.run_id = r.run_id
+			   AND h.status IN ('pending','delivered')
+			   AND r.status IN ('completed','failed','cancelled')
+			 RETURNING h.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) > 0 {
+		s.supersedeDeliveries(ctx, ids...)
+	}
 	return ids, nil
 }
 

@@ -599,6 +599,7 @@ export const en: Record<string, string> = {
     'runs.filter_initiator': 'Initiator…',
     'runs.filter_initiator_hint': 'Name or id of the run initiator',
     'runs.filter_status': 'Status',
+    'runs.filter_status_waiting': 'waiting for a human',
     'runs.filter_unit': 'Initiator org unit',
     'runs.filter_status_all': 'All statuses',
     'runs.list_window_hint': 'Showing the latest 100 runs. Older ones — search the Timeline and jump to the run from there.',

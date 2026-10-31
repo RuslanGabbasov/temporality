@@ -303,7 +303,9 @@ export default function AgentRuns({ project }: { project: string }) {
   const [initiatorDraft, setInitiatorDraft] = useState('')
   const [initiatorID, setInitiatorID] = useState('')
   const [initiatorUnit, setInitiatorUnit] = useState('')
-  const [statusFilter, setStatusFilter] = useState<RunStatus | ''>('')
+  // 'waiting' is a virtual status: a live run paused on a human answer
+  // (questionRuns) — not a journal status.
+  const [statusFilter, setStatusFilter] = useState<RunStatus | 'waiting' | ''>('')
   // Runs with an open human question (human_request entity, §28) — marks the
   // asking run in the list so the inbox is navigable. Older kernels without
   // the endpoint simply show no markers.
@@ -431,7 +433,9 @@ export default function AgentRuns({ project }: { project: string }) {
         ? row.actor === initiatorID
         : !initiator || actorName.toLowerCase().includes(initiator) || (row.actor ?? '').toLowerCase().includes(initiator)
       const matchesUnit = !initiatorUnit || users.get(row.actor ?? '')?.OrgUnitID === initiatorUnit
-      const matchesStatus = !statusFilter || row.status === statusFilter
+      			const matchesStatus = !statusFilter || (statusFilter === 'waiting'
+      				? questionRuns.has(row.id) && row.status === 'running'
+      				: row.status === statusFilter)
       selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && matchesInitiator && matchesUnit && matchesStatus && (!opsOnly || opRunIds.ids.has(row.id)))
     }
     const subtreeMatch = (id: string): boolean => {
@@ -440,7 +444,7 @@ export default function AgentRuns({ project }: { project: string }) {
       return (childrenOf.get(id) ?? []).some((child) => subtreeMatch(child))
     }
     return rows.filter((row) => subtreeMatch(row.id))
-  }, [rows, filter, initiatorDraft, initiatorID, initiatorUnit, statusFilter, opsOnly, opRunIds, userNameOf, users])
+  }, [rows, filter, initiatorDraft, initiatorID, initiatorUnit, statusFilter, questionRuns, opsOnly, opRunIds, userNameOf, users])
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
@@ -1071,6 +1075,7 @@ export default function AgentRuns({ project }: { project: string }) {
                 >
                   <option value="">{t('runs.filter_status_all') ?? 'Все статусы'}</option>
                   <option value="running">{t('status.running') ?? 'running'}</option>
+                  <option value="waiting">{t('runs.filter_status_waiting') ?? 'ждёт ответа человека'}</option>
                   <option value="completed">{t('status.completed') ?? 'completed'}</option>
                   <option value="failed">{t('status.failed') ?? 'failed'}</option>
                   <option value="cancelled">{t('status.cancelled') ?? 'cancelled'}</option>
@@ -1131,7 +1136,10 @@ export default function AgentRuns({ project }: { project: string }) {
                       )
                     )}
                     {row.status === 'cancelled' && <Tag type="warm-gray" size="sm">{t('status.cancelled')}</Tag>}
-                    {questionRuns.has(row.id) && <Tag type="warm-gray" size="sm" title={t('runs.asks_human') ?? 'This run is waiting for a human answer'}>❓ {t('runs.asks_human') ?? 'asks you'}</Tag>}
+                    {/* The ask badge only on a still-running row: a terminal run's
+                        open ask row is a ghost the sweep cancels (the old
+                        26-asks badge was exactly this graveyard). */}
+                    {questionRuns.has(row.id) && row.status === 'running' && <Tag type="warm-gray" size="sm" title={t('runs.asks_human') ?? 'This run is waiting for a human answer'}>❓ {t('runs.asks_human') ?? 'asks you'}</Tag>}
                     {opRunIds.ids.has(row.id) && (
                       <Tag type="red" size="sm" title={t('runs.ops_tag_title')}>⚠ {opRunIds.subtreeCount.get(row.id) ?? 0}</Tag>
                     )}
