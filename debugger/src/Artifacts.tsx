@@ -511,12 +511,20 @@ export default function Artifacts() {
         <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
           {/* Two views: the whole catalog vs my approvals inbox (rounds
               addressed to me) — a 10k registry buries your two rounds deep. */}
-          <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '0.5rem', alignItems: 'center' }}>
             <button type="button" onClick={() => setInboxMode(false)} style={chipStyle(!inboxMode)}>
               {t('artifacts.tab_catalog') ?? 'Каталог'}
             </button>
             <button type="button" onClick={() => setInboxMode(true)} style={chipStyle(inboxMode)}>
-              {t('artifacts.tab_inbox') ?? 'На моём согласовании'}{(inbox?.length ?? 0) > 0 && ` · ${inbox!.length}`}
+              {t('artifacts.tab_inbox') ?? 'На моём согласовании'}
+              {(inbox?.length ?? 0) > 0 && (
+                // The attention badge (runs-tab style): pending decisions are
+                // the work the user came for — it must be SEEN, not a gray
+                // suffix lost in the tab label.
+                <span style={{ marginLeft: '0.375rem', background: '#e0af68', color: '#1a1a1a', borderRadius: 999, fontSize: '0.68rem', fontWeight: 600, padding: '0.05rem 0.45rem', lineHeight: 1.4 }}>
+                  {inbox!.length}
+                </span>
+              )}
             </button>
           </div>
           {inboxMode ? (
