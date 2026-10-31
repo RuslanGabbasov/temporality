@@ -1274,41 +1274,7 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 				attempt = int(activity.GetInfo(ctx).Attempt)
 			}
 			if attempt > 1 {
-				// The worker died mid-command. NEVER re-execute: a retried
-				// yarn install corrupts node_modules and burns the registry.
-				// Attach instead: wait for the exit-code file the wrapper
-				// writes (the process kept running in the run container).
-				scratchKey := sandbox.SanitizeScratchToken(request.Project) + "/" + sandbox.SanitizeScratchToken(request.RunID)
-				deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-				if timeout <= 0 {
-					deadline = time.Now().Add(time.Duration(sandbox.CommandTimeout(0)) * time.Second)
-				}
-				for {
-					if time.Now().After(deadline) {
-						return ToolResult{Content: fmt.Sprintf("error: background operation %s lost its worker and outlived its timeout — its state is unknown; re-run it if the effect is still needed", request.OperationID)}, nil
-					}
-					state, err := a.Sandbox.OperationState(scratchKey, request.OperationID)
-					if err == nil {
-						if state.Finished {
-							activity.GetLogger(ctx).Info("background operation attached after worker restart", "operation", request.OperationID, "exit", state.ExitCode)
-							exitCode := state.ExitCode
-							return ToolResult{Content: fmt.Sprintf("exit_code=%d\n(output not available: the worker restarted while the command ran)", exitCode), ExitCode: &exitCode}, nil
-						}
-						if !state.Running && !state.Alive {
-							// Killed (no exit-code file) or the wrapper died.
-							exitCode := 137
-							return ToolResult{Content: "exit_code=137\n(terminated: the process is gone and left no exit code)", ExitCode: &exitCode}, nil
-						}
-					} else if ctx.Err() != nil {
-						return ToolResult{}, ctx.Err()
-					}
-					select {
-					case <-ctx.Done():
-						return ToolResult{}, ctx.Err()
-					case <-time.After(3 * time.Second):
-						activity.RecordHeartbeat(ctx)
-					}
-				}
+				return a.attachBackgroundOperation(ctx, request, timeout)
 			}
 		}
 		// Secrets resolve here — at the execution boundary: values go straight
@@ -1509,6 +1475,73 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			return ToolResult{Content: content}, err
 		}
 		return ToolResult{}, fmt.Errorf("tool %q is not registered", request.Name)
+	}
+}
+
+// backgroundAttachPoll is the attach loop's state-probe interval; a package
+// var so tests can shrink the wait.
+var backgroundAttachPoll = 3 * time.Second
+
+// backgroundAttachNotice explains the empty console stream to a reader who
+// subscribed around the worker restart: the output pipe lived inside the old
+// worker process, so the bytes are gone — only the exit code survives.
+const backgroundAttachNotice = "(attached after a worker restart — the live output was lost with the old worker; this stream reports the exit code only)\n"
+
+// attachBackgroundOperation is the attempt>1 run_command background path:
+// the worker died mid-command. NEVER re-execute: a retried yarn install
+// corrupts node_modules and burns the registry. Attach instead: wait for the
+// exit-code file the wrapper writes (the process kept running in the run
+// container). The console entry is re-registered here — the restart wiped the
+// registry, and a UI subscriber to this operation would otherwise stare at an
+// entry that no writer ever touches; the notice tells them why the stream is
+// empty, and Done delivers the exit code when the probe resolves.
+func (a *Activities) attachBackgroundOperation(ctx context.Context, request ToolRequest, timeout int) (ToolResult, error) {
+	scratchKey := sandbox.SanitizeScratchToken(request.Project) + "/" + sandbox.SanitizeScratchToken(request.RunID)
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	if timeout <= 0 {
+		deadline = time.Now().Add(time.Duration(sandbox.CommandTimeout(0)) * time.Second)
+	}
+	if a.Console != nil && request.OperationID != "" {
+		a.Console.Hook(request.Project, request.OperationID)
+		a.Console.Write(request.Project, request.OperationID, "stdout", []byte(backgroundAttachNotice))
+	}
+	for {
+		if time.Now().After(deadline) {
+			return ToolResult{Content: fmt.Sprintf("error: background operation %s lost its worker and outlived its timeout — its state is unknown; re-run it if the effect is still needed", request.OperationID)}, nil
+		}
+		state, err := a.Sandbox.OperationState(scratchKey, request.OperationID)
+		if err == nil {
+			if state.Finished {
+				if activity.IsActivity(ctx) {
+					if logger := activity.GetLogger(ctx); logger != nil {
+						logger.Info("background operation attached after worker restart", "operation", request.OperationID, "exit", state.ExitCode)
+					}
+				}
+				if a.Console != nil && request.OperationID != "" {
+					a.Console.Done(request.Project, request.OperationID, state.ExitCode)
+				}
+				exitCode := state.ExitCode
+				return ToolResult{Content: fmt.Sprintf("exit_code=%d\n(output not available: the worker restarted while the command ran)", exitCode), ExitCode: &exitCode}, nil
+			}
+			if !state.Running && !state.Alive {
+				// Killed (no exit-code file) or the wrapper died.
+				if a.Console != nil && request.OperationID != "" {
+					a.Console.Done(request.Project, request.OperationID, 137)
+				}
+				exitCode := 137
+				return ToolResult{Content: "exit_code=137\n(terminated: the process is gone and left no exit code)", ExitCode: &exitCode}, nil
+			}
+		} else if ctx.Err() != nil {
+			return ToolResult{}, ctx.Err()
+		}
+		select {
+		case <-ctx.Done():
+			return ToolResult{}, ctx.Err()
+		case <-time.After(backgroundAttachPoll):
+			if activity.IsActivity(ctx) {
+				activity.RecordHeartbeat(ctx)
+			}
+		}
 	}
 }
 

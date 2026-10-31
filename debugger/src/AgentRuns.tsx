@@ -34,8 +34,9 @@ import {
   type UncertainOperation, type ReconcileEffect, type Whoami,
 } from './kernelApi'
 import TraceLayers from './TraceLayers'
+import ConsoleOutput from './ConsoleOutput'
 import HumanForm, { type FormSchema } from './HumanForm'
-import { runStatusLabel } from './eventPresentation'
+import { runStatusLabel, runningBackgroundOps } from './eventPresentation'
 import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
 import { useDebouncedValue } from './useDebouncedValue'
 import { useOrgUnits, OrgUnitSelect } from './orgUnits'
@@ -512,6 +513,13 @@ export default function AgentRuns({ project }: { project: string }) {
     }
     return ids
   }, [timeline])
+  // Running background operations (docs/agent-async-operations.md): pinned
+  // panel below the trace header — see runningBackgroundOps in
+  // eventPresentation for the membership rules.
+  const backgroundOps = useMemo(
+    () => runningBackgroundOps(timeline, traceWindow, completedOps, selected),
+    [timeline, traceWindow, completedOps, selected],
+  )
   const olderAvailable = trace.visible.length > traceWindow.length
   const loadOlder = useCallback(() => {
     setTraceLimit((value) => value + TRACE_WINDOW_STEP)
@@ -1660,6 +1668,24 @@ export default function AgentRuns({ project }: { project: string }) {
                       (DoD-1/2/3/9). NFR-5: the bounded window feeds the
                       renderer; heavy texts (model responses) render only for
                       expanded rows. */}
+                  {/* Detached commands whose tool.started row fell out of the
+                      bounded window: their live console streams here for as
+                      long as the operation runs (docs/agent-async-operations.md). */}
+                  {backgroundOps.length > 0 && (
+                    <div style={{ marginBottom: '0.6rem', border: '1px dashed var(--tm-border)', borderRadius: '6px', padding: '0.5rem', minWidth: 0 }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', marginBottom: '0.35rem' }}>
+                        ⚙ {t('runs.background_ops', { count: String(backgroundOps.length) })}
+                      </div>
+                      {backgroundOps.map((op) => (
+                        <div key={op.operationId} style={{ marginBottom: '0.4rem', minWidth: 0 }}>
+                          <div title={op.operationId} style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', overflowWrap: 'anywhere', marginBottom: '0.15rem' }}>
+                            {op.command || op.operationId}
+                          </div>
+                          <ConsoleOutput operationId={op.operationId} project={selectedProject} runId={selected} live={selectedLive} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <TraceLayers
                     events={traceWindow}
                     locale={locale}

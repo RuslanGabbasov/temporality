@@ -862,6 +862,7 @@ export const en: Record<string, string> = {
 
     // Console output of run_command (v2-consolidated.md §6, DoD-5)
     'runs.console.tabs': 'Command output streams',
+    'runs.background_ops': 'Live background operations · {{count}}',
     'runs.console.live': 'streaming output',
     'runs.console.exited': 'exit {{code}}',
     'runs.console.copy': 'Copy',

@@ -124,8 +124,10 @@ export function runStatusLabel(status: unknown, t: TranslateFn): string {
 }
 
 /** Try to parse JSON-encoded tool arguments; tool payloads arrive as JSON
- *  strings (`{"command":["go","test"]}`), the human preview reads fields. */
-function parseArguments(raw: unknown): Record<string, unknown> | null {
+ *  strings (`{"command":["go","test"]}`), the human preview reads fields.
+ *  Exported: the background-ops panel (AgentRuns) reads the background flag
+ *  and the command of a detached run_command the same way. */
+export function parseArguments(raw: unknown): Record<string, unknown> | null {
   if (typeof raw !== 'string' || !raw) return null
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -675,3 +677,58 @@ export function rawEnvelope(event: { type: string; data?: Record<string, unknown
 
 /** Test seam: the declarative tables the coverage test walks (DoD-1). */
 export const PRESENTATION_TABLES = { OVERRIDES, STREAM_TYPES, NOISE_TYPES, MINOR_TURN_RE, MINOR_PLAN_RE } as const
+
+/** One live detached command for the pinned trace panel
+ *  (docs/agent-async-operations.md): its operation id (the console:// address)
+ *  and the human command line. */
+export interface BackgroundOp {
+  operationId: string
+  command: string
+}
+
+/** Running background run_command operations of one run (AgentRuns trace
+ *  panel): the live console mounts only on a tool.started row, and the
+ *  bounded trace window sheds that row while the model keeps working — the
+ *  stream would vanish for the reader though the command still runs. This
+ *  scan walks the FULL timeline and drops:
+ *  - operations already completed (completedOps, over the full timeline —
+ *    the completed row carries the output); the started row folds away;
+ *  - operations whose tool.started row is still inside the render window
+ *    (windowEvents — the inline console already shows them; no duplicate
+ *    subscription surface);
+ *  - everything that is not a detached run_command (no operation id, other
+ *    tool, background flag not true, foreign run).
+ *  Pure, unit-tested: the panel itself stays a thin renderer. */
+export function runningBackgroundOps(events: ObservationEvent[], windowEvents: ObservationEvent[], completedOps: Set<string>, selectedRun: string): BackgroundOp[] {
+  const windowOps = new Set<string>()
+  for (const event of windowEvents) {
+    if (event.type !== 'tool.started') continue
+    const id = operationIdOf(event)
+    if (id) windowOps.add(id)
+  }
+  const ops: BackgroundOp[] = []
+  const seen = new Set<string>()
+  for (const event of events) {
+    if (event.type !== 'tool.started') continue
+    if ((event.context?.run ?? '') !== selectedRun) continue
+    const opId = operationIdOf(event)
+    if (!opId || seen.has(opId) || windowOps.has(opId)) continue
+    if (completedOps.has(operationKeyOf(event, opId))) continue
+    const data = event.data ?? {}
+    if (data.tool !== 'run_command') continue
+    const args = parseArguments(data.arguments)
+    if (!args || args.background !== true) continue
+    seen.add(opId)
+    const command = Array.isArray(args.command) ? (args.command as unknown[]).map(String).join(' ') : ''
+    ops.push({ operationId: opId, command })
+  }
+  return ops
+}
+
+/** operationKey for an operation id that is already known — matches
+ *  traceModel.operationKey (run-agnostic: the id alone carries the identity;
+ *  the registry is keyed by (project, operation_id)). Importing traceModel
+ *  here would cycle, so the composition stays local. */
+function operationKeyOf(event: ObservationEvent, operationId: string): string {
+  return operationId
+}

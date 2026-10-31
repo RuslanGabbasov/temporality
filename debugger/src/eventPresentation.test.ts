@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EVENT_CATALOG } from './eventCatalog'
-import { eventDetails, rawEnvelope, timelineRow, PRESENTATION_TABLES, type TimelineRow } from './eventPresentation'
+import { eventDetails, rawEnvelope, timelineRow, runningBackgroundOps, PRESENTATION_TABLES, type TimelineRow } from './eventPresentation'
 import { ru } from './locales/ru'
 import { en } from './locales/en'
 import type { Locale } from './locales'
@@ -246,5 +246,29 @@ describe('§5 folding contract of the presentation classes', () => {
     expectKind('plan.task.rejected', 'normal')
     expectKind('approval.requested', 'normal')
     expectKind('saga.registered', 'normal')
+  })
+})
+
+describe('runningBackgroundOps (docs/agent-async-operations.md trace panel)', () => {
+  const bg = (operationId: string, command: string[] = ['yarn', 'install']): ReturnType<typeof modelEvent> =>
+    modelEvent('tool.started', { tool: 'run_command', operation_id: operationId, arguments: JSON.stringify({ command, background: true }) })
+
+  it('pins live detached commands, drops completed, in-window and foreground ones', () => {
+    const fg = modelEvent('tool.started', { tool: 'run_command', operation_id: 'op-fg', arguments: JSON.stringify({ command: ['ls'] }) })
+    const otherTool = modelEvent('tool.started', { tool: 'read_file', operation_id: 'op-read', arguments: JSON.stringify({ path: '/x' }) })
+    const noArgs = modelEvent('tool.started', { tool: 'run_command', operation_id: 'op-noargs' })
+    const foreign = { ...bg('op-foreign'), context: { ...bg('op-foreign').context, run: 'r2' } }
+    const timeline = [bg('op-window'), bg('op-out'), fg, otherTool, noArgs, foreign, bg('op-out') /* duplicate */]
+    const window = [bg('op-window')]
+    const ops = runningBackgroundOps(timeline, window, new Set<string>(), 'r1')
+    // op-window stays inline (its row is in the render window); op-out is the
+    // ONLY panel entry — foreground/other-tool/foreign-run rows never pin.
+    expect(ops).toEqual([{ operationId: 'op-out', command: 'yarn install' }])
+  })
+
+  it('drops an operation once its tool.completed lands in completedOps', () => {
+    const bg = modelEvent('tool.started', { tool: 'run_command', operation_id: 'op-1', arguments: JSON.stringify({ command: ['sleep', '30'], background: true }) })
+    const ops = runningBackgroundOps([bg], [], new Set(['op-1']), 'r1')
+    expect(ops).toEqual([])
   })
 })

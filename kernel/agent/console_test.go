@@ -386,3 +386,115 @@ func TestConsoleOutputNeverEntersTheJournal(t *testing.T) {
 }
 
 func (s *streamingSandbox) RunScratchDir(string) string { return "" }
+
+// ── Background operations (docs/agent-async-operations.md) ───────────────────
+
+func TestRunToolBackgroundStreamsConsole(t *testing.T) {
+	outbox := &capturedOutbox{}
+	activities := &Activities{
+		Events:  outbox,
+		Sandbox: &streamingSandbox{root: t.TempDir()},
+		Console: newTestConsole(1<<20, 100),
+	}
+	if _, err := activities.RunTool(t.Context(), ToolRequest{
+		RunID: "run-bg", OperationID: "op-bg-1", Project: "proj",
+		Name:      "run_command",
+		Arguments: map[string]any{"command": []string{"yarn", "install"}, "background": true},
+	}); err != nil {
+		t.Fatalf("background run_command must succeed: %v", err)
+	}
+	// The live console is the ONLY place a detached command's output exists:
+	// the trace watcher streams it while the model keeps working.
+	state, ok := activities.Console.Snapshot("proj", "op-bg-1")
+	if !ok {
+		t.Fatal("a background operation must be registered in the console")
+	}
+	if !strings.Contains(state.StdoutTail, "hello-from-command") {
+		t.Fatalf("the live tail must stream the command's stdout, got %q", state.StdoutTail)
+	}
+	if !state.Done || state.ExitCode == nil || *state.ExitCode != 0 {
+		t.Fatalf("the background operation must resolve done with its exit code, got %+v", state)
+	}
+}
+
+// scriptedOpStateSandbox answers the attach loop's OperationState probes from
+// a scripted list (the last state repeats): running first, then the exit-code
+// file appears — the wrapper finished while nobody watched.
+type scriptedOpStateSandbox struct {
+	streamingSandbox
+	states []sandbox.OperationState
+	calls  int
+}
+
+func (s *scriptedOpStateSandbox) OperationState(string, string) (sandbox.OperationState, error) {
+	if s.calls >= len(s.states) {
+		return s.states[len(s.states)-1], nil
+	}
+	state := s.states[s.calls]
+	s.calls++
+	return state, nil
+}
+
+func TestAttachBackgroundOperationReRegistersConsole(t *testing.T) {
+	defer func(prev time.Duration) { backgroundAttachPoll = prev }(backgroundAttachPoll)
+	backgroundAttachPoll = time.Millisecond
+
+	activities := &Activities{
+		Sandbox: &scriptedOpStateSandbox{
+			states: []sandbox.OperationState{
+				{Running: true, Alive: true},
+				{Finished: true, ExitCode: 7},
+			},
+		},
+		Console: newTestConsole(1<<20, 100),
+	}
+	result, err := activities.attachBackgroundOperation(t.Context(), ToolRequest{
+		RunID: "run-bg", OperationID: "op-bg-2", Project: "proj",
+	}, 30)
+	if err != nil {
+		t.Fatalf("attach must resolve with the script's exit: %v", err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 7 {
+		t.Fatalf("attach must report the wrapper's exit code, got %+v", result)
+	}
+	// The worker restart wiped the registry: without the re-registration a UI
+	// subscriber would stare at an entry no writer ever touches.
+	state, ok := activities.Console.Snapshot("proj", "op-bg-2")
+	if !ok {
+		t.Fatal("the attach path must re-register the console entry")
+	}
+	if !strings.Contains(state.StdoutTail, "worker restart") {
+		t.Fatalf("the attach notice must explain the lost output stream, got %q", state.StdoutTail)
+	}
+	if !state.Done || state.ExitCode == nil || *state.ExitCode != 7 {
+		t.Fatalf("the console must close with the exit code, got %+v", state)
+	}
+}
+
+func TestAttachBackgroundOperationKilledClosesConsole137(t *testing.T) {
+	defer func(prev time.Duration) { backgroundAttachPoll = prev }(backgroundAttachPoll)
+	backgroundAttachPoll = time.Millisecond
+
+	activities := &Activities{
+		Sandbox: &scriptedOpStateSandbox{
+			states: []sandbox.OperationState{
+				{Running: true, Alive: true},
+				{Running: false, Alive: false, Finished: false},
+			},
+		},
+		Console: newTestConsole(1<<20, 100),
+	}
+	result, err := activities.attachBackgroundOperation(t.Context(), ToolRequest{
+		RunID: "run-bg", OperationID: "op-bg-3", Project: "proj",
+	}, 30)
+	if err != nil {
+		t.Fatalf("attach must resolve a killed operation without error: %v", err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 137 {
+		t.Fatalf("a killed operation must report exit 137, got %+v", result)
+	}
+	state, _ := activities.Console.Snapshot("proj", "op-bg-3")
+	if !state.Done || state.ExitCode == nil || *state.ExitCode != 137 {
+		t.Fatalf("the console must close with 137 so the subscriber's stream ends, got %+v", state)
+	}
+}
