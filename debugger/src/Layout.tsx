@@ -263,6 +263,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [pendingOps, setPendingOps] = useState(0)
   // Pending approvals badge (for Runs tab)
   const [pendingApprovals, setPendingApprovals] = useState(0)
+  // Artifact approvals inbox (the artifacts page's «На моём согласовании»):
+  // the nav badge — the user lands on the artifacts tab and sees the queue
+  // count before opening the page.
+  const [artifactInboxCount, setArtifactInboxCount] = useState(0)
   // Onboarding mode: projects finished loading and none exist — the wizard
   // owns the screen, so navigation and the project selector stay hidden. The
   // system intake project is bootstrapped on every install and must not count
@@ -333,6 +337,13 @@ export default function Layout({ children, activePage }: LayoutProps) {
           openApprovals = requestedApproval.filter((id) => !ended.has(id)).length
         }
         setPendingApprovals(openQuestions + openApprovals)
+        // The artifact approvals inbox is server-matched (role, org structure,
+        // personal) — same number the artifacts tab badge shows. Best-effort:
+        // a missing/failing endpoint just hides the badge.
+        try {
+          const inbox = await workspaceApi.artifactInbox()
+          setArtifactInboxCount((inbox.entries ?? []).length)
+        } catch { setArtifactInboxCount(0) }
       } catch { /* ignore */ }
     }
     void poll()
@@ -598,6 +609,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
               {path === '/agents' && pendingOps > 0 && (
                 <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
               )}
+              {path === '/artifacts' && artifactInboxCount > 0 && (
+                <span className="nav-badge" style={{ background: '#e6b85c' }}>{artifactInboxCount}</span>
+              )}
             </a>
           ))}
           <div className="header-config-dropdown" ref={configMenuRef}>
@@ -832,6 +846,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 )}
                 {path === '/agents' && pendingOps > 0 && (
                   <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
+                )}
+                {path === '/artifacts' && artifactInboxCount > 0 && (
+                  <span className="nav-badge" style={{ background: '#e6b85c' }}>{artifactInboxCount}</span>
                 )}
               </a>
             ))}
