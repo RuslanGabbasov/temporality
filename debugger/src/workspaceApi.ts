@@ -1608,7 +1608,7 @@ export const workspaceApi = {
 
   // Reference artifacts (docs/artifact-registry.md phase 2): bodies load on
   // demand; lifecycle filters (status/kind/saga) narrow the listing.
-  listArtifacts: (params?: { status?: string; kind?: string; saga_id?: string; q?: string; tag?: string; provider?: string; org?: string; author?: string; created_after?: string; created_before?: string; limit?: number; offset?: number }) => {
+  listArtifacts: (params?: { status?: string; kind?: string; saga_id?: string; q?: string; tag?: string; provider?: string; org?: string; author?: string; author_unit?: string; created_after?: string; created_before?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams()
     if (params?.status) query.set('status', params.status)
     if (params?.kind) query.set('kind', params.kind)
@@ -1618,6 +1618,7 @@ export const workspaceApi = {
     if (params?.provider) query.set('provider', params.provider)
     if (params?.org) query.set('org_unit', params.org)
     if (params?.author) query.set('author', params.author)
+    if (params?.author_unit) query.set('author_unit', params.author_unit)
     if (params?.created_after) query.set('created_after', params.created_after)
     if (params?.created_before) query.set('created_before', params.created_before)
     if (params?.limit) query.set('limit', String(params.limit))

@@ -69,7 +69,9 @@ export default function Artifacts() {
   const [tagOptions, setTagOptions] = useState<Array<{ tag: string; count: number }>>([])
   // Creator and age filters: «my artifacts» and the new / this-week /
   // this-month presets — a 10k registry is unnavigable without them.
-  const [authorFilter, setAuthorFilter] = useState('')
+  // Author filter pick: a person (author=<id>) or an org unit
+  // (author_unit=<unit id> — every active member counts as author).
+  const [authorPick, setAuthorPick] = useState<{ kind: 'user' | 'unit'; id: string; name: string } | null>(null)
   const [searchFocused, setSearchFocused] = useState(false)
   const [ageFilter, setAgeFilter] = useState<'' | 'week' | 'month' | 'quarter'>('')
   // Approvals inbox: open review rounds addressed to the caller, one tab.
@@ -160,7 +162,8 @@ export default function Artifacts() {
           org: orgFilter || undefined,
           q: serverQuery.trim() || undefined,
           tag,
-          author: authorFilter.trim() || undefined,
+          author: authorPick?.kind === 'user' ? authorPick.id : undefined,
+          author_unit: authorPick?.kind === 'unit' ? authorPick.id : undefined,
           created_after: createdAfter?.toISOString(),
           limit,
         }),
@@ -172,7 +175,7 @@ export default function Artifacts() {
       setTotalKnown(list.count < limit ? (limit >= 200 ? list.count : null) : null)
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
-  }, [statusFilter, providerFilter, orgFilter, serverQuery, tagFilter, authorFilter, ageFilter, limit])
+  }, [statusFilter, providerFilter, orgFilter, serverQuery, tagFilter, authorPick, ageFilter, limit])
 
   useEffect(() => { void load() }, [load])
 
@@ -222,24 +225,27 @@ export default function Artifacts() {
   // as a filter (distinct origin_user values of the currently visible
   // artifacts + the user directory's names/emails). The query itself keeps
   // searching titles — the suggestion only appears while it matches someone.
+  // One field, two pick kinds: matching directory users AND matching org
+  // units (the unit's active members become the author filter server-side).
   const authorSuggest = useMemo(() => {
     const needle = searchDraft.trim().toLowerCase()
-    if (needle.length < 2 || authorFilter) return []
-    // Directory users only, resolved to {id, name}: the filter stores the id
-    // and displays the name — a raw id or a bare name from old contributor
-    // rows would render as «user-2d08…» in the chip and confuse the filter.
-    const seen = new Set<string>()
-    const people: Array<{ id: string; name: string }> = []
+    if (needle.length < 2 || authorPick) return []
+    const people: Array<{ kind: 'user' | 'unit'; id: string; name: string }> = []
     for (const u of directory ?? []) {
       if (u.active === false) continue
       const haystack = `${u.name} ${u.email}`.toLowerCase()
       if (needle && !haystack.includes(needle)) continue
-      if (seen.has(u.id)) continue
-      seen.add(u.id)
-      people.push({ id: u.id, name: u.name || u.id })
+      people.push({ kind: 'user', id: u.id, name: u.name || u.id })
+      if (people.length >= 5) return people
     }
-    return people.slice(0, 5)
-  }, [searchDraft, artifacts, directory, authorFilter])
+    for (const unit of org.units ?? []) {
+      const haystack = `${unit.name} ${unit.id}`.toLowerCase()
+      if (needle && !haystack.includes(needle)) continue
+      people.push({ kind: 'unit', id: unit.id, name: unit.name || unit.id })
+      if (people.length >= 7) break
+    }
+    return people
+  }, [searchDraft, directory, org.units, authorPick])
   useEffect(() => {
     const timer = setTimeout(() => setServerQuery(searchDraft), 300)
     return () => clearTimeout(timer)
@@ -544,26 +550,26 @@ export default function Artifacts() {
                   />
                   {searchFocused && authorSuggest.length > 0 && (
                     <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', zIndex: 3, overflow: 'hidden' }}>
-                      {authorSuggest.map((person) => (
+                      {authorSuggest.map((pick) => (
                         <button
-                          key={person.id}
+                          key={`${pick.kind}:${pick.id}`}
                           type="button"
-                          onClick={() => { setAuthorFilter(person.id); setSearchDraft('') }}
+                          onClick={() => { setAuthorPick(pick); setSearchDraft('') }}
                           style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', padding: '0.35rem 0.6rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem', textAlign: 'left' }}
                         >
-                          👤 {person.name}
-                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', marginLeft: 'auto' }}>{t('artifacts.suggest_author') ?? 'author'}</span>
+                          {pick.kind === 'user' ? '👤' : '🏢'} {pick.name}
+                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', marginLeft: 'auto' }}>{pick.kind === 'user' ? (t('artifacts.suggest_author') ?? 'author') : (t('artifacts.suggest_unit') ?? 'org unit')}</span>
                         </button>
                       ))}
                     </div>
                   )}
-                  {authorFilter && (
+                  {authorPick && (
                     <button
                       type="button"
-                      onClick={() => setAuthorFilter('')}
+                      onClick={() => setAuthorPick(null)}
                       title={t('artifacts.filter_author_label') ?? 'Author'}
                       style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)', background: 'var(--tm-surface-3, rgba(127,127,127,.15))', border: 'none', borderRadius: 999, color: 'var(--tm-text)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.05rem 0.45rem' }}
-                    >👤 {userNameOf(authorFilter)} ✕</button>
+                    >{authorPick.kind === 'user' ? '👤' : '🏢'} {authorPick.kind === 'user' ? (userNameOf(authorPick.id) || authorPick.name) : authorPick.name} ✕</button>
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>
@@ -773,7 +779,7 @@ export default function Artifacts() {
                         key={person}
                         type="button"
                         title={t('artifacts.filter_author_label') ?? 'Author'}
-                        onClick={() => setAuthorFilter(person)}
+                        onClick={() => setAuthorPick({ kind: 'user', id: person, name: userNameOf(person) || person })}
                         style={{ background: 'none', border: 'none', padding: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.72rem', textDecoration: 'underline dotted' }}
                       >{userNameOf(person) || person}</button>
                     ))}
