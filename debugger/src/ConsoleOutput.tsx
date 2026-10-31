@@ -95,6 +95,7 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
   const abortRef = useRef<AbortController | null>(null)
   const retryRef = useRef<number | null>(null)
   const missesRef = useRef(0)
+  const lastOpRef = useRef('')
 
   const stop = useCallback(() => {
     abortRef.current?.abort()
@@ -119,9 +120,17 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
   useEffect(() => {
     if (!operationId) return
     if (document.hidden) return
+    // Reset the miss counter ONLY when the operation changes: a 404-retry
+    // tick re-runs this effect too, and resetting there made the counter
+    // restart at 1 forever — the lost-output state never engaged (the
+    // eternal «Ожидание вывода…» on a restart-dead console).
+    if (lastOpRef.current !== operationId) {
+      lastOpRef.current = operationId
+      missesRef.current = 0
+      setLostOutput(false)
+      setSavedOutput(null)
+    }
     stop()
-    missesRef.current = 0
-    setLostOutput(false)
     const controller = new AbortController()
     abortRef.current = controller
     fetchConsoleTail(operationId, project, controller.signal)

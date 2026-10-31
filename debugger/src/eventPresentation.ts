@@ -742,10 +742,30 @@ export function runningBackgroundOps(events: ObservationEvent[], windowEvents: O
     if (completedOps.has(operationKeyOf(event, opId))) continue
     const data = event.data ?? {}
     if (data.tool !== 'run_command') continue
+    // Detached detection, two tiers: parsed arguments when the journal
+    // fragment is valid JSON, and a raw-string fallback for events written by
+    // kernels BEFORE the valid-truncation fix — their 500-char arguments
+    // cut mid-JSON and never parse, but the background flag is right there
+    // in the first bytes. Without the fallback those operations (the ones
+    // that predate the fix and most likely lost their console to a restart)
+    // vanish from the panel exactly when the reader needs them.
+    const raw = typeof data.arguments === 'string' ? data.arguments : ''
     const args = parseArguments(data.arguments)
-    if (!args || args.background !== true) continue
+    const isBackground = args ? args.background === true : raw.includes('"background":true') || raw.includes('"background": true')
+    if (!isBackground) continue
     seen.add(opId)
-    const command = Array.isArray(args.command) ? (args.command as unknown[]).map(String).join(' ') : ''
+    let command = ''
+    if (args && Array.isArray(args.command)) {
+      command = (args.command as unknown[]).map(String).join(' ')
+    } else if (raw) {
+      // Legacy cut: every complete string literal of the command array still
+      // stands in the fragment — collect them in order.
+      const cmdMatch = raw.match(/"command":\[([^\]]*)/)
+      if (cmdMatch) {
+        const literals = cmdMatch[1].match(/"((?:[^"\\]|\\.)*)"/g) ?? []
+        command = literals.map((s) => s.slice(1, -1)).join(' ')
+      }
+    }
     ops.push({ operationId: opId, command })
   }
   return ops

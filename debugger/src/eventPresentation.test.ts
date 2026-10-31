@@ -302,4 +302,18 @@ describe('runningBackgroundOps (docs/agent-async-operations.md trace panel)', ()
     const ops = runningBackgroundOps([bg], [], new Set(['op-1']), 'r1')
     expect(ops).toEqual([])
   })
+
+  it('recognizes legacy events whose truncated arguments never parse as JSON', () => {
+    // A pre-fix kernel wrote compactJSON as a byte-cut with a glued ellipsis:
+    // invalid JSON, so parseArguments fails — but the raw string carries the
+    // background flag and the command head. These are exactly the operations
+    // that lost their console to a restart; the panel must not hide them.
+    const legacy = modelEvent('tool.started', {
+      tool: 'run_command',
+      operation_id: 'op-legacy',
+      arguments: '{"command":["bash","-lc","npm install --no-audit >> /scratch/npm.log 2>&1"],"background":true,"time…',
+    })
+    const ops = runningBackgroundOps([legacy], [], new Set<string>(), 'r1')
+    expect(ops).toEqual([{ operationId: 'op-legacy', command: 'bash -lc npm install --no-audit >> /scratch/npm.log 2>&1' }])
+  })
 })
