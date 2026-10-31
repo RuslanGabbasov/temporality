@@ -225,11 +225,20 @@ export default function Artifacts() {
   const authorSuggest = useMemo(() => {
     const needle = searchDraft.trim().toLowerCase()
     if (needle.length < 2 || authorFilter) return []
-    const fromArtifacts = [...new Set(artifacts.flatMap((a) => [a.origin_user, ...(a.contributors ?? [])]).filter(Boolean))] as string[]
-    const fromDirectory = (directory ?? []).map((u) => u.name).concat((directory ?? []).map((u) => u.email)).filter(Boolean) as string[]
-    return [...new Set([...fromArtifacts, ...fromDirectory])]
-      .filter((author) => author.toLowerCase().includes(needle))
-      .slice(0, 5)
+    // Directory users only, resolved to {id, name}: the filter stores the id
+    // and displays the name — a raw id or a bare name from old contributor
+    // rows would render as «user-2d08…» in the chip and confuse the filter.
+    const seen = new Set<string>()
+    const people: Array<{ id: string; name: string }> = []
+    for (const u of directory ?? []) {
+      if (u.active === false) continue
+      const haystack = `${u.name} ${u.email}`.toLowerCase()
+      if (needle && !haystack.includes(needle)) continue
+      if (seen.has(u.id)) continue
+      seen.add(u.id)
+      people.push({ id: u.id, name: u.name || u.id })
+    }
+    return people.slice(0, 5)
   }, [searchDraft, artifacts, directory, authorFilter])
   useEffect(() => {
     const timer = setTimeout(() => setServerQuery(searchDraft), 300)
@@ -535,14 +544,14 @@ export default function Artifacts() {
                   />
                   {searchFocused && authorSuggest.length > 0 && (
                     <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', zIndex: 3, overflow: 'hidden' }}>
-                      {authorSuggest.map((author) => (
+                      {authorSuggest.map((person) => (
                         <button
-                          key={author}
+                          key={person.id}
                           type="button"
-                          onClick={() => { setAuthorFilter(author); setSearchDraft('') }}
+                          onClick={() => { setAuthorFilter(person.id); setSearchDraft('') }}
                           style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', padding: '0.35rem 0.6rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem', textAlign: 'left' }}
                         >
-                          👤 {author}
+                          👤 {person.name}
                           <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', marginLeft: 'auto' }}>{t('artifacts.suggest_author') ?? 'author'}</span>
                         </button>
                       ))}
@@ -554,7 +563,7 @@ export default function Artifacts() {
                       onClick={() => setAuthorFilter('')}
                       title={t('artifacts.filter_author_label') ?? 'Author'}
                       style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)', background: 'var(--tm-surface-3, rgba(127,127,127,.15))', border: 'none', borderRadius: 999, color: 'var(--tm-text)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.05rem 0.45rem' }}
-                    >👤 {authorFilter} ✕</button>
+                    >👤 {userNameOf(authorFilter)} ✕</button>
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem' }}>

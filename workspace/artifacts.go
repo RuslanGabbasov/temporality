@@ -234,16 +234,21 @@ type ArtifactFilter struct {
 	// description and id — the search box for registries of tens of thousands.
 	Query string
 	// Tags is AND semantics: an artifact must carry every listed tag.
-	Tags []string
-	// Author narrows to one creator (origin_user, case-insensitive) — the
-	// «my artifacts» and per-author views.
-	Author string
-	// CreatedAt window: the new / this-week / this-month presets.
-	CreatedAfter  *time.Time
-	CreatedBefore *time.Time
-	Limit  int
-	Offset int
-}
+		Tags []string
+		// Author narrows to one creator (origin_user, case-insensitive) — the
+		// «my artifacts» and per-author views.
+		Author string
+		// AuthorIDs is the exact-match form of Author: the handler resolves the
+		// operator's pick (a user id, name or email) into every identifier form
+		// that may appear in origin_user/contributors (ids there, names on older
+		// rows), and the row matches when any of them equals one of these.
+		AuthorIDs []string
+		// CreatedAt window: the new / this-week / this-month presets.
+		CreatedAfter  *time.Time
+		CreatedBefore *time.Time
+		Limit  int
+		Offset int
+	}
 
 // ListArtifactsVisible honors the org-visibility rule shared by every
 // workspace resource: org_unit_id IS NULL (installation-wide) or a unit on
@@ -295,6 +300,14 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 		args = append(args, "%"+f.Author+"%")
 		n := strconv.Itoa(len(args))
 		query += ` AND (origin_user ILIKE $` + n + ` OR EXISTS (SELECT 1 FROM unnest(contributors) AS c WHERE c ILIKE $` + n + `))`
+	}
+	if len(f.AuthorIDs) > 0 {
+		// Exact user resolution (the filter row picks a directory user): id,
+		// display name and email all count — contributors store ids on new rows
+		// and free-form names on older ones.
+		args = append(args, f.AuthorIDs)
+		n := strconv.Itoa(len(args))
+		query += ` AND (origin_user = ANY($` + n + `) OR EXISTS (SELECT 1 FROM unnest(contributors) AS c WHERE c = ANY($` + n + `)))`
 	}
 	if f.CreatedAfter != nil {
 		args = append(args, *f.CreatedAfter)

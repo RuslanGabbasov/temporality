@@ -6115,10 +6115,36 @@ func main() {
 			Query: strings.TrimSpace(r.URL.Query().Get("q")),
 			Provider: r.URL.Query().Get("provider"),
 		}
-		// Creator filter: «my artifacts» and per-author views (case-insensitive
-		// match against origin_user).
+		// Creator filter: «my artifacts» and per-author views. The pick names a
+		// user (id, name or email) — resolve it into every identifier form that
+		// may sit in origin_user/contributors and match exactly; a free-text
+		// miss keeps the substring fallback for ad-hoc searches.
 		if raw := strings.TrimSpace(r.URL.Query().Get("author")); raw != "" {
-			filter.Author = raw
+			if users, uErr := ws.ListUsers(r.Context()); uErr == nil {
+				ids := map[string]bool{}
+				exact := false
+				for _, u := range users {
+					if strings.EqualFold(u.ID, raw) || strings.EqualFold(u.Name, raw) || strings.EqualFold(u.Email, raw) {
+						exact = true
+						ids[u.ID] = true
+						if u.Name != "" {
+							ids[u.Name] = true
+						}
+						if u.Email != "" {
+							ids[u.Email] = true
+						}
+					}
+				}
+				if exact {
+					for id := range ids {
+						filter.AuthorIDs = append(filter.AuthorIDs, id)
+					}
+				} else {
+					filter.Author = raw
+				}
+			} else {
+				filter.Author = raw
+			}
 		}
 		// CreatedAt window: the new / this-week / this-month presets.
 		if raw := strings.TrimSpace(r.URL.Query().Get("created_after")); raw != "" {
