@@ -14,7 +14,6 @@ import {
   Heading,
   Toggle,
   NumberInput,
-  Slider,
   Checkbox,
 
 } from '@carbon/react'
@@ -57,25 +56,6 @@ import { useT } from './i18n'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
-
-/** Temperature is a 0..1 float: a plain stepper NumberInput fights the
- *  fraction (± buttons mislead, max=2 contradicted the range), so it renders
- *  as a slider with the manual-input box — drag for a quick pick, type for
- *  an exact value. */
-export function TemperatureControl({ value, onChange, label }: { value: number; onChange: (value: number) => void; label: string }) {
-  return (
-    <Slider
-      id="agent-temp"
-      labelText={label}
-      min={0}
-      max={1}
-      step={0.05}
-      value={typeof value === 'number' && Number.isFinite(value) ? value : 0}
-      onChange={({ value }) => onChange(typeof value === 'number' ? value : 0)}
-      hideTextInput={false}
-    />
-  )
-}
 
 /** Override panel for a gated-apply refusal: the operator read the proposal
  * and decides the gate's objection (empty suite, stale golden cases) is not a
@@ -2024,23 +2004,63 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             )}
             {formTab === 'params' && (
               <Stack gap={3}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
-                  <TemperatureControl label={t('agents.temperature') ?? 'Temperature'} value={form.temperature ?? 0} onChange={(value) => setForm({ ...form, temperature: value })} />
-                  <NumberInput id="agent-tokens" label={t('agents.max_tokens') ?? 'Max tokens'} value={form.max_tokens ?? 16384} onChange={(_, { value }) => setForm({ ...form, max_tokens: typeof value === 'number' ? value : 16384 })} min={64} max={1000000} />
-                  <NumberInput id="agent-turns" label={t('agents.max_turns') ?? 'Max turns'} value={form.max_turns ?? 20} onChange={(_, { value }) => setForm({ ...form, max_turns: typeof value === 'number' ? value : 20 })} min={1} max={100} />
-                </div>
-                <div>
-                  <NumberInput
-                    id="agent-turn-restarts"
-                    label={t('agents.turn_restarts') ?? 'Продолжать при упоре в лимит ходов'}
-                    value={form.turn_limit_restarts ?? 0}
-                    onChange={(_, { value }) => setForm({ ...form, turn_limit_restarts: typeof value === 'number' ? Math.min(5, Math.max(0, value)) : 0 })}
-                    min={0}
-                    max={5}
-                  />
-                  <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
-                    {t('agents.turn_restarts_hint') ?? 'Если ран завершился только из-за лимита ходов, он автоматически продолжится новым раном с полным бюджетом ходов (в трейсе — run.restarted). 0 = выключено.'}
-                  </p>
+                {/* One compact row of four numeric fields (the dialog is a
+                    settings table, not a control showroom): temperature is a
+                    plain 0..1 text box (no slider, no steppers), and the
+                    auto-continuation count sits next to the turn budget it
+                    extends — the long hint lives in the title tooltip. */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.5rem' }}>
+                  <label style={{ display: 'block', minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.temperature') ?? 'Temperature'}</span>
+                    <input
+                      type="number"
+                      value={form.temperature ?? 0}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      onChange={(e) => {
+                        const parsed = Number(e.target.value)
+                        setForm({ ...form, temperature: Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0 })
+                      }}
+                      style={paramInputStyle}
+                    />
+                  </label>
+                  <label style={{ display: 'block', minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_tokens') ?? 'Max tokens'}</span>
+                    <input
+                      type="number"
+                      value={form.max_tokens ?? 16384}
+                      min={64}
+                      max={1000000}
+                      step={64}
+                      onChange={(e) => setForm({ ...form, max_tokens: Math.max(64, Math.floor(Number(e.target.value) || 16384)) })}
+                      style={paramInputStyle}
+                    />
+                  </label>
+                  <label style={{ display: 'block', minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_turns') ?? 'Max turns'}</span>
+                    <input
+                      type="number"
+                      value={form.max_turns ?? 20}
+                      min={1}
+                      max={100}
+                      step={1}
+                      onChange={(e) => setForm({ ...form, max_turns: Math.min(100, Math.max(1, Math.floor(Number(e.target.value) || 20))) })}
+                      style={paramInputStyle}
+                    />
+                  </label>
+                  <label style={{ display: 'block', minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }} title={t('agents.turn_restarts_hint') ?? 'Если ран завершился только из-за лимита ходов, он автоматически продолжится новым раном с полным бюджетом ходов (в трейсе — run.restarted). 0 = выключено.'}>{t('agents.turn_restarts_short') ?? '× продолжений'}</span>
+                    <input
+                      type="number"
+                      value={form.turn_limit_restarts ?? 0}
+                      min={0}
+                      max={5}
+                      step={1}
+                      onChange={(e) => setForm({ ...form, turn_limit_restarts: Math.min(5, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
+                      style={paramInputStyle}
+                    />
+                  </label>
                 </div>
                 <Select id="agent-sandbox" labelText={t('agents.sandbox_profile') ?? 'Sandbox profile'} value={form.sandbox_profile ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_profile: e.target.value })}>
                   <SelectItem value="" text={t('agents.sandbox_default') ?? 'Default (installation image)'} />
@@ -2519,6 +2539,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
  *  already had. */
 const bulkInputStyle = { width: '100%', border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.8rem', padding: '0.4rem 0.6rem', outline: 'none' } as const
 
+// The agent dialog's four numeric params (temperature / tokens / turns /
+// continuations) share one compact style — same shape as the bulk editor's.
+const paramInputStyle = bulkInputStyle
+
 function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpServers, onClose, onApplied, t }: {
   agentIds: string[]
   providers: Provider[]
@@ -2692,11 +2716,23 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
       ) )}
 
       {section(applyParams, () => setApplyParams(!applyParams), t('agents.bulk_params') ?? 'Параметры генерации: температура, лимит токенов и ходов', (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'stretch' }}>
-          <div style={{ flex: '1 1 100%' }}>
-            <TemperatureControl label={t('agents.temperature') ?? 'Temperature'} value={bulkTemp} onChange={setBulkTemp} />
-          </div>
-          <div style={{ flex: '1 1 45%', minWidth: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
+          <label style={{ display: 'block', minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.temperature') ?? 'Temperature'}</span>
+            <input
+              type="number"
+              value={bulkTemp}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(e) => {
+                const parsed = Number(e.target.value)
+                setBulkTemp(Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0)
+              }}
+              style={bulkInputStyle}
+            />
+          </label>
+          <div style={{ minWidth: 0 }}>
             <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_tokens') ?? 'Max tokens'}</label>
             <input
               type="number"
@@ -2708,7 +2744,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
               style={bulkInputStyle}
             />
           </div>
-          <div style={{ flex: '1 1 45%', minWidth: 0 }}>
+          <div style={{ minWidth: 0 }}>
             <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_turns') ?? 'Max turns'}</label>
             <input
               type="number"
@@ -2720,8 +2756,8 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
               style={bulkInputStyle}
             />
           </div>
-          <div style={{ flex: '1 1 45%', minWidth: 0 }}>
-            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.turn_restarts') ?? 'Продолжать при упоре в лимит ходов'}</label>
+          <div style={{ minWidth: 0 }}>
+            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }} title={t('agents.turn_restarts_hint') ?? 'Если ран завершился только из-за лимита ходов, он автоматически продолжится новым раном с полным бюджетом ходов (в трейсе — run.restarted). 0 = выключено.'}>{t('agents.turn_restarts_short') ?? '× продолжений'}</label>
             <input
               type="number"
               value={bulkTurnRestarts}
