@@ -446,3 +446,35 @@ func TestExploreOrientMergedAreaCountsItemOnce(t *testing.T) {
 		t.Errorf("merged kind = %q, want topic", area.Kind)
 	}
 }
+
+// The same-topic candidate heuristic requires real text overlap: a generic
+// topic word collects unrelated statements (a git-grep note vs a skills
+// registry note share nothing but noise), and those pairs were flooding the
+// contradictions queue. Two meaningful shared tokens keep real divergences.
+func TestExploreCompareCandidateRequiresTextOverlap(t *testing.T) {
+	knowledge := []Knowledge{
+		// Same generic topic, totally unrelated texts: must NOT pair.
+		{ID: "K-git-grep", Proposition: "Локальный git не поддерживает флаг для grep по подпапкам репозитория", State: "proposed", Topics: []string{"tooling"}, Project: "demo", CreatedAt: time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)},
+		{ID: "K-skills-registry", Proposition: "Скиллы размещённые файлами не попадают в реестр скиллов пока не зарегистрированы", State: "invalidated", Topics: []string{"tooling"}, Project: "demo", CreatedAt: time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)},
+		// Same generic topic, genuinely diverging texts: 2+ meaningful shared
+		// tokens (миграции базы, схема) — a real candidate.
+		{ID: "K-mig-note", Proposition: "Миграции базы данных применяются вручную на стенде", State: "proposed", Topics: []string{"tooling"}, Project: "demo", CreatedAt: time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)},
+		{ID: "K-mig-retired", Proposition: "Миграции базы данных запускает отдельный сервис автоматически", State: "invalidated", Topics: []string{"tooling"}, Project: "demo", CreatedAt: time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)},
+	}
+
+	result := ExploreKnowledge(knowledge, ExploreQuery{Operation: ExploreCompare})
+	paired := map[string]bool{}
+	for _, conflict := range result.Conflicts {
+		if conflict.Basis != "candidate:same-topic-different-state" {
+			continue
+		}
+		key := strings.Join(conflict.KnowledgeIDs, "|")
+		paired[key] = true
+		if strings.Contains(key, "K-git-grep") {
+			t.Fatalf("unrelated texts must not pair: %v", conflict.KnowledgeIDs)
+		}
+	}
+	if !paired["K-mig-note|K-mig-retired"] {
+		t.Fatalf("the genuinely diverging pair must be a candidate, got %v", paired)
+	}
+}

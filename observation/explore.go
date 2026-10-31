@@ -951,6 +951,7 @@ func (e exploreEngine) collectConflicts(targets []Knowledge) []ExploreConflict {
 			}
 		}
 	}
+
 	// Candidate conflicts: same topic, diverging states (one side doubted or
 	// retired while the other lives). Heuristic by design and labelled as
 	// such; bounded to adjacent state-divergent pairs per topic.
@@ -984,6 +985,14 @@ func (e exploreEngine) collectConflicts(targets []Knowledge) []ExploreConflict {
 				if left.Proposition == right.Proposition {
 					continue
 				}
+				// A shared topic word alone is not a contradiction signal:
+				// generic topics ("tooling", "testing") collect unrelated
+				// statements from every run. Require real text overlap — two
+				// meaningful tokens beyond the topic word itself — before the
+				// pair is worth a human's queue slot.
+				if contentTokenOverlap(left.Proposition, right.Proposition) < 2 {
+					continue
+				}
 				conflict := ExploreConflict{
 					KnowledgeIDs:       sortedPair(left.ID, right.ID),
 					Basis:              "candidate:same-topic-different-state",
@@ -1002,6 +1011,22 @@ func (e exploreEngine) collectConflicts(targets []Knowledge) []ExploreConflict {
 		return strings.Join(conflicts[i].KnowledgeIDs, "\x00") < strings.Join(conflicts[j].KnowledgeIDs, "\x00")
 	})
 	return conflicts
+}
+
+// contentTokenOverlap counts the meaningful tokens two statements share
+// (stopwords and the topic word itself do not count): the same-topic heuristic
+// needs real text overlap, or generic topics ("tooling", "testing") would
+// pair unrelated statements from every run into the contradictions queue.
+func contentTokenOverlap(left, right string) int {
+	l := contentTokens(left)
+	r := contentTokens(right)
+	n := 0
+	for token := range l {
+		if r[token] {
+			n++
+		}
+	}
+	return n
 }
 
 // stateWeight maps lifecycle states onto a doubt scale: live proposals and
