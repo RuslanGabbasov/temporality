@@ -38,6 +38,7 @@ import HumanForm, { type FormSchema } from './HumanForm'
 import { runStatusLabel } from './eventPresentation'
 import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
 import { useDebouncedValue } from './useDebouncedValue'
+import { useOrgUnits, OrgUnitSelect } from './orgUnits'
 import type { ConsoleState } from './consoleStream'
 
 const KERNEL_API = '/kernel-api'
@@ -295,9 +296,13 @@ export default function AgentRuns({ project }: { project: string }) {
   const [confirmStop, setConfirmStop] = useState('')
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
-  // Filter row (docs/agents.md §runs-list): initiator (name or id) and
-  // status — client-side over the loaded newest-100 window.
-  const [initiatorFilter, setInitiatorFilter] = useState('')
+  // Filter row (docs/agents.md §runs-list): initiator with a directory
+  // suggest (typing filters by substring, picking a suggestion pins the
+  // exact user id), an org-unit of the initiator, and status — all
+  // client-side over the loaded newest-100 window.
+  const [initiatorDraft, setInitiatorDraft] = useState('')
+  const [initiatorID, setInitiatorID] = useState('')
+  const [initiatorUnit, setInitiatorUnit] = useState('')
   const [statusFilter, setStatusFilter] = useState<RunStatus | ''>('')
   // Runs with an open human question (human_request entity, §28) — marks the
   // asking run in the list so the inbox is navigable. Older kernels without
@@ -379,14 +384,34 @@ export default function AgentRuns({ project }: { project: string }) {
     return map
   }, [opsByRun])
   // Run initiators: rows carry the actor id from the event context; the
-  // directory turns it into a name. Failures leave ids — still traceable.
-  const [users, setUsers] = useState<Map<string, string>>(new Map())
+  // directory turns it into a name (and carries the org unit for the filter).
+  // Failures leave ids — still traceable.
+  const [users, setUsers] = useState<Map<string, { name: string; OrgUnitID: string }>>(new Map())
   useEffect(() => {
     workspaceApi.listUsers().then((data) => {
-      setUsers(new Map((data.users ?? []).map((u) => [u.id, u.name])))
+      setUsers(new Map((data.users ?? []).map((u) => [u.id, { name: u.name, OrgUnitID: u.org_unit_id ?? '' }])))
     }).catch(() => { /* ids stay */ })
   }, [])
-  const userNameOf = useCallback((id: string | undefined) => (id ? (users.get(id) ?? id) : ''), [users])
+  const userNameOf = useCallback((id: string | undefined) => (id ? (users.get(id)?.name ?? id) : ''), [users])
+  const org = useOrgUnits()
+
+  // Initiator suggest: directory users matching the typed fragment, limited
+  // to those who actually appear as actors in the loaded window (the filter
+  // works over this list; suggesting everyone would offer empty results).
+  const initiatorSuggest = useMemo(() => {
+    const needle = initiatorDraft.trim().toLowerCase()
+    if (!needle || initiatorID) return []
+    const actors = new Set(rows.map((row) => row.actor ?? '').filter(Boolean))
+    const out: Array<{ id: string; name: string; OrgUnitID: string }> = []
+    for (const [id, info] of users) {
+      if (!actors.has(id)) continue
+      if (info.name.toLowerCase().includes(needle) || id.toLowerCase().includes(needle)) {
+        out.push({ id, name: info.name, OrgUnitID: info.OrgUnitID })
+      }
+      if (out.length >= 5) break
+    }
+    return out
+  }, [initiatorDraft, initiatorID, rows, users])
 
   // A run row stays visible when it matches the filter or one of its delegated
   // children does, so searching for a child keeps its parent chain.
@@ -399,12 +424,15 @@ export default function AgentRuns({ project }: { project: string }) {
       childrenOf.set(row.parent, list)
     }
     const selfMatch = new Map<string, boolean>()
-    const initiator = initiatorFilter.trim().toLowerCase()
+    const initiator = initiatorDraft.trim().toLowerCase()
     for (const row of rows) {
       const actorName = userNameOf(row.actor)
-      const matchesInitiator = !initiator || actorName.toLowerCase().includes(initiator) || (row.actor ?? '').toLowerCase().includes(initiator)
+      const matchesInitiator = initiatorID
+        ? row.actor === initiatorID
+        : !initiator || actorName.toLowerCase().includes(initiator) || (row.actor ?? '').toLowerCase().includes(initiator)
+      const matchesUnit = !initiatorUnit || users.get(row.actor ?? '')?.OrgUnitID === initiatorUnit
       const matchesStatus = !statusFilter || row.status === statusFilter
-      selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && matchesInitiator && matchesStatus && (!opsOnly || opRunIds.ids.has(row.id)))
+      selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && matchesInitiator && matchesUnit && matchesStatus && (!opsOnly || opRunIds.ids.has(row.id)))
     }
     const subtreeMatch = (id: string): boolean => {
       const match = selfMatch.get(id) ?? false
@@ -412,7 +440,7 @@ export default function AgentRuns({ project }: { project: string }) {
       return (childrenOf.get(id) ?? []).some((child) => subtreeMatch(child))
     }
     return rows.filter((row) => subtreeMatch(row.id))
-  }, [rows, filter, initiatorFilter, statusFilter, opsOnly, opRunIds, userNameOf])
+  }, [rows, filter, initiatorDraft, initiatorID, initiatorUnit, statusFilter, opsOnly, opRunIds, userNameOf, users])
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
@@ -1005,16 +1033,36 @@ export default function AgentRuns({ project }: { project: string }) {
                 </div>
               </div>
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
-              {/* Filter row: initiator + status (docs/agents.md §runs-list).
-                  Works over the loaded newest-100 window client-side. */}
-              <div style={{ display: 'flex', gap: '0.4rem', margin: '0.35rem 0 0.1rem', alignItems: 'center' }}>
-                <input
-                  value={initiatorFilter}
-                  onChange={(e) => setInitiatorFilter(e.target.value)}
-                  placeholder={t('runs.filter_initiator') ?? 'Инициатор…'}
-                  title={t('runs.filter_initiator_hint') ?? 'Имя или id инициатора (кто запустил ран)'}
-                  style={{ flex: 1, minWidth: 0, background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.55rem', outline: 'none' }}
-                />
+              {/* Filter row: initiator (directory suggest pins the exact user;
+                  free text substring-matches), the initiator's org unit, and
+                  status (docs/agents.md §runs-list) — client-side over the
+                  loaded newest-100 window. */}
+              <div style={{ display: 'flex', gap: '0.4rem', margin: '0.35rem 0 0.1rem', alignItems: 'center', position: 'relative', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: '10rem' }}>
+                  <input
+                    value={initiatorDraft}
+                    onChange={(e) => { setInitiatorDraft(e.target.value); setInitiatorID('') }}
+                    placeholder={t('runs.filter_initiator') ?? 'Инициатор…'}
+                    title={t('runs.filter_initiator_hint') ?? 'Имя или id инициатора (кто запустил ран)'}
+                    style={{ width: '100%', background: 'var(--tm-bg)', border: `1px solid ${initiatorID ? 'var(--tm-teal)' : 'var(--tm-border)'}`, borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.35rem 0.55rem', outline: 'none' }}
+                  />
+                  {initiatorSuggest.length > 0 && (
+                    <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', zIndex: 3, overflow: 'hidden' }}>
+                      {initiatorSuggest.map((person) => (
+                        <button
+                          key={person.id}
+                          type="button"
+                          onClick={() => { setInitiatorDraft(person.name); setInitiatorID(person.id) }}
+                          style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', padding: '0.35rem 0.6rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem', textAlign: 'left' }}
+                        >
+                          👤 {person.name}
+                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', marginLeft: 'auto' }}>{org.nameOf?.(person.OrgUnitID) ?? person.OrgUnitID ?? ''}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <OrgUnitSelect id="runs-initiator-unit" size="sm" hideLabel label={t('runs.filter_unit') ?? 'Орг-единица инициатора'} org={org} value={initiatorUnit} onChange={setInitiatorUnit} />
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as RunStatus | '')}
@@ -1027,9 +1075,9 @@ export default function AgentRuns({ project }: { project: string }) {
                   <option value="failed">{t('status.failed') ?? 'failed'}</option>
                   <option value="cancelled">{t('status.cancelled') ?? 'cancelled'}</option>
                 </select>
-                {(initiatorFilter || statusFilter) && (
+                {(initiatorDraft || initiatorID || initiatorUnit || statusFilter) && (
                   <button
-                    onClick={() => { setInitiatorFilter(''); setStatusFilter('') }}
+                    onClick={() => { setInitiatorDraft(''); setInitiatorID(''); setInitiatorUnit(''); setStatusFilter('') }}
                   title={t('common.clear_filters') ?? 'Сбросить фильтры'}
                     style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.25rem 0.4rem', lineHeight: 1 }}
                   >✕</button>
