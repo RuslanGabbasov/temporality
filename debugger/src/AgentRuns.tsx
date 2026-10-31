@@ -675,9 +675,15 @@ export default function AgentRuns({ project }: { project: string }) {
       setRows(allRows)
       // Open human questions mark the asking runs (best-effort — the badge
       // in the header falls back to events when the endpoint is missing).
+      // ONLY workflow-backed rows qualify: the human_request table also holds
+      // channel notices for artifact review rounds (id artifact-review/…,
+      // no project, no run) — they live in the artifacts/channels surfaces,
+      // and marking them here produced phantom «asks you» badges.
       try {
         const open = await workspaceApi.listHumanRequests({ project: scope, onlyOpen: true })
-        setQuestionRuns(new Set((open.requests ?? []).map((request) => request.run_id)))
+        setQuestionRuns(new Set((open.requests ?? [])
+          .map((request) => request.run_id)
+          .filter((id) => id && !id.startsWith('artifact-review/'))))
       } catch { setQuestionRuns(new Set()) }
       const rootRuns = allRows.filter((row) => row.depth === 0)
       // Only auto-select on initial load when nothing is selected
