@@ -775,24 +775,14 @@ export default function Artifacts() {
                     </span>
                   ))}
                   {operator && (
-                    <input
-                      id="artifact-tag-editor"
-                      value={tagDraft}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTagDraft(e.target.value)}
-                      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                        if (e.key === 'Enter' && tagDraft.trim()) {
-                          e.preventDefault()
-                          void saveTags(selected, [...(selected.tags ?? []), tagDraft])
-                        }
-                      }}
-                      list="artifact-tag-options"
-                      placeholder={t('artifacts.tag_add') ?? '+ tag'}
-                      style={{ border: '1px dashed var(--tm-border)', borderRadius: 999, background: 'transparent', color: 'var(--tm-text-2)', fontSize: '0.72rem', padding: '0.1rem 0.45rem', width: '7rem', outline: 'none' }}
+                    <TagEditorInput
+                      draft={tagDraft}
+                      onDraft={setTagDraft}
+                      onCommit={(tag) => void saveTags(selected, [...(selected.tags ?? []), tag])}
+                      options={tagOptions}
+                      exclude={selected.tags ?? []}
                     />
                   )}
-                  <datalist id="artifact-tag-options">
-                    {tagOptions.map(({ tag }) => <option key={tag} value={tag} />)}
-                  </datalist>
                 </div>
                 {/* Everyone who put a hand on this: creator, the run's agent,
                     editors, reviewers — the author filter searches the same
@@ -1179,5 +1169,80 @@ function VersionHistory({ artifactID }: { artifactID: string }) {
         </div>
       )}
     </div>
+  )
+}
+
+/** The tag editor's suggest field: a styled dropdown instead of the native
+ *  datalist (browser chrome looked alien and only prefix-matched). Focus
+ *  shows the most-used tags first — the «last used on click» affordance;
+ *  typing narrows by substring, sorted by usage count. Enter commits the
+ *  typed tag, a click commits the suggestion; already-present tags never
+ *  suggest. */
+function TagEditorInput({ draft, onDraft, onCommit, options, exclude }: {
+  draft: string
+  onDraft: (value: string) => void
+  onCommit: (tag: string) => void
+  options: Array<{ tag: string; count: number }>
+  exclude: string[]
+}) {
+  const [focused, setFocused] = useState(false)
+  const [highlighted, setHighlighted] = useState(-1)
+  const suggestions = useMemo(() => {
+    const needle = draft.trim().toLowerCase()
+    return options
+      .filter(({ tag }) => !exclude.includes(tag) && (!needle || tag.toLowerCase().includes(needle)))
+      .slice(0, 8)
+  }, [options, exclude, draft])
+  const commit = (tag: string) => {
+    onDraft('')
+    setHighlighted(-1)
+    setFocused(false)
+    onCommit(tag)
+  }
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', minWidth: 0 }}>
+      <input
+        value={draft}
+        onChange={(e) => { onDraft(e.target.value); setHighlighted(-1); setFocused(true) }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            const pick = highlighted >= 0 ? suggestions[highlighted]?.tag : draft.trim()
+            if (pick) commit(pick)
+          } else if (e.key === 'Escape') {
+            setFocused(false)
+            setHighlighted(-1)
+          } else if (e.key === 'ArrowDown' && suggestions.length > 0) {
+            e.preventDefault()
+            setFocused(true)
+            setHighlighted((v) => Math.min(v + 1, suggestions.length - 1))
+          } else if (e.key === 'ArrowUp' && suggestions.length > 0) {
+            e.preventDefault()
+            setHighlighted((v) => Math.max(v - 1, -1))
+          }
+        }}
+        list={undefined}
+        placeholder="+ tag"
+        style={{ border: '1px dashed var(--tm-border)', borderRadius: 999, background: 'transparent', color: 'var(--tm-text-2)', fontSize: '0.72rem', padding: '0.1rem 0.45rem', width: '7rem', outline: 'none' }}
+      />
+      {focused && suggestions.length > 0 && (
+        <span style={{ position: 'absolute', left: 0, top: '100%', marginTop: '0.2rem', background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '8px', zIndex: 5, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: '10rem', boxShadow: '0 4px 16px rgba(0,0,0,0.25)' }}>
+          {suggestions.map(({ tag, count }, index) => (
+            <button
+              key={tag}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); commit(tag) }}
+              onMouseEnter={() => setHighlighted(index)}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', width: '100%', padding: '0.3rem 0.6rem', background: index === highlighted ? 'var(--tm-raised)' : 'none', border: 'none', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.72rem', textAlign: 'left' }}
+            >
+              <span style={{ color: 'var(--tm-teal)' }}>#{tag}</span>
+              <span style={{ color: 'var(--tm-text-3)', fontSize: '0.65rem', marginLeft: 'auto' }}>×{count}</span>
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
   )
 }
