@@ -68,6 +68,10 @@ export function ActorSuggestFilter({ pick, onPick, onDraftChange, options, place
                 setDraft('')
                 setFocused(false)
                 onPick(candidate)
+                // The pick replaces the free-text query (artifacts: the picked
+                // author no longer searches titles; runs: the picked initiator
+                // no longer matches titles either) — the echo clears too.
+                onDraftChange?.('')
               }}
               style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', padding: '0.35rem 0.6rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem', textAlign: 'left' }}
             >

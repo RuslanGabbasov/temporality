@@ -27,7 +27,7 @@ import {
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Time, Play } from '@carbon/icons-react'
-import ListFilter, { matchesFilter } from './ListFilter'
+import { matchesFilter } from './ListFilter'
 import {
   runCost, taskCost, type RunCost, type TaskCost,
   operations as fetchOperations, reconcile, canReconcile, whoami,
@@ -302,11 +302,13 @@ export default function AgentRuns({ project }: { project: string }) {
   // over directory users AND org units (typing matches both; picking a user
   // pins the exact actor id, picking a unit matches the actor's unit), plus
   // status — all client-side over the loaded newest-100 window.
-  const [initiatorDraft, setInitiatorDraft] = useState('')
   const [initiatorPick, setInitiatorPick] = useState<{ kind: 'user' | 'unit'; id: string; name: string } | null>(null)
   // 'waiting' is a virtual status: a live run paused on a human answer
   // (questionRuns) — not a journal status.
   const [statusFilter, setStatusFilter] = useState<RunStatus | 'waiting' | ''>('')
+  // Age preset: '' (all) | 'today' | '3d' | 'week' — matches the run's own
+  // start time (RunRow.at), client-side over the loaded window.
+  const [ageFilter, setAgeFilter] = useState<'' | 'today' | '3d' | 'week'>('')
   // Runs with an open human question (human_request entity, §28) — marks the
   // asking run in the list so the inbox is navigable. Older kernels without
   // the endpoint simply show no markers.
@@ -436,16 +438,21 @@ export default function AgentRuns({ project }: { project: string }) {
       childrenOf.set(row.parent, list)
     }
     const selfMatch = new Map<string, boolean>()
-    const initiator = initiatorDraft.trim().toLowerCase()
+    const ageBoundary = ageFilter
+      ? new Date(Date.now() - (ageFilter === 'today' ? 0 : ageFilter === '3d' ? 2 : 6) * 86400000)
+      : null
+    if (ageBoundary) ageBoundary.setHours(0, 0, 0, 0)
     for (const row of rows) {
-      const actorName = userNameOf(row.actor)
-      const matchesInitiator = initiatorPick
-        ? (initiatorPick.kind === 'user' ? row.actor === initiatorPick.id : users.get(row.actor ?? '')?.OrgUnitID === initiatorPick.id)
-        : !initiator || actorName.toLowerCase().includes(initiator) || (row.actor ?? '').toLowerCase().includes(initiator)
+      // A pinned pick decides the initiator match (exact actor id / org unit);
+      // free text now searches titles via `filter` — the initiator dimension
+      // is pick-only, like the artifacts author filter.
+      const matchesInitiator = !initiatorPick
+        || (initiatorPick.kind === 'user' ? row.actor === initiatorPick.id : users.get(row.actor ?? '')?.OrgUnitID === initiatorPick.id)
       const matchesStatus = !statusFilter || (statusFilter === 'waiting'
       				? questionRuns.has(row.id) && row.status === 'running'
       				: row.status === statusFilter)
-      selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && matchesInitiator && matchesStatus && (!opsOnly || opRunIds.ids.has(row.id)))
+      const matchesAge = !ageBoundary || !row.at || new Date(row.at) >= ageBoundary
+      selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && matchesInitiator && matchesStatus && matchesAge && (!opsOnly || opRunIds.ids.has(row.id)))
     }
     const subtreeMatch = (id: string): boolean => {
       const match = selfMatch.get(id) ?? false
@@ -453,7 +460,7 @@ export default function AgentRuns({ project }: { project: string }) {
       return (childrenOf.get(id) ?? []).some((child) => subtreeMatch(child))
     }
     return rows.filter((row) => subtreeMatch(row.id))
-  }, [rows, filter, initiatorDraft, initiatorPick, statusFilter, questionRuns, opsOnly, opRunIds, userNameOf, users, org.units])
+  }, [rows, filter, initiatorPick, statusFilter, ageFilter, questionRuns, opsOnly, opRunIds, userNameOf, users, org.units])
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
@@ -1058,30 +1065,29 @@ export default function AgentRuns({ project }: { project: string }) {
                   <button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
                 </div>
               </div>
-              <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
-              {/* Filter row: initiator (the universal person-or-unit suggest —
-                  ActorSuggestFilter: people from the loaded window's actors,
-                  units from their directory entries; a pinned user matches the
-                  exact actor id, a pinned unit matches the actor's org unit)
-                  and status — ONE line, no wrap (docs/agents.md §runs-list).
-                  Client-side over the loaded newest-100 window. */}
-              <div style={{ display: 'flex', gap: '0.35rem', margin: '0.35rem 0 0.1rem', alignItems: 'center', position: 'relative', flexWrap: 'nowrap' }}>
-                <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-                  <ActorSuggestFilter
-                    pick={initiatorPick}
-                    onPick={(value) => { setInitiatorPick(value); if (!value) setInitiatorDraft('') }}
-                    onDraftChange={setInitiatorDraft}
-                    options={(needle) => initiatorSuggest(needle)}
-                    placeholder={t('runs.filter_initiator') ?? 'Инициатор…'}
-                    title={t('runs.filter_initiator_hint') ?? 'Имя или id инициатора (кто запустил ран)'}
-                    kindLabels={{ user: t('runs.filter_kind_user') ?? 'сотрудник', unit: t('runs.filter_kind_unit') ?? 'подразделение' }}
-                  />
-                </div>
+              {/* ONE unified filter field, the artifacts pattern: the query
+                  searches titles/ids AND offers the initiators (people, org
+                  units) to pin; below it — two combos, statuses and age. The
+                  old standalone ListFilter + initiator field were two controls
+                  for one job. */}
+              <div style={{ position: 'relative' }}>
+                <ActorSuggestFilter
+                  pick={initiatorPick}
+                  onPick={setInitiatorPick}
+                  onDraftChange={setFilter}
+                  options={(needle) => initiatorSuggest(needle)}
+                  placeholder={t('runs.filter_unified') ?? 'Поиск по названию, id или инициатору…'}
+                  title={t('runs.filter_unified_hint') ?? 'Текст ищет по названию и id рана; если набранное совпадает с человеком или подразделением — можно закрепить точный фильтр по инициатору'}
+                  kindLabels={{ user: t('runs.filter_kind_user') ?? 'сотрудник', unit: t('runs.filter_kind_unit') ?? 'подразделение' }}
+                  inputStyle={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '0.35rem', margin: '0.35rem 0 0.1rem', alignItems: 'center', flexWrap: 'nowrap' }}>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as RunStatus | '')}
                   title={t('runs.filter_status') ?? 'Статус'}
-                  style={{ background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.72rem', padding: '0.35rem 0.25rem', outline: 'none', flexShrink: 0, maxWidth: '9.5rem' }}
+                  style={{ background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.72rem', padding: '0.35rem 0.25rem', outline: 'none', flex: 1, minWidth: 0 }}
                 >
                   <option value="">{t('runs.filter_status_all') ?? 'Все статусы'}</option>
                   <option value="running">{t('status.running') ?? 'running'}</option>
@@ -1090,11 +1096,22 @@ export default function AgentRuns({ project }: { project: string }) {
                   <option value="failed">{t('status.failed') ?? 'failed'}</option>
                   <option value="cancelled">{t('status.cancelled') ?? 'cancelled'}</option>
                 </select>
-                {(initiatorDraft || initiatorPick || statusFilter) && (
+                <select
+                  value={ageFilter}
+                  onChange={(e) => setAgeFilter(e.target.value as '' | 'today' | '3d' | 'week')}
+                  title={t('runs.filter_age') ?? 'Время запуска'}
+                  style={{ background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '6px', color: 'var(--tm-text)', fontSize: '0.72rem', padding: '0.35rem 0.25rem', outline: 'none', flex: 1, minWidth: 0 }}
+                >
+                  <option value="">{t('runs.filter_age_all') ?? 'За всё время'}</option>
+                  <option value="today">{t('runs.filter_age_today') ?? 'За сегодня'}</option>
+                  <option value="3d">{t('runs.filter_age_3d') ?? 'За 3 дня'}</option>
+                  <option value="week">{t('runs.filter_age_week') ?? 'За неделю'}</option>
+                </select>
+                {(filter || initiatorPick || statusFilter || ageFilter) && (
                   <button
-                    onClick={() => { setInitiatorDraft(''); setInitiatorPick(null); setStatusFilter('') }}
-                  title={t('common.clear_filters') ?? 'Сбросить фильтры'}
-                    style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.25rem 0.4rem', lineHeight: 1 }}
+                    onClick={() => { setInitiatorPick(null); setStatusFilter(''); setAgeFilter(''); setFilter('') }}
+                    title={t('common.clear_filters') ?? 'Сбросить фильтры'}
+                    style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.25rem 0.4rem', lineHeight: 1, flexShrink: 0 }}
                   >✕</button>
                 )}
               </div>
