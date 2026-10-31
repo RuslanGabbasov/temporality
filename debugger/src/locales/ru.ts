@@ -1370,6 +1370,7 @@ export const ru: Record<string, string> = {
     'skills.editor.evaluation': 'Набор проверок',
     'skills.editor.artifacts': 'Артефакты',
     'skills.editor.artifacts_hint': 'Документы, на которые навык ссылается без включения в промпт: агент подгружает их через artifact_read при совпадении задачи.',
+    'skills.editor.artifacts_count': 'Привязано: {{count}}',
     'skills.editor.artifacts_search': 'Поиск по реестру',
     'skills.editor.artifacts_search_placeholder': 'Начните вводить название…',
     'skills.editor.artifacts_none': 'В реестре ничего не нашлось.',

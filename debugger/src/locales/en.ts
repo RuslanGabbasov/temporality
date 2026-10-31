@@ -1370,6 +1370,7 @@ export const en: Record<string, string> = {
     'skills.editor.evaluation': 'Evaluation suite',
     'skills.editor.artifacts': 'Artifacts',
     'skills.editor.artifacts_hint': 'Documents the skill points at without inlining: the agent loads them with artifact_read when the task matches.',
+    'skills.editor.artifacts_count': 'Linked: {{count}}',
     'skills.editor.artifacts_search': 'Search the registry',
     'skills.editor.artifacts_search_placeholder': 'Start typing a title…',
     'skills.editor.artifacts_none': 'Nothing in the registry matches.',

@@ -1126,7 +1126,7 @@ export default function Skills() {
 
       {/* Create/Edit form (prefilled by the agent after the wizard) */}
       {showForm && (
-        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelClassName="tabbed" panelStyle={{ width: '760px', maxHeight: '85vh', minHeight: '480px' }}>
+        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelClassName="tabbed" panelStyle={{ width: 'min(960px, calc(100vw - 2rem))', maxHeight: '85vh', minHeight: '480px' }}>
             <SkillFormFields
               form={form}
               setForm={setForm}
