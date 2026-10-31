@@ -83,3 +83,37 @@ func TestArtifactUpdateApprovedWithoutFlagExplainsThePath(t *testing.T) {
 		t.Fatalf("the 409 must name the controlled path, got %q", result.Content)
 	}
 }
+
+// The failed-call routing map (docs/diagnostics.md): which providers were
+// visible, which served the call, and where its credential was supposed to
+// come from. This is the archive the «запрос → ответ» dialog renders.
+func TestRoutingDiagnosticsMapsProvidersAndKeySources(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/workspace/providers" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"providers": []map[string]any{
+			{"id": "prov-a", "name": "GPUStack", "base_url": "https://api.ai.gnivc.ru/v1-openai", "enabled": true, "api_key_ref": "GPUSTACK_API_KEY", "models": []string{"glm-4.5"}},
+			{"id": "prov-b", "name": "Keyless", "base_url": "http://localhost:11434/v1", "enabled": true, "api_key_ref": "", "models": []string{"llama3"}},
+		}})
+	}))
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	diag := activities.routingDiagnostics(context.Background(), "demo", "glm-4.5", "prov-a")
+	rows, _ := diag["providers"].([]providerRow)
+	if len(rows) != 2 {
+		t.Fatalf("providers = %d, want 2", len(rows))
+	}
+	if !rows[0].HasModel || !rows[0].Enabled || rows[0].KeyRef != "env variable: GPUSTACK_API_KEY" {
+		t.Fatalf("matched provider row = %+v", rows[0])
+	}
+	if rows[1].HasModel || !strings.HasPrefix(rows[1].KeyRef, "none") {
+		t.Fatalf("keyless row = %+v", rows[1])
+	}
+	routed, _ := diag["routed_provider"].(map[string]any)
+	if routed == nil || routed["name"] != "GPUStack" || routed["base_url"] != "https://api.ai.gnivc.ru/v1-openai" {
+		t.Fatalf("routed provider must be enriched, got %v", routed)
+	}
+}

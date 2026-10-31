@@ -23,6 +23,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
+	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 )
@@ -852,6 +853,11 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 // shows, captured from the call that actually failed. Also evicts the cached
 // routing on auth rejections: a rotated key must re-resolve on the retry
 // ladder instead of serving the stale credential until the TTL runs out.
+// routeFailure journals a failed model call together with the routing
+// decision and a full provider map (docs/diagnostics.md): the operator's
+// «запрос → ответ» dialog reads this to answer WHY the call went where it
+// went — wrong provider, empty credential, no match, disabled provider —
+// without SSH-ing into the box.
 func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, routeProvider, routeProviderName string, attempt int, err error) error {
 	if err == nil {
 		return nil
@@ -879,6 +885,12 @@ func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, rou
 			// event_id with a fresh OccurredAt — the journal reads that as «same id,
 			// different content» and poisons the outbox queue behind it.
 			eventID := fmt.Sprintf("%s/model-call-failed/%d/a%d/turn-%d/%d", eventScope(a.SourceID, request.Project, request.RunID), code, attempt, request.Turn, now.UnixNano())
+			// The routing map travels WITH the failed call: the operator's
+			// dialog shows the whole matching story (visible providers, which
+			// one matched, where the credential came from) next to the
+			// request/response pair. Best-effort — the report above is the
+			// primary content.
+			routing := a.routingDiagnostics(ctx, request.Project, request.Model, routeProvider)
 			event := observation.Event{
 				Schema: observation.Schema, EventID: eventID, OccurredAt: now,
 				Source:  observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
@@ -887,6 +899,7 @@ func (a *Activities) routeFailure(ctx context.Context, request ModelRequest, rou
 				Data: map[string]any{
 					"turn": request.Turn, "model": request.Model, "route": route,
 					"status": code, "request": report, "error": boundedAttemptError(err),
+					"routing": routing,
 				},
 			}
 			if err := event.Validate(); err == nil {
@@ -904,6 +917,80 @@ func routeLabel(id, name string) string {
 		return name
 	}
 	return id
+}
+
+// credentialSource classifies a provider's api_key_ref for diagnostics: the
+// operator must see WHERE the bearer key was supposed to come from — a ref
+// naming a missing env var or an empty ref (keyless) explains a bare
+// «Authorization: Bearer <none>» faster than any log diving.
+func credentialSource(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "none (keyless provider — empty bearer)"
+	}
+	if strings.Contains(ref, "secret:") || strings.Contains(ref, "#") {
+		return "builtin secret: " + ref
+	}
+	return "env variable: " + ref
+}
+
+// providerRow is one row of the routing diagnostics map (test-visible).
+type providerRow struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	BaseURL  string   `json:"base_url"`
+	Enabled  bool     `json:"enabled"`
+	KeyRef   string   `json:"key_source"`
+	HasModel bool     `json:"serves_model"`
+	Models   []string `json:"models"`
+}
+
+// routingDiagnostics snapshots the provider map and the model match for one
+// failed call. Best-effort diagnostics: any fetch failure degrades to a
+// stub note instead of failing the (already failing) call path. Tokens do
+// not appear — provider key refs are names, and the call report already
+// carries the masked bearer of the actual attempt.
+func (a *Activities) routingDiagnostics(ctx context.Context, project, model, routedProvider string) map[string]any {
+	diag := map[string]any{
+		"project": project,
+		"model":   model,
+		"routed_provider": map[string]any{
+			"id":   routedProvider,
+			"name": "",
+		},
+	}
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, a.WorkspaceURL+"/v1/workspace/providers", nil)
+	if err != nil || status >= 400 {
+		diag["providers_note"] = fmt.Sprintf("provider list unavailable (HTTP %d): %v", status, err)
+		return diag
+	}
+	var page struct {
+		Providers []workspace.Provider `json:"providers"`
+	}
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		diag["providers_note"] = "provider list decode failed: " + err.Error()
+		return diag
+	}
+	rows := make([]providerRow, 0, len(page.Providers))
+	for _, p := range page.Providers {
+		serves := false
+		for _, m := range p.Models {
+			if m == model {
+				serves = true
+				break
+			}
+		}
+		rows = append(rows, providerRow{
+			ID: p.ID, Name: p.Name, BaseURL: p.BaseURL, Enabled: p.Enabled,
+			KeyRef: credentialSource(p.APIKeyRef), HasModel: serves,
+			Models: p.Models,
+		})
+		if p.ID == routedProvider {
+			diag["routed_provider"] = map[string]any{"id": p.ID, "name": p.Name, "base_url": p.BaseURL, "enabled": p.Enabled, "key_source": credentialSource(p.APIKeyRef)}
+		}
+	}
+	diag["providers"] = rows
+	return diag
 }
 
 // boundedAttemptError clips a transport error for the journal marker; the

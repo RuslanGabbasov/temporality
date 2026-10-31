@@ -1784,6 +1784,7 @@ export default function AgentRuns({ project }: { project: string }) {
 export function CallReportView({ event, t }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string }) {
   const data = (event.data ?? {}) as Record<string, unknown>
   const report = (data.request ?? {}) as Record<string, unknown>
+  const routing = (data.routing ?? null) as Record<string, unknown> | null
   const requestHeaders = (report.request_headers ?? {}) as Record<string, string>
   const responseHeaders = (report.response_headers ?? {}) as Record<string, string>
   const route = String(data.route ?? '')
@@ -1801,6 +1802,11 @@ export function CallReportView({ event, t }: { event: ObservationEvent; t: (key:
     String(report.response_body ?? ''),
   ].join('\n')
   const pre = { background: 'var(--tm-raised)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.75rem', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: '0.25rem 0 0.75rem' } as const
+  // The routing map: which providers were visible, which one served, where
+  // its credential was supposed to come from. The provider row the call
+  // actually took is highlighted; key sources name env vars / secrets.
+  const providers = (Array.isArray(routing?.providers) ? routing!.providers : []) as Array<Record<string, unknown>>
+  const routedProvider = (routing?.routed_provider ?? null) as Record<string, unknown> | null
   return (
     <>
       <h3 style={{ margin: '0 0 0.25rem', fontSize: '1rem' }}>{t('runs.call_report_title') ?? 'Отклонённый вызов провайдера'}</h3>
@@ -1808,9 +1814,48 @@ export function CallReportView({ event, t }: { event: ObservationEvent; t: (key:
         {route && <Tag type={route.startsWith('env') ? 'red' : 'blue'} size="sm">{t('runs.call_report_route') ?? 'Маршрут'}: {route}</Tag>}
         {model && <Tag type="gray" size="sm">{t('runs.model', { name: model })}</Tag>}
       </div>
-      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
-        {t('runs.call_report_hint') ?? 'Тот же формат, что у проверки генерации: куда и с каким токеном (замаскирован) стучался вызов. Красный маршрут «env fallback» значит, что модель агента не заявлена ни в одном включённом провайдере.'}
-      </p>
+      {providers.length > 0 && (
+        <>
+          <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.5rem 0 0.15rem' }}>{t('runs.call_report_routing') ?? 'Маршрутизация и провайдеры'}</h5>
+          {routedProvider && (
+            <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', margin: '0.15rem 0 0.4rem' }}>
+              {t('runs.call_report_routed_summary', {
+                provider: String(routedProvider.name || routedProvider.id || '—'),
+                base: String(routedProvider.base_url ?? '—'),
+                key: String(routedProvider.key_source ?? '—'),
+              }) ?? `Вызов ушёл к «${String(routedProvider.name || routedProvider.id)}» (${String(routedProvider.base_url ?? '')}), ключ: ${String(routedProvider.key_source ?? '')}`}
+            </p>
+          )}
+          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '0.6rem', fontSize: '0.74rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.7fr 1.6fr 1.4fr', gap: '0.4rem', padding: '0.3rem 0.5rem', background: 'var(--tm-raised)', color: 'var(--tm-text-3)' }}>
+              <span>{t('providers.col_provider') ?? 'Provider'}</span>
+              <span>{t('providers.col_enabled') ?? 'Enabled'}</span>
+              <span>{t('providers.col_base_url') ?? 'Base URL'}</span>
+              <span>{t('providers.col_models') ?? 'Models'}</span>
+            </div>
+            {providers.map((p, i) => {
+              const isRouted = String(p.id ?? '') === String(routedProvider?.id ?? '')
+              const models = Array.isArray(p.models) ? (p.models as string[]).join(', ') : ''
+              return (
+                <div key={String(p.id ?? i)} style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.7fr 1.6fr 1.4fr', gap: '0.4rem', padding: '0.3rem 0.5rem', borderTop: '1px solid var(--tm-border)', background: isRouted ? 'var(--tm-elevated)' : 'transparent', alignItems: 'baseline' }}>
+                  <span style={{ fontWeight: isRouted ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={String(p.id ?? '')}>
+                    {isRouted && '➜ '}{String(p.name || p.id || '—')}
+                    {String(p.key_source ?? '').startsWith('none') && <Tag type="warm-gray" size="sm" style={{ marginLeft: '0.3rem' }} title={String(p.key_source)}>{t('providers.keyless') ?? 'без ключа'}</Tag>}
+                  </span>
+                  <span style={{ color: p.enabled ? 'var(--tm-text-2)' : 'var(--tm-danger)' }}>{p.enabled ? '✓' : '✗'}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={String(p.base_url ?? '')}>{String(p.base_url ?? '—')}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: p.serves_model ? 'var(--tm-teal)' : 'var(--tm-text-3)' }} title={models}>
+                    {p.serves_model ? '◉ ' : ''}{models || '—'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.6rem' }}>
+            {t('runs.call_report_routing_hint') ?? '◉ — провайдер, декларирующий модель вызова. «без ключа» = api_key_ref пуст: уйдёт пустой Bearer. Ключ из env-переменной берётся из окружения контейнера kernel.'}
+          </p>
+        </>
+      )}
       <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.25rem 0' }}>{t('providers.test_request') ?? 'Request'}</h5>
       <pre style={pre}>{requestText}</pre>
       <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.25rem 0' }}>{t('providers.test_response') ?? 'Response'}</h5>
