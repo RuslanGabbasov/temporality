@@ -695,6 +695,13 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			// chose this provider/model pair.
 			pinnedConfig, pName, perr := a.modelConfigForPinned(ctx, request.Project, request.ProviderID, request.Model)
 			if perr != nil {
+				// Nothing was sent — there is no request/response pair, but the
+				// ROUTING story is exactly what the operator needs (why did the
+				// pinned provider not serve this model?). Journal the failed
+				// call with the routing map so the «запрос → ответ» button
+				// appears for resolution failures too, not only for provider
+				// HTTP rejections.
+				a.journalRoutingFailure(ctx, request, attempt, activityID, routeProviderName, perr)
 				return llm.Completion{}, perr
 			}
 			client = llm.New(pinnedConfig)
@@ -933,6 +940,40 @@ func routeLabel(id, name string) string {
 		return name
 	}
 	return id
+}
+
+// journalRoutingFailure emits model.call_failed for a PINNED-provider
+// resolution failure (unknown provider, model not declared, provider
+// disabled, routing transport error): the HTTP call never happened, so there
+// is no request/response pair — but the routing map (visible providers, who
+// serves the model, where keys come from) is the diagnosis the operator
+// needs, and the «запрос → ответ» button reads this event. Best-effort: the
+// returned error is the primary signal.
+func (a *Activities) journalRoutingFailure(ctx context.Context, request ModelRequest, attempt int, activityID, providerName string, cause error) {
+	if a.Events == nil || request.RunID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	eventID := fmt.Sprintf("%s/model-routing-failed/%s/a%d/turn-%d/%d", eventScope(a.SourceID, request.Project, request.RunID), activityID, attempt, request.Turn, now.UnixNano())
+	if activityID == "" {
+		eventID = fmt.Sprintf("%s/model-routing-failed/a%d/turn-%d/%d", eventScope(a.SourceID, request.Project, request.RunID), attempt, request.Turn, now.UnixNano())
+	}
+	event := observation.Event{
+		Schema: observation.Schema, EventID: eventID, OccurredAt: now,
+		Source:  observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
+		Context: observation.Context{Project: request.Project, Run: request.RunID, Actor: observation.Actor{ID: "system", Type: "agent"}},
+		Type:    "model.call_failed",
+		Data: map[string]any{
+			"turn": request.Turn, "model": request.Model,
+			"route":   "provider " + routeLabel(request.ProviderID, providerName),
+			"status":  0,
+			"error":   boundedAttemptError(cause),
+			"routing": a.routingDiagnostics(ctx, request.Project, request.Model, request.ProviderID),
+		},
+	}
+	if err := event.Validate(); err == nil {
+		_ = a.Events.Enqueue(ctx, event)
+	}
 }
 
 // credentialSource classifies a provider's api_key_ref for diagnostics: the

@@ -1959,6 +1959,10 @@ export function CallReportView({ event, t }: { event: ObservationEvent; t: (key:
     '',
     String(report.response_body ?? ''),
   ].join('\n')
+  // A routing failure (pinned provider unknown/disabled/model mismatch) never
+  // made the HTTP call: no request/response pair exists. The ERROR and the
+  // routing map ARE the diagnosis then — render them, hide the empty pair.
+  const hasPair = Boolean(report.request_body || report.response_body || report.url)
   const pre = { background: 'var(--tm-raised)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.75rem', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: '0.25rem 0 0.75rem' } as const
   // The routing map: which providers were visible, which one served, where
   // its credential was supposed to come from. The provider row the call
@@ -1972,6 +1976,11 @@ export function CallReportView({ event, t }: { event: ObservationEvent; t: (key:
         {route && <Tag type={route.startsWith('env') ? 'red' : 'blue'} size="sm">{t('runs.call_report_route') ?? 'Маршрут'}: {route}</Tag>}
         {model && <Tag type="gray" size="sm">{t('runs.model', { name: model })}</Tag>}
       </div>
+      {data.error ? (
+        <div style={{ border: '1px solid var(--tm-danger)', borderRadius: '6px', padding: '0.5rem 0.7rem', margin: '0.25rem 0 0.75rem', fontSize: '0.78rem', color: 'var(--tm-danger)', overflowWrap: 'anywhere' }}>
+          {String(data.error)}
+        </div>
+      ) : null}
       {providers.length > 0 && (
         <>
           <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.5rem 0 0.15rem' }}>{t('runs.call_report_routing') ?? 'Маршрутизация и провайдеры'}</h5>
@@ -2014,10 +2023,14 @@ export function CallReportView({ event, t }: { event: ObservationEvent; t: (key:
           </p>
         </>
       )}
-      <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.25rem 0' }}>{t('providers.test_request') ?? 'Request'}</h5>
-      <pre style={pre}>{requestText}</pre>
-      <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.25rem 0' }}>{t('providers.test_response') ?? 'Response'}</h5>
-      <pre style={pre}>{responseText}</pre>
+      {hasPair && (
+        <>
+          <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.25rem 0' }}>{t('providers.test_request') ?? 'Request'}</h5>
+          <pre style={pre}>{requestText}</pre>
+          <h5 style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', margin: '0.25rem 0' }}>{t('providers.test_response') ?? 'Response'}</h5>
+          <pre style={pre}>{responseText}</pre>
+        </>
+      )}
     </>
   )
 }
