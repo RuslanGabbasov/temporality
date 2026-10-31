@@ -400,32 +400,29 @@ export default function AgentRuns({ project }: { project: string }) {
   const userNameOf = useCallback((id: string | undefined) => (id ? (users.get(id)?.name ?? id) : ''), [users])
   const org = useOrgUnits()
 
-  // Initiator suggest (ActorSuggestFilter's options callback): people are the
-  // loaded window's ACTORS (suggesting everyone would offer empty results),
-  // units come from those actors' directory entries plus every org unit whose
-  // name matches — the unit filter matches the actor's org membership.
+  // Initiator suggest (ActorSuggestFilter's options callback): the ARTIFACTS
+  // logic verbatim — the whole directory's people by name/id, then every org
+  // unit by name/id. No «actors of the loaded window» narrowing: that
+  // cleverness made unit suggestions disappear (a unit whose members hadn't
+  // run yet never appeared), and an exact-but-empty filter is honest.
   const initiatorSuggest = useCallback((needle: string) => {
     const needleLower = needle.toLowerCase()
     if (!needleLower) return []
-    const actorIDs = new Set(rows.map((row) => row.actor ?? '').filter(Boolean))
     const out: Array<{ kind: 'user' | 'unit'; id: string; name: string }> = []
-    const unitIDs = new Set<string>()
     for (const [id, info] of users) {
-      if (!actorIDs.has(id)) continue
-      if (info.name.toLowerCase().includes(needleLower) || id.toLowerCase().includes(needleLower)) {
-        out.push({ kind: 'user', id, name: info.name })
-      }
-      if (info.OrgUnitID) unitIDs.add(info.OrgUnitID)
-      if (out.length >= 5) break
+      const haystack = `${info.name} ${id}`.toLowerCase()
+      if (!haystack.includes(needleLower)) continue
+      out.push({ kind: 'user', id, name: info.name || id })
+      if (out.length >= 5) return out
     }
     for (const unit of org.units ?? []) {
       const haystack = `${unit.name} ${unit.id}`.toLowerCase()
-      if (unitIDs.has(unit.id) || out.some((p) => p.id === unit.id)) continue
-      if (haystack.includes(needleLower)) out.push({ kind: 'unit', id: unit.id, name: unit.name || unit.id })
-      if (out.length >= 8) break
+      if (!haystack.includes(needleLower)) continue
+      out.push({ kind: 'unit', id: unit.id, name: unit.name || unit.id })
+      if (out.length >= 7) break
     }
     return out
-  }, [rows, users, org.units])
+  }, [users, org.units])
 
   // A run row stays visible when it matches the filter or one of its delegated
   // children does, so searching for a child keeps its parent chain.
