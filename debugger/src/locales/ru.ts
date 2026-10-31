@@ -734,6 +734,7 @@ export const ru: Record<string, string> = {
     'runs.event.stream_chunks': 'чанков',
     'runs.event.stream_retried': 'первая попытка сожгла {{seconds}}с',
     'runs.event.learned': 'Изучено',
+    'runs.event.memory_empty': '(пусто — элементы не разобраны)',
     'runs.event.recalled': 'Восстановлено',
     'runs.event.knowledge_used': 'Знание применено',
     'runs.event.knowledge_confirmed': 'Знание подтверждено',

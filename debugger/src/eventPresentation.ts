@@ -145,6 +145,14 @@ function toolFact(d: Record<string, unknown>): string {
   const args = parseArguments(d.arguments)
   if (args) {
     if (Array.isArray(args.command) && args.command.length > 0) return squash(args.command.join(' '))
+    if (Array.isArray(args.items) && args.items.length > 0) {
+      // remember_many: the first proposition IS the fact (what it decided to
+      // keep), the count tells the batch size — readable without a click.
+      const first = args.items[0] as Record<string, unknown> | string
+      const proposition = squash(first && typeof first === 'object' ? first.proposition : first)
+      const rest = args.items.length - 1
+      return proposition.slice(0, 90) + (rest > 0 ? ` +${rest}` : '')
+    }
     for (const key of ['path', 'file', 'query', 'url', 'proposition', 'prompt', 'skill_id', 'saga_id', 'server', 'tool']) {
       const value = textOf(args[key])
       if (value) return squash(value)
@@ -619,7 +627,25 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   const args = parseArguments(d.arguments) ?? parseArguments(operation?.arguments)
   const tool = typeof d.tool === 'string' && d.tool ? d.tool : (typeof operation?.tool === 'string' ? operation.tool : '')
   const argumentLines: Array<{ key: string; value: string }> = []
-  if (args) {
+  if (args && tool === 'remember_many') {
+    // Memory writes are the reader's «what did it decide to keep?» moment: a
+    // raw JSON fragment of the items array says nothing — one line per
+    // proposition instead (the kernel fragment carries up to ~500 chars, so
+    // the propositions here are already a bounded preview).
+    const items = Array.isArray(args.items) ? (args.items as unknown[]) : []
+    items.forEach((item, index) => {
+      const proposition = squash(item && typeof item === 'object' ? (item as Record<string, unknown>).proposition : item)
+      if (proposition) argumentLines.push({ key: `#${index + 1}`, value: proposition.slice(0, 200) + (proposition.length > 200 ? '…' : '') })
+    })
+    if (argumentLines.length === 0) argumentLines.push({ key: 'items', value: t('runs.event.memory_empty') ?? '(no items)' })
+  } else if (args && (tool === 'write_file' || tool === 'edit_file')) {
+    // File writes: the path leads, the content fragment follows — the reader
+    // wants WHAT was written, not a JSON envelope.
+    const path = textOf(args.path)
+    if (path) argumentLines.push({ key: 'path', value: path })
+    const content = textOf(args.content ?? args.new_string ?? args.old_string)
+    if (content) argumentLines.push({ key: 'content', value: content.slice(0, 400) + (content.length > 400 ? '…' : '') })
+  } else if (args) {
     for (const [key, value] of Object.entries(args)) {
       const text = textOf(value)
       if (!text) continue

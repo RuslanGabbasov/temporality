@@ -734,6 +734,7 @@ export const en: Record<string, string> = {
     'runs.event.stream_chunks': 'chunks',
     'runs.event.stream_retried': 'first attempt wasted {{seconds}}s',
     'runs.event.learned': 'Learned',
+    'runs.event.memory_empty': '(empty — no items parsed)',
     'runs.event.recalled': 'Recalled',
     'runs.event.knowledge_used': 'Knowledge applied',
     'runs.event.knowledge_confirmed': 'Knowledge confirmed',

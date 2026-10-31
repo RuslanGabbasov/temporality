@@ -193,6 +193,37 @@ describe('details layer (§4.2)', () => {
     expect(details.argumentLines[0].value.length).toBeLessThanOrEqual(300)
   })
 
+  it('write_file details show the path and a content fragment — not a JSON envelope', () => {
+    // The kernel fragment arrives truncated (compactJSON ≤500 chars) but now
+    // VALID, so the parsed args reach the special cases.
+    const args = JSON.stringify({ path: '/workspace/src/main.go', content: 'package main\n\nfunc main() { ... }' })
+    const details = eventDetails(modelEvent('tool.started', { tool: 'write_file', operation_id: 'op-3', arguments: args }), t)
+    expect(details.argumentLines[0]).toEqual({ key: 'path', value: '/workspace/src/main.go' })
+    expect(details.argumentLines[1].key).toBe('content')
+    expect(details.argumentLines[1].value).toContain('package main')
+  })
+
+  it('remember_many details list the propositions instead of raw JSON', () => {
+    const args = JSON.stringify({ items: [
+      { proposition: 'Billing covered by e2e/billing tests', evidence: ['e1'] },
+      { proposition: 'Auth tokens live in /cache' },
+    ] })
+    const details = eventDetails(modelEvent('tool.started', { tool: 'remember_many', operation_id: 'op-4', arguments: args }), t)
+    expect(details.argumentLines).toEqual([
+      { key: '#1', value: 'Billing covered by e2e/billing tests' },
+      { key: '#2', value: 'Auth tokens live in /cache' },
+    ])
+  })
+
+  it('remember_many row fact names the first proposition and the batch size', () => {
+    const row = timelineRow(modelEvent('tool.started', {
+      tool: 'remember_many',
+      arguments: JSON.stringify({ items: [{ proposition: 'Billing covered by e2e/billing tests' }, { proposition: 'Second fact' }] }),
+    }), RU, t)
+    expect(row.fact).toContain('Billing covered by e2e/billing tests')
+    expect(row.fact).toContain('+1')
+  })
+
   it('makes the human verdict expandable and shows what the human said', () => {
     const row = timelineRow(modelEvent('hitl.verdict.recorded', {
       type: 'accepted', answered_by: 'user:ivan',

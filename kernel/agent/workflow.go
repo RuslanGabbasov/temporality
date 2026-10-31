@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/sandbox"
@@ -2741,17 +2742,255 @@ func resultContentRef(content string) string {
 // happened at or after the execution boundary, where the operator — not the
 // model — must decide whether the side effect landed.
 
-// compactJSON serializes v as JSON, truncating to maxLen characters.
-// Returns empty string if marshaling fails.
+// compactJSON serializes v as JSON, truncating to maxLen characters. The
+// truncation REPAIRS the document instead of slicing bytes: a bare cut (the
+// old behavior) produced invalid JSON that every trace-side parser
+// (eventDetails, eventSummary) failed to parse — tool rows for
+// content-heavy calls (write_file, remember_many) expanded to nothing.
+// First the longest STRING VALUES shrink (a write_file keeps its path next
+// to the content fragment); when that cannot fit (dozens of mid-length
+// strings), the valid prefix cut closes the open string and brackets with a
+// visible … inside. Both results always parse. Returns empty string if
+// marshaling fails.
 func compactJSON(v any, maxLen int) string {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return ""
 	}
-	if len(b) > maxLen {
-		return string(b[:maxLen]) + "…"
+	if len(b) <= maxLen {
+		return string(b)
 	}
-	return string(b)
+	// Value shrink pass: the tree came from a parsed tool call, so map/slice
+	// nodes mutate in place.
+	if tree, perr := jsonParseTree(b); perr == nil {
+		for i := 0; i < 64; i++ {
+			if !shrinkLongestString(tree) {
+				break
+			}
+			b, err = json.Marshal(tree)
+			if err != nil {
+				break
+			}
+			if len(b) <= maxLen {
+				return string(b)
+			}
+		}
+	}
+	return truncateJSON(b, maxLen)
+}
+
+// compactJSONStringFloor is the shrink floor: strings at or below it keep
+// their full text (structure and short fields survive untouched).
+const compactJSONStringFloor = 48
+
+// jsonParseTree parses a marshaled document back into the mutable tree
+// compactJSON shrinks; anything non-generic fails the pass.
+func jsonParseTree(b []byte) (any, error) {
+	var tree any
+	if err := json.Unmarshal(b, &tree); err != nil {
+		return nil, err
+	}
+	return tree, nil
+}
+
+// shrinkLongestString halves the longest string value of the tree (deep,
+// in place) and reports whether anything was shrunk. Halving converges fast
+// and keeps the cut multibyte-safe.
+func shrinkLongestString(node any) bool {
+	switch t := node.(type) {
+	case map[string]any:
+		bestKey, bestLen := "", 0
+		for k, v := range t {
+			if s, ok := v.(string); ok && len(s) > bestLen {
+				bestKey, bestLen = k, len(s)
+			}
+		}
+		if bestLen > compactJSONStringFloor {
+			t[bestKey] = compactJSONCutString(t[bestKey].(string))
+			return true
+		}
+		for _, v := range t {
+			if shrinkLongestString(v) {
+				return true
+			}
+		}
+	case []any:
+		bestIdx, bestLen := -1, 0
+		for i, v := range t {
+			if s, ok := v.(string); ok && len(s) > bestLen {
+				bestIdx, bestLen = i, len(s)
+			}
+		}
+		if bestIdx >= 0 && bestLen > compactJSONStringFloor {
+			t[bestIdx] = compactJSONCutString(t[bestIdx].(string))
+			return true
+		}
+		for _, v := range t {
+			if shrinkLongestString(v) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// compactJSONCutString halves a string (never below the floor by the caller's
+// guard) without splitting a multibyte rune, marking the continuation.
+func compactJSONCutString(s string) string {
+	cut := len(s) / 2
+	if cut > compactJSONStringFloor*2 {
+		cut = compactJSONStringFloor * 2
+	}
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
+// truncateJSON cuts b to ≤ maxLen bytes as a VALID JSON document: shorter
+// prefixes are tried until one survives the bracket repair, so the result is
+// guaranteed parseable. The … rides INSIDE a string value where possible —
+// the reader sees that text continues.
+func truncateJSON(b []byte, maxLen int) string {
+	if maxLen < 8 {
+		maxLen = 8
+	}
+	for cut := maxLen; cut >= 2; cut-- {
+		if repaired, ok := closeJSONPrefix(b[:cut]); ok {
+			return repaired
+		}
+	}
+	return "{}"
+}
+
+// closeJSONPrefix closes the JSON prefix p: it walks the prefix once tracking
+// open strings, escapes and the bracket stack, then appends the ellipsis
+// inside the innermost string (mid-string cut) or as a filler value, and the
+// closing brackets. ok=false when the prefix cannot be closed validly (the
+// caller tries a shorter prefix).
+func closeJSONPrefix(p []byte) (string, bool) {
+	var stack []byte
+	inString, escaped := false, false
+	lastSignificant := byte(0)
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[', '{':
+			stack = append(stack, c)
+		case ']', '}':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case ' ', '\t', '\n', '\r':
+			continue // never significant
+		}
+		lastSignificant = c
+	}
+	closers := make([]byte, 0, len(stack)+2)
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == '[' {
+			closers = append(closers, ']')
+		} else {
+			closers = append(closers, '}')
+		}
+	}
+	var cand string
+	switch {
+	case inString:
+		// Mid-string cut: the … lands inside the string, then the quote and
+		// every open container close.
+		cand = string(p) + "…" + `"` + string(closers)
+	case lastSignificant == ':' && len(stack) > 0:
+		// Cut right after a key's colon: the … becomes the pending value.
+		cand = string(p) + `"…"` + string(closers)
+	case len(stack) > 0 && stack[len(stack)-1] == '[' && (lastSignificant == ',' || lastSignificant == '['):
+		// Array waiting for its (first or next) element.
+		cand = string(p) + `"…"` + string(closers)
+	case len(stack) > 0 && stack[len(stack)-1] == '[':
+		// Array after a complete element: comma, filler, close.
+		cand = string(p) + `,"…"` + string(closers)
+	case len(stack) > 0:
+		// Object: only a clean pair boundary closes validly — walk the prefix
+		// back to the nearest structural '{' or ',' and append a filler pair,
+		// then close whatever that shorter prefix holds open. A byte-level ','
+		// inside a string is a false boundary: json.Valid rejects it and the
+		// caller's loop simply tries a shorter prefix.
+		trimmed := p
+		for len(trimmed) > 0 {
+			last := trimmed[len(trimmed)-1]
+			if last == '{' || last == ',' {
+				break
+			}
+			trimmed = trimmed[:len(trimmed)-1]
+		}
+		if len(trimmed) == 0 {
+			return "", false
+		}
+		rest := openContainers(trimmed)
+		pair := make([]byte, 0, len(rest)+16)
+		pair = append(pair, trimmed...)
+		pair = append(pair, `"…":"…"`...)
+		for i := len(rest) - 1; i >= 0; i-- {
+			if rest[i] == '[' {
+				pair = append(pair, ']')
+			} else {
+				pair = append(pair, '}')
+			}
+		}
+		cand = string(pair)
+	default:
+		return "", false
+	}
+	if !json.Valid([]byte(cand)) {
+		return "", false
+	}
+	return cand, true
+}
+
+// openContainers walks a JSON prefix and returns its unclosed bracket stack
+// (strings and escapes are skipped): '[' / '{' in opening order.
+func openContainers(p []byte) []byte {
+	var stack []byte
+	inString, escaped := false, false
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if inString {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[', '{':
+			stack = append(stack, c)
+		case ']', '}':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	return stack
 }
 
 // advertisedTools merges kernel and configured MCP tools, then applies the
