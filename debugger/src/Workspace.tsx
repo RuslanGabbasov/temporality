@@ -1727,12 +1727,16 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                             >{t('chat.stop') ?? 'Stop'}</button>
                           )}
                           {msg.runId && (
-                            /* New tab on purpose: the run is still streaming
-                               here — the chat keeps its live view while the
-                               trace opens next to it. */
+                            /* A NAMED new tab on purpose: the run is still
+                               streaming here — the chat keeps its live view
+                               while the trace opens next to it. The fixed
+                               name reuses the same tab on repeated clicks
+                               instead of piling up a heavy runs page per
+                               click (each copy polls, streams and renders
+                               the full trace on its own). */
                             <a
                               href={runTraceUrl(project, msg.runId)}
-                              target="_blank"
+                              target="temporality-runs"
                               rel="noopener"
                               style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', textDecoration: 'none', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}
                               title={t('chat.trace_title') ?? 'Open the run trace'}

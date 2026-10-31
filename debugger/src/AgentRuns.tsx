@@ -824,6 +824,32 @@ export default function AgentRuns({ project }: { project: string }) {
   }, [project])
 
   useEffect(() => { void loadRuns(true) }, [loadRuns])
+  // Silent list refresh: keeps status tags and newly started runs (including
+  // delegated children) fresh without touching the current selection. A
+  // HIDDEN tab pauses the interval entirely — several opened runs pages must
+  // not multiply into parallel request piles while nobody watches them; the
+  // visibilitychange flip below re-syncs on return.
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden)
+  useEffect(() => {
+    const onVis = () => setPageVisible(!document.hidden)
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
+  useEffect(() => {
+    if (!pageVisible) return
+    const timer = window.setInterval(() => { void loadRuns(true, true) }, 15000)
+    // Wake-from-sleep (and tab switch back): one immediate refresh re-syncs
+    // the list after the hidden gap (and the open run's tail pass follows on
+    // its own 30s cadence).
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void loadRuns(true, true)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [loadRuns, pageVisible])
   useEffect(() => { if (selected) void loadRun(selected) }, [selected, loadRun])
   // Tab switches update the URL so a trace/trajectory/budget view is
   // shareable; loadRun preserves the current tab via viewRef.
@@ -835,13 +861,15 @@ export default function AgentRuns({ project }: { project: string }) {
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
   }, [view, selected])
   useEffect(() => {
-    if (!selected) return
+    if (!selected || !pageVisible) return
     // Poll only the selected run's events, don't re-fetch the full run list
     // 30s: the light tail pass is cheap, but a 10s cadence on a busy stand
-    // still multiplies into a steady hum of journal queries.
+    // still multiplies into a steady hum of journal queries. A HIDDEN tab
+    // skips the poll entirely (its next visible tick resyncs) — several
+    // opened trace tabs must not multiply into parallel request piles.
     const timer = window.setInterval(() => { void loadRun(selected, true) }, 30000)
     return () => window.clearInterval(timer)
-  }, [selected, loadRun])
+  }, [selected, loadRun, pageVisible])
   // Live journal tail: while the selected run is in flight, events arrive over
   // SSE at the server's ~1.5s cadence instead of the 10s poll above — without
   // it a finishing model call, its tool events and the next turn land in one
@@ -850,7 +878,11 @@ export default function AgentRuns({ project }: { project: string }) {
   // context) is stamped from the run's own root event. The poll stays as the
   // safety net (and covers team-run children the per-run stream skips).
   useEffect(() => {
-    if (!selected || !selectedLive) return
+    if (!selected || !selectedLive || !pageVisible) return
+    // The live tail is for eyes on screen: a hidden tab pauses the stream
+    // (and its per-frame re-renders of the big trace) and re-subscribes when
+    // it becomes visible again — the frames are re-read from the journal by
+    // the visibility resync below.
     const controller = new AbortController()
     // §8 search index holds only this run's loaded console buffers.
     setConsoleStates(new Map())
@@ -876,23 +908,7 @@ export default function AgentRuns({ project }: { project: string }) {
       })
     }, controller.signal, { tail: true })
     return () => controller.abort()
-  }, [selected, selectedLive])
-  // Silent list refresh: keeps status tags and newly started runs (including
-  // delegated children) fresh without touching the current selection.
-  useEffect(() => {
-    const timer = window.setInterval(() => { void loadRuns(true, true) }, 15000)
-    // Wake-from-sleep: the interval froze overnight while runs finished — one
-    // immediate refresh on return to visibility re-syncs the list (and the
-    // open run's tail pass follows on its own 30s cadence).
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void loadRuns(true, true)
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [loadRuns])
+  }, [selected, selectedLive, pageVisible])
   // Agents power the delegation tree node names; they rarely change.
   useEffect(() => {
     workspaceApi.listAllAgents().then((page) => setAgents(page.agents)).catch(() => { /* names fall back to ids */ })
