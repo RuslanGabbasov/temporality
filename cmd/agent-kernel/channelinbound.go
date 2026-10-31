@@ -88,6 +88,7 @@ type channelInboundStore interface {
 	CancelHumanRequest(ctx context.Context, id, actor string) error
 	SetHumanRequestThreadRef(ctx context.Context, id, threadRef string) error
 	ListUsers(ctx context.Context) ([]workspace.User, error)
+	ListOrgUnits(ctx context.Context) ([]workspace.OrgUnit, error)
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
 	ChannelCursor(ctx context.Context, channel string) (workspace.ChannelCursor, error)
 	SaveChannelCursor(ctx context.Context, channel string, cursor workspace.ChannelCursor) error

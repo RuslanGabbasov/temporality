@@ -104,7 +104,7 @@ func sweepArtifactReviews(ctx context.Context, store artifactReviewSweepStore, n
 			})
 			log.Info("artifact review escalated", "review", round.Review.ID, "artifact", round.Review.ArtifactID, "age", age.Round(time.Hour).String())
 		case age >= timeout && round.Review.RemindedAt == nil:
-			targets := expandArtifactReviewers(round.Review.Reviewers, users)
+			targets := expandArtifactReviewers(round.Review.Reviewers, users, nil)
 			body := artifactReviewReminderText(round, timeout, notify.currentSettings(ctx).UIURL)
 			if notify.deliverReviewText(ctx, targets, body) == 0 {
 				continue
@@ -145,7 +145,7 @@ func artifactReviewEscalationTargets(ctx context.Context, store artifactReviewSw
 			}
 		}
 	}
-	return expandArtifactReviewers([]string{"project_owner"}, users)
+	return expandArtifactReviewers([]string{"project_owner"}, users, nil)
 }
 
 // artifactReviewReminderText is the reviewer-facing nudge: same facts as the

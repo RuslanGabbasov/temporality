@@ -151,6 +151,10 @@ func (f *fakeArtifactLifecycleStore) ListUsers(_ context.Context) ([]workspace.U
 	return f.users, nil
 }
 
+func (f *fakeArtifactLifecycleStore) ListOrgUnits(_ context.Context) ([]workspace.OrgUnit, error) {
+	return nil, nil
+}
+
 func (f *fakeArtifactLifecycleStore) RecordAccessAudit(_ context.Context, actor, action, entityKind, entityID string, details map[string]any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -104,7 +104,8 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 		l.log.Warn("artifact review reply users", "review", reviewID, "error", err)
 		return
 	}
-	entries := workspace.MatchArtifactReviewers(actor, users, review.Reviewers)
+	units, _ := l.store.ListOrgUnits(ctx)
+	entries := workspace.MatchArtifactReviewers(actor, users, units, review.Reviewers)
 	if len(entries) == 0 {
 		// The chat owner lost their reviewer entry (role change, unit move):
 		// never resolve through this chat.

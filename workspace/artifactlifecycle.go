@@ -405,7 +405,13 @@ func (s *Store) GetArtifactReview(ctx context.Context, reviewID string) (Artifac
 // by a model, and "Ivanov" vs "ivanov" must not void a review. An account
 // without an active workspace row satisfies nothing: deactivated reviewers
 // must not decide.
-func MatchArtifactReviewers(principal string, users []User, entries []string) []string {
+// MatchArtifactReviewers returns the reviewer entries the principal
+// satisfies: personal entries match the user's id/name/email, group entries
+// match membership (org:) or the platform role (role:), and an org entry
+// also matches the unit's effective head — a manager addressed as org:unit
+// owes the decision even when their own org_unit_id points elsewhere
+// (docs/inbound-messages.md §7 head-first resolution).
+func MatchArtifactReviewers(principal string, users []User, units []OrgUnit, entries []string) []string {
 	var self *User
 	for i := range users {
 		if strings.EqualFold(users[i].ID, principal) || strings.EqualFold(users[i].Name, principal) || strings.EqualFold(users[i].Email, principal) {
@@ -415,6 +421,12 @@ func MatchArtifactReviewers(principal string, users []User, entries []string) []
 	}
 	if self == nil || !self.Active {
 		return nil
+	}
+	headOf := map[string]bool{}
+	for _, unit := range units {
+		if unit.HeadUserID != "" && strings.EqualFold(unit.HeadUserID, self.ID) {
+			headOf[unit.ID] = true
+		}
 	}
 	var matched []string
 	for _, entry := range entries {
@@ -428,7 +440,8 @@ func MatchArtifactReviewers(principal string, users []User, entries []string) []
 				matched = append(matched, entry)
 			}
 		case strings.HasPrefix(entry, "org:"):
-			if strings.EqualFold(self.OrgUnitID, strings.TrimSpace(strings.TrimPrefix(entry, "org:"))) {
+			unit := strings.TrimSpace(strings.TrimPrefix(entry, "org:"))
+			if strings.EqualFold(self.OrgUnitID, unit) || headOf[unit] {
 				matched = append(matched, entry)
 			}
 		default:
@@ -510,6 +523,13 @@ type ArtifactInboxEntry struct {
 // plus rounds the principal requested themselves. Org visibility applies to
 // the artifact row; newest first.
 func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, users []User, units []string) ([]ArtifactInboxEntry, error) {
+	// The full unit map feeds the org-head matching: an addressed unit's
+	// effective head is a reviewer even when their own org_unit_id is a
+	// different unit.
+	allUnits, err := s.ListOrgUnits(ctx)
+	if err != nil {
+		allUnits = nil // degrade: membership matching still works
+	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+artifactReviewColumns+`, a.id, a.title, a.kind, a.status, a.version,
 			COALESCE(a.origin_type, ''), COALESCE(a.origin_user, ''), a.origin_run, a.tags, a.created_at, a.updated_at, COALESCE(a.org_unit_id, '')
@@ -533,7 +553,7 @@ func (s *Store) ListArtifactReviewInbox(ctx context.Context, principal string, u
 			return nil, err
 		}
 		entry.Review = review
-		entry.Matched = MatchArtifactReviewers(principal, users, review.Reviewers)
+		entry.Matched = MatchArtifactReviewers(principal, users, allUnits, review.Reviewers)
 		isRequester := review.RequestedBy != "" && review.RequestedBy != "kernel-internal" && strings.EqualFold(review.RequestedBy, principal)
 		if len(entry.Matched) == 0 && !isRequester {
 			continue

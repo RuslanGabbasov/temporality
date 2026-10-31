@@ -90,7 +90,7 @@ func TestMatchArtifactReviewers(t *testing.T) {
 	}
 	entries := []string{"user:writer", "writer", "Olga", "org:core", "role:admin", "project_owner", "user:admin", "olga@corp.ru", "user:olga@corp.ru"}
 
-	matched := MatchArtifactReviewers("writer", users, entries)
+	matched := MatchArtifactReviewers("writer", users, nil, entries)
 	require.Contains(t, matched, "user:writer")
 	require.Contains(t, matched, "writer")
 	require.Contains(t, matched, "Olga")
@@ -102,20 +102,20 @@ func TestMatchArtifactReviewers(t *testing.T) {
 	require.NotContains(t, matched, "role:admin")
 	require.NotContains(t, matched, "project_owner")
 
-	matched = MatchArtifactReviewers("admin", users, entries)
+	matched = MatchArtifactReviewers("admin", users, nil, entries)
 	require.Contains(t, matched, "org:core")
 	require.Contains(t, matched, "role:admin")
 	require.Contains(t, matched, "project_owner")
 	require.Contains(t, matched, "user:admin")
 
 	// Name-based principal resolution: the token subject may be the login name.
-	matched = MatchArtifactReviewers("Ruslan", users, entries)
+	matched = MatchArtifactReviewers("Ruslan", users, nil, entries)
 	require.Contains(t, matched, "role:admin")
 
-	require.Empty(t, MatchArtifactReviewers("nobody", users, entries))
+	require.Empty(t, MatchArtifactReviewers("nobody", users, nil, entries))
 	// Deactivated accounts never decide.
-	require.Empty(t, MatchArtifactReviewers("ghost", users, []string{"user:ghost", "role:writer"}))
-	require.Empty(t, MatchArtifactReviewers("writer", []User{{ID: "writer"}}, entries))
+	require.Empty(t, MatchArtifactReviewers("ghost", users, nil, []string{"user:ghost", "role:writer"}))
+	require.Empty(t, MatchArtifactReviewers("writer", []User{{ID: "writer"}}, nil, entries))
 
 	// Case-insensitive matching: reviewer entries are model-typed, and
 	// "Ivanov" vs "ivanov" must not void a review.
@@ -123,7 +123,7 @@ func TestMatchArtifactReviewers(t *testing.T) {
 		{ID: "user-2d08", Name: "Ivan Petrov", Role: "Writer", OrgUnitID: "Core", Active: true},
 	}
 	caseEntries := []string{"user:USER-2D08", "ivan petrov", "role:WRITER", "org:CORE"}
-	matched = MatchArtifactReviewers("USER-2D08", caseUsers, caseEntries)
+	matched = MatchArtifactReviewers("USER-2D08", caseUsers, nil, caseEntries)
 	require.Contains(t, matched, "user:USER-2D08")
 	require.Contains(t, matched, "ivan petrov")
 	require.Contains(t, matched, "role:WRITER")

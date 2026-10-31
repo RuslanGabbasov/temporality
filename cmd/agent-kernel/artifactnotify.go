@@ -80,7 +80,11 @@ func (n *channelReviewNotifier) NotifyArtifactReviewRequested(ctx context.Contex
 		n.log.Warn("artifact review notice: load users", "artifact", artifact.ID, "error", err)
 		return
 	}
-	targets := expandArtifactReviewers(review.Reviewers, users)
+	units, uErr := n.ws.ListOrgUnits(ctx)
+	if uErr != nil {
+		units = nil // membership-only expansion: degrades gracefully
+	}
+	targets, _ := expandArtifactReviewersDetailed(review.Reviewers, users, units)
 	if len(targets) == 0 {
 		return
 	}
@@ -230,18 +234,20 @@ func firstPostedThread(delivered []reviewNoticeDelivery) string {
 }
 
 // expandArtifactReviewers resolves reviewer entries to concrete active users
-// (docs/artifact-lifecycle.md §6): org: → unit members, role: → role holders,
-// project_owner → installation admins, user:/bare → the named user.
-// Deduplicated by id, deterministic order.
-func expandArtifactReviewers(entries []string, users []workspace.User) []workspace.User {
-	matched, _ := expandArtifactReviewersDetailed(entries, users)
+// (docs/artifact-lifecycle.md §6): org: → unit members (and the unit's head),
+// role: → role holders, project_owner → installation admins, user:/bare → the
+// named user. Deduplicated by id, deterministic order.
+func expandArtifactReviewers(entries []string, users []workspace.User, units []workspace.OrgUnit) []workspace.User {
+	matched, _ := expandArtifactReviewersDetailed(entries, users, units)
 	return matched
 }
 
 // expandArtifactReviewersDetailed also reports which entries resolved to at
 // least one active user — the submit answer carries this so the agent sees a
 // «project_owner resolved to nobody» BEFORE the round hangs undecidable.
-func expandArtifactReviewersDetailed(entries []string, users []workspace.User) ([]workspace.User, map[string]bool) {
+// units enables the org-head rule: an addressed unit's effective head gets
+// the notice even when they are not a member.
+func expandArtifactReviewersDetailed(entries []string, users []workspace.User, units []workspace.OrgUnit) ([]workspace.User, map[string]bool) {
 	matched := make([]workspace.User, 0, len(users))
 	covered := map[string]bool{}
 	seen := map[string]bool{}
@@ -255,10 +261,22 @@ func expandArtifactReviewersDetailed(entries []string, users []workspace.User) (
 		before := len(matched)
 		switch {
 		case strings.HasPrefix(entry, "org:"):
-			unit := strings.TrimSpace(strings.TrimPrefix(entry, "org:"))
+			addressedUnit := strings.TrimSpace(strings.TrimPrefix(entry, "org:"))
 			for _, u := range users {
-				if u.OrgUnitID == unit {
+				if u.OrgUnitID == addressedUnit {
 					add(u)
+				}
+			}
+			// Head of the unit receives the notice too, even when they are not
+			// a member (the ask_human org fan-out delivers head-first).
+			for _, orgUnit := range units {
+				if orgUnit.ID != addressedUnit || orgUnit.HeadUserID == "" {
+					continue
+				}
+				for _, u := range users {
+					if strings.EqualFold(u.ID, orgUnit.HeadUserID) {
+						add(u)
+					}
 				}
 			}
 		case strings.HasPrefix(entry, "role:"):

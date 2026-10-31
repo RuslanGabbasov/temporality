@@ -25,7 +25,7 @@ func TestExpandArtifactReviewers(t *testing.T) {
 		{ID: "d", Role: "admin", OrgUnitID: "ops", Active: true},
 		{ID: "e", Role: "writer", OrgUnitID: "ops", Active: true},
 	}
-	got := expandArtifactReviewers([]string{"org:core", "role:admin", "user:e", "b", "project_owner"}, users)
+	got := expandArtifactReviewers([]string{"org:core", "role:admin", "user:e", "b", "project_owner"}, users, nil)
 	require.Equal(t, []string{"a", "b", "d", "e"}, func() []string {
 		ids := make([]string, 0, len(got))
 		for _, u := range got {
@@ -33,7 +33,7 @@ func TestExpandArtifactReviewers(t *testing.T) {
 		}
 		return ids
 	}())
-	require.Empty(t, expandArtifactReviewers([]string{"org:missing"}, users))
+	require.Empty(t, expandArtifactReviewers([]string{"org:missing"}, users, nil))
 }
 
 // The delivery channel follows the ask_human policy: preferred channel when

@@ -51,6 +51,7 @@ type artifactLifecycleStore interface {
 	SetHumanRequestThreadRef(ctx context.Context, id, threadRef string) error
 	AddHumanRequestDeliveries(ctx context.Context, requestID string, deliveries []workspace.HumanRequestDelivery) error
 	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, bool, error)
+	ListOrgUnits(ctx context.Context) ([]workspace.OrgUnit, error)
 }
 
 // artifactLifecycleOutbox is the durable-outbox surface for lifecycle events.
@@ -173,9 +174,10 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 		// never be decided, and the model must know that now, not after the
 		// operators ask why nothing is happening.
 		users, uErr := ws.ListUsers(r.Context())
+		units, _ := ws.ListOrgUnits(r.Context())
 		resolvedIDs, unresolved := []string{}, []string{}
 		if uErr == nil {
-			targets, covered := expandArtifactReviewersDetailed(req.Reviewers, users)
+			targets, covered := expandArtifactReviewersDetailed(req.Reviewers, users, units)
 			for _, u := range targets {
 				resolvedIDs = append(resolvedIDs, u.ID)
 			}
@@ -300,7 +302,11 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			// Empty match is not an immediate 409: the round's requester may
 			// decide their own review even when the model-authored reviewer
 			// list missed them — the decision lands under the dedicated key.
-			entries := workspace.MatchArtifactReviewers(principal, users, review.Reviewers)
+			units, uErr := ws.ListOrgUnits(r.Context())
+			if uErr != nil {
+				units = nil // degrade to membership matching
+			}
+			entries := workspace.MatchArtifactReviewers(principal, users, units, review.Reviewers)
 			if len(entries) == 0 && review.RequestedBy == principal && principal != "" && !isKernelInternal(r) {
 				entries = []string{workspace.ArtifactRequestedByKey}
 			}

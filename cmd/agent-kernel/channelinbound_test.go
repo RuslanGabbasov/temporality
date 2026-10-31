@@ -70,6 +70,10 @@ func (s *fakeInboundStore) AnswerHumanRequest(_ context.Context, id, response, _
 	return workspace.HumanRequest{ID: id}, true, nil
 }
 
+func (s *fakeInboundStore) ListOrgUnits(_ context.Context) ([]workspace.OrgUnit, error) {
+	return nil, nil
+}
+
 func (s *fakeInboundStore) CancelHumanRequest(_ context.Context, id, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
