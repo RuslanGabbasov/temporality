@@ -42,6 +42,16 @@ export interface NamedRef {
 
 /** Policy (docs/org-structure.md §24): org-bound run constraints that inherit
  * top-down and merge restrictively. Empty lists mean unrestricted. */
+/** The filesystem dimension of one policy row (docs/filesystem-policy.md §3,
+ *  workspace/fspolicy.go): workspace-relative glob masks. An empty dimension
+ *  means «not set» — the backend normalizes a submitted empty list back to
+ *  nil, i.e. unrestricted. Deny is absolute; write implies read. */
+export interface FilesystemRules {
+  read?: string[] | null
+  write?: string[] | null
+  deny?: string[] | null
+}
+
 export interface Policy {
   id: string
   org_unit_id?: string // empty = installation-wide
@@ -56,6 +66,7 @@ export interface Policy {
   approval_mode?: string // '' | 'auto' | 'tools'
   egress_allowlist?: string[] | null // centralized baseline, UNION with the agent's own list
   intake_mode?: string // '' | 'deny' — overlay that can only narrow, never widen (docs/inbound-messages.md §12)
+  filesystem?: FilesystemRules | null
   enabled: boolean
   created_at: string
   updated_at: string

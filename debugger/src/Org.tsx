@@ -16,6 +16,7 @@ import { useT } from './i18n'
 import { whoami } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import PolicyDialog from './PolicyDialog'
 import { flattenUnits } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -32,46 +33,6 @@ function kindLabel(t: (k: string, v?: Record<string, string>) => string, kind: s
 
 type Node = { unit: OrgUnit; children: Node[] }
 
-// Policy dialog form: comma-separated lists and optional numbers are edited as
-// strings; empty means "no restriction" on save.
-type PolicyForm = {
-  name: string
-  org_unit_id: string
-  allowed_models: string
-  allowed_mcp: string
-  egress_allowlist: string
-  max_tokens: string
-  max_budget_usd: string
-  timeout_seconds: string
-  network_mode: string
-  sandbox_mode: string
-  approval_mode: string
-  intake_mode: string
-  enabled: boolean
-}
-
-const emptyPolicyForm = (): PolicyForm => ({
-  name: '', org_unit_id: '', allowed_models: '', allowed_mcp: '', egress_allowlist: '',
-  max_tokens: '', max_budget_usd: '', timeout_seconds: '',
-  network_mode: '', sandbox_mode: '', approval_mode: '', intake_mode: '', enabled: true,
-})
-
-const policyFormOf = (p: Policy): PolicyForm => ({
-  name: p.name,
-  org_unit_id: p.org_unit_id ?? '',
-  allowed_models: (p.allowed_models ?? []).join(', '),
-  allowed_mcp: (p.allowed_mcp ?? []).join(', '),
-  egress_allowlist: (p.egress_allowlist ?? []).join('\n'),
-  max_tokens: p.max_tokens != null ? String(p.max_tokens) : '',
-  max_budget_usd: p.max_budget_usd != null ? String(p.max_budget_usd) : '',
-  timeout_seconds: p.timeout_seconds != null ? String(p.timeout_seconds) : '',
-  network_mode: p.network_mode ?? '',
-  sandbox_mode: p.sandbox_mode ?? '',
-  approval_mode: p.approval_mode ?? '',
-  intake_mode: p.intake_mode ?? '',
-  enabled: p.enabled,
-})
-
 const splitList = (raw: string): string[] =>
   raw.split(',').map((x) => x.trim()).filter(Boolean)
 
@@ -84,6 +45,11 @@ function policySummaryTags(p: Policy, t: (k: string, v?: Record<string, string>)
   const tags: { key: string; text: string }[] = []
   if (p.allowed_models && p.allowed_models.length > 0) tags.push({ key: 'models', text: `${t('org.policy_models') ?? 'Models'}: ${p.allowed_models.length}` })
   if (p.allowed_mcp && p.allowed_mcp.length > 0) tags.push({ key: 'mcp', text: `${t('org.policy_mcp') ?? 'MCP'}: ${p.allowed_mcp.length}` })
+  // The filesystem dimension as R/W/D counts (0 = the dimension is unset).
+  const fs = p.filesystem
+  if (fs && ((fs.read?.length ?? 0) + (fs.write?.length ?? 0) + (fs.deny?.length ?? 0)) > 0) {
+    tags.push({ key: 'fs', text: `${t('org.policy_fs_tag') ?? 'Files'}: ${fs.read?.length ?? 0}/${fs.write?.length ?? 0}/${fs.deny?.length ?? 0}` })
+  }
   if (p.max_tokens != null) tags.push({ key: 'tokens', text: t('org.policy_tokens_tag', { count: String(p.max_tokens) }) ?? `≤ ${p.max_tokens} tokens` })
   if (p.max_budget_usd != null) tags.push({ key: 'budget', text: t('org.policy_budget_tag', { amount: String(p.max_budget_usd) }) ?? `≤ $${p.max_budget_usd}` })
   if (p.timeout_seconds != null) tags.push({ key: 'timeout', text: t('org.policy_timeout_tag', { count: String(p.timeout_seconds) }) ?? `≤ ${p.timeout_seconds}s` })
@@ -205,7 +171,6 @@ export default function Org() {
   const [policyFilter, setPolicyFilter] = useState('')
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null)
   const [policyDialogOpen, setPolicyDialogOpen] = useState(false)
-  const [policyForm, setPolicyForm] = useState<PolicyForm>(emptyPolicyForm())
   const [deletingPolicy, setDeletingPolicy] = useState<Policy | null>(null)
   const [effective, setEffective] = useState<{ policy: Policy; sources: Policy[] } | null>(null)
 
@@ -324,50 +289,21 @@ export default function Org() {
 
   const openPolicyCreate = () => {
     setEditingPolicy(null)
-    setPolicyForm({ ...emptyPolicyForm(), org_unit_id: selected ?? '' })
     setPolicyDialogOpen(true)
   }
 
   const openPolicyEdit = (p: Policy) => {
     setEditingPolicy(p)
-    setPolicyForm(policyFormOf(p))
     setPolicyDialogOpen(true)
   }
 
-  const savePolicy = async () => {
-    const name = policyForm.name.trim()
-    if (!name) return
-    const payload = {
-      name,
-      org_unit_id: policyForm.org_unit_id || '',
-      allowed_models: splitList(policyForm.allowed_models),
-      allowed_mcp: splitList(policyForm.allowed_mcp),
-      egress_allowlist: policyForm.egress_allowlist.split('\n').map((line) => line.trim()).filter(Boolean),
-      max_tokens: optionalNumber(policyForm.max_tokens) ?? null,
-      max_budget_usd: optionalNumber(policyForm.max_budget_usd) ?? null,
-      timeout_seconds: optionalNumber(policyForm.timeout_seconds) ?? null,
-      network_mode: policyForm.network_mode,
-      sandbox_mode: policyForm.sandbox_mode,
-      approval_mode: policyForm.approval_mode,
-      intake_mode: policyForm.intake_mode,
-      enabled: policyForm.enabled,
+  // Saved inside PolicyDialog: the tabbed form owns its validation and the
+  // full payload (including the filesystem dimension).
+  const policySaved = () => {
+    void load()
+    if (selected) {
+      void workspaceApi.effectivePolicy(selected).then(setEffective).catch(() => setEffective(null))
     }
-    setLoading(true); setError('')
-    try {
-      if (editingPolicy) {
-        await workspaceApi.updatePolicy(editingPolicy.id, payload)
-      } else {
-        await workspaceApi.createPolicy(payload)
-      }
-      setEditingPolicy(null)
-      setPolicyDialogOpen(false)
-      setPolicyForm(emptyPolicyForm())
-      void load()
-      if (selected) {
-        void workspaceApi.effectivePolicy(selected).then(setEffective).catch(() => setEffective(null))
-      }
-    } catch (f) { setError(message(f)) }
-    finally { setLoading(false) }
   }
 
   const doDeletePolicy = async () => {
@@ -945,128 +881,16 @@ export default function Org() {
         </AppModal>
       )}
 
-      {/* Policy create / edit dialog */}
+      {/* Policy create / edit dialog: the tabbed form lives in PolicyDialog. */}
       {(editingPolicy || policyDialogOpen) && isAdmin && (
-        <AppModal onClose={() => { setEditingPolicy(null); setPolicyDialogOpen(false); setPolicyForm(emptyPolicyForm()) }} panelStyle={{ width: '520px' }}>
-            <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
-              {editingPolicy ? (t('org.policy_edit') ?? 'Edit policy') : (t('org.policy_create') ?? 'Create policy')}
-            </Heading>
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              <TextInput
-                id="policy-name"
-                labelText={t('org.name_label') ?? 'Name'}
-                value={policyForm.name}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, name: e.target.value })}
-                placeholder="Tier-1 production limits"
-                autoFocus
-              />
-              <Select
-                id="policy-scope"
-                labelText={t('org.policy_scope_label') ?? 'Applies to'}
-                value={policyForm.org_unit_id}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, org_unit_id: e.target.value })}
-              >
-                <SelectItem value="" text={t('org.policy_scope_installation') ?? 'Whole installation'} />
-                {flat.map(({ unit, depth }) => (
-                  <SelectItem key={unit.id} value={unit.id} text={`${'　'.repeat(depth)}${unit.name}`} />
-                ))}
-              </Select>
-              <TextInput
-                id="policy-models"
-                labelText={t('org.policy_models_label') ?? 'Allowed models'}
-                value={policyForm.allowed_models}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, allowed_models: e.target.value })}
-                placeholder={t('org.policy_models_placeholder') ?? 'model-a, model-b — empty = any'}
-              />
-              <TextInput
-                id="policy-mcp"
-                labelText={t('org.policy_mcp_label') ?? 'Allowed MCP servers'}
-                value={policyForm.allowed_mcp}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, allowed_mcp: e.target.value })}
-                placeholder={t('org.policy_mcp_placeholder') ?? 'server-a, server-b — empty = any'}
-              />
-              <TextArea
-                id="policy-egress"
-                labelText={t('org.policy_egress_label') ?? 'Egress baseline (centralized)'}
-                value={policyForm.egress_allowlist}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setPolicyForm({ ...policyForm, egress_allowlist: e.target.value })}
-                rows={3}
-                placeholder={t('org.policy_egress_placeholder') ?? 'One entry per line: a domain, a glob (*.example.com), a CIDR. Every sandboxed agent in scope gets these for free.'}
-              />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
-                <TextInput
-                  id="policy-tokens"
-                  labelText={t('org.policy_max_tokens_label') ?? 'Max tokens per run'}
-                  value={policyForm.max_tokens}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, max_tokens: e.target.value })}
-                  placeholder="200000"
-                />
-                <TextInput
-                  id="policy-budget"
-                  labelText={t('org.policy_budget_label') ?? 'Max cost, USD'}
-                  value={policyForm.max_budget_usd}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, max_budget_usd: e.target.value })}
-                  placeholder="5"
-                />
-                <TextInput
-                  id="policy-timeout"
-                  labelText={t('org.policy_timeout_label') ?? 'Max time, s'}
-                  value={policyForm.timeout_seconds}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, timeout_seconds: e.target.value })}
-                  placeholder="1800"
-                />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                <Select
-                  id="policy-network"
-                  labelText={t('org.policy_network_label') ?? 'Network'}
-                  value={policyForm.network_mode}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, network_mode: e.target.value })}
-                >
-                  <SelectItem value="" text={t('org.policy_network.default') ?? 'not restricted'} />
-                  <SelectItem value="deny" text={t('org.policy_network.deny') ?? 'denied'} />
-                </Select>
-                <Select
-                  id="policy-sandbox"
-                  labelText={t('org.policy_sandbox_label') ?? 'Sandbox'}
-                  value={policyForm.sandbox_mode}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, sandbox_mode: e.target.value })}
-                >
-                  <SelectItem value="" text={t('org.policy_sandbox.default') ?? 'standard'} />
-                  <SelectItem value="read_only" text={t('org.policy_sandbox.read_only') ?? 'read-only'} />
-                </Select>
-                <Select
-                  id="policy-approval"
-                  labelText={t('org.policy_approval_label') ?? 'Consequential tools'}
-                  value={policyForm.approval_mode}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, approval_mode: e.target.value })}
-                >
-                  <SelectItem value="" text={t('org.policy_approval.default') ?? 'no approval'} />
-                  <SelectItem value="tools" text={t('org.policy_approval.tools') ?? 'require approval'} />
-                </Select>
-                <Select
-                  id="policy-intake"
-                  labelText={t('org.policy_intake_label') ?? 'Channel intake'}
-                  value={policyForm.intake_mode}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, intake_mode: e.target.value })}
-                >
-                  <SelectItem value="" text={t('org.policy_intake.default') ?? 'governed by projects'} />
-                  <SelectItem value="deny" text={t('org.policy_intake.deny') ?? 'denied'} />
-                </Select>
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--tm-text-1)' }}>
-                <input
-                  type="checkbox"
-                  checked={policyForm.enabled}
-                  onChange={(e) => setPolicyForm({ ...policyForm, enabled: e.target.checked })}
-                />
-                {t('org.policy_enabled_label') ?? 'Policy enabled'}
-              </label>
-              <div className="form-actions">
-                <Button kind="secondary" onClick={() => { setEditingPolicy(null); setPolicyDialogOpen(false); setPolicyForm(emptyPolicyForm()) }}>{t('action.cancel') ?? 'Cancel'}</Button>
-                <Button onClick={() => void savePolicy()} disabled={!policyForm.name.trim()}>{editingPolicy ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
-              </div>
-            </div>
+        <AppModal onClose={() => { setEditingPolicy(null); setPolicyDialogOpen(false) }} panelStyle={{ width: 'min(800px, calc(100vw - 2rem))', maxHeight: '88vh', overflowY: 'auto' }}>
+          <PolicyDialog
+            editing={editingPolicy}
+            initialUnitId={selected ?? ''}
+            units={units}
+            onClose={() => { setEditingPolicy(null); setPolicyDialogOpen(false) }}
+            onSaved={policySaved}
+          />
         </AppModal>
       )}
 
