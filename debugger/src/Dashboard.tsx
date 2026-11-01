@@ -70,6 +70,8 @@ interface OverviewCache {
   toolReadiness?: ReadinessCheck[] | null
 }
 const OVERVIEW_CACHE_KEY = 'dashboard.overview'
+// Exported for the hydration regression test (Dashboard.cache.test.tsx).
+export { OVERVIEW_CACHE_KEY }
 
 /** Placeholder for one dashboard panel (header bar + body block) while its
  *  slice is in flight: Storage / Server / Human factors land independently
@@ -156,7 +158,11 @@ export default function Dashboard({ project, setProject }: Props) {
   })
   const [health, setHealth] = useState<HealthStats | null>(() => cached?.health ?? null)
   const [overview, setOverview] = useState<ProjectsOverview | null>(() => cached?.overview ?? null)
-  const [opsCount, setOpsCount] = useState<number | null>(() => cached?.opsCount ?? null)
+  const [opsCount, setOpsCount] = useState<number | null>(() =>
+    // The guard is not paranoia: one shipped build cached the raw operations
+    // summary object here instead of its count, and that crash (#31, object
+    // as a React child) is exactly what a hydration guard contains.
+    typeof cached?.opsCount === 'number' ? cached.opsCount : null)
   const [storage_, setStorage] = useState<StorageSnapshot | null>(() => cached?.storage ?? null)
   const [syshealth, setSyshealth] = useState<SystemHealth | null>(() => cached?.syshealth ?? null)
   // Run id → title from run.started events: the sandbox digest shows the human
@@ -221,7 +227,10 @@ export default function Dashboard({ project, setProject }: Props) {
 
     // Slow slices: health (~5s), operations (~3s), storage, system health.
     jobs.push(land('health', setHealth, observationApi.healthStats(undefined, since), null))
-    jobs.push(land('opsCount', (ops) => setOpsCount(ops ? ops.count : null), operations().catch(() => null), null))
+    // The count is extracted before the cache: the summary object itself
+    // ({count, operations}) must never enter the tab cache — only what the
+    // state would hold.
+    jobs.push(land('opsCount', setOpsCount, operations().then((ops) => (ops ? ops.count : null)).catch(() => null), null))
     jobs.push(land('storage', setStorage, storageOverview().catch(() => null), null))
     jobs.push(land('syshealth', setSyshealth, systemHealth().catch(() => null), null))
 
