@@ -114,6 +114,13 @@ type RunInput struct {
 	// vars at the execution boundary. Names only — values never enter the
 	// workflow or the model context.
 	Secrets []string `json:"secrets,omitempty"`
+	// IncomingAsks seeds the run's answer_agent bookkeeping with asks it
+	// received before starting (docs/temporality-agent-collaboration-spec.md):
+	// a relay ask-run launched to answer a finished agent's pending message
+	// gets the original ask in its input — no signal race, the request_id is
+	// valid from turn 1. Delivered-again via signal would double-frame, so the
+	// ask is ONLY in the input.
+	IncomingAsks []AgentMessage `json:"incoming_asks,omitempty"`
 	// ToolAllowlist restricts the tools offered to (and executed for) this
 	// run across kernel and MCP tools; empty allows everything configured.
 	ToolAllowlist []string `json:"tool_allowlist,omitempty"`
@@ -1360,9 +1367,19 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// re-framed at the next turn boundary instead of being dropped. All three
 	// are workflow-local and rebuilt deterministically during replay.
 	incomingAsks := map[string]AgentMessage{}
+	// Relay asks (a follow-up run launched to answer for a finished agent)
+	// carry the ask in the input — the request_id is valid from turn 1.
+	for _, ask := range input.IncomingAsks {
+		if strings.TrimSpace(ask.RequestID) != "" {
+			incomingAsks[ask.RequestID] = ask
+		}
+	}
 	answeredAsks := map[string]bool{}
 	var deferredReplies []AgentReply
 	collabState := &collabState{incoming: incomingAsks, answered: answeredAsks}
+	// askRelays counts follow-up runs launched on this run's behalf — the
+	// deterministic ordinal of <target>/ask/NN run ids.
+	askRelays := 0
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
 		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
@@ -2063,54 +2080,134 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						toolBlocked = true
 					} else {
 						message := AgentMessage{RequestID: requestID, FromRunID: input.RunID, FromAgentID: input.AgentID, FromRole: input.Role, Type: askType, Payload: payload, Mode: mode, SentAt: workflow.Now(ctx).UTC().Format(time.RFC3339)}
-						asked := map[string]any{"request_id": requestID, "to_run": target.RunID, "to_agent": target.AgentID, "to_role": target.Role, "type": askType, "mode": mode, "payload": payload, "timeout_seconds": timeoutSeconds}
+						// A completed delegation is not automatically addressable, but the
+						// model DOES support resuming it: a finished collaborator gets a
+						// short follow-up run that answers and finishes, instead of a refusal.
+						relay := target.Status != "running"
+						asked := map[string]any{"request_id": requestID, "to_run": target.RunID, "to_agent": target.AgentID, "to_role": target.Role, "type": askType, "mode": mode, "payload": payload, "timeout_seconds": timeoutSeconds, "target_status": target.Status}
 						if err := emit(activityCtx, state, "agent.asked", asked); err != nil {
 							return result, err
 						}
-						// Signal the target run's workflow. A finished/unknown target
-						// errors here — that is the explicit "recipient not available"
-						// outcome, not a run failure (§4: completed delegation is not
-						// automatically addressable).
-						signalErr := workflow.SignalExternalWorkflow(ctx, WorkflowID(target.SourceID, input.Project, target.RunID), "", AgentMessageSignal, message).Get(ctx, nil)
-						if signalErr != nil {
-							if err := emit(activityCtx, state, "agent.ask_undeliverable", map[string]any{"request_id": requestID, "to": to, "to_run": target.RunID, "reason": boundedFailureDetail(signalErr)}); err != nil {
-								return result, err
-							}
-							toolResult.Content = fmt.Sprintf("The ask was not delivered: the target run %s is no longer accepting messages (it finished or was cancelled). No new run is started automatically.", target.RunID)
-							toolBlocked = true
-						} else if mode == "wait" {
-							reply, timedOut, waitErr := awaitAgentReply(ctx, requestID, time.Duration(timeoutSeconds)*time.Second, &deferredReplies)
-							if waitErr != nil {
-								return result, waitErr
-							}
-							if timedOut {
-								if err := emit(activityCtx, state, "agent.ask_expired", map[string]any{"request_id": requestID, "to_run": target.RunID, "timeout_seconds": timeoutSeconds}); err != nil {
+						if !relay {
+							// Live target: the ask rides kernel.agent_message into the running
+							// workflow; it lands at the recipient's next turn boundary.
+							signalErr := workflow.SignalExternalWorkflow(ctx, WorkflowID(target.SourceID, input.Project, target.RunID), "", AgentMessageSignal, message).Get(ctx, nil)
+							if signalErr != nil {
+								if err := emit(activityCtx, state, "agent.ask_undeliverable", map[string]any{"request_id": requestID, "to": to, "to_run": target.RunID, "reason": boundedFailureDetail(signalErr)}); err != nil {
 									return result, err
 								}
-								// §4: the timeout must not lose the request — the
-								// recipient still holds it, a late answer flows through
-								// the async delivery path at a turn boundary.
-								toolResult.Content = fmt.Sprintf("No reply within %d seconds. The request stays with the recipient (request_id: %s) — a late answer will arrive as a follow-up message; continue with other work.", timeoutSeconds, requestID)
+								toolResult.Content = fmt.Sprintf("The ask was not delivered: the target run %s is no longer accepting messages (it finished or was cancelled). No new run is started automatically.", target.RunID)
+								toolBlocked = true
+							} else if mode == "wait" {
+								reply, timedOut, waitErr := awaitAgentReply(ctx, requestID, time.Duration(timeoutSeconds)*time.Second, &deferredReplies)
+								if waitErr != nil {
+									return result, waitErr
+								}
+								if timedOut {
+									if err := emit(activityCtx, state, "agent.ask_expired", map[string]any{"request_id": requestID, "to_run": target.RunID, "timeout_seconds": timeoutSeconds}); err != nil {
+										return result, err
+									}
+									// §4: the timeout must not lose the request — the recipient still
+									// holds it, a late answer flows through the async delivery path.
+									toolResult.Content = fmt.Sprintf("No reply within %d seconds. The request stays with the recipient (request_id: %s) — a late answer will arrive as a follow-up message; continue with other work.", timeoutSeconds, requestID)
+								} else {
+									toolResult.Content = formatAgentReply(reply, askType)
+								}
 							} else {
-								replyPayload := reply.Payload
-								if len(replyPayload) > 4096 {
-									replyPayload = replyPayload[:4096]
-								}
-								from := reply.FromAgentID
-								if from == "" {
-									from = reply.FromRunID
-								}
-								if err := emit(activityCtx, state, "agent.answer.received", map[string]any{"request_id": requestID, "from_run": reply.FromRunID, "from_agent": reply.FromAgentID, "payload": replyPayload}); err != nil {
-									return result, err
-								}
-								toolResult.Content = fmt.Sprintf("Reply from %s to your request %q:\n%s", from, askType, replyPayload)
+								toolResult.Content = fmt.Sprintf("Request delivered to %s (run %s). request_id: %s, status: pending. The reply will arrive as a follow-up message at a turn boundary — do not poll the target.", target.AgentID, target.RunID, requestID)
 							}
 						} else {
-							toolResult.Content = fmt.Sprintf("Request delivered to %s (run %s). request_id: %s, status: pending. The reply will arrive as a follow-up message at a turn boundary — do not poll the target.", target.AgentID, target.RunID, requestID)
+							// Finished target: launch a short follow-up run of the SAME agent
+							// (the resolution machinery of delegation reused). It reads the ask
+							// from its input, answers with answer_agent and finishes — it cannot
+							// delegate further and it does not start any work on its own.
+							askRelays++
+							relayRunID := fmt.Sprintf("%s/ask/%02d", target.RunID, askRelays)
+							relayActor := target.ActorID
+							if relayActor == "" {
+								relayActor = input.ActorID
+							}
+							resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+							var relayInput RunInput
+							resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: target.AgentID, RunID: relayRunID, TaskID: input.TaskID, Prompt: agentAskRelayPrompt(message, target.RunID, input.TaskID), ActorID: relayActor, MaxTurns: askRunMaxTurns, DelegationDepth: MaxDelegationDepth, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &relayInput)
+							if resolveErr != nil {
+								if err := emit(activityCtx, state, "agent.ask_undeliverable", map[string]any{"request_id": requestID, "to": to, "to_run": target.RunID, "reason": boundedFailureDetail(resolveErr)}); err != nil {
+									return result, err
+								}
+								toolResult.Content = fmt.Sprintf("The ask could not be delivered: %s finished and a follow-up run of agent %q could not be started (%s). No new run was started.", target.RunID, target.AgentID, boundedFailureDetail(resolveErr))
+								toolBlocked = true
+							} else {
+								// A Q&A run must stay short: the delegated-turns floor exists to
+								// protect subtask work, an answer needs a couple of turns.
+								relayInput.MaxTurns = askRunMaxTurns
+								relayInput.ParentRunID = target.RunID
+								relayInput.TeamRootRunID = input.TeamRootRunID
+								relayInput.SourceID = input.SourceID
+								relayInput.IncomingAsks = []AgentMessage{message}
+								asked["relay_run"] = relayRunID
+								asked["relay"] = true
+								if err := emit(activityCtx, state, "agent.asked", asked); err != nil {
+									return result, err
+								}
+								// ABANDON: the asker may finish while the short run is still
+								// answering — it must not be terminated for that.
+								childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, relayRunID), ParentClosePolicy: enums.PARENT_CLOSE_POLICY_ABANDON})
+								childFuture := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", relayInput)
+								var childExec workflow.Execution
+								if startErr := childFuture.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
+									if err := emit(activityCtx, state, "agent.ask_undeliverable", map[string]any{"request_id": requestID, "to": to, "to_run": target.RunID, "relay_run": relayRunID, "reason": boundedFailureDetail(startErr)}); err != nil {
+										return result, err
+									}
+									toolResult.Content = fmt.Sprintf("The follow-up run %s was rejected before execution, no effect; the ask was not delivered.", relayRunID)
+									toolBlocked = true
+								} else if mode == "wait" {
+									// Park until the reply, the run finishing without one, or the
+									// timeout — whichever lands first.
+									var reply AgentReply
+									gotReply, childDone, timedOut := false, false, false
+									selector := workflow.NewSelector(ctx)
+									selector.AddReceive(workflow.GetSignalChannel(ctx, AgentReplySignal), func(c workflow.ReceiveChannel, _ bool) {
+										var r AgentReply
+										for c.ReceiveAsync(&r) {
+											if r.RequestID == requestID {
+												reply = r
+												gotReply = true
+												return
+											}
+											// Another ask's answer: keep for the next boundary.
+											deferredReplies = append(deferredReplies, r)
+										}
+									})
+									selector.AddFuture(childFuture, func(f workflow.Future) {
+										childDone = true
+										_ = f.Get(ctx, nil)
+									})
+									selector.AddFuture(workflow.NewTimer(ctx, time.Duration(timeoutSeconds)*time.Second), func(f workflow.Future) {
+										_ = f.Get(ctx, nil)
+										timedOut = true
+									})
+									for !gotReply && !childDone && !timedOut {
+										selector.Select(ctx)
+									}
+									switch {
+									case gotReply:
+										toolResult.Content = formatAgentReply(reply, askType)
+									case childDone:
+										toolResult.Content = fmt.Sprintf("The follow-up run %s finished without answering (request_id: %s). Its trace may hold the reason; the request is not retried automatically.", relayRunID, requestID)
+									default: // timed out
+										if err := emit(activityCtx, state, "agent.ask_expired", map[string]any{"request_id": requestID, "relay_run": relayRunID, "timeout_seconds": timeoutSeconds}); err != nil {
+											return result, err
+										}
+										toolResult.Content = fmt.Sprintf("No reply within %d seconds. The follow-up run %s keeps the request (request_id: %s) — a late answer will arrive as a follow-up message.", timeoutSeconds, relayRunID, requestID)
+									}
+								} else {
+									toolResult.Content = fmt.Sprintf("A follow-up run %s of %s was started to answer the ask (the run had already finished). request_id: %s, status: pending — the reply arrives as a follow-up message.", relayRunID, target.AgentID, requestID)
+								}
+							}
 						}
-					}
-					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000)}); err != nil {
-						return result, err
+						if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000)}); err != nil {
+							return result, err
+						}
 					}
 				}
 			} else if agentCollab == 1 && call.Name == "answer_agent" {
@@ -3530,6 +3627,48 @@ func normalizeAskPayload(raw any) string {
 	return text
 }
 
+// askRunMaxTurns is the turn budget of a relay ask-run (a follow-up run
+// launched so a finished collaborator can answer): read the ask, answer via
+// answer_agent, finish. Ceiling, not target — a real answer takes 1–2 turns.
+const askRunMaxTurns = 6
+
+// formatAgentReply is the wait-mode tool result for a matched reply.
+func formatAgentReply(reply AgentReply, askType string) string {
+	replyPayload := reply.Payload
+	if len(replyPayload) > 4096 {
+		replyPayload = replyPayload[:4096]
+	}
+	from := reply.FromAgentID
+	if from == "" {
+		from = reply.FromRunID
+	}
+	return fmt.Sprintf("Reply from %s to your request %q:\n%s", from, askType, replyPayload)
+}
+
+// agentAskRelayPrompt is the self-contained prompt of a relay ask-run: the
+// agent reads why it was woken, answers with answer_agent and finishes — a
+// short Q&A, not a new work cycle. The original run id is in the prompt so
+// the agent can check its own trace instead of guessing.
+func agentAskRelayPrompt(msg AgentMessage, targetRunID, taskID string) string {
+	from := msg.FromAgentID
+	if from == "" {
+		from = msg.FromRunID
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Your earlier run %s on task %s has finished; a collaborating agent now sends you a direct follow-up request within the same saga. This is a short Q&A run: answer the request below with the answer_agent tool (request_id %s) and finish — do not start new work cycles.", targetRunID, taskID, msg.RequestID))
+	if msg.FromRole != "" && from != "" {
+		b.WriteString(fmt.Sprintf("\n\nFrom: %s (%s)", msg.FromRole, from))
+	} else if from != "" {
+		b.WriteString("\n\nFrom: " + from)
+	}
+	if msg.Type != "" {
+		b.WriteString("\nType: " + msg.Type)
+	}
+	b.WriteString("\n\nPayload:\n" + msg.Payload)
+	b.WriteString(fmt.Sprintf("\n\nIf the request needs facts from your earlier work, inspect the workspace or your own trace (trace_read run_id=%s) instead of guessing. If it is out of scope for you, answer via answer_agent saying exactly that.", targetRunID))
+	return b.String()
+}
+
 // isReadOnlyCall is the effect-classification entry point: read-only tool
 // names, plus per-action classification for the browser tool.
 func isReadOnlyCall(tool string, args map[string]any) bool {
@@ -4737,8 +4876,8 @@ func KernelTools() []llm.ToolDef {
 		{Name: "saga_register", Description: "Register the current task's work as a saga — an explicitly tracked long-running effort that may span many runs, chat follow-ups and delegated agents. Call it once when starting work you expect to be long or multi-stage, or when asked to track a saga. The saga rides the task: every follow-up run and delegation joins it automatically. Registering an already-bound task returns the existing saga", Parameters: map[string]any{"type": "object", "properties": map[string]any{"title": map[string]any{"type": "string", "description": "Short human-readable saga title"}, "goal": map[string]any{"type": "string", "description": "Optional one-line goal/outcome of the saga"}}, "required": []string{"title"}}},
 		{Name: "saga_attach", Description: "Attach the current task to an existing saga (docs/sagas.md). Use it to join related efforts — for example when taking over work another agent already tracks in a saga. The saga_id comes from saga_list", Parameters: map[string]any{"type": "object", "properties": map[string]any{"saga_id": map[string]any{"type": "string", "description": "The saga to join, from saga_list"}, "note": map[string]any{"type": "string", "description": "Optional one-line reason for joining this saga"}}, "required": []string{"saga_id"}}},
 		{Name: "saga_list", Description: "List sagas registered in this project: saga_id, title, goal, bound tasks and registration time. Use it to find an existing saga before saga_attach instead of registering a duplicate", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
-		{Name: "get_collaborators", Description: "List the humans and agents participating in the CURRENT saga: id (agent:<id> / human:<id>), kind, role, task, status and run_id for agents. Scope is this saga only — its tasks and every delegation under them. Use it to see who is working alongside you before ask_agent; humans are better reached with ask_human", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
-		{Name: "ask_agent", Description: "Send a request or structured data to a collaborating AGENT of this saga (address from get_collaborators: agent:<id>, or run:<run_id> for a specific run). Modes: async (default) — the request is delivered, you get request_id and continue, the reply arrives as a follow-up message at a turn boundary; wait — pause up to timeout_sec for the reply as this call's result. The payload may be text or arbitrary JSON. The target is validated kernel-side against your saga scope and must be a live run — a finished run refuses delivery", Parameters: map[string]any{"type": "object", "properties": map[string]any{"to": map[string]any{"type": "string", "description": "Collaborator address: agent:<agent_id> from get_collaborators, or run:<run_id> for a specific run"}, "type": map[string]any{"type": "string", "description": "Short message type, e.g. compatibility.check, review.request, data.share"}, "payload": map[string]any{"description": "Text or arbitrary JSON: the question, task or structured data (bounded to ~4KB)"}, "mode": map[string]any{"type": "string", "enum": []string{"async", "wait"}, "description": "async (default): return immediately, reply arrives later; wait: block up to timeout_sec for the reply"}, "timeout_sec": map[string]any{"type": "integer", "description": "wait mode only: how long to wait for the reply (default 300, max 3600). On timeout the request stays with the recipient — a late reply arrives as a follow-up message"}}, "required": []string{"to", "type"}}},
+		{Name: "get_collaborators", Description: "List the humans and agents participating in the CURRENT saga: id (agent:<id> / human:<id>), kind, role, task, status and run_id for agents. Scope is this saga only — its tasks and every delegation under them. Status completed/failed means the agent finished but can still be ASKED: ask_agent launches a short follow-up run of that agent to answer. Use this before ask_agent; humans are better reached with ask_human", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
+		{Name: "ask_agent", Description: "Send a request or structured data to a collaborating AGENT of this saga (address from get_collaborators: agent:<id>, or run:<run_id> for a specific run). A live run receives the message at its next turn boundary; a FINISHED agent gets a short follow-up run that reads your ask and answers. Modes: async (default) — you get request_id and continue, the reply arrives as a follow-up message; wait — pause up to timeout_sec for the reply as this call's result. The payload may be text or arbitrary JSON. Addresses are validated kernel-side against your saga scope", Parameters: map[string]any{"type": "object", "properties": map[string]any{"to": map[string]any{"type": "string", "description": "Collaborator address: agent:<agent_id> from get_collaborators, or run:<run_id> for a specific run"}, "type": map[string]any{"type": "string", "description": "Short message type, e.g. compatibility.check, review.request, data.share"}, "payload": map[string]any{"description": "Text or arbitrary JSON: the question, task or structured data (bounded to ~4KB)"}, "mode": map[string]any{"type": "string", "enum": []string{"async", "wait"}, "description": "async (default): return immediately, reply arrives later; wait: block up to timeout_sec for the reply"}, "timeout_sec": map[string]any{"type": "integer", "description": "wait mode only: how long to wait for the reply (default 300, max 3600). On timeout the request stays with the recipient — a late reply arrives as a follow-up message"}}, "required": []string{"to", "type"}}},
 		{Name: "answer_agent", Description: "Reply to an agent message delivered to this run: pass the request_id from that message's framing and your answer payload (text or JSON). One answer per request — a duplicate is refused", Parameters: map[string]any{"type": "object", "properties": map[string]any{"request_id": map[string]any{"type": "string", "description": "request_id from the received agent message"}, "payload": map[string]any{"description": "Text or arbitrary JSON: the answer"}}, "required": []string{"request_id", "payload"}}},
 		{Name: "skill_inspect", Description: "Show a skill's full SKILL.md and manifest contract (capabilities, tools, runtime, preconditions, postconditions, evidence)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_validate", Description: "Validate a skill's manifest and return issues", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},

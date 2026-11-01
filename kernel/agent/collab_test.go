@@ -219,6 +219,19 @@ func TestAgentMessageFraming(t *testing.T) {
 	}
 }
 
+// The relay ask-run is woken purely by its prompt: it must carry the answer
+// handle (request_id), the original run to ground on, and the Q&A-only
+// framing — or the woken agent would treat the ask as new work.
+func TestAgentAskRelayPrompt(t *testing.T) {
+	msg := AgentMessage{RequestID: "req-relay", FromRunID: "run-lead", FromAgentID: "writer-01", Type: "compatibility.check", Payload: `{"api_change":"x"}`}
+	prompt := agentAskRelayPrompt(msg, "run-coder/original", "task-9")
+	for _, want := range []string{"req-relay", "answer_agent", "run-coder/original", "task-9", "writer-01", "compatibility.check", "trace_read run_id=run-coder/original"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("relay prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestCollabToolsVersionFiltered(t *testing.T) {
 	tools := KernelTools()
 	all := withoutCollabTools(tools)

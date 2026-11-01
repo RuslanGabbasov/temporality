@@ -39,6 +39,7 @@ type runParticipant struct {
 	Title     string
 	Status    string // running | completed | failed | cancelled
 	SourceID  string
+	ActorID   string // the starting principal, inherited by every delegated child
 	StartedAt time.Time
 }
 
@@ -196,7 +197,7 @@ func foldRunParticipants(events []observation.Event) (runs map[string]*runPartic
 			if !seen || ev.OccurredAt.After(prev.StartedAt) {
 				runs[runID] = &runParticipant{
 					RunID: runID, AgentID: agentID, Role: role, Title: title,
-					Status: "running", SourceID: ev.Source.ID, StartedAt: ev.OccurredAt,
+					Status: "running", SourceID: ev.Source.ID, ActorID: ev.Context.Actor.ID, StartedAt: ev.OccurredAt,
 				}
 			} else if seen && prev.AgentID == "" && agentID != "" {
 				prev.AgentID = agentID
@@ -328,7 +329,8 @@ type ResolveCollaboratorRequest struct {
 }
 
 // ResolvedCollaborator is the delivery address: the run's workflow identity
-// is WorkflowID(SourceID, Project, RunID).
+// is WorkflowID(SourceID, Project, RunID). Found with Status != running means
+// a FINISHED run — the caller launches a relay ask-run instead of signaling.
 type ResolvedCollaborator struct {
 	Found    bool   `json:"found"`
 	RunID    string `json:"run_id,omitempty"`
@@ -336,6 +338,7 @@ type ResolvedCollaborator struct {
 	AgentID  string `json:"agent_id,omitempty"`
 	Role     string `json:"role,omitempty"`
 	Status   string `json:"status,omitempty"`
+	ActorID  string `json:"actor_id,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 }
 
@@ -423,8 +426,10 @@ func (a *Activities) ResolveCollaborator(ctx context.Context, request ResolveCol
 	if target == nil {
 		return ResolvedCollaborator{Found: false, Detail: fmt.Sprintf("no collaborator %q in this saga's scope; call get_collaborators for the available ones", request.To)}, nil
 	}
-	if target.Status != "running" {
-		return ResolvedCollaborator{Found: false, RunID: target.RunID, Status: target.Status, Detail: fmt.Sprintf("the target run %s is %s — a finished run does not accept asks and no new run is started for it (docs/temporality-agent-collaboration-spec.md §4)", target.RunID, target.Status)}, nil
-	}
-	return ResolvedCollaborator{Found: true, RunID: target.RunID, SourceID: target.SourceID, AgentID: target.AgentID, Role: target.Role, Status: target.Status}, nil
+	// Both live and finished targets resolve: a finished run gets a relay
+	// ask-run of the same agent (docs/temporality-agent-collaboration-spec.md
+	// §4 — addressing a completed agent is defined by the run-resumption
+	// support, which the delegation model provides). The caller reads Status
+	// to choose signal vs relay.
+	return ResolvedCollaborator{Found: true, RunID: target.RunID, SourceID: target.SourceID, AgentID: target.AgentID, Role: target.Role, Status: target.Status, ActorID: target.ActorID}, nil
 }
