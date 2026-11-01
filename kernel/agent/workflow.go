@@ -2382,7 +2382,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 							StartToCloseTimeout:    time.Duration(timeoutSec)*time.Second + 10*time.Minute,
 							ScheduleToCloseTimeout: time.Duration(timeoutSec)*time.Second + 15*time.Minute,
 							HeartbeatTimeout:       90 * time.Second,
-							RetryPolicy:            &temporal.RetryPolicy{MaximumAttempts: 1},
+							// Retries ARE the worker-restart recovery: attempt 1
+							// starts the process, later attempts attach to it.
+							RetryPolicy: backgroundActivityRetryPolicy(),
 						})
 						future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion})
 						if err := startTool(); err != nil {
@@ -2546,9 +2548,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						StartToCloseTimeout:    time.Duration(timeoutSec)*time.Second + 10*time.Minute,
 						ScheduleToCloseTimeout: time.Duration(timeoutSec)*time.Second + 15*time.Minute,
 						HeartbeatTimeout:       90 * time.Second,
-						// Never re-execute a detached install/build on retry: the
-						// attach path in RunTool handles a worker death instead.
-						RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1},
+						// Retries ARE the worker-restart recovery
+						// (docs/agent-async-operations.md): attempt 1 starts the
+						// detached install/build, every later attempt attaches to
+						// the existing process via RunTool's attach path — the
+						// command is never re-executed.
+						RetryPolicy: backgroundActivityRetryPolicy(),
 					})
 					future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion})
 					if err := startTool(); err != nil {
@@ -4156,6 +4161,22 @@ type backgroundOp struct {
 	started    time.Time
 	timeoutSec int
 	turn       int
+}
+
+// backgroundActivityRetryPolicy is the detached-command retry contract
+// (docs/agent-async-operations.md): the activity retries so a dead worker's
+// command gets re-ATTACHED, never re-executed — RunTool routes every attempt
+// after the first into attachBackgroundOperation, which only observes the
+// already-running process. The typed lost/timeout errors end the ladder:
+// re-attaching would find the same nothing.
+func backgroundActivityRetryPolicy() *temporal.RetryPolicy {
+	return &temporal.RetryPolicy{
+		InitialInterval:        time.Second,
+		BackoffCoefficient:     2,
+		MaximumInterval:        30 * time.Second,
+		MaximumAttempts:        3,
+		NonRetryableErrorTypes: []string{"BackgroundOpLost", "BackgroundOpTimeout", "InvalidToolArguments", "ToolNotAllowed"},
+	}
 }
 
 // awaitBackgroundOps blocks until at least one pending background operation

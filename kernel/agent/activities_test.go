@@ -249,6 +249,35 @@ func TestRunToolMCPFaultCommitsEffectBeforeCrash(t *testing.T) {
 	}
 }
 
+// The tool list PrepareRun hands the model must advertise the whole sandbox
+// surface: kill_operation was once executable but unadvertised —
+// BuiltinToolDefs had it while ToolDefsFor (the list PrepareRun uses) did not,
+// so the model never saw it in a standard run.
+func TestPrepareRunAdvertisesKillOperation(t *testing.T) {
+	activities := &Activities{MCP: mcpclient.NewRegistry(), Sandbox: &streamingSandbox{root: t.TempDir()}}
+	input := &RunInput{RunID: "run-tools", Project: "proj"}
+	if err := activities.PrepareRun(input); err != nil {
+		t.Fatalf("PrepareRun: %v", err)
+	}
+	names := map[string]bool{}
+	for _, def := range input.Tools {
+		names[def.Name] = true
+	}
+	for _, want := range []string{"run_command", "kill_operation"} {
+		if !names[want] {
+			t.Fatalf("tool %q missing from the model-visible set after PrepareRun: %v", want, names)
+		}
+	}
+	// The two builders share one sandbox surface — they must not drift.
+	builtin := map[string]bool{}
+	for _, def := range activities.BuiltinToolDefs() {
+		builtin[def.Name] = true
+	}
+	if !builtin["kill_operation"] || !builtin["run_command"] {
+		t.Fatalf("BuiltinToolDefs lost a sandbox tool: %v", builtin)
+	}
+}
+
 func TestSandboxLabelsCarryRunIdentity(t *testing.T) {
 	labels := sandboxLabels(ToolRequest{
 		Project: "omni", RunID: "untitled-20261016", AgentID: "lead", ActorID: "ivan",

@@ -297,29 +297,29 @@ var killOperationTool = llm.ToolDef{
 	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"operation_id": map[string]any{"type": "string", "description": "The operation id the background start returned"}}, "required": []string{"operation_id"}},
 }
 
+// sandboxToolDefs is the sandbox execution surface — one list shared by
+// BuiltinToolDefs and ToolDefsFor, so a tool can never drift out of the
+// model-visible set the way kill_operation once did: callable in every run
+// but advertised in none, because ToolDefsFor simply forgot it.
+func (a *Activities) sandboxToolDefs() []llm.ToolDef {
+	if !sandboxConfigured(a.Sandbox) {
+		return nil
+	}
+	return append([]llm.ToolDef{runCommandTool, killOperationTool}, fileToolDefs...)
+}
+
 // BuiltinToolDefs returns kernel tools plus the sandbox surface (run_command
 // and the native file tools, when the sandbox is configured) — the tool set
 // independent of any MCP server.
 func (a *Activities) BuiltinToolDefs() []llm.ToolDef {
-	defs := KernelTools()
-	if sandboxConfigured(a.Sandbox) {
-		defs = append(defs, runCommandTool)
-		defs = append(defs, killOperationTool)
-		defs = append(defs, fileToolDefs...)
-	}
-	return defs
+	return append(KernelTools(), a.sandboxToolDefs()...)
 }
 
 // ToolDefsFor returns configured MCP tools for the given servers plus the
-// sandbox surface (run_command, file tools). An empty server list keeps the
-// legacy env server only.
+// sandbox surface (run_command, kill_operation, file tools). An empty server
+// list keeps the legacy env server only.
 func (a *Activities) ToolDefsFor(servers []string) []llm.ToolDef {
-	defs := a.MCP.ToolDefsFor(servers)
-	if sandboxConfigured(a.Sandbox) {
-		defs = append(defs, runCommandTool)
-		defs = append(defs, fileToolDefs...)
-	}
-	return defs
+	return append(a.MCP.ToolDefsFor(servers), a.sandboxToolDefs()...)
 }
 
 func (a *Activities) ApprovalTools() []string {
@@ -1417,6 +1417,15 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		sbReq.OnOutput = a.Console.Hook(request.Project, request.OperationID)
 		result, err := a.Sandbox.Execute(ctx, sbReq)
 		if err != nil {
+			if background {
+				var timeoutErr *sandbox.CommandTimeoutError
+				if errors.As(err, &timeoutErr) {
+					// The budget ran out — a definitive outcome for this attempt,
+					// never retried into a re-run. The partial effect stays
+					// uncertain and flows to reconciliation.
+					return ToolResult{}, temporal.NewApplicationError(err.Error(), "BackgroundOpTimeout", nil)
+				}
+			}
 			return ToolResult{}, err
 		}
 		if a.Console != nil {
@@ -1560,36 +1569,54 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 // var so tests can shrink the wait.
 var backgroundAttachPoll = 3 * time.Second
 
+// backgroundAttachLostGrace bounds how long the attach loop tolerates state
+// probe failures (a docker daemon blip) before declaring the operation
+// lost/unknown; a package var so tests can shrink the window.
+var backgroundAttachLostGrace = 30 * time.Second
+
 // backgroundAttachNotice explains the empty console stream to a reader who
 // subscribed around the worker restart: the output pipe lived inside the old
 // worker process, so the bytes are gone — only the exit code survives.
 const backgroundAttachNotice = "(attached after a worker restart — the live output was lost with the old worker; this stream reports the exit code only)\n"
 
-// attachBackgroundOperation is the attempt>1 run_command background path:
-// the worker died mid-command. NEVER re-execute: a retried yarn install
-// corrupts node_modules and burns the registry. Attach instead: wait for the
-// exit-code file the wrapper writes (the process kept running in the run
-// container). The console entry is re-registered here — the restart wiped the
-// registry, and a UI subscriber to this operation would otherwise stare at an
-// entry that no writer ever touches; the notice tells them why the stream is
+// attachBackgroundOperation is the retry run_command background path: the
+// worker died mid-command. NEVER re-execute: a retried yarn install corrupts
+// node_modules and burns the registry. Attach instead: wait for the exit-code
+// file the wrapper writes (the process kept running in the run container).
+// The console entry is re-registered here — the restart wiped the registry,
+// and a UI subscriber to this operation would otherwise stare at an entry
+// that no writer ever touches; the notice tells them why the stream is
 // empty, and Done delivers the exit code when the probe resolves.
+//
+// Outcomes (docs/agent-async-operations.md) are three-way and honest: the
+// recorded exit code, continued waiting on a live process, or an explicit
+// lost/unknown. Lost and timed-out outcomes surface as typed activity errors,
+// so the workflow records tool.failed with effect=uncertain and the
+// reconciliation wall owns the decision — never a false exit 0, never a
+// re-run of the command.
 func (a *Activities) attachBackgroundOperation(ctx context.Context, request ToolRequest, timeout int) (ToolResult, error) {
 	scratchKey := sandbox.SanitizeScratchToken(request.Project) + "/" + sandbox.SanitizeScratchToken(request.RunID)
 	// The attach wait uses the detached budget: the caller's timeout_sec
 	// clamped to the background ceiling (1h), the background default (900s)
 	// when the model passed none — never the foreground 15-minute budgets.
 	timeout = sandbox.CommandTimeoutBackground(timeout)
+	// Measured from the operation's own start when its pid marker survived,
+	// so a worker restart never stretches the timeout the model was promised.
+	// Without the marker the budget restarts from now: the alternative —
+	// killing a possibly-live process on a guessed clock — is worse.
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	if a.Console != nil && request.OperationID != "" {
 		a.Console.Hook(request.Project, request.OperationID)
 		a.Console.Write(request.Project, request.OperationID, "stdout", []byte(backgroundAttachNotice))
 	}
+	probeFailuresSince := time.Time{}
 	for {
-		if time.Now().After(deadline) {
-			return ToolResult{Content: fmt.Sprintf("error: background operation %s lost its worker and outlived its timeout — its state is unknown; re-run it if the effect is still needed", request.OperationID)}, nil
-		}
 		state, err := a.Sandbox.OperationState(scratchKey, request.OperationID)
 		if err == nil {
+			probeFailuresSince = time.Time{}
+			if !state.StartedAt.IsZero() {
+				deadline = state.StartedAt.Add(time.Duration(timeout) * time.Second)
+			}
 			if state.Finished {
 				if activity.IsActivity(ctx) {
 					if logger := activity.GetLogger(ctx); logger != nil {
@@ -1603,15 +1630,32 @@ func (a *Activities) attachBackgroundOperation(ctx context.Context, request Tool
 				return ToolResult{Content: fmt.Sprintf("exit_code=%d\n(output not available: the worker restarted while the command ran)", exitCode), ExitCode: &exitCode}, nil
 			}
 			if !state.Running && !state.Alive {
-				// Killed (no exit-code file) or the wrapper died.
-				if a.Console != nil && request.OperationID != "" {
-					a.Console.Done(request.Project, request.OperationID, 137)
-				}
-				exitCode := 137
-				return ToolResult{Content: "exit_code=137\n(terminated: the process is gone and left no exit code)", ExitCode: &exitCode}, nil
+				// The process vanished without recording a result: crashed,
+				// killed outside kill_operation, or lost with its container.
+				return ToolResult{}, a.backgroundLost(request, "the process is gone and left no exit code")
 			}
 		} else if ctx.Err() != nil {
 			return ToolResult{}, ctx.Err()
+		} else {
+			// Probe failures may be a daemon blip: give the state a grace
+			// window before declaring the operation unreachable.
+			if probeFailuresSince.IsZero() {
+				probeFailuresSince = time.Now()
+			}
+			if time.Since(probeFailuresSince) > backgroundAttachLostGrace {
+				return ToolResult{}, a.backgroundLost(request, fmt.Sprintf("its container or the docker daemon is unreachable: %v", err))
+			}
+		}
+		if time.Now().After(deadline) {
+			// The budget the command was promised is spent. Terminate what is
+			// left (the first-attempt path kills the container at the same
+			// moment) and report an uncertain effect — never a re-run.
+			_, _ = a.Sandbox.KillOperation(scratchKey, request.OperationID)
+			if a.Console != nil && request.OperationID != "" {
+				a.Console.Write(request.Project, request.OperationID, "stderr", []byte("timed out — the process was terminated\n"))
+				a.Console.Done(request.Project, request.OperationID, 137)
+			}
+			return ToolResult{}, temporal.NewApplicationError(fmt.Sprintf("background operation %s exceeded its %d second timeout; the process was terminated and its partial effect is uncertain", request.OperationID, timeout), "BackgroundOpTimeout", nil)
 		}
 		select {
 		case <-ctx.Done():
@@ -1622,6 +1666,19 @@ func (a *Activities) attachBackgroundOperation(ctx context.Context, request Tool
 			}
 		}
 	}
+}
+
+// backgroundLost resolves an attach whose operation cannot be accounted for:
+// no recorded exit code and no reachable process. The typed error stops the
+// activity retry ladder (a retry would attach to the same nothing) while
+// staying retryable-class for effect accounting — tool.failed lands with
+// effect=uncertain and the reconciliation wall owns the decision.
+func (a *Activities) backgroundLost(request ToolRequest, detail string) error {
+	if a.Console != nil && request.OperationID != "" {
+		a.Console.Write(request.Project, request.OperationID, "stderr", []byte("state lost/unknown — "+detail+"\n"))
+		a.Console.Done(request.Project, request.OperationID, 137)
+	}
+	return temporal.NewApplicationError(fmt.Sprintf("background operation %s is lost/unknown: %s; its effect is uncertain — reconcile it if the effect matters", request.OperationID, detail), "BackgroundOpLost", nil)
 }
 
 func allowedForAgent(allowed []string, name string) bool {

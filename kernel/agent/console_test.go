@@ -2,10 +2,13 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"go.temporal.io/sdk/temporal"
 
 	"github.com/temporality-project/temporality/kernel/sandbox"
 )
@@ -419,14 +422,22 @@ func TestRunToolBackgroundStreamsConsole(t *testing.T) {
 
 // scriptedOpStateSandbox answers the attach loop's OperationState probes from
 // a scripted list (the last state repeats): running first, then the exit-code
-// file appears — the wrapper finished while nobody watched.
+// file appears — the wrapper finished while nobody watched. Execute fails the
+// test if the attach path ever tries to run the command again: re-running is
+// the one thing the retry semantics must never do.
 type scriptedOpStateSandbox struct {
 	streamingSandbox
-	states []sandbox.OperationState
-	calls  int
+	states     []sandbox.OperationState
+	probeErr   error
+	calls      int
+	executions int
+	kills      int
 }
 
 func (s *scriptedOpStateSandbox) OperationState(string, string) (sandbox.OperationState, error) {
+	if s.probeErr != nil {
+		return sandbox.OperationState{}, s.probeErr
+	}
 	if s.calls >= len(s.states) {
 		return s.states[len(s.states)-1], nil
 	}
@@ -435,17 +446,46 @@ func (s *scriptedOpStateSandbox) OperationState(string, string) (sandbox.Operati
 	return state, nil
 }
 
+func (s *scriptedOpStateSandbox) Execute(context.Context, sandbox.Request) (sandbox.Result, error) {
+	s.executions++
+	return sandbox.Result{}, errors.New("attach must never execute the command again")
+}
+
+func (s *scriptedOpStateSandbox) KillOperation(string, string) (bool, error) {
+	s.kills++
+	return true, nil
+}
+
+// requireBackgroundOpError pins the error contract of the lost/timeout
+// outcomes: a typed application error that stays retryable-class, so effect
+// accounting records uncertain (a non-retryable error would read as "no side
+// effect") while the retry policy ends the ladder by type name.
+func requireBackgroundOpError(t *testing.T, err error, wantType string) {
+	t.Helper()
+	var app *temporal.ApplicationError
+	if !errors.As(err, &app) {
+		t.Fatalf("expected a typed application error for %s, got %v", wantType, err)
+	}
+	if app.Type() != wantType {
+		t.Fatalf("expected error type %s, got %s (%v)", wantType, app.Type(), err)
+	}
+	if app.NonRetryable() {
+		t.Fatalf("%s must stay retryable-class for effect accounting, got %v", wantType, err)
+	}
+}
+
 func TestAttachBackgroundOperationReRegistersConsole(t *testing.T) {
 	defer func(prev time.Duration) { backgroundAttachPoll = prev }(backgroundAttachPoll)
 	backgroundAttachPoll = time.Millisecond
 
-	activities := &Activities{
-		Sandbox: &scriptedOpStateSandbox{
-			states: []sandbox.OperationState{
-				{Running: true, Alive: true},
-				{Finished: true, ExitCode: 7},
-			},
+	probe := &scriptedOpStateSandbox{
+		states: []sandbox.OperationState{
+			{Running: true, Alive: true},
+			{Finished: true, ExitCode: 7},
 		},
+	}
+	activities := &Activities{
+		Sandbox: probe,
 		Console: newTestConsole(1<<20, 100),
 	}
 	result, err := activities.attachBackgroundOperation(t.Context(), ToolRequest{
@@ -456,6 +496,9 @@ func TestAttachBackgroundOperationReRegistersConsole(t *testing.T) {
 	}
 	if result.ExitCode == nil || *result.ExitCode != 7 {
 		t.Fatalf("attach must report the wrapper's exit code, got %+v", result)
+	}
+	if probe.executions != 0 {
+		t.Fatalf("attach must observe, never re-execute: %d executions", probe.executions)
 	}
 	// The worker restart wiped the registry: without the re-registration a UI
 	// subscriber would stare at an entry no writer ever touches.
@@ -471,19 +514,20 @@ func TestAttachBackgroundOperationReRegistersConsole(t *testing.T) {
 	}
 }
 
-func TestAttachBackgroundOperationKilledClosesConsole137(t *testing.T) {
+func TestAttachBackgroundOperationKilledResolvesWithRecorded137(t *testing.T) {
+	// A deliberate kill records exit 137 (kill_operation writes the code
+	// file), so cancellation resolves as a finished operation with its
+	// recorded code — the same story before and after a worker restart.
 	defer func(prev time.Duration) { backgroundAttachPoll = prev }(backgroundAttachPoll)
 	backgroundAttachPoll = time.Millisecond
 
-	activities := &Activities{
-		Sandbox: &scriptedOpStateSandbox{
-			states: []sandbox.OperationState{
-				{Running: true, Alive: true},
-				{Running: false, Alive: false, Finished: false},
-			},
+	probe := &scriptedOpStateSandbox{
+		states: []sandbox.OperationState{
+			{Running: true, Alive: true},
+			{Finished: true, ExitCode: 137},
 		},
-		Console: newTestConsole(1<<20, 100),
 	}
+	activities := &Activities{Sandbox: probe, Console: newTestConsole(1<<20, 100)}
 	result, err := activities.attachBackgroundOperation(t.Context(), ToolRequest{
 		RunID: "run-bg", OperationID: "op-bg-3", Project: "proj",
 	}, 30)
@@ -497,4 +541,86 @@ func TestAttachBackgroundOperationKilledClosesConsole137(t *testing.T) {
 	if !state.Done || state.ExitCode == nil || *state.ExitCode != 137 {
 		t.Fatalf("the console must close with 137 so the subscriber's stream ends, got %+v", state)
 	}
+}
+
+func TestAttachBackgroundOperationGoneIsLostNotSuccess(t *testing.T) {
+	// A process that vanished without recording a result is lost/unknown —
+	// an explicit uncertain outcome for the reconciliation wall. Never a
+	// false exit 0 (the old attach timeout reported a bare result the
+	// workflow booked as finished) and never the old synthetic 137 that read
+	// as a clean kill.
+	defer func(prev time.Duration) { backgroundAttachPoll = prev }(backgroundAttachPoll)
+	backgroundAttachPoll = time.Millisecond
+
+	probe := &scriptedOpStateSandbox{
+		states: []sandbox.OperationState{
+			{Running: true, Alive: true},
+			{Running: false, Alive: false, Finished: false},
+		},
+	}
+	activities := &Activities{Sandbox: probe, Console: newTestConsole(1<<20, 100)}
+	result, err := activities.attachBackgroundOperation(t.Context(), ToolRequest{
+		RunID: "run-bg", OperationID: "op-bg-lost", Project: "proj",
+	}, 30)
+	if err == nil {
+		t.Fatalf("a lost operation must fail explicitly, got %+v", result)
+	}
+	requireBackgroundOpError(t, err, "BackgroundOpLost")
+	state, _ := activities.Console.Snapshot("proj", "op-bg-lost")
+	if !state.Done {
+		t.Fatalf("the console must close so the subscriber's stream ends, got %+v", state)
+	}
+	if !strings.Contains(state.StderrTail, "lost/unknown") {
+		t.Fatalf("the console must say the state is lost/unknown, got %q", state.StderrTail)
+	}
+}
+
+func TestAttachBackgroundOperationDeadlineTimesOutWithoutFalseSuccess(t *testing.T) {
+	// The budget is measured from the operation's own start: an op that began
+	// two hours ago with a one-hour budget is already out of time — the attach
+	// terminates it and reports an uncertain effect instead of waiting another
+	// hour or stretching the timeout the model was promised.
+	defer func(prev time.Duration) { backgroundAttachPoll = prev }(backgroundAttachPoll)
+	backgroundAttachPoll = time.Millisecond
+
+	probe := &scriptedOpStateSandbox{
+		states: []sandbox.OperationState{
+			{Running: true, Alive: true, StartedAt: time.Now().Add(-2 * time.Hour)},
+		},
+	}
+	activities := &Activities{Sandbox: probe, Console: newTestConsole(1<<20, 100)}
+	result, err := activities.attachBackgroundOperation(t.Context(), ToolRequest{
+		RunID: "run-bg", OperationID: "op-bg-timeout", Project: "proj",
+	}, 3600)
+	if err == nil {
+		t.Fatalf("an over-budget operation must fail explicitly, got %+v", result)
+	}
+	requireBackgroundOpError(t, err, "BackgroundOpTimeout")
+	if probe.kills != 1 {
+		t.Fatalf("the over-budget process must be terminated, kills=%d", probe.kills)
+	}
+	state, _ := activities.Console.Snapshot("proj", "op-bg-timeout")
+	if !state.Done {
+		t.Fatalf("the console must close so the subscriber's stream ends, got %+v", state)
+	}
+}
+
+func TestAttachBackgroundOperationProbeFailuresBecomeLost(t *testing.T) {
+	// A container or daemon that stays unreachable past the grace window is
+	// lost/unknown — the loop does not spin to the deadline pretending it
+	// might still hear something.
+	defer func(prev time.Duration) { backgroundAttachPoll = prev }(backgroundAttachPoll)
+	backgroundAttachPoll = time.Millisecond
+	defer func(prev time.Duration) { backgroundAttachLostGrace = prev }(backgroundAttachLostGrace)
+	backgroundAttachLostGrace = 5 * time.Millisecond
+
+	probe := &scriptedOpStateSandbox{probeErr: errors.New("run container not found for proj/run-bg")}
+	activities := &Activities{Sandbox: probe, Console: newTestConsole(1<<20, 100)}
+	result, err := activities.attachBackgroundOperation(t.Context(), ToolRequest{
+		RunID: "run-bg", OperationID: "op-bg-err", Project: "proj",
+	}, 30)
+	if err == nil {
+		t.Fatalf("an unreachable operation must fail explicitly, got %+v", result)
+	}
+	requireBackgroundOpError(t, err, "BackgroundOpLost")
 }

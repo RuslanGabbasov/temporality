@@ -3,6 +3,8 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -21,11 +23,26 @@ import (
 
 const opsDir = "/scratch/.ops"
 
+// Op marker file suffixes inside the ops dir. The scratch is a bind mount,
+// so the markers are host-readable at the runner's scratch directory — the
+// property that makes them durable across worker and kernel restarts.
+const (
+	opPidSuffix  = ".pid"
+	opCodeSuffix = ".code"
+)
+
 func opPidFile(operationID string) string {
-	return fmt.Sprintf("%s/%s.pid", opsDir, sanitizeOpToken(operationID))
+	return fmt.Sprintf("%s/%s%s", opsDir, sanitizeOpToken(operationID), opPidSuffix)
 }
 func opCodeFile(operationID string) string {
-	return fmt.Sprintf("%s/%s.code", opsDir, sanitizeOpToken(operationID))
+	return fmt.Sprintf("%s/%s%s", opsDir, sanitizeOpToken(operationID), opCodeSuffix)
+}
+
+// opHostFile maps a container-side op marker onto the host: /scratch is
+// bind-mounted from the run scratch directory, so the same bytes live at
+// runScratchDir/.ops/<name> — readable without any container.
+func (d *Docker) opHostFile(scratchKey, name string) string {
+	return filepath.Join(d.runScratchDir(scratchKey), ".ops", name)
 }
 
 // OpMarkerEnv is the environment entry the wrapper runs with; the kill path
@@ -75,53 +92,57 @@ type OperationState struct {
 	Finished bool // the exit-code file exists
 	ExitCode int
 	Alive    bool // the pid file exists and the process answers a signal
+	// StartedAt is the wrapper's pid-file mtime — when the operation began.
+	// The attach path measures the ORIGINAL command budget from it, so a
+	// worker restart never stretches the operation's timeout. Zero when the
+	// markers are gone.
+	StartedAt time.Time
 }
 
 // OperationState probes one background operation of the run container keyed
-// by scratchKey. One docker exec per probe — cheap enough for a 2-second
-// polling loop.
+// by scratchKey. The exit code and the start time are host-readable first —
+// a FINISHED operation reports its recorded result even when the container
+// is gone (a restart or a reaped container must not turn a recorded exit
+// code into "unknown"). Only the liveness check needs the container: one
+// docker exec per probe — cheap enough for a polling loop.
 func (d *Docker) OperationState(scratchKey, operationID string) (OperationState, error) {
 	var state OperationState
 	if scratchKey == "" {
 		return state, fmt.Errorf("background operations need a run container (no scratch key)")
+	}
+	token := sanitizeOpToken(operationID)
+	if info, err := os.Stat(d.opHostFile(scratchKey, token+opPidSuffix)); err == nil {
+		state.StartedAt = info.ModTime()
+	}
+	if raw, err := os.ReadFile(d.opHostFile(scratchKey, token+opCodeSuffix)); err == nil {
+		state.Finished = true
+		fmt.Sscanf(strings.TrimSpace(string(raw)), "%d", &state.ExitCode)
+		return state, nil
 	}
 	rc := d.lookupRunForHelper(scratchKey)
 	if rc == nil {
 		return state, fmt.Errorf("run container not found for %s", scratchKey)
 	}
 	defer d.releaseRunContainer(rc)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	script := fmt.Sprintf(
-		`if [ -f %[1]s ]; then echo "done $(cat %[1]s)"; elif [ -f %[2]s ] && kill -0 "$(cat %[2]s)" 2>/dev/null; then echo running; else echo gone; fi`,
-		opCodeFile(operationID), opPidFile(operationID),
-	)
-	request := Request{Command: []string{"/bin/sh", "-c", script}, TimeoutSeconds: 10}
-	result, err := d.execCommand(ctx, rc, request)
+	alive, err := d.opProbeAliveIn(rc.name, operationID)
 	if err != nil {
 		return state, err
 	}
-	out := strings.TrimSpace(result.Output)
-	switch {
-	case strings.HasPrefix(out, "done"):
-		state.Finished = true
-		state.Running = false
-		fmt.Sscanf(out, "done %d", &state.ExitCode)
-	case out == "running":
+	if alive {
 		state.Running = true
 		state.Alive = true
-	default:
-		// pid gone and no exit code: killed (or the wrapper died unnaturally).
-		state.Finished = false
-		state.Running = false
 	}
+	// pid gone and no exit code: killed unnaturally, crashed or lost.
 	return state, nil
 }
 
 // KillOperation terminates the process tree of one background operation
 // inside the run's container: TERM the tree, one beat, KILL the survivors.
 // The wrapper pid is verified against the __TEMPORALITY_OP environment
-// marker first — a stale pid file must never kill a reused pid.
+// marker first — a stale pid file must never kill a reused pid. The kill
+// records exit 137 when the dying wrapper cannot write its own code file —
+// a deliberate kill then reads as a finished (137) operation everywhere,
+// never as a lost one.
 func (d *Docker) KillOperation(scratchKey, operationID string) (bool, error) {
 	if scratchKey == "" {
 		return false, fmt.Errorf("background operations need a run container (no scratch key)")
@@ -152,6 +173,7 @@ done
 for p in $list; do kill -TERM $p 2>/dev/null; done
 sleep 1
 for p in $list; do kill -KILL $p 2>/dev/null; done
+[ -f %[2]s ] || echo 137 > %[2]s
 rm -f %[1]s
 echo killed
 `, opPidFile(operationID), opCodeFile(operationID), marker)
@@ -165,15 +187,82 @@ echo killed
 
 // lookupRunForHelper borrows the run container for a helper exec (kill /
 // state probe) without disturbing the fingerprint discipline of command
-// execution: helpers are best-effort diagnostics, not run traffic.
+// execution: helpers are best-effort diagnostics, not run traffic. A
+// registry miss falls back to the container's durable labels — after a
+// kernel restart the mapping is recovered before declaring the operation
+// unreachable, and an unverifiable container is never attached to.
 func (d *Docker) lookupRunForHelper(key string) *runContainer {
-	d.runMu.Lock()
-	defer d.runMu.Unlock()
-	rc := d.runs[key]
-	if rc == nil {
+	if rc := d.claimRunEntry(key); rc != nil {
+		return rc
+	}
+	if d.recoverRun(key) == nil {
 		return nil
 	}
-	rc.busy++
-	rc.lastUsed = time.Now()
-	return rc
+	return d.claimRunEntry(key)
+}
+
+// unfinishedOps lists the operation tokens whose wrapper started but never
+// recorded an exit code — the durable candidates for "still running"
+// (docs/agent-async-operations.md). Host-side: the scratch is a bind mount.
+func (d *Docker) unfinishedOps(key string) []string {
+	entries, err := os.ReadDir(filepath.Join(d.runScratchDir(key), ".ops"))
+	if err != nil {
+		return nil
+	}
+	finished := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasSuffix(name, opCodeSuffix) {
+			finished[strings.TrimSuffix(name, opCodeSuffix)] = true
+		}
+	}
+	var ops []string
+	for _, entry := range entries {
+		name := entry.Name()
+		token := strings.TrimSuffix(name, opPidSuffix)
+		if strings.HasSuffix(name, opPidSuffix) && !finished[token] {
+			ops = append(ops, token)
+		}
+	}
+	return ops
+}
+
+// scratchHasUnfinishedOps reports whether the run's scratch still holds a
+// background operation that never recorded its exit code — the durable
+// "something may still be running" signal the teardown respects.
+func (d *Docker) scratchHasUnfinishedOps(key string) bool {
+	return len(d.unfinishedOps(key)) > 0
+}
+
+// opProbeAliveIn asks one container whether a background operation's wrapper
+// process is still alive (its recorded pid answers a signal). The liveness
+// truth only exists inside the container's pid namespace: the host markers
+// say what was started, this says what survived.
+func (d *Docker) opProbeAliveIn(container, operationID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	script := fmt.Sprintf(
+		`if [ -f %[1]s ] && kill -0 "$(cat %[1]s)" 2>/dev/null; then echo running; else echo gone; fi`,
+		opPidFile(operationID),
+	)
+	request := Request{Command: []string{"/bin/sh", "-c", script}, TimeoutSeconds: 10}
+	result, err := d.execCommand(ctx, &runContainer{name: container}, request)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(result.Output) == "running", nil
+}
+
+// liveOps reports whether any operation that never recorded an exit code is
+// still running inside the container — or cannot be told apart from one.
+// A crashed operation with stale markers does not hold its container
+// hostage; an answer the probe cannot trust keeps it.
+func (d *Docker) liveOps(ref runContainerRef) bool {
+	for _, token := range d.unfinishedOps(ref.key) {
+		alive, err := d.opProbeAliveIn(ref.name, token)
+		if err != nil || alive {
+			return true
+		}
+	}
+	return false
 }

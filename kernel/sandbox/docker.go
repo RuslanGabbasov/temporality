@@ -331,6 +331,18 @@ func commandTimeout(requested int, background bool) int {
 	return timeout
 }
 
+// CommandTimeoutError reports the wall-clock kill of a sandbox command. The
+// typed error lets the background attach path tell "the budget ran out"
+// (definitive for this attempt — never retried) from transport failures
+// (attachable — the retry re-attaches instead of re-running).
+type CommandTimeoutError struct {
+	Timeout int
+}
+
+func (e *CommandTimeoutError) Error() string {
+	return fmt.Sprintf("sandbox command exceeded %d second timeout", e.Timeout)
+}
+
 // defaultContainerIdle keeps an unused run container alive for a quarter
 // hour: runs idle between turns (model calls, human input) for minutes, so
 // anything shorter would tear down containers the next turn still needs.
@@ -552,7 +564,7 @@ func (d *Docker) executeOneShot(parent context.Context, request Request, workspa
 	}
 	result.Output = commandOutput(&stdout, &stderr)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return result, fmt.Errorf("sandbox command exceeded %d second timeout", timeout)
+		return result, &CommandTimeoutError{Timeout: timeout}
 	}
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -601,7 +613,7 @@ func (d *Docker) executeReused(parent context.Context, request Request, workspac
 			// (rm --force = stop + remove, nothing lingers) and evict it: the
 			// next command of the run starts clean.
 			d.evictRunContainer(rc)
-			return result, fmt.Errorf("sandbox command exceeded %d second timeout", timeout)
+			return result, &CommandTimeoutError{Timeout: timeout}
 		}
 		var exitErr *exec.ExitError
 		if !errors.As(execErr, &exitErr) {
@@ -684,6 +696,15 @@ func (d *Docker) acquireRunContainer(ctx context.Context, request Request, works
 	if rc := d.lookupRun(request.ScratchKey, fingerprint); rc != nil {
 		return rc, nil
 	}
+	// A registry miss may mean a kernel restart, not a dead container:
+	// recover the mapping from the container's durable labels before
+	// retiring anything. The recovered entry goes through the same
+	// fingerprint discipline — a profile switch retires it below.
+	if d.recoverRun(request.ScratchKey) != nil {
+		if rc := d.lookupRun(request.ScratchKey, fingerprint); rc != nil {
+			return rc, nil
+		}
+	}
 	d.TeardownRun(request.ScratchKey)
 	return d.createRunContainer(ctx, request, workspace, socketArgs, timeout)
 }
@@ -726,7 +747,7 @@ func (d *Docker) createRunContainer(ctx context.Context, request Request, worksp
 	if err := cmd.Run(); err != nil {
 		d.forgetNetwork(network)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("sandbox command exceeded %d second timeout", timeout)
+			return nil, &CommandTimeoutError{Timeout: timeout}
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -746,6 +767,97 @@ func (d *Docker) storeRun(rc *runContainer) {
 		d.runs = make(map[string]*runContainer)
 	}
 	d.runs[rc.key] = rc
+}
+
+// runContainerRef is one sandbox container discovered by a `docker ps`
+// listing: its name and id plus the durable identity labels. Listings fill
+// what they carry — recovery needs the labels, the reaper needs the id.
+type runContainerRef struct {
+	id          string
+	name        string
+	key         string
+	fingerprint string
+}
+
+// listRunContainers lists the running containers this runner may own: the
+// sandbox name prefix plus the durable identity labels. Labelled and
+// unlabelled rows both come back — recovery and the orphan sweeper decide
+// per row what is provable.
+func (d *Docker) listRunContainers(ctx context.Context) ([]runContainerRef, error) {
+	out, err := exec.CommandContext(ctx, d.Binary, "ps",
+		"--filter", "name="+SandboxNamePrefix,
+		"--format", "{{.ID}}\t{{.Names}}\t{{.Label \""+ScratchKeyLabel+"\"}}\t{{.Label \""+FingerprintLabel+"\"}}").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("list sandbox containers: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	var refs []runContainerRef
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.SplitN(strings.TrimSpace(line), "\t", 4)
+		if len(fields) != 4 {
+			continue
+		}
+		refs = append(refs, runContainerRef{id: fields[0], name: fields[1], key: fields[2], fingerprint: fields[3]})
+	}
+	return refs, nil
+}
+
+// recoverRun rebuilds one registry entry from the container's durable labels
+// after a kernel restart (docs/agent-async-operations.md). Identity must be
+// provable: exactly one live container carries this ScratchKey label together
+// with the sandbox marker and a fingerprint. An unlabelled, partially labelled
+// or ambiguous container is never re-attached to — "run container not found"
+// is the honest answer then, and the operation resolves as lost/unknown.
+// Returns the registered entry (an existing one wins if another goroutine
+// stored it first).
+func (d *Docker) recoverRun(key string) *runContainer {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	refs, err := d.listRunContainers(ctx)
+	if err != nil {
+		return nil
+	}
+	var found *runContainerRef
+	for i := range refs {
+		ref := refs[i]
+		if ref.key != key {
+			continue
+		}
+		if !strings.HasPrefix(ref.name, SandboxNamePrefix) || ref.fingerprint == "" {
+			continue // identity not provable from labels alone
+		}
+		if found != nil {
+			return nil // two containers claim one key: refuse to guess
+		}
+		found = &ref
+	}
+	if found == nil {
+		return nil
+	}
+	rc := &runContainer{key: key, name: found.name, fingerprint: found.fingerprint, lastUsed: time.Now()}
+	d.runMu.Lock()
+	defer d.runMu.Unlock()
+	if existing := d.runs[key]; existing != nil {
+		return existing
+	}
+	if d.runs == nil {
+		d.runs = make(map[string]*runContainer)
+	}
+	d.runs[key] = rc
+	return rc
+}
+
+// claimRunEntry marks the registry's container for one key busy (one count
+// for the caller, released through releaseRunContainer).
+func (d *Docker) claimRunEntry(key string) *runContainer {
+	d.runMu.Lock()
+	defer d.runMu.Unlock()
+	rc := d.runs[key]
+	if rc == nil {
+		return nil
+	}
+	rc.busy++
+	rc.lastUsed = time.Now()
+	return rc
 }
 
 // releaseRunContainer hands the container back: the last release of an
@@ -783,18 +895,40 @@ func (d *Docker) evictRunContainer(rc *runContainer) {
 // called when the run's scratch tree is swept — scratch and container share
 // the "<project>/<run>" key, so the sweep is the one moment the run is known
 // to be over. A container with an in-flight command is flagged instead of
-// force-removed; its releasing command stops it.
+// force-removed; its releasing command stops it. Containers the registry lost
+// (a restart dropped it while the container stayed) retire the same way —
+// unless one still hosts unfinished background work, which the orphan reaper
+// keeps until its operation resolves.
 func (d *Docker) TeardownRun(key string) {
+	deferredName := ""
 	d.runMu.Lock()
 	rc := d.runs[key]
 	delete(d.runs, key)
 	if rc != nil && rc.busy > 0 {
 		rc.evict = true
+		deferredName = rc.name
 		rc = nil
 	}
 	d.runMu.Unlock()
-	if rc != nil {
+	// A recovered container can host a background operation nobody in this
+	// process is watching (busy is 0 after a restart): an operation that never
+	// recorded its exit code protects the container — the orphan reaper
+	// retires it precisely once the operation's state resolves.
+	unfinished := d.scratchHasUnfinishedOps(key)
+	if rc != nil && !unfinished {
 		_ = d.removeContainer(rc.name)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	refs, err := d.listRunContainers(ctx)
+	if err != nil {
+		return
+	}
+	for _, ref := range refs {
+		if ref.key != key || ref.name == deferredName || unfinished {
+			continue
+		}
+		_ = d.removeContainer(ref.name)
 	}
 }
 
@@ -833,6 +967,17 @@ func (d *Docker) reapIdle() {
 // label but always carry the sandbox name.
 const SandboxMarkerLabel = "temporality.sandbox"
 
+// ScratchKeyLabel and FingerprintLabel are the durable identity of a run
+// container (docs/agent-async-operations.md): the in-memory registry lives
+// only as long as the kernel process, while the container and its background
+// operations survive a restart. The labels let a restarted kernel recover the
+// ScratchKey → container mapping and verify identity before re-attaching —
+// an unlabelled or ambiguous container is never trusted with a re-attach.
+const (
+	ScratchKeyLabel  = "temporality.scratch_key"
+	FingerprintLabel = "temporality.run_fingerprint"
+)
+
 // SandboxNamePrefix is the deterministic name prefix of every sandbox
 // container this runner creates (see newSandboxContainerName). The orphan
 // sweeper lists docker by it: name covers the pre-marker orphans too.
@@ -843,9 +988,11 @@ const SandboxNamePrefix = "temporality-sandbox-"
 // empty while the previous process's keep-alive containers keep running —
 // the idle reaper only walks the registry, so those orphans lived forever
 // (a day of rebuilds piled up 34 idle containers against 3 live runs).
-// Ownership = the sandbox name prefix; age = docker's RunningFor against
-// the same idle TTL the registry reaper uses. Registry entries are
-// protected even when docker's list races ahead of it.
+// Ownership = the sandbox name prefix. Absence from the registry is NOT the
+// verdict (docs/agent-async-operations.md): after a restart a container can
+// still be running a command or a background operation, so the reaper only
+// reaps when age AND durable operation markers AND the live process table
+// all agree the container is abandoned. Uncertainty keeps the container.
 func (d *Docker) reapOrphans() {
 	if d.idleTTL <= 0 {
 		return
@@ -861,23 +1008,90 @@ func (d *Docker) reapOrphans() {
 	defer cancel()
 	list, err := exec.CommandContext(ctx, d.Binary, "ps",
 		"--filter", "name="+SandboxNamePrefix,
-		"--format", "{{.ID}}\t{{.Names}}\t{{.RunningFor}}").CombinedOutput()
+		"--format", "{{.ID}}\t{{.Names}}\t{{.RunningFor}}\t{{.Label \""+ScratchKeyLabel+"\"}}").CombinedOutput()
 	if err != nil {
 		return // listing must never break the reaper pass
 	}
 	for _, line := range strings.Split(string(list), "\n") {
-		fields := strings.SplitN(strings.TrimSpace(line), "\t", 3)
-		if len(fields) != 3 {
+		fields := strings.SplitN(strings.TrimSpace(line), "\t", 4)
+		if len(fields) != 4 {
 			continue
 		}
-		id, name, runningFor := fields[0], fields[1], fields[2]
+		id, name, runningFor, scratchKey := fields[0], fields[1], fields[2], fields[3]
 		if known[name] || !strings.HasPrefix(name, SandboxNamePrefix) {
 			continue
 		}
-		if age, ok := dockerRunningForAge(runningFor); ok && age > d.idleTTL {
-			_ = d.removeContainer(id)
+		// Age gates the candidate; it is never the sole criterion for
+		// inactivity — RunningFor measures the container, not its work.
+		age, ok := dockerRunningForAge(runningFor)
+		if !ok || age <= d.idleTTL {
+			continue
 		}
+		if d.containerHasWork(runContainerRef{id: id, name: name, key: scratchKey}) {
+			continue
+		}
+		_ = d.removeContainer(id)
 	}
+}
+
+// containerHasWork is the orphan reaper's "is anything still using this?"
+// verdict. A background operation that never recorded its exit code is asked
+// directly whether it is still alive (the durable markers plus a liveness
+// probe in the container); anything beyond the keep-alive sleeper chain in
+// the process table is work too. An answer it cannot trust keeps the
+// container — the reaper is a janitor, never an execution-critical decision.
+func (d *Docker) containerHasWork(ref runContainerRef) bool {
+	if ref.key != "" && d.liveOps(ref) {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, d.Binary, "top", ref.name).CombinedOutput()
+	if err != nil {
+		return true
+	}
+	return !keepAliveProcessesOnly(string(out))
+}
+
+// keepAliveProcessesOnly reports whether a `docker top` listing shows nothing
+// but the keep-alive sleeper chain (init layers + the "sleep infinity"
+// hold-open): an idle run container between commands. Matching is per
+// process — a command whose ARGV merely mentions "sleep infinity" (a
+// model-authored `bash -lc "sleep infinity && build"`) is work, not the
+// hold-open sleeper. An unparseable or empty listing reports false (keep the
+// container).
+func keepAliveProcessesOnly(top string) bool {
+	lines := strings.Split(top, "\n")
+	if len(lines) < 2 {
+		return false
+	}
+	sawProcess := false
+	for _, line := range lines[1:] { // the first line is the ps header
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			if len(fields) > 0 {
+				return false // unparseable row → keep the container
+			}
+			continue
+		}
+		command := strings.Join(fields[3:], " ") // PID USER TIME COMMAND
+		if !isKeepAliveProcess(command) {
+			return false
+		}
+		sawProcess = true
+	}
+	return sawProcess
+}
+
+// isKeepAliveProcess recognizes the hold-open chain: the sleeper itself and
+// the init/entrypoint layers wrapping it.
+func isKeepAliveProcess(command string) bool {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "sleep infinity" {
+		return true
+	}
+	return strings.HasSuffix(trimmed, "sleep infinity") &&
+		(strings.Contains(trimmed, "docker-init") || strings.Contains(trimmed, "tini") || strings.Contains(trimmed, "docker-entrypoint"))
 }
 
 // dockerRunningForAge parses docker ps RunningFor ("3 minutes ago",
@@ -919,13 +1133,16 @@ func dockerRunningForAge(s string) (time.Duration, bool) {
 // idleContainers picks the registry entries whose last command started
 // longer than idleTTL ago, removing them from the registry. Busy containers
 // always stay: lastUsed only dates the START of the current command, and a
-// long build must never be rm -f'd mid-flight.
+// long build must never be rm -f'd mid-flight. A recovered entry whose
+// background operation never recorded its exit code stays too — the marker
+// is the durable "may still be working" signal (the scratch sweep's
+// TeardownRun retires it precisely once the state resolves).
 func (d *Docker) idleContainers(now time.Time) []*runContainer {
 	d.runMu.Lock()
 	defer d.runMu.Unlock()
 	var idle []*runContainer
 	for _, rc := range d.runs {
-		if rc.busy == 0 && now.Sub(rc.lastUsed) > d.idleTTL {
+		if rc.busy == 0 && now.Sub(rc.lastUsed) > d.idleTTL && !d.scratchHasUnfinishedOps(rc.key) {
 			delete(d.runs, rc.key)
 			idle = append(idle, rc)
 		}
@@ -1246,6 +1463,13 @@ func (d *Docker) runFlags(workspace string, request Request, name string, socket
 	// The permanent ownership marker: the orphan sweeper identifies every
 	// Temporality sandbox by it, independent of the per-run request labels.
 	args = append(args, "--label", SandboxMarkerLabel+"=1")
+	// Durable run identity for registry recovery after a kernel restart.
+	// Only run-scoped containers carry it: one-shot containers have no
+	// ScratchKey and nothing to recover.
+	if request.ScratchKey != "" {
+		args = append(args, "--label", ScratchKeyLabel+"="+request.ScratchKey)
+		args = append(args, "--label", FingerprintLabel+"="+d.containerFingerprint(workspace, request))
+	}
 	return args
 }
 

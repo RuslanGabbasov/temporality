@@ -118,3 +118,25 @@ func TestAgentRunBackgroundOperationWaitsAndNotifies(t *testing.T) {
 	require.Len(t, completions, 1, "the deferred completion must be journaled once")
 	require.InDelta(t, 0.0, completions[0].Data["exit_code"], 0.001)
 }
+
+// The retry policy IS the worker-restart recovery (docs/agent-async-
+// operations.md): attempts after the first attach to the already-running
+// command instead of re-executing it, and the typed lost/timeout outcomes end
+// the ladder — a further attempt would attach to the same nothing.
+func TestBackgroundActivityRetryPolicySupportsAttach(t *testing.T) {
+	policy := backgroundActivityRetryPolicy()
+	if policy.MaximumAttempts < 2 {
+		t.Fatalf("the background activity must retry so the attach path can run, got %d attempts", policy.MaximumAttempts)
+	}
+	need := map[string]bool{"BackgroundOpLost": false, "BackgroundOpTimeout": false}
+	for _, typ := range policy.NonRetryableErrorTypes {
+		if _, ok := need[typ]; ok {
+			need[typ] = true
+		}
+	}
+	for typ, seen := range need {
+		if !seen {
+			t.Fatalf("error type %s must end the retry ladder, policy has %v", typ, policy.NonRetryableErrorTypes)
+		}
+	}
+}
