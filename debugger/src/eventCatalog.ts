@@ -36,6 +36,7 @@ export const EVENT_GROUPS: EventGroupMeta[] = [
   { id: 'intake', ru: 'Входящие сообщения', en: 'Intake' },
   { id: 'quality', ru: 'Качество и эволюция агентов', en: 'Quality and evolution' },
   { id: 'sagas', ru: 'Саги', en: 'Sagas' },
+  { id: 'collab', ru: 'Межагентное взаимодействие', en: 'Agent collaboration' },
   { id: 'ops', ru: 'Эксплуатация', en: 'Operations' },
 ]
 
@@ -176,6 +177,13 @@ export const EVENT_CATALOG: EventMeta[] = [
   E('sagas', 'saga.renamed', 'Сага переименована', 'Человек поправил название или цель саги.', 'Saga renamed', 'A human corrected a saga\'s title or goal.'),
   E('sagas', 'saga.merged', 'Саги объединены', 'Дубликаты слиты в одну сагу: задачи и затраты перешли к ней.', 'Sagas merged', 'Duplicates were merged into one saga: tasks and spend moved to it.'),
   E('sagas', 'saga.detached', 'Задача отвязана от саги', 'Задача вернулась в пул работ без саги.', 'Task detached from saga', 'A task moved back to the no-saga pool.'),
+  // ── collab: agent-to-agent collaboration within a saga ──
+  E('collab', 'agent.asked', 'Запрос агента отправлен', 'Агент адресовал запрос другому агенту текущей саги.', 'Agent ask sent', 'An agent addressed a request to another agent of the current saga.'),
+  E('collab', 'agent.message.received', 'Запрос агента доставлен', 'Входящий межагентный запрос доставлен в ход на границе хода.', 'Agent message received', 'An incoming agent-to-agent ask was delivered to the run at a turn boundary.'),
+  E('collab', 'agent.replied', 'Ответ агента отправлен', 'Агент ответил на входящий запрос другого агента.', 'Agent replied', 'An agent answered an incoming ask from another agent.'),
+  E('collab', 'agent.answer.received', 'Ответ агента получен', 'Ответ на свой запрос доставлен отправителю через steering.', 'Agent answer received', 'A reply to this run\'s earlier ask was delivered to the asker via steering.'),
+  E('collab', 'agent.ask_expired', 'Ожидание ответа истекло', 'Синхронное ожидание истекло — запрос остаётся у получателя, поздний ответ придёт асинхронно.', 'Ask wait expired', 'A synchronous wait timed out — the request stays with the recipient; a late reply arrives asynchronously.'),
+  E('collab', 'agent.ask_undeliverable', 'Запрос не доставлен', 'Адресат не найден в области саги или не принимает сообщения.', 'Ask undeliverable', 'The target was not found in the saga scope or no longer accepts messages.'),
   // ── ops ──
   E('ops', 'notification.sent', 'Уведомление отправлено', 'Каналу доставлено уведомление.', 'Notification sent', 'A notification was delivered to a channel.'),
   E('ops', 'operation.reconciled', 'Операция сверена', 'Неопределённая операция закрыта решением человека.', 'Operation reconciled', 'An uncertain operation was closed by a human decision.'),

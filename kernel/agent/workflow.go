@@ -38,6 +38,15 @@ const (
 	ApprovalSignal            = "kernel.approval"
 	NudgeSignal               = "kernel.nudge"
 	UserNoteSignal            = "kernel.user_note"
+	// Agent collaboration signals (docs/temporality-agent-collaboration-spec.md):
+	// request delivery to the target run and the answer back to the asker.
+	AgentMessageSignal = "kernel.agent_message"
+	AgentReplySignal   = "kernel.agent_reply"
+
+	// ActivityResolveCollaborator resolves an ask_agent address (agent:<id>,
+	// run:<id> or a bare run id) to a concrete runnable target run within the
+	// asker's saga scope.
+	ActivityResolveCollaborator = "kernel.resolve_collaborator"
 
 	// MaxDelegationDepth bounds agent-to-agent delegation chains
 	// (docs/agent-delegation.md): depth 0 → 1 → 2 is allowed, a run at depth 2
@@ -388,6 +397,37 @@ type UserNote struct {
 	ActorID string `json:"actor_id,omitempty"`
 }
 
+// Agent-to-agent collaboration (docs/temporality-agent-collaboration-spec.md):
+// ask_agent delivers an AgentMessage into the target run's workflow via
+// kernel.agent_message; the recipient answers with the answer_agent tool,
+// which signals the asker's workflow back via kernel.agent_reply. Delivery is
+// always at a turn boundary — an incoming message never interrupts the
+// recipient's current work (steering semantics).
+type AgentMessage struct {
+	// RequestID is stable for the whole request/response pair: "req-" + hash of
+	// the asker's operation id — retries of the same ask land on the same id.
+	RequestID   string `json:"request_id"`
+	FromRunID   string `json:"from_run_id"`
+	FromAgentID string `json:"from_agent_id,omitempty"`
+	FromRole    string `json:"from_role,omitempty"`
+	Type        string `json:"type"`
+	// Payload is the canonical JSON of the caller's payload argument,
+	// bounded (normalizeAskPayload) — strings stay verbatim.
+	Payload string `json:"payload"`
+	// Mode is informational for the recipient ("wait" | "async"); the
+	// recipient answers the same way either way.
+	Mode   string `json:"mode"`
+	SentAt string `json:"sent_at"`
+}
+
+type AgentReply struct {
+	RequestID   string `json:"request_id"`
+	FromRunID   string `json:"from_run_id"`
+	FromAgentID string `json:"from_agent_id,omitempty"`
+	FromRole    string `json:"from_role,omitempty"`
+	Payload     string `json:"payload"`
+}
+
 func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	result := RunResult{RunID: input.RunID, Status: "running"}
 	if input.RunID == "" || input.Project == "" || input.Prompt == "" {
@@ -410,6 +450,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// Journal transport gate: version 1 records every emit event through a
 	// local activity (RecordEventLocal) instead of a queued activity task.
 	recordLocal := workflow.GetVersion(ctx, recordEventLocalChangeID, workflow.DefaultVersion, recordEventLocalVersion)
+	// Agent collaboration (docs/temporality-agent-collaboration-spec.md):
+	// version 1 turns on the kernel.agent_message / kernel.agent_reply signal
+	// drains at turn boundaries and the ask_agent/answer_agent tools. In-flight
+	// runs replayed from older histories keep draining nothing, exactly as
+	// recorded.
+	agentCollab := workflow.GetVersion(ctx, "agent-collaboration", workflow.DefaultVersion, 1)
 	// The team root seeds the shared context handle: every child run of the
 	// program (slots, reviewers, delegates below them) inherits it so scratch
 	// paths and run-scoped hints stay addressable across the tree.
@@ -1293,6 +1339,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// compute it once; a local computation issues no workflow commands and needs
 	// no GetVersion gate.
 	runTools := advertisedTools(&input)
+	// The collaboration tools ride the agent-collaboration gate: a run whose
+	// history predates the feature never advertises (and so never executes)
+	// them, keeping replays deterministic.
+	if agentCollab != 1 {
+		runTools = withoutCollabTools(runTools)
+	}
 	// Background operations (docs/agent-async-operations.md): run_command calls
 	// with background=true start their RunTool activity here and the turn gets
 	// a synthetic «started» result immediately; the futures resolve later and
@@ -1300,6 +1352,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// workflow-local and rebuilt deterministically during replay (the
 	// ExecuteActivity calls are history records).
 	background := map[string]*backgroundOp{}
+	// Agent collaboration state (docs/temporality-agent-collaboration-spec.md):
+	// incoming asks this run has not answered yet (request_id → original
+	// message, so answer_agent can route the reply), request ids already seen
+	// (a redelivered signal never frames twice), and replies that arrived for
+	// other request ids while this run was parked in a wait — they are
+	// re-framed at the next turn boundary instead of being dropped. All three
+	// are workflow-local and rebuilt deterministically during replay.
+	incomingAsks := map[string]AgentMessage{}
+	answeredAsks := map[string]bool{}
+	var deferredReplies []AgentReply
+	collabState := &collabState{incoming: incomingAsks, answered: answeredAsks}
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
 		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
@@ -1324,6 +1387,20 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// that has not been built yet.
 		if _, noteErr := appendUserNotes(activityCtx, state, turn, &messages, pendingUserNotes(ctx)); noteErr != nil {
 			return result, noteErr
+		}
+		// Agent collaboration messages and replies ride the same boundary: a
+		// message never interrupts the current work, it joins the conversation
+		// at the earliest turn that has not been built yet (steering semantics,
+		// docs/temporality-agent-collaboration-spec.md §4).
+		if agentCollab == 1 {
+			if err := appendAgentMessages(activityCtx, state, turn, &messages, collabState, pendingAgentMessages(ctx)); err != nil {
+				return result, err
+			}
+			deferred := append(deferredReplies, pendingAgentReplies(ctx)...)
+			deferredReplies = nil
+			if err := appendAgentReplies(activityCtx, state, turn, &messages, deferred); err != nil {
+				return result, err
+			}
 		}
 		turnMessages := messages
 		if turn == input.MaxTurns {
@@ -1936,6 +2013,147 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
 					return result, err
+				}
+			} else if agentCollab == 1 && call.Name == "ask_agent" {
+				// Agent-to-agent ask (docs/temporality-agent-collaboration-spec.md
+				// §4): deliver an AgentMessage into the target run's workflow via
+				// kernel.agent_message, then either wait for the reply signal or
+				// return pending immediately. The address is validated kernel-side
+				// (ResolveCollaborator) — a model-supplied `to` is never trusted;
+				// only collaborators visible within the run's own saga scope resolve.
+				to, _ := call.Args["to"].(string)
+				to = strings.TrimSpace(to)
+				askType, _ := call.Args["type"].(string)
+				askType = strings.TrimSpace(askType)
+				payload := normalizeAskPayload(call.Args["payload"])
+				mode, _ := call.Args["mode"].(string)
+				if mode != "wait" && mode != "async" {
+					// Default (§4: value decided at design time): async — a chat
+					// round-trip should not park the run unless the model explicitly
+					// wants to block on the answer.
+					mode = "async"
+				}
+				timeoutSeconds := 300
+				if requested, ok := numericArg(call.Args["timeout_sec"]); ok && requested > 0 {
+					timeoutSeconds = int(requested)
+				}
+				if timeoutSeconds > 3600 {
+					timeoutSeconds = 3600
+				}
+				if to == "" || askType == "" || payload == "" {
+					toolResult.Content = "error: ask_agent requires to (collaborator id from get_collaborators), type and a non-empty payload"
+					toolFailed = true
+				} else {
+					if err := startTool(); err != nil {
+						return result, err
+					}
+					requestID := "req-" + shortHash(operationID)
+					resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+					var target ResolvedCollaborator
+					resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveCollaborator, ResolveCollaboratorRequest{Project: input.Project, TaskID: input.TaskID, To: to, ExcludeRunID: input.RunID}).Get(ctx, &target)
+					if resolveErr != nil || !target.Found {
+						detail := fmt.Sprintf("no accessible collaborator matches %q in this saga's scope", to)
+						if resolveErr == nil && target.Detail != "" {
+							detail = target.Detail
+						}
+						if err := emit(activityCtx, state, "agent.ask_undeliverable", map[string]any{"request_id": requestID, "to": to, "reason": detail}); err != nil {
+							return result, err
+						}
+						toolResult.Content = "The ask was not delivered: " + detail + ". Check get_collaborators for currently available collaborators."
+						toolBlocked = true
+					} else {
+						message := AgentMessage{RequestID: requestID, FromRunID: input.RunID, FromAgentID: input.AgentID, FromRole: input.Role, Type: askType, Payload: payload, Mode: mode, SentAt: workflow.Now(ctx).UTC().Format(time.RFC3339)}
+						asked := map[string]any{"request_id": requestID, "to_run": target.RunID, "to_agent": target.AgentID, "to_role": target.Role, "type": askType, "mode": mode, "payload": payload, "timeout_seconds": timeoutSeconds}
+						if err := emit(activityCtx, state, "agent.asked", asked); err != nil {
+							return result, err
+						}
+						// Signal the target run's workflow. A finished/unknown target
+						// errors here — that is the explicit "recipient not available"
+						// outcome, not a run failure (§4: completed delegation is not
+						// automatically addressable).
+						signalErr := workflow.SignalExternalWorkflow(ctx, WorkflowID(target.SourceID, input.Project, target.RunID), "", AgentMessageSignal, message).Get(ctx, nil)
+						if signalErr != nil {
+							if err := emit(activityCtx, state, "agent.ask_undeliverable", map[string]any{"request_id": requestID, "to": to, "to_run": target.RunID, "reason": boundedFailureDetail(signalErr)}); err != nil {
+								return result, err
+							}
+							toolResult.Content = fmt.Sprintf("The ask was not delivered: the target run %s is no longer accepting messages (it finished or was cancelled). No new run is started automatically.", target.RunID)
+							toolBlocked = true
+						} else if mode == "wait" {
+							reply, timedOut, waitErr := awaitAgentReply(ctx, requestID, time.Duration(timeoutSeconds)*time.Second, &deferredReplies)
+							if waitErr != nil {
+								return result, waitErr
+							}
+							if timedOut {
+								if err := emit(activityCtx, state, "agent.ask_expired", map[string]any{"request_id": requestID, "to_run": target.RunID, "timeout_seconds": timeoutSeconds}); err != nil {
+									return result, err
+								}
+								// §4: the timeout must not lose the request — the
+								// recipient still holds it, a late answer flows through
+								// the async delivery path at a turn boundary.
+								toolResult.Content = fmt.Sprintf("No reply within %d seconds. The request stays with the recipient (request_id: %s) — a late answer will arrive as a follow-up message; continue with other work.", timeoutSeconds, requestID)
+							} else {
+								replyPayload := reply.Payload
+								if len(replyPayload) > 4096 {
+									replyPayload = replyPayload[:4096]
+								}
+								from := reply.FromAgentID
+								if from == "" {
+									from = reply.FromRunID
+								}
+								if err := emit(activityCtx, state, "agent.answer.received", map[string]any{"request_id": requestID, "from_run": reply.FromRunID, "from_agent": reply.FromAgentID, "payload": replyPayload}); err != nil {
+									return result, err
+								}
+								toolResult.Content = fmt.Sprintf("Reply from %s to your request %q:\n%s", from, askType, replyPayload)
+							}
+						} else {
+							toolResult.Content = fmt.Sprintf("Request delivered to %s (run %s). request_id: %s, status: pending. The reply will arrive as a follow-up message at a turn boundary — do not poll the target.", target.AgentID, target.RunID, requestID)
+						}
+					}
+					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000)}); err != nil {
+						return result, err
+					}
+				}
+			} else if agentCollab == 1 && call.Name == "answer_agent" {
+				// The recipient half of the collaboration (§4 async): route the
+				// reply back to the asker's workflow via kernel.agent_reply, where
+				// it lands either as a wait-mode tool result or as a turn-boundary
+				// follow-up message. The request_id is matched against asks this
+				// run actually received — a model-invented id can never address a
+				// foreign conversation (§6: no sender/answer substitution).
+				requestID, _ := call.Args["request_id"].(string)
+				requestID = strings.TrimSpace(requestID)
+				replyPayload := normalizeAskPayload(call.Args["payload"])
+				if requestID == "" || replyPayload == "" {
+					toolResult.Content = "error: answer_agent requires request_id and a non-empty payload"
+					toolFailed = true
+				} else if original, known := incomingAsks[requestID]; !known {
+					toolResult.Content = fmt.Sprintf("error: unknown request_id %q — this run has no such incoming agent ask. The ids come from agent messages delivered to you", requestID)
+					toolFailed = true
+				} else if answeredAsks[requestID] {
+					toolResult.Content = fmt.Sprintf("This request (%s) was already answered; the answer was delivered to %s. No duplicate was sent.", requestID, original.FromRunID)
+				} else {
+					if err := startTool(); err != nil {
+						return result, err
+					}
+					reply := AgentReply{RequestID: requestID, FromRunID: input.RunID, FromAgentID: input.AgentID, FromRole: input.Role, Payload: replyPayload}
+					if err := emit(activityCtx, state, "agent.replied", map[string]any{"request_id": requestID, "to_run": original.FromRunID, "payload": replyPayload}); err != nil {
+						return result, err
+					}
+					// Same-kernel source: every run of this kernel shares one
+					// SourceID, so the asker's workflow resolves from input.SourceID.
+					signalErr := workflow.SignalExternalWorkflow(ctx, WorkflowID(input.SourceID, input.Project, original.FromRunID), "", AgentReplySignal, reply).Get(ctx, nil)
+					answeredAsks[requestID] = true
+					if signalErr != nil {
+						// The asker finished before the answer: the reply is already
+						// journaled (agent.replied) — the audit trail keeps it even
+						// though no workflow is left to receive it.
+						toolResult.Content = fmt.Sprintf("The answer to %s was recorded, but the asking run %s already finished — it can no longer receive replies.", requestID, original.FromRunID)
+					} else {
+						toolResult.Content = fmt.Sprintf("Answer delivered to %s for request %s.", original.FromRunID, requestID)
+					}
+					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000)}); err != nil {
+						return result, err
+					}
 				}
 			} else if call.Name == "submit_review" && len(input.ReviewOf) > 0 {
 				// Acceptance-gate verdict (docs/agent-delegation.md): the plan
@@ -3276,6 +3494,42 @@ func bareToolName(tool string) (string, bool) {
 	return tool, false
 }
 
+// withoutCollabTools strips the agent-collaboration tools (they only exist
+// behind the agent-collaboration GetVersion gate). Order preserved.
+func withoutCollabTools(tools []llm.ToolDef) []llm.ToolDef {
+	out := make([]llm.ToolDef, 0, len(tools))
+	for _, tool := range tools {
+		switch tool.Name {
+		case "get_collaborators", "ask_agent", "answer_agent":
+			continue
+		}
+		out = append(out, tool)
+	}
+	return out
+}
+
+// normalizeAskPayload renders the ask_agent payload argument as the bounded
+// string that rides the signal and the journal: strings stay verbatim
+// (trimmed), everything else becomes canonical JSON. The cap mirrors user
+// notes — an unbounded payload would bloat signal histories and SSE replays.
+func normalizeAskPayload(raw any) string {
+	var text string
+	if s, ok := raw.(string); ok {
+		text = strings.TrimSpace(s)
+	} else if raw != nil {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			text = fmt.Sprintf("%v", raw)
+		} else {
+			text = string(encoded)
+		}
+	}
+	if len(text) > 4096 {
+		text = text[:4096]
+	}
+	return text
+}
+
 // isReadOnlyCall is the effect-classification entry point: read-only tool
 // names, plus per-action classification for the browser tool.
 func isReadOnlyCall(tool string, args map[string]any) bool {
@@ -3395,6 +3649,12 @@ var policySafeTools = map[string]bool{
 	// Saga tools (docs/sagas.md) only write observation journal events — the
 	// system's own memory layer, no workspace or external effect.
 	"saga_register": true, "saga_attach": true,
+	// Agent collaboration (docs/temporality-agent-collaboration-spec.md):
+	// get_collaborators is a read-only fold of the saga's journal. ask/answer
+	// write journaled signals gated by kernel-side scope checks; an approval
+	// round-trip on every chat turn would defeat the purpose, and org policy
+	// can still deny them per agent via the tool allowlist/deny list.
+	"get_collaborators": true, "ask_agent": true, "answer_agent": true,
 	// user_remember writes one profile fact about the CURRENT sender — the
 	// same memory layer scope, no external effect.
 	"user_remember": true,
@@ -3489,6 +3749,38 @@ func awaitApproval(ctx workflow.Context, operationID string, timeout time.Durati
 	return approval.Approved, approval, false, nil
 }
 
+// awaitAgentReply parks the asker on kernel.agent_reply until the reply with
+// the matching request_id lands or the timeout expires. Replies for OTHER
+// pending requests are NOT dropped (unlike awaitApproval): they are queued in
+// deferred and framed at the next turn boundary — parallel asks must resolve
+// independently. On timeout the request is not cancelled: the recipient still
+// holds it, and a late reply flows through the async delivery path.
+func awaitAgentReply(ctx workflow.Context, requestID string, timeout time.Duration, deferred *[]AgentReply) (AgentReply, bool, error) {
+	channel := workflow.GetSignalChannel(ctx, AgentReplySignal)
+	var reply AgentReply
+	matched := false
+	ok, err := workflow.AwaitWithTimeout(ctx, timeout, func() bool {
+		for channel.ReceiveAsync(&reply) {
+			if reply.RequestID == requestID {
+				matched = true
+				return true
+			}
+			*deferred = append(*deferred, reply)
+		}
+		return false
+	})
+	if err != nil {
+		return reply, false, err
+	}
+	if !ok {
+		return reply, true, nil
+	}
+	if !matched {
+		return reply, false, errors.New("agent reply wait completed without matching request")
+	}
+	return reply, false, nil
+}
+
 // executeModelWithNudge runs one call_model activity, cancellable by the
 // kernel.nudge signal (the human escape hatch for a stuck provider). A stuck
 // endpoint can sit through the whole silent retry ladder — idle watchdog →
@@ -3578,6 +3870,142 @@ func pendingUserNotes(ctx workflow.Context) []UserNote {
 		}
 	}
 	return notes
+}
+
+// collabState carries the agent-collaboration bookkeeping a run needs to
+// answer asks and to avoid framing a redelivered signal twice. Everything is
+// rebuilt deterministically during replay.
+type collabState struct {
+	// incoming: request_id → the original message, until answer_agent routes
+	// the reply; answered: request ids already answered (a second answer_agent
+	// for the same id refuses instead of double-signalling the asker).
+	incoming map[string]AgentMessage
+	answered map[string]bool
+}
+
+// pendingAgentMessages drains kernel.agent_message signals without touching
+// the conversation — the ask_agent delivery side. Asks without a request id
+// are skipped: without it the recipient could not reply.
+func pendingAgentMessages(ctx workflow.Context) []AgentMessage {
+	channel := workflow.GetSignalChannel(ctx, AgentMessageSignal)
+	var out []AgentMessage
+	var msg AgentMessage
+	for channel.ReceiveAsync(&msg) {
+		if strings.TrimSpace(msg.RequestID) != "" {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+// pendingAgentReplies drains kernel.agent_reply signals (answers to this
+// run's earlier ask_agent calls).
+func pendingAgentReplies(ctx workflow.Context) []AgentReply {
+	channel := workflow.GetSignalChannel(ctx, AgentReplySignal)
+	var out []AgentReply
+	var reply AgentReply
+	for channel.ReceiveAsync(&reply) {
+		if strings.TrimSpace(reply.RequestID) != "" {
+			out = append(out, reply)
+		}
+	}
+	return out
+}
+
+// agentMessageFraming is the user-role envelope for an incoming agent ask:
+// the model needs the sender identity, the message type and — if it chooses
+// to answer — the request_id handle for answer_agent.
+func agentMessageFraming(msg AgentMessage) string {
+	from := msg.FromAgentID
+	if from == "" {
+		from = msg.FromRunID
+	}
+	var b strings.Builder
+	b.WriteString("Message from a collaborating agent (agent-to-agent within this saga, delivered while your run was in progress).")
+	if msg.FromRole != "" {
+		b.WriteString("\nFrom: " + msg.FromRole)
+		if from != "" {
+			b.WriteString(" (" + from + ")")
+		}
+	} else if from != "" {
+		b.WriteString("\nFrom: " + from)
+	}
+	if msg.FromRunID != "" {
+		b.WriteString(" · run: " + msg.FromRunID)
+	}
+	if msg.Type != "" {
+		b.WriteString("\nType: " + msg.Type)
+	}
+	b.WriteString("\nrequest_id: " + msg.RequestID)
+	if msg.Mode == "wait" {
+		b.WriteString("\nThe sender is waiting for an answer right now — if you can respond, call answer_agent with this request_id in your next tool batch.")
+	} else {
+		b.WriteString("\nIf a reply is expected, answer with the answer_agent tool using this request_id. If the message does not concern you, you may ignore it.")
+	}
+	b.WriteString("\n\nPayload:\n")
+	b.WriteString(msg.Payload)
+	return b.String()
+}
+
+// agentReplyFraming is the user-role envelope for an async reply to an
+// earlier ask_agent call.
+func agentReplyFraming(reply AgentReply) string {
+	from := reply.FromAgentID
+	if from == "" {
+		from = reply.FromRunID
+	}
+	var b strings.Builder
+	b.WriteString("Reply to your ask_agent request " + reply.RequestID)
+	if from != "" {
+		b.WriteString(" from " + from)
+	}
+	if reply.FromRunID != "" {
+		b.WriteString(" (run " + reply.FromRunID + ")")
+	}
+	b.WriteString(":\n\n")
+	b.WriteString(reply.Payload)
+	return b.String()
+}
+
+// appendAgentMessages journals and injects incoming agent asks at a turn
+// boundary. A request_id already seen (or answered) is skipped — a redelivered
+// signal never frames twice and never re-runs anything on the recipient side.
+func appendAgentMessages(activityCtx workflow.Context, state *eventState, turn int, messages *[]llm.Message, state2 *collabState, msgs []AgentMessage) error {
+	for _, msg := range msgs {
+		if state2.answered[msg.RequestID] {
+			continue
+		}
+		if _, seen := state2.incoming[msg.RequestID]; seen {
+			continue
+		}
+		state2.incoming[msg.RequestID] = msg
+		payload := msg.Payload
+		if len(payload) > 4096 {
+			payload = payload[:4096]
+		}
+		if err := emit(activityCtx, state, "agent.message.received", map[string]any{"turn": turn, "request_id": msg.RequestID, "from_run": msg.FromRunID, "from_agent": msg.FromAgentID, "type": msg.Type, "mode": msg.Mode, "payload": payload}); err != nil {
+			return err
+		}
+		*messages = append(*messages, llm.Message{Role: "user", Content: agentMessageFraming(msg)})
+	}
+	return nil
+}
+
+// appendAgentReplies journals and injects async answers to this run's earlier
+// asks. Non-empty payloads only — an empty reply reads as a lost answer and
+// would trigger pointless retries.
+func appendAgentReplies(activityCtx workflow.Context, state *eventState, turn int, messages *[]llm.Message, replies []AgentReply) error {
+	for _, reply := range replies {
+		payload := reply.Payload
+		if len(payload) > 4096 {
+			payload = payload[:4096]
+		}
+		if err := emit(activityCtx, state, "agent.answer.received", map[string]any{"turn": turn, "request_id": reply.RequestID, "from_run": reply.FromRunID, "from_agent": reply.FromAgentID, "payload": payload}); err != nil {
+			return err
+		}
+		*messages = append(*messages, llm.Message{Role: "user", Content: agentReplyFraming(reply)})
+	}
+	return nil
 }
 
 // backgroundOp is one detached run_command in flight (docs/agent-async-operations.md):
@@ -4309,6 +4737,9 @@ func KernelTools() []llm.ToolDef {
 		{Name: "saga_register", Description: "Register the current task's work as a saga — an explicitly tracked long-running effort that may span many runs, chat follow-ups and delegated agents. Call it once when starting work you expect to be long or multi-stage, or when asked to track a saga. The saga rides the task: every follow-up run and delegation joins it automatically. Registering an already-bound task returns the existing saga", Parameters: map[string]any{"type": "object", "properties": map[string]any{"title": map[string]any{"type": "string", "description": "Short human-readable saga title"}, "goal": map[string]any{"type": "string", "description": "Optional one-line goal/outcome of the saga"}}, "required": []string{"title"}}},
 		{Name: "saga_attach", Description: "Attach the current task to an existing saga (docs/sagas.md). Use it to join related efforts — for example when taking over work another agent already tracks in a saga. The saga_id comes from saga_list", Parameters: map[string]any{"type": "object", "properties": map[string]any{"saga_id": map[string]any{"type": "string", "description": "The saga to join, from saga_list"}, "note": map[string]any{"type": "string", "description": "Optional one-line reason for joining this saga"}}, "required": []string{"saga_id"}}},
 		{Name: "saga_list", Description: "List sagas registered in this project: saga_id, title, goal, bound tasks and registration time. Use it to find an existing saga before saga_attach instead of registering a duplicate", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
+		{Name: "get_collaborators", Description: "List the humans and agents participating in the CURRENT saga: id (agent:<id> / human:<id>), kind, role, task, status and run_id for agents. Scope is this saga only — its tasks and every delegation under them. Use it to see who is working alongside you before ask_agent; humans are better reached with ask_human", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
+		{Name: "ask_agent", Description: "Send a request or structured data to a collaborating AGENT of this saga (address from get_collaborators: agent:<id>, or run:<run_id> for a specific run). Modes: async (default) — the request is delivered, you get request_id and continue, the reply arrives as a follow-up message at a turn boundary; wait — pause up to timeout_sec for the reply as this call's result. The payload may be text or arbitrary JSON. The target is validated kernel-side against your saga scope and must be a live run — a finished run refuses delivery", Parameters: map[string]any{"type": "object", "properties": map[string]any{"to": map[string]any{"type": "string", "description": "Collaborator address: agent:<agent_id> from get_collaborators, or run:<run_id> for a specific run"}, "type": map[string]any{"type": "string", "description": "Short message type, e.g. compatibility.check, review.request, data.share"}, "payload": map[string]any{"description": "Text or arbitrary JSON: the question, task or structured data (bounded to ~4KB)"}, "mode": map[string]any{"type": "string", "enum": []string{"async", "wait"}, "description": "async (default): return immediately, reply arrives later; wait: block up to timeout_sec for the reply"}, "timeout_sec": map[string]any{"type": "integer", "description": "wait mode only: how long to wait for the reply (default 300, max 3600). On timeout the request stays with the recipient — a late reply arrives as a follow-up message"}}, "required": []string{"to", "type"}}},
+		{Name: "answer_agent", Description: "Reply to an agent message delivered to this run: pass the request_id from that message's framing and your answer payload (text or JSON). One answer per request — a duplicate is refused", Parameters: map[string]any{"type": "object", "properties": map[string]any{"request_id": map[string]any{"type": "string", "description": "request_id from the received agent message"}, "payload": map[string]any{"description": "Text or arbitrary JSON: the answer"}}, "required": []string{"request_id", "payload"}}},
 		{Name: "skill_inspect", Description: "Show a skill's full SKILL.md and manifest contract (capabilities, tools, runtime, preconditions, postconditions, evidence)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_validate", Description: "Validate a skill's manifest and return issues", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_history", Description: "List a skill's versions", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},

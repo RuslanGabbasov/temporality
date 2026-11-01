@@ -525,6 +525,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeHints, activity.RegisterOptions{Name: agent.ActivityKnowledgeHints})
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeLookup, activity.RegisterOptions{Name: agent.ActivityKnowledgeLookup})
 	temporalWorker.RegisterActivityWithOptions(activities.ResolveAgent, activity.RegisterOptions{Name: agent.ActivityResolveAgent})
+	temporalWorker.RegisterActivityWithOptions(activities.ResolveCollaborator, activity.RegisterOptions{Name: agent.ActivityResolveCollaborator})
 	temporalWorker.RegisterActivityWithOptions(activities.GenerateTitle, activity.RegisterOptions{Name: agent.ActivityGenerateTitle})
 	temporalWorker.RegisterActivityWithOptions(activities.ExtractKnowledge, activity.RegisterOptions{Name: agent.ActivityExtractKnowledge})
 	temporalWorker.RegisterActivityWithOptions(activities.SummarizeChildRun, activity.RegisterOptions{Name: agent.ActivitySummarizeChildRun})
