@@ -1377,6 +1377,8 @@ export const ru: Record<string, string> = {
     'skills.editor.artifacts_empty': 'Артефакты не прикреплены — найдите выше и кликните результат.',
     'skills.editor.add_artifact': 'Привязать артефакт',
     'skills.editor.artifact_note_placeholder': 'Когда этот документ важен',
+    'skills.editor.artifact_col': 'Артефакт',
+    'skills.editor.artifact_note_col': 'Условие применения',
     'skills.editor.raw_yaml': 'Редактировать YAML',
     'skills.editor.structured': 'Вернуться к форме',
     'skills.editor.yaml_error': 'Некорректный YAML',

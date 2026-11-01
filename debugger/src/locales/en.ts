@@ -1377,6 +1377,8 @@ export const en: Record<string, string> = {
     'skills.editor.artifacts_empty': 'No artifacts attached yet — search above and click a result.',
     'skills.editor.add_artifact': 'Attach artifact',
     'skills.editor.artifact_note_placeholder': 'When this document matters',
+    'skills.editor.artifact_col': 'Artifact',
+    'skills.editor.artifact_note_col': 'Applies when',
     'skills.editor.raw_yaml': 'Edit as YAML',
     'skills.editor.structured': 'Back to form',
     'skills.editor.yaml_error': 'Invalid YAML',
