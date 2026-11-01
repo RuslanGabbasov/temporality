@@ -1862,7 +1862,10 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"policy": effective, "sources": sources})
+		// The filesystem dimension resolves LAYERED (docs/filesystem-policy.md
+		// §3.4) — the flat merged row cannot express the intersection, so the
+		// response carries it separately alongside the contributing rows.
+		writeJSON(w, 200, map[string]any{"policy": effective, "sources": sources, "filesystem": workspace.MergeFilesystem(sources)})
 	})
 	// Org unit role grants (docs/org-structure.md §13): a grant upgrades the
 	// grantee's effective role on the unit and its whole subtree. Mutations are
@@ -6112,7 +6115,7 @@ func main() {
 		// limit/offset keep tens of thousands off one response.
 		filter := workspace.ArtifactFilter{
 			Status: r.URL.Query().Get("status"), Kind: r.URL.Query().Get("kind"), SagaID: r.URL.Query().Get("saga_id"),
-			Query: strings.TrimSpace(r.URL.Query().Get("q")),
+			Query:    strings.TrimSpace(r.URL.Query().Get("q")),
 			Provider: r.URL.Query().Get("provider"),
 		}
 		// Creator filter: «my artifacts» and per-author views. The pick names a
@@ -8409,8 +8412,8 @@ func fetchPriorAttemptTail(ctx context.Context, observationURL, journalToken, ta
 	}
 	var page struct {
 		Events []struct {
-			OccurredAt string `json:"occurred_at"`
-			Type       string `json:"type"`
+			OccurredAt string         `json:"occurred_at"`
+			Type       string         `json:"type"`
 			Data       map[string]any `json:"data"`
 		} `json:"events"`
 	}
@@ -9276,7 +9279,7 @@ func applyRunPolicy(ctx context.Context, ws *workspace.Store, prices cost.Config
 		}
 		units = append(units, links...)
 	}
-	effective, _, err := ws.EffectivePolicy(ctx, units...)
+	effective, sources, err := ws.EffectivePolicy(ctx, units...)
 	if err != nil {
 		return err
 	}
@@ -9321,6 +9324,14 @@ func applyRunPolicy(ctx context.Context, ws *workspace.Store, prices cost.Config
 	if effective.TimeoutSeconds != nil {
 		input.TimeoutSeconds = *effective.TimeoutSeconds
 	}
+	// Filesystem policy (docs/filesystem-policy.md §6): freeze the effective
+	// file rules once, at run start. The layered form is the runtime authority
+	// (MergePolicies deliberately leaves the flat dimension unmerged); the
+	// version fingerprints the snapshot for the audit trail, and delegation
+	// inherits this exact snapshot instead of re-resolving (§6.2–§6.3).
+	filesystem := workspace.MergeFilesystem(sources)
+	input.Filesystem = &filesystem
+	input.PolicyVersion = filesystem.Version()
 	return nil
 }
 

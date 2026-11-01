@@ -474,7 +474,7 @@ func runTeamLead(ctx workflow.Context, activityCtx workflow.Context, state *even
 	resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
 	var childInput RunInput
 	depth := input.DelegationDepth + 1
-	if resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: binding.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: prompt, ActorID: input.ActorID, MaxTurns: team.Manifest.Defaults.MaxTurns, DelegationDepth: depth}).Get(ctx, &childInput); resolveErr != nil {
+	if resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: binding.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: prompt, ActorID: input.ActorID, MaxTurns: team.Manifest.Defaults.MaxTurns, DelegationDepth: depth, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &childInput); resolveErr != nil {
 		return fail("lead agent \""+binding.AgentID+"\" could not be resolved: "+boundedFailureDetail(resolveErr), lead.ID, childRunID)
 	}
 	if err := emit(activityCtx, state, "delegation.started", map[string]any{"operation_id": state.frame + "/lead", "child_run_id": childRunID, "agent_id": binding.AgentID, "ordinal": 1, "depth": depth}); err != nil {

@@ -400,6 +400,14 @@ type ResolveAgentRequest struct {
 	ActorID         string `json:"actor_id,omitempty"`
 	MaxTurns        int    `json:"max_turns,omitempty"`
 	DelegationDepth int    `json:"delegation_depth,omitempty"`
+	// Filesystem/PolicyVersion carry the initiator's frozen policy snapshot
+	// (docs/filesystem-policy.md §6.2): the child inherits it verbatim — the
+	// delegation tree shares ONE set of file permissions and a policy change
+	// mid-flight can never widen what a running tree may touch. Nil = the
+	// parent predates the snapshot (legacy replay) and the child keeps its
+	// freshly resolved policy.
+	Filesystem    *workspace.EffectiveFilesystem `json:"filesystem,omitempty"`
+	PolicyVersion string                         `json:"policy_version,omitempty"`
 }
 
 // ResolveAgent builds the child RunInput for a delegated run: it fetches the
@@ -436,6 +444,14 @@ func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentReque
 	child.Prompt = request.Prompt
 	child.ActorID = request.ActorID
 	child.DelegationDepth = request.DelegationDepth
+	if request.Filesystem != nil {
+		// Filesystem policy inheritance (docs/filesystem-policy.md §6.2): the
+		// child works on the initiator's frozen snapshot. The override wins over
+		// whatever the run-config re-resolved — delegation must never pick up a
+		// looser (or differently strict) policy than the tree was started with.
+		child.Filesystem = request.Filesystem
+		child.PolicyVersion = request.PolicyVersion
+	}
 	if request.MaxTurns > 0 {
 		// The delegating model guesses budgets low (observed 9–15 for real
 		// subtasks): children died mid-work, were marked incomplete, and the
