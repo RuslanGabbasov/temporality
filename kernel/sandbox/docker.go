@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -111,7 +112,7 @@ type Request struct {
 	// with the pid/code bookkeeping in the run scratch.
 	Background bool
 	ReadOnly   bool
-	Network        string // "" (use Docker default), "none", "bridge"
+	Network    string // "" (use Docker default), "none", "bridge"
 	// Env carries injected environment variables (KEY=VALUE) for this command —
 	// e.g. agent-granted secrets resolved at the execution boundary. They pass
 	// through exec argv (no shell), but keys still get validated to keep docker
@@ -139,6 +140,20 @@ type Request struct {
 	// custom profile: the socket is host-root-equivalent, so only profiles an
 	// operator explicitly flagged get it.
 	DockerSocket bool
+	// Filesystem is the run's frozen filesystem policy (docs/filesystem-
+	// policy.md §5.3): when it restricts anything, every command runs under
+	// the landlock launcher with the compiled ruleset — one policy, one
+	// semantics for the kernel gateway and the OS layer (§5.4). Nil/zero =
+	// the pre-filesystem contour, wrapper-free.
+	Filesystem *FilesystemPolicy
+	// PolicyVersion fingerprints the snapshot — it rides into the launcher
+	// env and the container fingerprint (a reused container must never serve
+	// a different policy).
+	PolicyVersion string
+	// LauncherPath is the kernel-side path of the landlock launcher binary;
+	// it is staged into the sandbox root and mounted read-only into every
+	// container (host path == container path discipline, like the root).
+	LauncherPath string
 	// Labels tag the container for observability (docker --label): the health
 	// endpoint lists running sandboxes with their run/agent/actor so the
 	// dashboard can show who consumes the host. Keys are used verbatim.
@@ -479,6 +494,13 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 		}
 		socketArgs, err = socketMountArgs(dockerSocketPath, info)
 		if err != nil {
+			return Result{}, err
+		}
+	}
+	if request.landlock() {
+		// Stage before any container work: a configured policy with an
+		// unstageable launcher must refuse the command outright (§5.3.6).
+		if _, err := d.stageLauncher(request); err != nil {
 			return Result{}, err
 		}
 	}
@@ -1065,10 +1087,82 @@ func (d *Docker) effectiveNetwork(request Request) string {
 // exec, command and timeout are exec arguments, labels are observability
 // only (the first command's labels stay for the container's lifetime).
 func (d *Docker) containerFingerprint(workspace string, request Request) string {
-	return fmt.Sprintf("%t|%q|%q|%q|%q|%d|%q|%q|%q|%t|%q|%d:%d",
+	return fmt.Sprintf("%t|%q|%q|%q|%q|%d|%q|%q|%q|%t|%q|%d:%d|%q",
 		request.ReadOnly, workspace, request.Image, request.Memory, request.CPUs, request.PIDs,
 		request.ScratchSize, request.TmpSize, fmt.Sprint(request.CacheEnv), request.DockerSocket,
-		d.effectiveNetwork(request), d.UID, d.GID)
+		d.effectiveNetwork(request), d.UID, d.GID, request.PolicyVersion)
+}
+
+// landlock reports whether commands run under the filesystem-policy
+// launcher: only when the snapshot actually restricts something.
+func (r Request) landlock() bool {
+	return r.Filesystem != nil && !r.Filesystem.Unrestricted()
+}
+
+// landlockContainerPath is where the launcher is mounted inside every
+// sandbox container.
+const landlockContainerPath = "/usr/local/bin/temporality-landlock"
+
+// launcherHostPath is the staged launcher location under the sandbox root —
+// the only tree the docker daemon can mount back into the container.
+func (d *Docker) launcherHostPath() string {
+	return filepath.Join(d.Root, ".bin", "landlock-launcher")
+}
+
+// stageLauncher copies the launcher binary into the sandbox root (the
+// kernel container's own filesystem is invisible to the docker daemon —
+// only the shared root follows the host-path == container-path discipline)
+// and re-copies on content drift, so a kernel upgrade swaps the launcher.
+// Failure is fail-closed: a configured policy without a launcher refuses
+// the command instead of running it unconfined (§5.3.6).
+func (d *Docker) stageLauncher(request Request) (string, error) {
+	if strings.TrimSpace(request.LauncherPath) == "" {
+		return "", errors.New("filesystem policy requires the landlock launcher (KERNEL_SANDBOX_LAUNCHER is empty) — refusing to run without enforcement")
+	}
+	source, err := os.ReadFile(request.LauncherPath)
+	if err != nil {
+		return "", fmt.Errorf("landlock launcher %s: %w", request.LauncherPath, err)
+	}
+	dest := d.launcherHostPath()
+	if existing, err := os.ReadFile(dest); err == nil && bytes.Equal(existing, source) {
+		return dest, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", fmt.Errorf("landlock launcher staging: %w", err)
+	}
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, source, 0o755); err != nil {
+		return "", fmt.Errorf("landlock launcher staging: %w", err)
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		os.Remove(tmp)
+		return "", fmt.Errorf("landlock launcher staging: %w", err)
+	}
+	return dest, nil
+}
+
+// wrappedCommand prefixes the payload with the landlock launcher so the
+// command process starts restricted and every child inherits the ruleset.
+func (r Request) wrappedCommand() []string {
+	if !r.landlock() {
+		return r.Command
+	}
+	return append([]string{landlockContainerPath, "--"}, r.Command...)
+}
+
+// commandEnv carries the per-command env plus the policy snapshot for the
+// launcher (compact JSON — the policy is configuration, not a secret).
+func (r Request) commandEnv() []string {
+	if !r.landlock() {
+		return r.Env
+	}
+	encoded, err := json.Marshal(r.Filesystem)
+	if err != nil {
+		return r.Env // unreachable for the wire type
+	}
+	return append(append([]string{}, r.Env...),
+		"TEMPORALITY_FS_POLICY="+string(encoded),
+		"TEMPORALITY_FS_POLICY_VERSION="+r.PolicyVersion)
 }
 
 // runFlags renders every docker run argument before the image reference: the
@@ -1119,6 +1213,11 @@ func (d *Docker) runFlags(workspace string, request Request, name string, socket
 	args = append(args, "--init", "--pull=never", "--name", name, "--network="+network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(pids), "--memory", memory, "--memory-swap", memory, "--cpus", cpus, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size="+tmpSize)
 	args = append(args, scratchArgs...)
 	args = append(args, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace+":/workspace:"+mode)
+	if request.landlock() {
+		// The launcher rides from the sandbox root: the daemon can only mount
+		// host paths, and only the shared root follows the path discipline.
+		args = append(args, "--volume", d.launcherHostPath()+":"+landlockContainerPath+":ro")
+	}
 	// Socket passthrough flags land with the other volume/env flags — before
 	// the image, where every docker argument must stay.
 	args = append(args, socketArgs...)
@@ -1154,12 +1253,12 @@ func (d *Docker) runFlags(workspace string, request Request, name string, socket
 // and the command as the container payload — including the per-command env.
 func (d *Docker) arguments(workspace string, request Request, name string, socketArgs []string) []string {
 	args := d.runFlags(workspace, request, name, socketArgs, false)
-	for _, entry := range request.Env {
+	for _, entry := range request.commandEnv() {
 		args = append(args, "--env", entry)
 	}
 	image := firstNonEmpty(request.Image, d.Image)
 	args = append(args, image)
-	return append(args, request.Command...)
+	return append(args, request.wrappedCommand()...)
 }
 
 // keepAliveArgs renders the `docker run -d` that creates a run container:
@@ -1182,11 +1281,11 @@ func (d *Docker) keepAliveArgs(workspace string, request Request, name string, s
 // used to be run flags and must therefore be restated on every exec.
 func (d *Docker) execArgs(rc *runContainer, request Request) []string {
 	args := []string{"exec"}
-	for _, entry := range request.Env {
+	for _, entry := range request.commandEnv() {
 		args = append(args, "--env", entry)
 	}
 	args = append(args, "--workdir", "/workspace", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), rc.name)
-	return append(args, request.Command...)
+	return append(args, request.wrappedCommand()...)
 }
 
 func firstNonEmpty(values ...string) string {

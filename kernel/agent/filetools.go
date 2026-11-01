@@ -144,12 +144,44 @@ func requireWritableWorkspace(request ToolRequest) error {
 	return nil
 }
 
+// fsOp classifies a filesystem operation for the policy check (docs/
+// filesystem-policy.md §3.2): "read" or "write" — create, overwrite, rename
+// and delete are all write, there is no separate delete right.
+type fsOp string
+
+const (
+	fsOpRead  fsOp = "read"
+	fsOpWrite fsOp = "write"
+)
+
+// requireFilesystemAccess is the kernel filesystem gateway (docs/filesystem-
+// policy.md §5.2): every built-in file operation consults the run's FROZEN
+// policy snapshot before executing. The check runs on the normalized
+// workspace-relative path; the run's /scratch is technical space (§4.3), not
+// project storage, and stays outside the policy. The same snapshot drives
+// the sandbox-side enforcement — one policy, one semantics (§5.4).
+func requireFilesystemAccess(request ToolRequest, rel string, op fsOp) error {
+	if request.Filesystem.Unrestricted() {
+		return nil
+	}
+	allowed := request.Filesystem.AllowRead(rel)
+	if op == fsOpWrite {
+		allowed = request.Filesystem.AllowWrite(rel)
+	}
+	if !allowed {
+		return temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("filesystem policy denied %s of %q (policy %s)", op, rel, request.PolicyVersion),
+			"FilesystemDenied", nil)
+	}
+	return nil
+}
+
 // resolveToolTarget resolves the run workspace and the model-supplied path
 // inside it — or, for /scratch/… paths, into the run-scoped scratch directory
 // (the same host tree run_command mounts at /scratch). Argument-shape
 // failures are non-retryable: they are deterministic caller errors with no
 // side effect.
-func (a *Activities) resolveToolTarget(request ToolRequest, pathArg string) (string, error) {
+func (a *Activities) resolveToolTarget(request ToolRequest, pathArg string, op fsOp) (string, error) {
 	if !sandboxConfigured(a.Sandbox) {
 		return "", fileToolFailure(errors.New("sandbox is not configured"))
 	}
@@ -157,13 +189,19 @@ func (a *Activities) resolveToolTarget(request ToolRequest, pathArg string) (str
 	if trimmed == "/scratch" || trimmed == "/scratch/" || strings.HasPrefix(trimmed, "/scratch/") {
 		return a.resolveScratchTarget(request, strings.TrimPrefix(trimmed, "/scratch"))
 	}
-	workspace, err := a.Sandbox.ResolveWorkspace(request.WorkspacePath)
+	workspaceDir, err := a.Sandbox.ResolveWorkspace(request.WorkspacePath)
 	if err != nil {
 		return "", fileToolFailure(err)
 	}
-	abs, err := resolveWorkspacePath(workspace, pathArg)
+	abs, err := resolveWorkspacePath(workspaceDir, pathArg)
 	if err != nil {
 		return "", invalidToolArguments(err)
+	}
+	// Policy gate (docs/filesystem-policy.md §5.2) — after containment, so
+	// escapes still fail as escapes and the denial message names a clean
+	// workspace-relative path.
+	if err := requireFilesystemAccess(request, cleanPath(pathArg), op); err != nil {
+		return "", err
 	}
 	return abs, nil
 }
@@ -234,7 +272,7 @@ func (a *Activities) handleReadFile(request ToolRequest) (ToolResult, error) {
 	if strings.TrimSpace(pathArg) == "" {
 		return ToolResult{}, invalidToolArguments(errors.New("read_file requires path"))
 	}
-	abs, err := a.resolveToolTarget(request, pathArg)
+	abs, err := a.resolveToolTarget(request, pathArg, fsOpRead)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -281,7 +319,7 @@ func (a *Activities) handleWriteFile(request ToolRequest) (ToolResult, error) {
 	if len(content) > maxFileWriteBytes {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("content is %d bytes, the write cap is %d; split the file or produce it with run_command", len(content), maxFileWriteBytes))
 	}
-	abs, err := a.resolveToolTarget(request, pathArg)
+	abs, err := a.resolveToolTarget(request, pathArg, fsOpWrite)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -318,7 +356,7 @@ func (a *Activities) handleEditFile(request ToolRequest) (ToolResult, error) {
 	if oldText == newText {
 		return ToolResult{}, invalidToolArguments(errors.New("old_text and new_text are identical"))
 	}
-	abs, err := a.resolveToolTarget(request, pathArg)
+	abs, err := a.resolveToolTarget(request, pathArg, fsOpWrite)
 	if err != nil {
 		return ToolResult{}, err
 	}

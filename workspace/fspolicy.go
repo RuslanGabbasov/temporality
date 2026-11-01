@@ -26,7 +26,11 @@ import (
 //     closed under intersection and «простого пересечения строковых значений
 //     недостаточно» (§3.4);
 //   - deny is absolute: union across levels, checked before any allow, never
-//     un-deniable by a child policy.
+//     un-deniable by a child policy;
+//   - write NEVER exists without read: the writable area is the intersection
+//     of the write and read areas — a path the read rules exclude is not
+//     writable even when a write mask matches (fail-closed: a contradiction
+//     between the dimensions narrows, never widens).
 
 // FilesystemRules is one policy row's filesystem rules. Masks are normalized
 // relative paths with '/' separators: `**` matches any number of segments
@@ -237,9 +241,14 @@ func (e *EffectiveFilesystem) AllowRead(cleanPath string) bool {
 
 // AllowWrite reports whether a mutation (create, overwrite, truncate,
 // rename, delete, mkdir — delete is write, §3.2) on the normalized path is
-// permitted. write does not imply read: the two are separate operations.
+// permitted. Write requires read: the writable area is the intersection of
+// the write and read areas («write не должен быть без read») — a path the
+// read rules exclude must never be writable, however the write masks read.
 func (e *EffectiveFilesystem) AllowWrite(cleanPath string) bool {
-	return e.allow(cleanPath, e.Write)
+	if e == nil {
+		return true
+	}
+	return e.allow(cleanPath, e.Write) && e.allow(cleanPath, e.Read)
 }
 
 func (e *EffectiveFilesystem) allow(cleanPath string, layers [][]string) bool {

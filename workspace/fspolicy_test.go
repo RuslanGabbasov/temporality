@@ -129,17 +129,38 @@ func TestMergeFilesystemDenyWins(t *testing.T) {
 	}
 }
 
-// write does not imply read: the dimensions are independent operations (§3.2).
-func TestMergeFilesystemWriteDoesNotImplyRead(t *testing.T) {
-	rows := []Policy{
+// Write never exists without read: the writable area is the intersection of
+// the write and read areas (product decision — write без read не бывает), so
+// a contradiction between the dimensions narrows to nothing instead of
+// silently widening read.
+func TestMergeFilesystemWriteRequiresRead(t *testing.T) {
+	// Write-only rules: read is unrestricted, so the write area stands.
+	writeOnly := MergeFilesystem([]Policy{
 		{Enabled: true, Filesystem: &FilesystemRules{Write: []string{"out/**"}}},
-	}
-	merged := MergeFilesystem(rows)
-	if !merged.AllowWrite("out/report.md") {
+	})
+	if !writeOnly.AllowWrite("out/report.md") {
 		t.Error("AllowWrite(out/report.md) = false, want true")
 	}
-	if !merged.AllowRead("anything") {
-		t.Error("AllowRead(anything) = false, want true — read is unrestricted here")
+	if !writeOnly.AllowRead("anywhere.md") {
+		t.Error("AllowRead(anywhere.md) = false, want true — read is unrestricted")
+	}
+
+	// Read restricted away from the write area: nothing writable there —
+	// the intersection decides, read is never silently widened.
+	split := MergeFilesystem([]Policy{
+		{Enabled: true, Filesystem: &FilesystemRules{Read: []string{"src/**"}, Write: []string{"out/**"}}},
+	})
+	if split.AllowWrite("out/report.md") {
+		t.Error("write must not exist where read is denied (out/**)")
+	}
+	if split.AllowWrite("src/a.go") {
+		t.Error("src/a.go is outside the write area")
+	}
+	if !split.AllowRead("src/a.go") {
+		t.Error("src/a.go must stay readable")
+	}
+	if split.AllowRead("out/report.md") {
+		t.Error("out/report.md is outside the read area")
 	}
 }
 

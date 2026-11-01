@@ -1211,6 +1211,20 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		req.CacheEnv = spec.CacheEnv
 		req.DockerSocket = spec.DockerSocket
 	}
+	// Filesystem policy enforcement (docs/filesystem-policy.md §5.3): the
+	// same frozen snapshot the native tools consult, compiled to Landlock
+	// rules inside the sandbox. KERNEL_SANDBOX_LANDLOCK=off is the operator's
+	// explicit lab escape — the wrapper is skipped loudly in the request
+	// shape (nil policy), never silently downgraded per call.
+	if request.Filesystem != nil && !request.Filesystem.Unrestricted() && env("KERNEL_SANDBOX_LANDLOCK", "") != "off" {
+		// Wire mirror at the runner boundary (kernel/sandbox.FilesystemPolicy):
+		// identical JSON, no storage-package dependency in the runner.
+		req.Filesystem = &sandbox.FilesystemPolicy{
+			Read: request.Filesystem.Read, Write: request.Filesystem.Write, Deny: request.Filesystem.Deny,
+		}
+		req.PolicyVersion = request.PolicyVersion
+		req.LauncherPath = env("KERNEL_SANDBOX_LAUNCHER", "/usr/local/bin/landlock-launcher")
+	}
 	return req, nil
 }
 
