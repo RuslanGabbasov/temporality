@@ -6,14 +6,17 @@ import { useMemo, useRef, useState } from 'react'
  *  (a policy may reference a model no provider advertises yet). Enter adds
  *  the typed token or the highlighted suggestion; Backspace on an empty input
  *  pops the last chip. */
-export default function SuggestChips({ id, value, onChange, suggestions, suggestionLabels, placeholder, invalid }: {
+export default function SuggestChips({ id, value, onChange, suggestions, suggestionLabels, annotateChips = true, placeholder, invalid }: {
   id: string
   value: string[]
   onChange: (next: string[]) => void
   suggestions: string[]
-  /** Display names for candidates (MCP server id → name); the chip shows
-   *  «name (id)» when the chosen token is a known id. */
+  /** Display names for candidates (MCP server id → name); shown next to the
+   *  token in the dropdown and — unless annotateChips is false — on the chip.
+   *  Models use dropdown-only labels (the provider name is metadata; the chip
+   *  must show exactly what the policy stores). */
   suggestionLabels?: Map<string, string>
+  annotateChips?: boolean
   placeholder?: string
   /** Red border when the dialog-level save validation flagged this field. */
   invalid?: boolean
@@ -72,7 +75,7 @@ export default function SuggestChips({ id, value, onChange, suggestions, suggest
         {value.map((chip, i) => (
           <span key={chip} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'var(--tm-raised)', border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.08rem 0.55rem', fontSize: '0.74rem', maxWidth: '100%' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {suggestionLabels?.get(chip) ? `${suggestionLabels.get(chip)} (${chip})` : chip}
+              {annotateChips && suggestionLabels?.get(chip) ? `${suggestionLabels.get(chip)} (${chip})` : chip}
             </span>
             <button
               type="button"

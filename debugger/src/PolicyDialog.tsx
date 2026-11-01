@@ -143,6 +143,11 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
   // Catalogs for the suggestions (best-effort: a failed load leaves the
   // free-typing path, which always worked).
   const [models, setModels] = useState<string[]>([])
+  // model id → provider names serving it: the dropdown annotates each
+  // suggestion with its source, so «one provider's models» is visible at a
+  // glance instead of a mystery (catalogs of OpenAI-compatible mirrors
+  // overlap and dedupe to one list).
+  const [modelSources, setModelSources] = useState<Map<string, string>>(new Map())
   const [mcpServers, setMcpServers] = useState<{ id: string; name: string }[]>([])
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
   const [testerPath, setTesterPath] = useState('')
@@ -152,8 +157,16 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
     let alive = true
     void workspaceApi.listProviders().then((page) => {
       if (!alive) return
-      const all = [...new Set((page.providers ?? []).flatMap((p) => p.models ?? []))].sort()
-      setModels(all)
+      const sources = new Map<string, string[]>()
+      for (const provider of page.providers ?? []) {
+        for (const model of provider.models ?? []) {
+          const list = sources.get(model)
+          if (list) list.push(provider.name)
+          else sources.set(model, [provider.name])
+        }
+      }
+      setModels([...sources.keys()].sort())
+      setModelSources(new Map([...sources.entries()].map(([m, names]) => [m, names.join(', ')])))
     }).catch(() => { /* the free-typing path still works */ })
     void workspaceApi.listMCPServers().then((page) => {
       if (!alive) return
@@ -296,6 +309,8 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
               value={form.allowedModels}
               onChange={(next) => setForm({ ...form, allowedModels: next })}
               suggestions={models}
+              suggestionLabels={modelSources}
+              annotateChips={false}
               placeholder={t('org.policy.chip_placeholder') ?? 'Type or pick, Enter to add…'}
             />
             <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: 0 }}>
