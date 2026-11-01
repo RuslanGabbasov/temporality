@@ -2466,6 +2466,7 @@ export const ru: Record<string, string> = {
     'onboarding.admin_hint': 'Минимум 8 символов. Войти можно будет по имени или email.',
     'onboarding.admin_create': 'Создать администратора',
     'onboarding.admin_created': 'Администратор создан',
+    'onboarding.admin_required': 'Шаг обязателен — анонимная установка не допускается: администратор закрывает анонимный доступ и включает аутентификацию.',
     'onboarding.sandbox_title': 'Песочница: выберите профиль',
     'onboarding.sandbox_desc': 'Готовые профили окружения: выберите тот, что подходит вашим задачам, и соберите его образ. Можно пропустить и вернуться позже.',
     'onboarding.sandbox_checking': 'Проверяем состояние песочницы…',

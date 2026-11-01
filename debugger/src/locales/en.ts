@@ -2466,6 +2466,7 @@ export const en: Record<string, string> = {
     'onboarding.admin_hint': 'At least 8 characters. Sign in with the name or email.',
     'onboarding.admin_create': 'Create administrator',
     'onboarding.admin_created': 'Administrator created',
+    'onboarding.admin_required': 'This step is required — anonymous installs are not supported: the administrator closes anonymous access and enables authentication.',
     'onboarding.sandbox_title': 'Command sandbox',
     'onboarding.sandbox_desc': 'Build the isolated image where agents run commands. You can skip this and come back later.',
     'onboarding.sandbox_checking': 'Checking sandbox state…',

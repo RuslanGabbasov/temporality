@@ -111,7 +111,12 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     setBusy(true); setError('')
     try {
       await workspaceApi.createProject({ id: projectName.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, ''), name: projectName.trim() } as never)
-      setStep('admin')
+      // The admin step is mandatory for an anonymous install (no users, no
+      // env tokens): the auth gate is what gives the kernel's loopback its
+      // service identity, and without identity the workspace never hands
+      // model credentials — every provider call 401s. An already-gated
+      // install has its admin and moves on.
+      setStep(status?.auth_enabled ? 'provider' : 'admin')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(false) }
   }
@@ -327,9 +332,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 placeholder="≥ 8 chars"
               />
               <p className="onboarding-hint">{t('onboarding.admin_hint')}</p>
+              <p className="onboarding-hint">{t('onboarding.admin_required')}</p>
               {error && <p className="onboarding-error">{error}</p>}
               <div className="onboarding-actions">
-                <Button kind="secondary" onClick={() => setStep('provider')}>{t('action.skip')}</Button>
                 <Button onClick={() => void createAdmin()} disabled={busy || !adminName.trim() || adminPassword.length < 8}>{t('onboarding.admin_create')}</Button>
               </div>
             </>

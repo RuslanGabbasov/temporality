@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -97,6 +98,48 @@ func TestCallModelRoutesToServingProvider(t *testing.T) {
 	// free of routing round trips.
 	if n := atomic.LoadInt32(&lookups); n != 1 {
 		t.Fatalf("workspace lookups = %d, want 1 (TTL cache miss)", n)
+	}
+}
+
+// A routing answer WITHOUT an api_key field means the workspace did not
+// recognize the kernel's service identity (the plaintext-credential
+// boundary). The call must fail loudly before any HTTP request goes out —
+// shipping an empty bearer only earns a far-away 401 from the provider that
+// hides the cause.
+func TestCallModelRefusesCallWhenRoutingHandsNoCredential(t *testing.T) {
+	var providerHits int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&providerHits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer provider.Close()
+
+	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/workspace/model-config" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"provider_id": "prov-x", "provider_name": "custom31", "base_url": provider.URL,
+			"api_key_ref": "secret://provider-custom31-key", "model": "mimo-x",
+		})
+	}))
+	defer workspace.Close()
+
+	activities := &Activities{
+		HTTP:         &http.Client{},
+		WorkspaceURL: workspace.URL,
+	}
+
+	_, err := activities.CallModel(context.Background(), ModelRequest{
+		RunID: "run-noident", Turn: 1, Project: "proj-1", ProviderID: "prov-x", Model: "mimo-x",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "handed no credential") {
+		t.Fatalf("expected a loud routing error, got: %v", err)
+	}
+	if hits := atomic.LoadInt32(&providerHits); hits != 0 {
+		t.Fatalf("provider was called %d times without a credential", hits)
 	}
 }
 

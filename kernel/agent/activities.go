@@ -23,8 +23,8 @@ import (
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
-	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/observation"
+	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
@@ -190,13 +190,13 @@ type skillEmbedEntry struct {
 // providerCacheEntry is one cached model-config resolution; ok=false is the
 // cached negative "no provider serves this model" answer.
 type providerCacheEntry struct {
-	config    llm.Config
+	config     llm.Config
 	providerID string
 	// providerName is the human label of the serving provider — the route
 	// markers and failure messages show it instead of the opaque id.
 	providerName string
-	ok        bool
-	fetchedAt time.Time
+	ok           bool
+	fetchedAt    time.Time
 }
 
 // evictModelConfig drops the cached routing decision for project|model: a
@@ -294,7 +294,7 @@ var runCommandTool = llm.ToolDef{
 var killOperationTool = llm.ToolDef{
 	Name:        "kill_operation",
 	Description: "Terminate one of this run's background operations (a command started with run_command background=true). The completion notification will report its final state. Use when a long operation is no longer needed or blocks your plan.",
-	Parameters: map[string]any{"type": "object", "properties": map[string]any{"operation_id": map[string]any{"type": "string", "description": "The operation id the background start returned"}}, "required": []string{"operation_id"}},
+	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"operation_id": map[string]any{"type": "string", "description": "The operation id the background start returned"}}, "required": []string{"operation_id"}},
 }
 
 // BuiltinToolDefs returns kernel tools plus the sandbox surface (run_command
@@ -719,7 +719,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 					if logger := activity.GetLogger(ctx); logger != nil {
 						logger.Warn("model-config lookup failed, falling back to env provider",
 							"run_id", request.RunID, "model", request.Model, "error", err.Error())
-							}
+					}
 				}
 			} else if ok {
 				client = llm.New(config)
@@ -1784,6 +1784,20 @@ func isTransportError(err error) bool {
 		strings.Contains(msg, "broken pipe")
 }
 
+// modelConfigAnswer is the /v1/workspace/model-config payload. APIKey is a
+// pointer because field PRESENCE is part of the contract: the endpoint hands
+// plaintext only to the kernel's service principal — an absent api_key means
+// the loopback identity was not recognized, and building a client on an
+// empty bearer would only earn a bare 401 from the provider far from the
+// cause. A present-but-empty api_key is a legitimate keyless provider.
+type modelConfigAnswer struct {
+	ProviderID   string  `json:"provider_id"`
+	ProviderName string  `json:"provider_name"`
+	BaseURL      string  `json:"base_url"`
+	APIKey       *string `json:"api_key"`
+	Model        string  `json:"model"`
+}
+
 // pinnedConfigFrom decodes the model-config answer into the pinned llm.Config,
 // mapping HTTP answers to the loud, actionable routing errors (no retries —
 // these are definitive answers, not transport noise).
@@ -1797,20 +1811,17 @@ func (a *Activities) pinnedConfigFrom(body string, status int, providerID, model
 	if status >= 400 {
 		return llm.Config{}, "", fmt.Errorf("provider %q routing failed (HTTP %d): %s", providerID, status, truncate(body, 300))
 	}
-	var answer struct {
-		ProviderID   string `json:"provider_id"`
-		ProviderName string `json:"provider_name"`
-		BaseURL      string `json:"base_url"`
-		APIKey       string `json:"api_key"`
-		Model        string `json:"model"`
-	}
+	var answer modelConfigAnswer
 	if err := json.Unmarshal([]byte(body), &answer); err != nil {
 		return llm.Config{}, "", fmt.Errorf("provider %q routing decode: %w", providerID, err)
 	}
 	if answer.BaseURL == "" || answer.Model == "" {
 		return llm.Config{}, "", fmt.Errorf("provider %q routing response incomplete for model %q", providerID, model)
 	}
-	config := llm.Config{BaseURL: answer.BaseURL, APIKey: answer.APIKey, Model: answer.Model}
+	if answer.APIKey == nil {
+		return llm.Config{}, "", fmt.Errorf("the workspace handed no credential for provider %q: the kernel's loopback identity was not recognized as the service principal — an empty bearer would only earn a bare 401 from the provider", providerID)
+	}
+	config := llm.Config{BaseURL: answer.BaseURL, APIKey: *answer.APIKey, Model: answer.Model}
 	if envConfig, err := llm.ConfigFromEnv(); err == nil {
 		config.Temperature = envConfig.Temperature
 		config.Timeout = envConfig.Timeout
@@ -1856,25 +1867,25 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 	if status >= 400 {
 		return llm.Config{}, "", "", false, fmt.Errorf("model-config lookup failed (HTTP %d): %s", status, truncate(body, 200))
 	}
-	var answer struct {
-		ProviderID   string `json:"provider_id"`
-		ProviderName string `json:"provider_name"`
-		BaseURL      string `json:"base_url"`
-		APIKey       string `json:"api_key"`
-		Model        string `json:"model"`
-	}
+	var answer modelConfigAnswer
 	if err := json.Unmarshal([]byte(body), &answer); err != nil {
 		return llm.Config{}, "", "", false, fmt.Errorf("model-config decode: %w", err)
 	}
 	if answer.BaseURL == "" || answer.Model == "" {
 		return llm.Config{}, "", "", false, fmt.Errorf("model-config response incomplete for model %q", model)
 	}
-	// An empty api_key is a legitimate keyless provider (ollama, lmstudio);
-	// llm.Config sends no Authorization header for those.
+	if answer.APIKey == nil {
+		// Not a routing answer at all: the workspace did not hand the credential
+		// (the caller is not the kernel service principal). Fail loud instead of
+		// shipping an empty bearer — CallModel logs this and keeps the env path.
+		return llm.Config{}, "", "", false, fmt.Errorf("the workspace handed no credential for provider %q: the kernel's loopback identity was not recognized as the service principal", answer.ProviderID)
+	}
+	// A present-but-empty api_key is a legitimate keyless provider (ollama,
+	// lmstudio); llm.Config sends no Authorization header for those.
 	// The endpoint carries routing only (base URL, key, model); timeouts and
 	// caps come from the env config when it parses, else the same hard defaults
 	// ConfigFromEnv would apply.
-	config = llm.Config{BaseURL: answer.BaseURL, APIKey: answer.APIKey, Model: answer.Model}
+	config = llm.Config{BaseURL: answer.BaseURL, APIKey: *answer.APIKey, Model: answer.Model}
 	if envConfig, err := llm.ConfigFromEnv(); err == nil {
 		config.Temperature = envConfig.Temperature
 		config.Timeout = envConfig.Timeout
@@ -2651,7 +2662,9 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 			var approved bool
 			if err == nil && status == 200 {
 				var row struct {
-					Artifact struct{ Status string `json:"status"` } `json:"artifact"`
+					Artifact struct {
+						Status string `json:"status"`
+					} `json:"artifact"`
 				}
 				if json.Unmarshal([]byte(body), &row) == nil && row.Artifact.Status == "approved" {
 					approved = true

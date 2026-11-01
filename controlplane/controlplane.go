@@ -339,6 +339,17 @@ type contextKey struct{}
 func (g *Gate) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !g.Enabled() {
+			// A disabled gate is anonymous admin for humans — but the kernel's
+			// loopback self-access keeps its identity even here: identity-sensitive
+			// boundaries (plaintext provider credentials, human-only reviews) key
+			// off the principal, and a fresh install's kernel runs model calls
+			// before the first user exists. The internal token still never enables
+			// the gate — it only pins identity when presented.
+			if token, ok := BearerToken(r); ok && g.internalToken != "" && token == g.internalToken {
+				principal := Principal{Subject: "kernel-internal", Role: RoleOperator, Projects: []string{"*"}}
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, principal)))
+				return
+			}
 			anonymous := Principal{Subject: "anonymous", Role: RoleAdmin, Projects: []string{"*"}}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, anonymous)))
 			return
