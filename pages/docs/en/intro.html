@@ -48,7 +48,7 @@
 <p><strong>Temporality</strong> is an open runtime and control plane for agent systems: it runs long-lived tasks, keeps an evidence-backed history of every action, governs permissions and oversight — and turns verified experience into knowledge and skills that work on the next tasks.</p>
 <p>A conventional chat bot forgets everything between sessions, and its &quot;memory&quot; is a junk drawer of notes stuffed into context. An autonomous agent working inside a team needs execution, control and learning at once: tasks must survive restarts, actions must leave evidence, permissions must match the org structure, and mistakes must become experience instead of repeating. Temporality covers all four layers with one self-hosted stack:</p>
 <ol>
-<li><strong>Execute</strong> — long-lived tasks, delegation to subagents, plan DAGs, human approvals.</li>
+<li><strong>Execute</strong> — long-lived tasks, delegation to subagents, plan DAGs, background commands, human approvals.</li>
 <li><strong>Observe</strong> — an event journal, traces, a live command console, cause reconstruction.</li>
 <li><strong>Control</strong> — capabilities and policies, secrets, egress rules, behavior-anomaly signals.</li>
 <li><strong>Improve</strong> — experience → knowledge with status and provenance → skills → reuse.</li>
@@ -62,8 +62,8 @@
 <li><strong>Knowledge with provenance.</strong> Statements extracted from trajectories carry an author, a source, a lifecycle status (proposed → confirmed → challenged…) and a bitemporal history. Knowledge can be challenged, corrected, invalidated — and you can see who and when.</li>
 <li><strong>Hints</strong> — compact excerpts of relevant experience the system feeds the agent before a task. The agent can dig into full primary sources through research tools.</li>
 <li><strong>Sagas</strong> — explicitly tracked long-running work that outlives a single run: chat continuations, delegated agents and amendments join the saga automatically.</li>
-<li><strong>Artifacts</strong> — a registry of reference documents (policies, runbooks, checklists) agents load on demand instead of carrying them in the prompt.</li>
-<li><strong>Living skills</strong> — reusable procedures with a contract (what it does, when it applies, what to verify), versions, quality evaluations and human-governed evolution.</li>
+<li><strong>Artifacts</strong> — a registry of documents (policies, requirements, runbooks) with human approval and versions: agents load them on demand, and &quot;see document X&quot; means the version people approved.</li>
+<li><strong>Living skills</strong> — reusable procedures with a contract (what it does, when it applies, what to verify), versions, quality evaluations and human-governed evolution; a skill references approved artifacts as its reference material.</li>
 <li><strong>The quality loop</strong> — agent changes are applied only on top of a fresh green evaluation run: golden cases from production, human verdicts, a calibrated LLM judge.</li>
 <li><strong>Secure by default</strong> — commands run in a Docker sandbox with no network and no privileges, consequential actions require human approval, secrets are never visible to the agent, with RBAC and an org structure on top.</li>
 </ul>

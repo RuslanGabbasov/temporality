@@ -90,6 +90,25 @@ recorded in the audit log.</p>
 </tbody></table>
 <p>Constraints and completion checks are part of the contract: they enter the
 prompt and the result verification.</p>
+<h2 id="background-commands"><a class="anchor" href="#background-commands" aria-label="Section link">#</a>Background commands</h2><p>Long sandbox operations — dependency installs, builds, big test suites — no
+longer block the agent. <code>run_command</code> with <code>background: true</code> runs detached:
+the tool returns an operation id immediately, the agent keeps working, and
+the result (exit code + output tail) arrives automatically as a follow-up
+message in the conversation.</p>
+<ul>
+<li>the run does not finish while background operations are in flight; ready
+results are drained in one batch — the agent spends a single turn
+incorporating them instead of waiting for each command;</li>
+<li>each background command&#39;s live console is visible in the trace (the
+pinned &quot;Live background operations&quot; panel);</li>
+<li>cancellation — the <code>kill_operation</code> tool (kills the process tree by
+marker, never a foreign process);</li>
+<li>background commands get their own time budget: 900 seconds by default,
+a 1-hour ceiling (<code>timeout_sec</code> up to 3600,
+<code>KERNEL_BG_TOOL_MAX_SECONDS</code>); ordinary commands stay at 300/900
+(<code>KERNEL_TOOL_MAX_SECONDS</code>).</li>
+</ul>
+<p>Details and delivery guarantees — <code>docs/agent-async-operations.md</code>.</p>
 <h2 id="agent-evolution"><a class="anchor" href="#agent-evolution" aria-label="Section link">#</a>Agent evolution</h2><p><img src="../assets/agent-evolution.webp" alt="Evolution: versions, gate, regressions"></p>
 <p>The agent can propose changes to its own configuration (the <code>agent_propose</code>
 tool): the problem with evidence (run ids), the change and the expected

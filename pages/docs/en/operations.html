@@ -293,8 +293,10 @@ candidate lands in the queue and is pre-filled as a draft on <code>/skills</code
 Versions: a draft is <code>0.x</code>, applying/rejecting revisions is a human decision;
 the skill list shows <code>draft</code> and &quot;↺ N&quot; badges — pending draft revisions. Do
 not let unapplied revisions pile up: go through the queue by badge.</p>
-<p><strong>Artifacts</strong> — reference documents agents load on demand. Statuses:
-<code>draft / in_review / rejected / approved</code>. The review cycle: submit
+<p><strong>Artifacts</strong> — documents agents load on demand. Statuses:
+<code>draft / in_review / rejected / approved / superseded</code> (the lifecycle is per
+version: editing an approved document means a new revision and a repeated
+approval round). The review cycle: submit
 (idempotent per version) → reviewers are notified → the decision is
 <strong>human-only</strong> (self-approval is forbidden at the API level) →
 approved/rejected. Reviewers: the <code>all</code> mode (everyone must decide) or <code>any</code>
@@ -342,6 +344,8 @@ tmpfs cleanup on a node reboot will destroy the agents&#39; workspaces.</li>
 gid of the docker group on the host (the socket). <code>KERNEL_SANDBOX_PIDS</code>,
 <code>KERNEL_SANDBOX_SCRATCH_SIZE</code> — container limits.</li>
 <li><code>KERNEL_TOOL_MAX_SECONDS</code> (900) — the ceiling for one command;
+<code>KERNEL_BG_TOOL_MAX_SECONDS</code> (3600) — the ceiling for a background command
+(<code>run_command</code> with <code>background: true</code>);
 <code>TEMPORALITY_TOOL_ACTIVITY_TIMEOUT</code> (16m) — the ceiling for a <code>run_tool</code>
 activity.</li>
 <li>Web: <code>KERNEL_SEARXNG_URL</code> (search), <code>KERNEL_WEB_SEARCH_PER_MIN</code> /

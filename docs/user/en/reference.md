@@ -21,6 +21,7 @@ description: Environment variables, ports, UI pages and links to the in-depth do
 | `TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT` | `2m` | First-token wait (adaptive, +60s per MB of prompt) |
 | `TEMPORALITY_TOOL_ACTIVITY_TIMEOUT` | `16m` | Ceiling for a `run_tool` activity |
 | `KERNEL_TOOL_MAX_SECONDS` | `900` | Ceiling for a single sandbox command |
+| `KERNEL_BG_TOOL_MAX_SECONDS` | `3600` | Ceiling for a detached background command — `run_command` with `background: true` gets its own budget of up to an hour |
 | `KERNEL_EMBEDDINGS_MODEL` | `intfloat/multilingual-e5-small` | Model of the knowledge semantic layer (in-process, rembed) |
 | `KERNEL_EMBEDDING_WORKERS` | — | Parallelism of background embedding computations |
 | `KERNEL_PROVIDER_MODELS_REFRESH` | `24h` | Background refresh cycle of the provider model catalog (`0` — disable) |
@@ -90,7 +91,7 @@ The full list with semantics is in the root `README.md` and `docs/runbook.md`.
 - **Knowledge** — a statement with provenance, a status and a history.
 - **Hint** — a compact excerpt of experience fed to the agent.
 - **Skill** — a versioned procedure with a contract and evaluations.
-- **Artifact** — a reference document in the registry, loaded on demand.
+- **Artifact** — a document in the registry with versions and human approval, loaded on demand.
 - **Reconcile** — manually resolving an uncertain operation (happened / did not happen).
 - **Judge** — the LLM model evaluating answers in the quality loop.
 

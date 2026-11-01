@@ -235,8 +235,10 @@ Versions: a draft is `0.x`, applying/rejecting revisions is a human decision;
 the skill list shows `draft` and "↺ N" badges — pending draft revisions. Do
 not let unapplied revisions pile up: go through the queue by badge.
 
-**Artifacts** — reference documents agents load on demand. Statuses:
-`draft / in_review / rejected / approved`. The review cycle: submit
+**Artifacts** — documents agents load on demand. Statuses:
+`draft / in_review / rejected / approved / superseded` (the lifecycle is per
+version: editing an approved document means a new revision and a repeated
+approval round). The review cycle: submit
 (idempotent per version) → reviewers are notified → the decision is
 **human-only** (self-approval is forbidden at the API level) →
 approved/rejected. Reviewers: the `all` mode (everyone must decide) or `any`
@@ -296,6 +298,8 @@ the egress stack sandboxes keep the legacy bridge behavior.
   gid of the docker group on the host (the socket). `KERNEL_SANDBOX_PIDS`,
   `KERNEL_SANDBOX_SCRATCH_SIZE` — container limits.
 - `KERNEL_TOOL_MAX_SECONDS` (900) — the ceiling for one command;
+  `KERNEL_BG_TOOL_MAX_SECONDS` (3600) — the ceiling for a background command
+  (`run_command` with `background: true`);
   `TEMPORALITY_TOOL_ACTIVITY_TIMEOUT` (16m) — the ceiling for a `run_tool`
   activity.
 - Web: `KERNEL_SEARXNG_URL` (search), `KERNEL_WEB_SEARCH_PER_MIN` /

@@ -63,6 +63,19 @@ through the same quality loop. The tools `skill_history`, `skill_diff`,
 `skill_executions` give the full picture: who changed what and when, where the
 skill ran and what it "remembered" from executions (`skill_memory`).
 
+![Skill artifacts](../assets/skill-artifacts.webp)
+
+**Artifact references ride the evolution.** A change proposal
+(`skill_propose`) carries an `artifact_refs` list — the documents the skill
+needs as reference material. Each reference is validated against the
+registry at submit time: only approved artifacts enter the manifest, while
+hallucinated or unapproved ids are dropped and listed back in the response —
+the model sees exactly what survived. A server-side check at the save
+boundary makes it impossible for a skill to reference an unapproved
+document. References can also be edited by hand in the skill editor's
+"Artifacts" tab: search the registry, attach a document and describe when it
+applies.
+
 ## How the agent works with skills
 
 In a run the agent has `skill_search` (find a match), `skill_inspect` (read

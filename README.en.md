@@ -3,12 +3,13 @@
 [Русский](README.md) · **English** · [Docs](https://ruslangabbasov.github.io/temporality/docs/en/) · [Harness operations](https://ruslangabbasov.github.io/temporality/docs/en/operations.html)
 
 Temporality is a runtime and control plane for AI agents: durable tasks on
-Temporal, a full trace of every run, permissions and approvals — and
-accumulated experience that flows back into future runs.
+Temporal, a full trace of every run, permissions, approvals and human
+document sign-off — and accumulated experience (knowledge, skills,
+artifacts) that flows back into future runs.
 
 <p align="center">
-  <a href="https://ruslangabbasov.github.io/temporality/assets/knowledge-expantions.mp4">
-    <video src="pages/assets/knowledge-expantions.mp4" autoplay muted loop playsinline width="100%"></video>
+  <a href="https://ruslangabbasov.github.io/temporality/assets/knowledge-expansions.mp4">
+    <video src="pages/assets/knowledge-expansions.mp4" autoplay muted loop playsinline width="100%"></video>
   </a>
   <em>The knowledge map: the knowledge base laid out by semantic similarity — streaming in live, clusters forming on their own.</em>
 </p>
@@ -70,7 +71,7 @@ make debugger-build # UI static build
 | Component | Path | Purpose |
 |---|---|---|
 | Journal | `observation/`, `cmd/temporality-journal` | append-only events, knowledge projection, hint retrieval |
-| Agent Kernel | `kernel/`, `cmd/agent-kernel` | the agent harness on Temporal: model gateway, MCP, sandbox, approvals, delegation |
+| Agent Kernel | `kernel/`, `cmd/agent-kernel` | the agent harness on Temporal: model gateway, MCP, sandbox, approvals, delegation, skills and artifacts with human approval |
 | Workspace UI | `debugger/` | agent chat, run traces, knowledge map, settings |
 
 The detailed map of interfaces and internals lives in the
