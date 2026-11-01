@@ -282,10 +282,10 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 				Chat struct {
 					ID int64 `json:"id"`
 				} `json:"chat"`
-				Text     string `json:"text"`
-				Caption  string `json:"caption"`
+				Text       string `json:"text"`
+				Caption    string `json:"caption"`
 				MediaGroup string `json:"media_group_id"`
-				Document *struct {
+				Document   *struct {
 					FileID   string `json:"file_id"`
 					FileName string `json:"file_name"`
 				} `json:"document"`

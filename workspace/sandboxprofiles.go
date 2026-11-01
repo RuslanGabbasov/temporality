@@ -61,10 +61,10 @@ type SandboxProfile struct {
 	// Enabled is the uniform on/off switch (the trigger pattern): a disabled
 	// profile cannot be resolved for new runs; agents bound to it fail loudly
 	// at start instead of silently landing in another image.
-	Enabled   bool `json:"enabled"`
-	Builtin   bool `json:"builtin"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Enabled   bool      `json:"enabled"`
+	Builtin   bool      `json:"builtin"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ErrProfileBuiltin reports an attempt to delete or rewrite a builtin profile.

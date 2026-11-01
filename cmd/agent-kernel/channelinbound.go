@@ -842,9 +842,9 @@ func (l *channelInboundLoop) deliverUserNote(ctx context.Context, channelSetting
 			saved, err := l.saveProjectFiles(ctx, row.ProjectID, message.Files)
 			if err != nil {
 				l.log.Warn("intake follow-up files", "channel", l.driver.Type(), "run", row.TargetRunID, "error", err)
-				noteText = strings.TrimSpace("[File could not be received: "+err.Error()+"] "+noteText)
+				noteText = strings.TrimSpace("[File could not be received: " + err.Error() + "] " + noteText)
 			} else {
-				noteText = strings.TrimSpace("[Attached file: "+saved+"] "+noteText)
+				noteText = strings.TrimSpace("[Attached file: " + saved + "] " + noteText)
 			}
 		}
 		workflowID := agent.WorkflowID(l.sourceID, row.ProjectID, row.TargetRunID)

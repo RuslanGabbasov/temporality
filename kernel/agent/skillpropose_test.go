@@ -73,7 +73,7 @@ func skillWorkspaceStub(t *testing.T, exists func() bool) (*httptest.Server, *sk
 			if recorder.approvedArtifacts[id] {
 				_ = json.NewEncoder(w).Encode(map[string]any{"artifact": map[string]any{"id": id, "status": "approved"}})
 			} else {
-			http.NotFound(w, r)
+				http.NotFound(w, r)
 			}
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/workspace/skills":
 			_ = json.NewDecoder(r.Body).Decode(&recorder.created)

@@ -832,7 +832,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 				"Content-Type":  "application/json",
 				"Authorization": "Bearer " + maskKey(c.cfg.APIKey),
 			},
-			reqBody:     truncate(string(payload), 2000),
+			reqBody: truncate(string(payload), 2000),
 			respHeaders: map[string]string{
 				"Content-Type":     response.Header.Get("Content-Type"),
 				"Www-Authenticate": response.Header.Get("Www-Authenticate"),
@@ -1048,13 +1048,13 @@ type statusError struct {
 // Credentials are masked at construction; the journal and the UI show it
 // verbatim.
 type CallReport struct {
-	Method         string            `json:"method"`
-	URL            string            `json:"url"`
-	RequestHeaders map[string]string `json:"request_headers"`
-	RequestBody    string            `json:"request_body"`
-	Status         int               `json:"status"`
+	Method          string            `json:"method"`
+	URL             string            `json:"url"`
+	RequestHeaders  map[string]string `json:"request_headers"`
+	RequestBody     string            `json:"request_body"`
+	Status          int               `json:"status"`
 	ResponseHeaders map[string]string `json:"response_headers"`
-	ResponseBody   string            `json:"response_body"`
+	ResponseBody    string            `json:"response_body"`
 }
 
 // maskKey keeps enough of a bearer token to tell WHICH credential was used
@@ -1078,13 +1078,13 @@ func CallReportOf(err error) (CallReport, bool) {
 		return CallReport{}, false
 	}
 	return CallReport{
-		Method:         http.MethodPost,
-		URL:            statusErr.url,
-		RequestHeaders: statusErr.reqHeaders,
-		RequestBody:    statusErr.reqBody,
-		Status:         statusErr.code,
+		Method:          http.MethodPost,
+		URL:             statusErr.url,
+		RequestHeaders:  statusErr.reqHeaders,
+		RequestBody:     statusErr.reqBody,
+		Status:          statusErr.code,
 		ResponseHeaders: statusErr.respHeaders,
-		ResponseBody:   statusErr.body,
+		ResponseBody:    statusErr.body,
 	}, true
 }
 
@@ -1241,9 +1241,9 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 				"Content-Type":  "application/json",
 				"Authorization": "Bearer " + maskKey(c.cfg.APIKey),
 			},
-			reqBody:  truncate(string(payload), 2000),
+			reqBody: truncate(string(payload), 2000),
 			respHeaders: map[string]string{
-				"Content-Type": response.Header.Get("Content-Type"),
+				"Content-Type":     response.Header.Get("Content-Type"),
 				"Www-Authenticate": response.Header.Get("Www-Authenticate"),
 			},
 		}

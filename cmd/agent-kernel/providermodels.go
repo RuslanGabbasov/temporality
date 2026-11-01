@@ -307,8 +307,8 @@ func providerModelsRefreshInterval(log *slog.Logger) time.Duration {
 // The credential is masked (prefix/suffix/length) — enough to recognize
 // WHICH key went out without exposing it.
 type GenTestReport struct {
-	OK       bool `json:"ok"`
-	Request  struct {
+	OK      bool `json:"ok"`
+	Request struct {
 		Method  string            `json:"method"`
 		URL     string            `json:"url"`
 		Headers map[string]string `json:"headers"`

@@ -65,57 +65,57 @@ func (p *matrixPoller) Poll(ctx context.Context, client *http.Client, settings m
 	if p.buffer == nil {
 		p.buffer = newMatrixBatchBuffer()
 	}
-		if p.cursor == "" {
-			p.cursor = cursor
-		}
-		exposed := cursor
-		for {
-			// While a group is buffering the long poll is replaced by short polls:
-			// the release must happen within the quiet window, not after the next
-			// 25-second quiet sync.
-			timeout := int(matrixSyncTimeout.Seconds())
-			if p.buffer.pending() {
-				timeout = 0
-			}
-			messages, next, err := matrixSync(ctx, client, homeserver, token, p.cursor, timeout)
-			if err != nil && p.cursor != "" && matrixUnknownSince(err) {
-				// The homeserver forgot the cursor (restart, retention): fall back
-				// to a bounded initial sync instead of erroring forever.
-				messages, next, err = matrixSync(ctx, client, homeserver, token, "", timeout)
-			}
-			if err != nil {
-				return nil, "", err
-			}
-			p.cursor = next
-			now := time.Now()
-			for _, message := range messages {
-				if p.buffer.contains(message.EventID) {
-					continue // replayed while buffering — already parked
-				}
-				p.buffer.add(message, now)
-			}
-			released := p.buffer.flushDue(now)
-			if !p.buffer.pending() {
-				// Everything seen so far has been released — the position is safe
-				// to expose. While any group still buffers, the exposed cursor
-				// stays behind: a crash redelivers those events instead of
-				// silently dropping a half-collected message.
-				exposed = p.cursor
-			}
-			if len(released) > 0 {
-				return released, exposed, nil
-			}
-			if p.buffer.pending() {
-				select {
-				case <-ctx.Done():
-					return nil, "", ctx.Err()
-				case <-time.After(matrixBatchPollStep):
-				}
-				continue
-			}
-			return nil, exposed, nil
-		}
+	if p.cursor == "" {
+		p.cursor = cursor
 	}
+	exposed := cursor
+	for {
+		// While a group is buffering the long poll is replaced by short polls:
+		// the release must happen within the quiet window, not after the next
+		// 25-second quiet sync.
+		timeout := int(matrixSyncTimeout.Seconds())
+		if p.buffer.pending() {
+			timeout = 0
+		}
+		messages, next, err := matrixSync(ctx, client, homeserver, token, p.cursor, timeout)
+		if err != nil && p.cursor != "" && matrixUnknownSince(err) {
+			// The homeserver forgot the cursor (restart, retention): fall back
+			// to a bounded initial sync instead of erroring forever.
+			messages, next, err = matrixSync(ctx, client, homeserver, token, "", timeout)
+		}
+		if err != nil {
+			return nil, "", err
+		}
+		p.cursor = next
+		now := time.Now()
+		for _, message := range messages {
+			if p.buffer.contains(message.EventID) {
+				continue // replayed while buffering — already parked
+			}
+			p.buffer.add(message, now)
+		}
+		released := p.buffer.flushDue(now)
+		if !p.buffer.pending() {
+			// Everything seen so far has been released — the position is safe
+			// to expose. While any group still buffers, the exposed cursor
+			// stays behind: a crash redelivers those events instead of
+			// silently dropping a half-collected message.
+			exposed = p.cursor
+		}
+		if len(released) > 0 {
+			return released, exposed, nil
+		}
+		if p.buffer.pending() {
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			case <-time.After(matrixBatchPollStep):
+			}
+			continue
+		}
+		return nil, exposed, nil
+	}
+}
 
 func (matrixPoller) Self(ctx context.Context, client *http.Client, settings map[string]string) (string, error) {
 	homeserver, token, err := matrixCredentials(settings)
@@ -282,9 +282,9 @@ func matrixNormalized(messages []MatrixInboundMessage) []InboundMessage {
 type matrixMessageKind int
 
 const (
-	matrixPlainMessage matrixMessageKind = iota // text without attachment
-	matrixCaptionedFile                         // attachment with its own caption
-	matrixBareFile                              // attachment whose body is just the file name
+	matrixPlainMessage  matrixMessageKind = iota // text without attachment
+	matrixCaptionedFile                          // attachment with its own caption
+	matrixBareFile                               // attachment whose body is just the file name
 )
 
 // matrixKind applies the caption convention of the spec: a file event carries

@@ -69,7 +69,7 @@ func TestAgentRunBackgroundOperationWaitsAndNotifies(t *testing.T) {
 		switch call {
 		case 1:
 			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "bg-1", Name: "run_command", Args: map[string]any{
-				"command": []any{"bash", "-lc", "yarn install"},
+				"command":    []any{"bash", "-lc", "yarn install"},
 				"background": true, "timeout_sec": 600,
 			}}}}, nil
 		case 2:

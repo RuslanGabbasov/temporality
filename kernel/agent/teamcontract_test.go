@@ -16,7 +16,7 @@ import (
 // PrepareRun creates.
 type contractSandbox struct{ root string }
 
-func (c *contractSandbox) SandboxRoot() string                       { return c.root }
+func (c *contractSandbox) SandboxRoot() string { return c.root }
 func (c *contractSandbox) OperationState(scratchKey, operationID string) (sandbox.OperationState, error) {
 	return sandbox.OperationState{}, nil
 }
