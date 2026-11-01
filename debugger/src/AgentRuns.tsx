@@ -41,6 +41,8 @@ import { runStatusLabel, runningBackgroundOps } from './eventPresentation'
 import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
 import { useDebouncedValue } from './useDebouncedValue'
 import { useOrgUnits, OrgUnitSelect } from './orgUnits'
+import { cacheGet, cacheSet } from './tabCache'
+import { SkeletonTiles } from './Skeleton'
 import type { ConsoleState } from './consoleStream'
 
 const KERNEL_API = '/kernel-api'
@@ -67,6 +69,12 @@ export const TRACE_WINDOW_STEP = 50
 // deeper history belongs to the Timeline, which finds a concrete run and
 // links here. Filters work over this loaded window.
 export const RUNS_LIMIT = 100
+
+// The last rendered list of the scope (tabCache): switching to Chats and back
+// remounts this page, and an empty rows array otherwise paints «Запусков пока
+// нет» over data the user saw seconds ago while the real fetch runs for
+// seconds. Rows are plain journal-derived objects — JSON-safe.
+const runsCacheKey = (scope: string | undefined) => `runs.list:${scope ?? 'all'}`
 
 /** Newest `limit` rows of `rows`, newest first (the trace renders in this
  *  order; index 0 stays the live-model row). Exported so the NFR-5 window
@@ -262,7 +270,15 @@ function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStat
 export default function AgentRuns({ project }: { project: string }) {
   const t = useT()
   const { locale } = useI18n()
-  const [rows, setRows] = useState<RunRow[]>([])
+  const scopeKey = project.trim() || undefined
+  // Hydrate from the session cache: the previous list paints instantly, the
+  // first loadRuns below only updates it. Without a cache this stays empty
+  // and the list shows its skeleton until the first fetch lands (see the
+  // runsLoaded gate on the empty state).
+  const [rows, setRows] = useState<RunRow[]>(() => cacheGet<RunRow[]>(runsCacheKey(scopeKey)) ?? [])
+  // Whether at least one real fetch of this scope finished: only then does an
+  // empty list mean «no runs» — before that it is «not yet», i.e. skeleton.
+  const [runsLoaded, setRunsLoaded] = useState(() => (cacheGet<RunRow[]>(runsCacheKey(scopeKey))?.length ?? 0) > 0)
   // Read the run from the URL up front (links from other panels point at
   // /agents?project=…&run=…) — an initializer, not an effect, so the first
   // loadRuns call sees it through its closure and skips auto-select.
@@ -677,6 +693,8 @@ export default function AgentRuns({ project }: { project: string }) {
       for (const event of completedEvents) statuses.set(runID(event), 'completed')
       const allRows = buildRunRows(startedPage.events, statuses)
       setRows(allRows)
+      setRunsLoaded(true)
+      cacheSet(runsCacheKey(scope), allRows)
       // Open human questions mark the asking runs (best-effort — the badge
       // in the header falls back to events when the endpoint is missing).
       // ONLY workflow-backed rows qualify: the human_request table also holds
@@ -709,6 +727,16 @@ export default function AgentRuns({ project }: { project: string }) {
     } catch (failure) { if (!silent) setError(message(failure)) }
     finally { if (!autoSelect && !silent) setBusy(false) }
   }, [project, refreshOps])
+
+  // Project switch: repaint from that scope's cache at once (the fetch takes
+  // seconds) and re-arm the loaded gate — until this scope's first fetch
+  // lands, an empty list must show the skeleton, not «no runs». On the first
+  // mount this is a no-op re-hydrate of the same rows.
+  useEffect(() => {
+    const cachedRows = cacheGet<RunRow[]>(runsCacheKey(project.trim() || undefined)) ?? []
+    setRows(cachedRows)
+    setRunsLoaded(cachedRows.length > 0)
+  }, [project])
 
   const loadRun = useCallback(async (run: string, silent = false) => {
     if (!run) return
@@ -1130,7 +1158,15 @@ export default function AgentRuns({ project }: { project: string }) {
               </div>
             </div>
             <Stack gap={1}>
-              {rows.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}
+              {/* An empty list only means «no runs» after a real fetch landed
+                  (runsLoaded): before that it is the loading skeleton — the
+                  old blank-rows render showed «Запусков пока нет» during the
+                  multi-second first load and on every remount. */}
+              {rows.length === 0 && (runsLoaded ? (
+                <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>
+              ) : (
+                <SkeletonTiles rows={6} />
+              ))}
               {visibleRuns.map((row) => {
                 const agentName = row.agentId ? agents.find((a) => a.id === row.agentId)?.name : undefined
                 const label = row.title || agentName || (row.depth > 0 ? `#${row.id.split('/').pop() ?? ''}` : row.id)

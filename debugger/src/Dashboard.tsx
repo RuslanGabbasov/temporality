@@ -22,6 +22,8 @@ import { formatDuration } from './eventSummary'
 import { runStatusLabel } from './eventPresentation'
 import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
 import { fmtBytes } from './format'
+import { cacheGet, cacheSet } from './tabCache'
+import { SkeletonBox, SkeletonTiles } from './Skeleton'
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
@@ -48,6 +50,38 @@ const WINDOWS: { key: string; ms: number; go: string }[] = [
 ]
 
 const REFRESH_MS = 30_000
+
+// The last shown overview slices, per journal window (tabCache): a dashboard
+// visit remounts the page, and the slow slices — health ~5s, operations ~3s —
+// blanked the widgets every time. Hydrating from the cache paints the
+// previous visit at once; the regular refresh then updates numbers in place.
+// Maps are stored as plain records (JSON has no maps).
+interface OverviewCache {
+  window: number
+  at: number
+  health?: HealthStats | null
+  overview?: ProjectsOverview | null
+  opsCount?: number | null
+  storage?: StorageSnapshot | null
+  syshealth?: SystemHealth | null
+  runTitles?: Record<string, string>
+  userNames?: Record<string, string>
+  agentNames?: Record<string, string>
+  toolReadiness?: ReadinessCheck[] | null
+}
+const OVERVIEW_CACHE_KEY = 'dashboard.overview'
+
+/** Placeholder for one dashboard panel (header bar + body block) while its
+ *  slice is in flight: Storage / Server / Human factors land independently
+ *  and each skeleton is replaced by its real section as its data arrives. */
+function SkeletonSection({ height = '9rem' }: { height?: string }) {
+  return (
+    <section style={{ minWidth: 0 }}>
+      <SkeletonBox width="9rem" height="1rem" style={{ marginBottom: '0.55rem' }} />
+      <SkeletonBox width="100%" height={height} />
+    </section>
+  )
+}
 
 /** One clickable health-strip chip: a counter with a drill-down link. */
 function HealthChip({ label, value, title, danger, onClick }: { label: string; value: number | string; title?: string; danger?: boolean; onClick?: () => void }) {
@@ -113,25 +147,32 @@ export default function Dashboard({ project, setProject }: Props) {
     try { window.localStorage.setItem(LAST_TAB_KEY, next) } catch { /* private mode: memory-only */ }
   }, [])
   const [windowIdx, setWindowIdx] = useState(1) // 24h by default
-  const [health, setHealth] = useState<HealthStats | null>(null)
-  const [overview, setOverview] = useState<ProjectsOverview | null>(null)
-  const [opsCount, setOpsCount] = useState<number | null>(null)
-  const [storage_, setStorage] = useState<StorageSnapshot | null>(null)
-  const [syshealth, setSyshealth] = useState<SystemHealth | null>(null)
+  // One cache read per mount: hydration only, writes happen after a refresh
+  // lands. A cache stamped with another journal window is ignored — numbers
+  // of a different period must not read as the current one's.
+  const [cached] = useState<OverviewCache | null>(() => {
+    const entry = cacheGet<OverviewCache>(OVERVIEW_CACHE_KEY)
+    return entry && entry.window === windowIdx ? entry : null
+  })
+  const [health, setHealth] = useState<HealthStats | null>(() => cached?.health ?? null)
+  const [overview, setOverview] = useState<ProjectsOverview | null>(() => cached?.overview ?? null)
+  const [opsCount, setOpsCount] = useState<number | null>(() => cached?.opsCount ?? null)
+  const [storage_, setStorage] = useState<StorageSnapshot | null>(() => cached?.storage ?? null)
+  const [syshealth, setSyshealth] = useState<SystemHealth | null>(() => cached?.syshealth ?? null)
   // Run id → title from run.started events: the sandbox digest shows the human
   // name of the run, not the opaque id. Best-effort — failures leave ids.
-  const [runTitles, setRunTitles] = useState<Map<string, string>>(new Map())
+  const [runTitles, setRunTitles] = useState<Map<string, string>>(() => new Map(Object.entries(cached?.runTitles ?? {})))
   // The same policy for actor and agent labels: users and agents load once per
   // refresh so the digest shows names; ids stay the fallback.
-  const [userNames, setUserNames] = useState<Map<string, string>>(new Map())
-  const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map())
+  const [userNames, setUserNames] = useState<Map<string, string>>(() => new Map(Object.entries(cached?.userNames ?? {})))
+  const [agentNames, setAgentNames] = useState<Map<string, string>>(() => new Map(Object.entries(cached?.agentNames ?? {})))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(() => (cached?.at ? new Date(cached.at) : null))
   // Supervisor tab badge: unresolved problem-queue depth. The panel reports it
   // while mounted; this light fetch seeds it before the first tab open.
   const [supervisorPending, setSupervisorPending] = useState(0)
-  const [toolReadiness, setToolReadiness] = useState<ReadinessCheck[] | null>(null)
+  const [toolReadiness, setToolReadiness] = useState<ReadinessCheck[] | null>(() => cached?.toolReadiness ?? null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const window_ = WINDOWS[windowIdx] ?? WINDOWS[1]
@@ -147,14 +188,22 @@ export default function Dashboard({ project, setProject }: Props) {
     // Already-loaded slices stay on screen and refresh in place.
     const since = new Date(Date.now() - window_.ms).toISOString()
     let alive = true
-    const land = <T,>(setter: (value: T) => void, promise: Promise<T>, fallback: T): Promise<void> =>
-      promise.then((value) => { if (alive) setter(value ?? fallback) }).catch(() => { if (alive) setter(fallback) })
+    // Slices that really landed this round, for the tab cache: fallbacks on
+    // error never enter — a failed refresh must not overwrite the cached view
+    // with emptiness.
+    const fresh: Record<string, unknown> = {}
+    const land = <T,>(key: string | null, setter: (value: T) => void, promise: Promise<T>, fallback: T, toCache?: (value: T) => unknown): Promise<void> =>
+      promise.then((value) => {
+        if (!alive) return
+        setter(value ?? fallback)
+        if (key && value != null) fresh[key] = toCache ? toCache(value) : value
+      }).catch(() => { if (alive) setter(fallback) })
 
     const jobs: Array<Promise<void>> = []
 
     // Fast skeleton first: project rollup, titles, users, agents.
-    jobs.push(land(setOverview, projectsOverview(window_.go), null))
-    jobs.push(land((titles: Map<string, string>) => setRunTitles(titles),
+    jobs.push(land('overview', setOverview, projectsOverview(window_.go), null))
+    jobs.push(land('runTitles', (titles: Map<string, string>) => setRunTitles(titles),
       observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200 }).then((page) => {
         const titles = new Map<string, string>()
         for (const event of page.events) {
@@ -163,27 +212,30 @@ export default function Dashboard({ project, setProject }: Props) {
           if (run && typeof title === 'string' && title.trim()) titles.set(run, title.trim())
         }
         return titles
-      }), new Map()))
-    jobs.push(land((users: Map<string, string>) => setUserNames(users),
-      workspaceApi.listUsers().then((page) => new Map((page.users ?? []).map((u) => [u.id, u.name]))), new Map()))
-    jobs.push(land((names: Map<string, string>) => setAgentNames(names),
-      workspaceApi.listAllAgents().then((page) => new Map((page.agents ?? []).map((a) => [a.id, a.name]))), new Map()))
-    jobs.push(land((checks) => setToolReadiness(checks), readiness().then((r) => r?.checks ?? null), null))
+      }), new Map(), (titles) => Object.fromEntries(titles)))
+    jobs.push(land('userNames', (users: Map<string, string>) => setUserNames(users),
+      workspaceApi.listUsers().then((page) => new Map((page.users ?? []).map((u) => [u.id, u.name]))), new Map(), (users) => Object.fromEntries(users)))
+    jobs.push(land('agentNames', (names: Map<string, string>) => setAgentNames(names),
+      workspaceApi.listAllAgents().then((page) => new Map((page.agents ?? []).map((a) => [a.id, a.name]))), new Map(), (names) => Object.fromEntries(names)))
+    jobs.push(land('toolReadiness', (checks) => setToolReadiness(checks), readiness().then((r) => r?.checks ?? null), null))
 
     // Slow slices: health (~5s), operations (~3s), storage, system health.
-    jobs.push(land(setHealth, observationApi.healthStats(undefined, since), null))
-    jobs.push(land((ops) => setOpsCount(ops ? ops.count : null), operations().catch(() => null), null))
-    jobs.push(land(setStorage, storageOverview().catch(() => null), null))
-    jobs.push(land(setSyshealth, systemHealth().catch(() => null), null))
+    jobs.push(land('health', setHealth, observationApi.healthStats(undefined, since), null))
+    jobs.push(land('opsCount', (ops) => setOpsCount(ops ? ops.count : null), operations().catch(() => null), null))
+    jobs.push(land('storage', setStorage, storageOverview().catch(() => null), null))
+    jobs.push(land('syshealth', setSyshealth, systemHealth().catch(() => null), null))
 
     // The refresh pulse spins until the slowest slice lands; slices that
     // arrived earlier are already on screen.
     setBusy(true)
     await Promise.all(jobs)
     if (!alive) return
+    // Stamp the tab cache: leaving and returning repaints this state at once.
+    // Slices that failed this round keep their previous cached value.
+    cacheSet(OVERVIEW_CACHE_KEY, { ...(cached?.window === windowIdx ? cached : {}), window: windowIdx, at: Date.now(), ...fresh })
     setUpdatedAt(new Date())
     setBusy(false)
-  }, [window_.go, window_.ms])
+  }, [window_.go, window_.ms, cached])
 
   // Seed the supervisor badge once: unresolved = verdicts minus acknowledgements
   // (same accounting the queue panel renders). Cheap enough for a tab strip.
@@ -325,40 +377,52 @@ export default function Dashboard({ project, setProject }: Props) {
 
       {tab === 'overview' && (
         <>
-          {/* Health strip */}
+          {/* Health strip: skeleton chips while the first health is in flight
+              — zeros would read as «all quiet» while it is only «not yet».
+              A failed fetch keeps the old zeros (nothing is known ≠ loading). */}
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <HealthChip
-              value={health?.runs.running_now ?? 0}
-              label={pluralT(t, locale, 'dashboard.running_n', health?.runs.running_now ?? 0)}
-              title={t('dashboard.running_hint') ?? undefined}
-              onClick={() => navigate('/agents')}
-            />
-            <HealthChip
-              value={health?.totals.in_flight ?? 0}
-              label={pluralT(t, locale, 'dashboard.inflight_n', health?.totals.in_flight ?? 0)}
-              title={t('dashboard.inflight_hint') ?? undefined}
-              onClick={() => navigate('/agents')}
-            />
-            <HealthChip
-              value={health?.totals.model_failures ?? 0}
-              label={pluralT(t, locale, 'dashboard.failures_n', health?.totals.model_failures ?? 0)}
-              danger
-              title={t('dashboard.failures_hint') ?? undefined}
-              onClick={() => navigate('/agents')}
-            />
-            <HealthChip
-              value={health?.approvals.pending ?? 0}
-              label={pluralT(t, locale, 'dashboard.approvals_n', health?.approvals.pending ?? 0)}
-              title={health?.approvals.wait_ms_avg ? `${t('dashboard.wait_avg') ?? 'avg wait'}: ${formatDuration(health.approvals.wait_ms_avg)}` : undefined}
-              onClick={() => navigate('/agents')}
-            />
-            {opsCount !== null && (
-              <HealthChip
-                value={opsCount}
-                label={pluralT(t, locale, 'dashboard.ops_n', opsCount)}
-                title={t('dashboard.ops_hint') ?? undefined}
-                onClick={() => navigate('/agents')}
-              />
+            {health || !busy ? (
+              <>
+                <HealthChip
+                  value={health?.runs.running_now ?? 0}
+                  label={pluralT(t, locale, 'dashboard.running_n', health?.runs.running_now ?? 0)}
+                  title={t('dashboard.running_hint') ?? undefined}
+                  onClick={() => navigate('/agents')}
+                />
+                <HealthChip
+                  value={health?.totals.in_flight ?? 0}
+                  label={pluralT(t, locale, 'dashboard.inflight_n', health?.totals.in_flight ?? 0)}
+                  title={t('dashboard.inflight_hint') ?? undefined}
+                  onClick={() => navigate('/agents')}
+                />
+                <HealthChip
+                  value={health?.totals.model_failures ?? 0}
+                  label={pluralT(t, locale, 'dashboard.failures_n', health?.totals.model_failures ?? 0)}
+                  danger
+                  title={t('dashboard.failures_hint') ?? undefined}
+                  onClick={() => navigate('/agents')}
+                />
+                <HealthChip
+                  value={health?.approvals.pending ?? 0}
+                  label={pluralT(t, locale, 'dashboard.approvals_n', health?.approvals.pending ?? 0)}
+                  title={health?.approvals.wait_ms_avg ? `${t('dashboard.wait_avg') ?? 'avg wait'}: ${formatDuration(health.approvals.wait_ms_avg)}` : undefined}
+                  onClick={() => navigate('/agents')}
+                />
+                {opsCount !== null && (
+                  <HealthChip
+                    value={opsCount}
+                    label={pluralT(t, locale, 'dashboard.ops_n', opsCount)}
+                    title={t('dashboard.ops_hint') ?? undefined}
+                    onClick={() => navigate('/agents')}
+                  />
+                )}
+              </>
+            ) : busy && (
+              <>
+                {Array.from({ length: 5 }, (_, i) => (
+                  <SkeletonBox key={i} width="7.5rem" height="2.1rem" radius="999px" />
+                ))}
+              </>
             )}
           </div>
 
@@ -382,10 +446,12 @@ export default function Dashboard({ project, setProject }: Props) {
 
           {/* Supervisor problems live in the dashboard's Supervisor t
 
-          {/* Storage + Server + Human factors side by side (docs/sandbox-storage.md §5.4, §7.1, supervisor-model.md §5) */}
-          {(storage_ || syshealth || health?.human) && (
+          {/* Storage + Server + Human factors side by side (docs/sandbox-storage.md §5.4, §7.1, supervisor-model.md §5).
+              Each panel keeps its skeleton until its own slice lands — they
+              load independently, so the fast ones must not wait for the slow. */}
+          {(storage_ || syshealth || health?.human || busy) && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1rem', alignItems: 'start', marginBottom: '1rem' }}>
-            {storage_ && (
+            {storage_ ? (
               <section style={{ minWidth: 0 }}>
                 <PanelHeader title={t('dashboard.storage') ?? 'Storage'} hint={t('dashboard.storage_hint') ?? undefined} />
                 <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
@@ -428,8 +494,8 @@ export default function Dashboard({ project, setProject }: Props) {
                 )}
               </div>
               </section>
-            )}
-            {syshealth && (
+            ) : busy && <SkeletonSection height="11rem" />}
+            {syshealth ? (
               <section style={{ minWidth: 0 }}>
                 <PanelHeader title={t('dashboard.server') ?? 'Server'} hint={t('dashboard.server_hint') ?? undefined} />
                 <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem', display: 'grid', gridTemplateColumns: 'minmax(7rem, 0.8fr) minmax(9rem, 1.4fr)', rowGap: '0.45rem', alignItems: 'center' }}>
@@ -475,8 +541,8 @@ export default function Dashboard({ project, setProject }: Props) {
                 )}
               </div>
               </section>
-            )}
-            {health?.human && (
+            ) : busy && <SkeletonSection height="11rem" />}
+            {health?.human ? (
               <section style={{ minWidth: 0 }}>
                 <PanelHeader title={t('dashboard.human_title') ?? 'Human factors'} hint={t('dashboard.human_hint') ?? undefined} />
                 <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
@@ -505,22 +571,35 @@ export default function Dashboard({ project, setProject }: Props) {
                   </div>
                 </div>
               </section>
-            )}
+            ) : busy && <SkeletonSection height="7rem" />}
           </div>
           )}
 
           {/* Sandbox bubbles: one ball per active sandbox container, size and
               color = integral load (CPU + memory + network). Hover shows the
               digest (who initiated, which agent, which run), click opens the
-              run. Only the top-N load hogs get balls; the rest fold into +N. */}
-          {syshealth && syshealth.docker.available && (
-            <SandboxBubbles
-              containers={syshealth.sandboxes ?? []}
-              userNames={userNames}
-              agentNames={agentNames}
-              runTitles={runTitles}
-              onOpenRun={(run, sandboxProject) => navigate(`/agents?project=${encodeURIComponent(sandboxProject)}&run=${encodeURIComponent(run)}`)}
-            />
+              run. Only the top-N load hogs get balls; the rest fold into +N.
+              System health is the slowest slice (~5s): until it lands the
+              widget keeps a bubble-shaped skeleton instead of vanishing. */}
+          {syshealth ? (
+            syshealth.docker.available && (
+              <SandboxBubbles
+                containers={syshealth.sandboxes ?? []}
+                userNames={userNames}
+                agentNames={agentNames}
+                runTitles={runTitles}
+                onOpenRun={(run, sandboxProject) => navigate(`/agents?project=${encodeURIComponent(sandboxProject)}&run=${encodeURIComponent(run)}`)}
+              />
+            )
+          ) : busy && (
+            <section style={{ marginBottom: '1rem' }}>
+              <SkeletonBox width="7rem" height="1rem" style={{ marginBottom: '0.55rem' }} />
+              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.75rem', display: 'flex', alignItems: 'flex-end', gap: '0.9rem' }}>
+                {['2.6rem', '1.7rem', '3rem', '1.4rem', '2.2rem'].map((size, i) => (
+                  <SkeletonBox key={i} width={size} height={size} radius="50%" />
+                ))}
+              </div>
+            </section>
           )}
 
           {/* Models / providers */}
@@ -549,6 +628,12 @@ export default function Dashboard({ project, setProject }: Props) {
                   <span style={{ color: 'var(--tm-text-3)' }}>{m.p50_latency_ms ? formatDuration(m.p50_latency_ms) : '—'} / {m.p95_latency_ms ? formatDuration(m.p95_latency_ms) : '—'}</span>
                   <span>{m.total_tokens.toLocaleString()}</span>
                 </div>
+              ))}
+            </div>
+          ) : busy && !health ? (
+            <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '1rem' }}>
+              {Array.from({ length: 4 }, (_, i) => (
+                <SkeletonBox key={i} width="100%" height="2.1rem" radius={0} style={{ borderTop: '1px solid var(--tm-border)' }} />
               ))}
             </div>
           ) : !busy && (
@@ -601,6 +686,8 @@ export default function Dashboard({ project, setProject }: Props) {
                 </div>
               </div>
             ))
+          ) : busy && !overview ? (
+            <SkeletonTiles rows={4} style={{ marginBottom: '1rem' }} />
           ) : !busy && (
             <Tile style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.no_projects') ?? 'No project activity in the window'}</Tile>
           )}

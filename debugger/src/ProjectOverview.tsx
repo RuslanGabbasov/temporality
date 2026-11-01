@@ -7,8 +7,29 @@ import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration, approvalHint } from './eventSummary'
+import { cacheGet, cacheSet } from './tabCache'
+import { SkeletonBox, SkeletonTiles } from './Skeleton'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
+
+// The last computed budget of a project (tabCache): the overview is the slow
+// sagas tab, and every dashboard visit remounted it into a blank page. The
+// cached budget paints the previous visit at once; the fetch updates in place.
+const budgetCacheKey = (project: string) => `sagas.budget:${project}`
+
+/** The tab's shape while the first budget is in flight: totals strip, the
+ *  sagas table, the unbound-tasks list — nothing jumps when data arrives. */
+function ProjectOverviewSkeleton() {
+  return (
+    <div style={{ marginBottom: '1rem' }}>
+      <SkeletonBox width="100%" height="2.7rem" style={{ marginBottom: '1.1rem' }} />
+      <SkeletonBox width="7rem" height="1rem" style={{ marginBottom: '0.55rem' }} />
+      <SkeletonTiles rows={4} />
+      <SkeletonBox width="9rem" height="1rem" style={{ margin: '1.1rem 0 0.55rem' }} />
+      <SkeletonTiles rows={3} />
+    </div>
+  )
+}
 
 interface Props {
   project: string
@@ -34,7 +55,9 @@ type Dialog =
  */
 export default function ProjectOverview({ project }: Props) {
   const { t, locale } = useI18n()
-  const [budget, setBudget] = useState<ProjectBudget | null>(null)
+  // Hydrate from the session cache: the previous visit paints instantly, the
+  // refresh below only updates. A project switch re-hydrates in the effect.
+  const [budget, setBudget] = useState<ProjectBudget | null>(() => cacheGet<ProjectBudget>(budgetCacheKey(project.trim())))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [openSaga, setOpenSaga] = useState<string | null>(null)
@@ -75,16 +98,26 @@ export default function ProjectOverview({ project }: Props) {
     try {
       const data = await projectBudget(project.trim())
       // Older kernels predate sagas: normalize so the page never sees nulls.
-      setBudget({ ...data, sagas: data.sagas ?? [], tasks: data.tasks ?? [], approvals: data.approvals })
+      const normalized = { ...data, sagas: data.sagas ?? [], tasks: data.tasks ?? [], approvals: data.approvals }
+      setBudget(normalized)
+      cacheSet(budgetCacheKey(project.trim()), normalized)
     } catch (failure) {
-      setBudget(null)
+      // A failed refresh keeps the cached view on screen — it is still the
+      // best available picture; only a cache-less mount falls back to null.
+      setBudget(cacheGet<ProjectBudget>(budgetCacheKey(project.trim())))
       setError(message(failure))
     } finally {
       setBusy(false)
     }
   }, [project])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    // Project switch: repaint from that project's cache at once (the fetch
+    // takes seconds); a cache miss clears the previous project's numbers —
+    // they would read as the new project's otherwise.
+    setBudget(cacheGet<ProjectBudget>(budgetCacheKey(project.trim())))
+    void load()
+  }, [load])
 
   const unbound = useMemo(() => (budget?.tasks ?? [])
     .filter((task) => !task.saga_id)
@@ -375,8 +408,8 @@ export default function ProjectOverview({ project }: Props) {
             </div>
           )}
         </>
-      ) : !busy && !error && (
-        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('common.loading') ?? 'Loading…'}</Tile>
+      ) : error ? null : (
+        <ProjectOverviewSkeleton />
       )}
 
       {dialog?.kind === 'rename' && (
