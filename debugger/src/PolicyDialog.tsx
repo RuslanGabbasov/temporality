@@ -80,19 +80,21 @@ function MaskList({ label, hint, dimension, masks, onChange, presets, touched }:
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.45rem' }}>
-        <TextInput
-          id={`policy-fs-${dimension}`}
-          size="sm"
-          hideLabel
-          labelText="mask"
-          value={draft}
-          invalid={touched && error !== null}
-          placeholder={t('org.policy.fs_add_placeholder') ?? 'mask, e.g. projects/app/src/**'}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setDraft(e.target.value); setError(null) }}
-          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); add(draft) } }}
-          onBlur={() => { if (draft.trim()) add(draft) }}
-        />
+      <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.45rem', alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TextInput
+            id={`policy-fs-${dimension}`}
+            size="sm"
+            hideLabel
+            labelText="mask"
+            value={draft}
+            invalid={touched && error !== null}
+            placeholder={t('org.policy.fs_add_placeholder') ?? 'mask, e.g. projects/app/src/**'}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setDraft(e.target.value); setError(null) }}
+            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); add(draft) } }}
+            onBlur={() => { if (draft.trim()) add(draft) }}
+          />
+        </div>
         <Button size="sm" kind="secondary" onClick={() => add(draft)} disabled={!draft.trim()}>{t('action.add') ?? 'Add'}</Button>
       </div>
       {touched && error !== null && (
@@ -384,18 +386,21 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-2)' }}>{t('org.policy.fs_project_label') ?? 'Quick rules for project'}:</span>
-              <Select
-                id="policy-fs-project"
-                size="sm"
-                hideLabel
-                labelText="project"
-                value={testerProject}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTesterProject(e.target.value)}
-                style={{ width: '16rem' }}
-              >
-                <SelectItem value="" text="—" />
-                {projects.map((p) => <SelectItem key={p.id} value={p.id} text={p.name || p.id} />)}
-              </Select>
+              {/* Carbon's .cds--select wrapper is width:100% and ignores the
+                  style prop — constrain it with a sized container. */}
+              <div style={{ width: '18rem', maxWidth: '100%' }}>
+                <Select
+                  id="policy-fs-project"
+                  size="sm"
+                  hideLabel
+                  labelText="project"
+                  value={testerProject}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTesterProject(e.target.value)}
+                >
+                  <SelectItem value="" text="—" />
+                  {projects.map((p) => <SelectItem key={p.id} value={p.id} text={p.name || p.id} />)}
+                </Select>
+              </div>
             </div>
             <MaskList
               label={t('org.policy.fs_read') ?? 'Read'}
