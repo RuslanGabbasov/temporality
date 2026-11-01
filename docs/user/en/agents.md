@@ -41,6 +41,28 @@ recorded in the audit log.
 Constraints and completion checks are part of the contract: they enter the
 prompt and the result verification.
 
+## Background commands
+
+Long sandbox operations — dependency installs, builds, big test suites — no
+longer block the agent. `run_command` with `background: true` runs detached:
+the tool returns an operation id immediately, the agent keeps working, and
+the result (exit code + output tail) arrives automatically as a follow-up
+message in the conversation.
+
+- the run does not finish while background operations are in flight; ready
+  results are drained in one batch — the agent spends a single turn
+  incorporating them instead of waiting for each command;
+- each background command's live console is visible in the trace (the
+  pinned "Live background operations" panel);
+- cancellation — the `kill_operation` tool (kills the process tree by
+  marker, never a foreign process);
+- background commands get their own time budget: 900 seconds by default,
+  a 1-hour ceiling (`timeout_sec` up to 3600,
+  `KERNEL_BG_TOOL_MAX_SECONDS`); ordinary commands stay at 300/900
+  (`KERNEL_TOOL_MAX_SECONDS`).
+
+Details and delivery guarantees — `docs/agent-async-operations.md`.
+
 ## Agent evolution
 
 ![Evolution: versions, gate, regressions](../assets/agent-evolution.webp)

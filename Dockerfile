@@ -34,6 +34,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     CGO_ENABLED=0 go build -ldflags "-X main.buildVersion=${BUILD_VERSION}" -o /out/temporality-journal ./cmd/temporality-journal \
  && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -ldflags "-X main.buildVersion=${BUILD_VERSION}" -o /out/temporality-agent-kernel ./cmd/agent-kernel \
+ && CGO_ENABLED=0 go build -o /out/landlock-launcher ./cmd/landlock-launcher \
  && CGO_ENABLED=0 go build -o /out/test-mcp ./examples/test-mcp
 
 FROM alpine:3.22 AS journal
@@ -56,6 +57,9 @@ RUN mkdir -p /var/cache/rembed && chown temporality /var/cache/rembed
 WORKDIR /app
 COPY --from=build /out/temporality-agent-kernel /usr/local/bin/temporality-agent-kernel
 COPY --from=build /out/test-mcp /usr/local/bin/test-mcp
+# The landlock launcher (docs/filesystem-policy.md §5.3): staged into the
+# sandbox root and mounted into every policy-constrained sandbox command.
+COPY --from=build /out/landlock-launcher /usr/local/bin/landlock-launcher
 # The kernel applies the kernel event outbox migration (000019) from the
 # filesystem before serving traffic.
 COPY migrations ./migrations

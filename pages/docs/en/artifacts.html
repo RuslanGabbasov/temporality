@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0F1F1D"><meta name="description" content="A registry of reference documents — coding policies, runbooks and templates agents load on demand.">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="A registry of documents with human approval — coding policies, requirements and instructions agents can trust.">
 <title>Artifacts — Temporality</title>
 <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -43,14 +43,19 @@
 <article class="docs-content">
 <div class="docs-eyebrow">Knowledge and experience</div>
 <h1>Artifacts</h1>
-<p class="docs-lead">A registry of reference documents — coding policies, runbooks and templates agents load on demand.</p>
-<p>An artifact is a reference document in a registry: a coding policy, a release
-runbook, an estimate template, an audit checklist. Only the reference enters
-the agent&#39;s prompt; the agent loads the body on demand (<code>artifact_search</code> /
-<code>artifact_read</code> with read auditing). A large policy does not eat the context
-yet is always there when needed.</p>
-<p>The <strong>Artifacts</strong> page (<code>/artifacts</code>); details — <code>docs/artifact-registry.md</code>.</p>
-<h2 id="artifact-types"><a class="anchor" href="#artifact-types" aria-label="Section link">#</a>Artifact types</h2><table>
+<p class="docs-lead">A registry of documents with human approval — coding policies, requirements and instructions agents can trust.</p>
+<p>An artifact is a document in a registry: a coding policy, feature
+requirements, a release runbook, an estimate template, an audit checklist.
+Only the reference enters the agent&#39;s prompt; the agent loads the body on
+demand (<code>artifact_search</code> / <code>artifact_read</code> with read auditing). A large
+policy does not eat the context yet is always there when needed.</p>
+<p>The real value is trust. Every artifact carries a status, a version and a
+review round, so &quot;see policy X&quot; means a human-verified document, not a
+random draft: the agent proposes, the human approves.</p>
+<p><img src="../assets/artifacts-page.webp" alt="The Artifacts page"></p>
+<p>The <strong>Artifacts</strong> page (<code>/artifacts</code>); details — <code>docs/artifact-registry.md</code>
+and <code>docs/artifact-lifecycle.md</code>.</p>
+<h2 id="types-and-purpose"><a class="anchor" href="#types-and-purpose" aria-label="Section link">#</a>Types and purpose</h2><table>
 <thead>
 <tr>
 <th>Type</th>
@@ -66,33 +71,161 @@ yet is always there when needed.</p>
 <td>Proxied and cached by the kernel (corporate wiki, Confluence)</td>
 </tr>
 </tbody></table>
-<h2 id="approval-flow"><a class="anchor" href="#approval-flow" aria-label="Section link">#</a>Approval flow</h2><p>An artifact goes through four statuses: <strong>draft</strong>, <strong>in_review</strong> (sent for
-review), <strong>rejected</strong> (rejected with a verdict) and <strong>approved</strong>. Only
-approved artifacts are referenced from skills and prompts: &quot;see policy X&quot;
-means a human-verified version.</p>
-<p>The review cycle: the author submits the artifact for review (idempotent per
-version, the <code>ARTIFACT_SUBMIT_PER_DAY</code> quota per run) → reviewers get a
-notification → the decision is made by <strong>a human only</strong> (self-approval is
-forbidden at the API level). Reviewers are configured with the <code>all</code> mode
-(everyone must decide) or <code>any</code> (one is enough). A rejection returns the
-artifact to the author with a reason.</p>
-<p>Decide in the web UI (the Artifacts page) or right in your messenger: reply
-to the notification — the first word decides (<code>approve</code>/<code>reject</code>, the rest
-becomes the comment). If a round sits unresolved past
-<code>ARTIFACT_REVIEW_TIMEOUT</code> (72 hours by default), reviewers get one reminder;
-after another silent timeout the escalation reaches the artifact org unit&#39;s
-manager (or an administrator).</p>
-<p>A typical cycle: an analyst agent drafts the document → sends it for review →
-the human edits it themselves or with the agent → approves → the document
-becomes available to all executor agents as a link from a skill.</p>
-<h2 id="relations"><a class="anchor" href="#relations" aria-label="Section link">#</a>Relations</h2><ul>
-<li><strong>Saga</strong> — an artifact can belong to a long-running effort (requirements for a feature inside a saga).</li>
-<li><strong>Skill</strong> — a skill&#39;s manifest references artifacts as reference material.</li>
-<li><strong>Project / department / organization</strong> — visibility scope: a company-wide policy is visible everywhere, a project&#39;s only inside the project.</li>
+<p>The <code>kind</code> field splits one registry into two consumption patterns:</p>
+<ul>
+<li><strong>reference</strong> — coding policies, instructions, checklists: what skills
+point at;</li>
+<li><strong>work</strong> — requirements, specs, design decisions: work products authored
+and approved inside tasks and sagas.</li>
 </ul>
-<h2 id="tool-support"><a class="anchor" href="#tool-support" aria-label="Section link">#</a>Tool support</h2><p>Agents search artifacts semantically (<code>artifact_search</code>) and read them in
-chunks with auditing (<code>artifact_read</code>): every read is journaled — who read
-what, in which run.</p>
+<p>A shipped requirement can later become the reference document of a new
+skill — the same record with a different <code>kind</code>, after a new approval round.</p>
+<h2 id="statuses-and-versions"><a class="anchor" href="#statuses-and-versions" aria-label="Section link">#</a>Statuses and versions</h2><p>The lifecycle is tracked per <strong>version</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>draft</strong></td>
+<td>A draft: created by a human or an agent, editable. Readable (reuse between agents is half the value), but flagged as unverified material</td>
+</tr>
+<tr>
+<td><strong>in_review</strong></td>
+<td>Under review: edits are locked</td>
+</tr>
+<tr>
+<td><strong>approved</strong></td>
+<td>Approved by a human: immutable, available for skill references</td>
+</tr>
+<tr>
+<td><strong>rejected</strong></td>
+<td>Returned with comments: rework and resubmit</td>
+</tr>
+<tr>
+<td><strong>superseded</strong></td>
+<td>Replaced by a newer approved version</td>
+</tr>
+</tbody></table>
+<p>Editing an approved document always means a <strong>new version and a new review
+round</strong>. The approved version keeps serving agents and skills while the
+revision goes through review. Skills reference the artifact id and always
+resolve to the latest approved version.</p>
+<h2 id="approval-flow"><a class="anchor" href="#approval-flow" aria-label="Section link">#</a>Approval flow</h2><ul>
+<li><strong>A human approves — nobody else.</strong> Self-approval is forbidden at the API
+level: the decision belongs to a named person, not to an agent or a &quot;sum
+of signals&quot;.</li>
+<li><strong>The review round.</strong> The author submits the artifact for review
+(idempotent per version; the <code>ARTIFACT_SUBMIT_PER_DAY</code> quota per run keeps
+a flooded run out of the reviewers&#39; queue) and names the reviewers: a
+person, an org unit, a role or the project owner. A unit expands to its
+active people at submit time; the unit&#39;s head is a reviewer too.</li>
+<li><strong>Modes.</strong> <code>all</code> — the round is approved when everyone votes yes (the
+first &quot;no&quot; closes it as rejected); <code>any</code> — the first response decides.</li>
+<li><strong>Decide from your messenger.</strong> Each reviewer gets a notification in their
+channel with a link to the artifact card and can decide right in the chat:
+the first word decides (<code>approve</code>/<code>lgtm</code> — yes, <code>reject</code> — no), the rest
+becomes the comment. An ambiguous reply keeps the round open — the bot
+asks for the proper form.</li>
+<li><strong>Rework in a loop.</strong> A rejection returns the artifact to the author with
+the reason: the human edits it themselves (in the UI) or the agent applies
+the fixes (<code>artifact_update</code>) and resubmits. Rounds are unlimited and each
+one leaves a trace in the review history.</li>
+<li><strong>Reminders and escalation.</strong> A round silent past <code>ARTIFACT_REVIEW_TIMEOUT</code>
+(72 hours by default) sends one reminder to the reviewers; after another
+timeout the escalation reaches the artifact org unit&#39;s manager (or an
+administrator). A value of <code>0</code> disables the sweep.</li>
+<li><strong>Idempotency.</strong> A repeated approve/reject of the same round is a 409 with
+no state change; a decision is recorded exactly once. The requester can
+always decide their own round.</li>
+</ul>
+<h2 id="the-approvals-inbox"><a class="anchor" href="#the-approvals-inbox" aria-label="Section link">#</a>The approvals inbox</h2><p>The Artifacts page opens on the <strong>My approvals</strong> tab — the queue of open
+rounds addressed to you: the queue leads, the catalog is the browsing
+surface. While there is something to decide, the Artifacts menu item carries
+a badge with the count. Catalog filters cover status, age, tags and the
+author (a person or an org unit in one field); an <code>?id=…</code> link opens a
+specific artifact.</p>
+<h2 id="example-a-heavily-agreed-document"><a class="anchor" href="#example-a-heavily-agreed-document" aria-label="Section link">#</a>Example: a heavily agreed document</h2><p>How agents and humans build a document that survives several review rounds
+(a real scenario — requirements for a UI rework):</p>
+<ol>
+<li><strong>The task.</strong> The user asks in chat: &quot;Draft the requirements for the
+trace panel rework and agree them with the team.&quot; The agent registers a
+saga (<code>saga_register</code>) that ties the whole story together: requirements →
+approval → implementation runs.</li>
+<li><strong>The draft.</strong> An analyst agent creates a <code>kind=work</code> artifact
+(<code>artifact_create</code>, with <code>saga_id</code>) and fills it over iterations. Other
+agents read the draft in their own runs (<code>artifact_read</code> honestly reports
+<code>draft</code>) and extend it with comments — reuse works before approval, but
+the draft is always flagged as unverified.</li>
+<li><strong>First round.</strong> The agent submits the document for review
+(<code>artifact_submit</code>): reviewers are <code>org:backend</code> and <code>role:security</code>,
+mode <code>all</code>, the note carries the context and what to check. Reviewers get
+notifications in their messengers.</li>
+<li><strong>A rejection with substance.</strong> The security reviewer replies in the
+thread <code>reject no secrets section</code> — the round closes as rejected and the
+document returns to the author with the reason.</li>
+<li><strong>Rework.</strong> The agent applies the fixes (<code>artifact_update</code>) and resubmits
+— a new round; both rounds stay in the review history with verdicts and
+comments.</li>
+<li><strong>Approval.</strong> Every reviewer replies &quot;approve&quot; — version 1 becomes
+<code>approved</code> and immutable.</li>
+<li><strong>Working off the document.</strong> A &quot;Feature delivery&quot; skill links the
+artifact (the skill editor&#39;s Artifacts tab, or <code>artifact_refs</code> in
+<code>skill_propose</code>); executor agents load the approved version on demand —
+every read is journaled, so you can see who relied on the document in
+which run.</li>
+<li><strong>A new revision.</strong> The requirements change: an approved document can
+only be edited as a new revision (<code>artifact_update</code> with
+<code>new_version: true</code>) — a version-2 draft lives next to approved version
+1; the repeated approval promotes it to <code>approved</code> and marks version 1
+<code>superseded</code>. Agents keep working on the live version without pauses.</li>
+</ol>
+<p>This is how a requirement survives several refinement iterations while
+keeping its history: who proposed it, who rejected it and why, what changed
+between versions.</p>
+<h2 id="relations"><a class="anchor" href="#relations" aria-label="Section link">#</a>Relations</h2><ul>
+<li><strong>Saga</strong> — an artifact can belong to a long-running effort (requirements
+for a feature inside a saga): the link gives end-to-end tracing from the
+requirement to the implementation runs.</li>
+<li><strong>Skill</strong> — a skill&#39;s manifest references artifacts as reference material;
+only approved artifacts make it into skills.</li>
+<li><strong>Project / department / organization</strong> — visibility scope: a
+company-wide policy is visible everywhere, a project&#39;s only inside the
+project.</li>
+</ul>
+<h2 id="agent-tools"><a class="anchor" href="#agent-tools" aria-label="Section link">#</a>Agent tools</h2><table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>artifact_search</code></td>
+<td>Semantic search; status and kind filters</td>
+</tr>
+<tr>
+<td><code>artifact_read</code></td>
+<td>Chunked reads with auditing: who read what, in which run</td>
+</tr>
+<tr>
+<td><code>artifact_create</code></td>
+<td>Creates a draft (<code>kind=work</code> for work products)</td>
+</tr>
+<tr>
+<td><code>artifact_update</code></td>
+<td>Edits a draft or a rejected version; with <code>new_version: true</code> opens a revision of an approved one</td>
+</tr>
+<tr>
+<td><code>artifact_submit</code></td>
+<td>Sends for review: reviewer list, <code>all</code>/<code>any</code> mode, note</td>
+</tr>
+</tbody></table>
+<p>An approved document is locked for direct edits: the tool reports that a new
+revision is needed. An agent can never make the approval decision — only a
+human can.</p>
 
 
   <nav class="docs-pager">

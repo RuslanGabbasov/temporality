@@ -3,12 +3,13 @@
 **Русский** · [English](README.en.md) · [Документация](https://ruslangabbasov.github.io/temporality/docs/) · [Эксплуатация харнеса](https://ruslangabbasov.github.io/temporality/docs/operations.html)
 
 Temporality — среда исполнения и контур управления для ИИ-агентов: долговременные
-задачи на Temporal, полная трасса работы, права и подтверждения — и накопление
-опыта, который возвращается в следующие запуски.
+задачи на Temporal, полная трасса работы, права, подтверждения и согласование
+документов людьми — и накопление опыта (знания, навыки, артефакты), который
+возвращается в следующие запуски.
 
 <p align="center">
-  <a href="https://ruslangabbasov.github.io/temporality/assets/knowledge-expantions.mp4">
-    <video src="pages/assets/knowledge-expantions.mp4" autoplay muted loop playsinline width="100%"></video>
+  <a href="https://ruslangabbasov.github.io/temporality/assets/knowledge-expansions.mp4">
+    <video src="pages/assets/knowledge-expansions.mp4" autoplay muted loop playsinline width="100%"></video>
   </a>
   <em>Карта знаний: база знаний выкладывается на карту по смысловому сходству — грузится на глазах, кластеры собираются сами.</em>
 </p>
@@ -70,7 +71,7 @@ make debugger-build # сборка статики UI
 | Компонент | Путь | Назначение |
 |---|---|---|
 | Journal | `observation/`, `cmd/temporality-journal` | append-only события, проекция знаний, подбор подсказок |
-| Agent Kernel | `kernel/`, `cmd/agent-kernel` | harness агента на Temporal: модельный шлюз, MCP, песочница, подтверждения, делегирование |
+| Agent Kernel | `kernel/`, `cmd/agent-kernel` | harness агента на Temporal: модельный шлюз, MCP, песочница, подтверждения, делегирование, навыки и артефакты с согласованием |
 | Workspace UI | `debugger/` | чат с агентом, трассы, карта знаний, настройки |
 
 Подробная карта интерфейсов и внутренностей — в

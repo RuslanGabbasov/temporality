@@ -103,6 +103,11 @@
 <td>Ceiling for a single sandbox command</td>
 </tr>
 <tr>
+<td><code>KERNEL_BG_TOOL_MAX_SECONDS</code></td>
+<td><code>3600</code></td>
+<td>Ceiling for a detached background command — <code>run_command</code> with <code>background: true</code> gets its own budget of up to an hour</td>
+</tr>
+<tr>
 <td><code>KERNEL_EMBEDDINGS_MODEL</code></td>
 <td><code>intfloat/multilingual-e5-small</code></td>
 <td>Model of the knowledge semantic layer (in-process, rembed)</td>
@@ -345,7 +350,7 @@
 <li><strong>Knowledge</strong> — a statement with provenance, a status and a history.</li>
 <li><strong>Hint</strong> — a compact excerpt of experience fed to the agent.</li>
 <li><strong>Skill</strong> — a versioned procedure with a contract and evaluations.</li>
-<li><strong>Artifact</strong> — a reference document in the registry, loaded on demand.</li>
+<li><strong>Artifact</strong> — a document in the registry with versions and human approval, loaded on demand.</li>
 <li><strong>Reconcile</strong> — manually resolving an uncertain operation (happened / did not happen).</li>
 <li><strong>Judge</strong> — the LLM model evaluating answers in the quality loop.</li>
 </ul>

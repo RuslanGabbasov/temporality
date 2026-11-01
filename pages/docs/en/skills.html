@@ -86,6 +86,17 @@ based on repeated friction. Versions accumulate; applying a new version goes
 through the same quality loop. The tools <code>skill_history</code>, <code>skill_diff</code>,
 <code>skill_executions</code> give the full picture: who changed what and when, where the
 skill ran and what it &quot;remembered&quot; from executions (<code>skill_memory</code>).</p>
+<p><img src="../assets/skill-artifacts.webp" alt="Skill artifacts"></p>
+<p><strong>Artifact references ride the evolution.</strong> A change proposal
+(<code>skill_propose</code>) carries an <code>artifact_refs</code> list — the documents the skill
+needs as reference material. Each reference is validated against the
+registry at submit time: only approved artifacts enter the manifest, while
+hallucinated or unapproved ids are dropped and listed back in the response —
+the model sees exactly what survived. A server-side check at the save
+boundary makes it impossible for a skill to reference an unapproved
+document. References can also be edited by hand in the skill editor&#39;s
+&quot;Artifacts&quot; tab: search the registry, attach a document and describe when it
+applies.</p>
 <h2 id="how-the-agent-works-with-skills"><a class="anchor" href="#how-the-agent-works-with-skills" aria-label="Section link">#</a>How the agent works with skills</h2><p>In a run the agent has <code>skill_search</code> (find a match), <code>skill_inspect</code> (read
 the contract), <code>skill_validate</code> (check applicability). The skill is loaded
 into context on demand, not as a permanent prompt.</p>

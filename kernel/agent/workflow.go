@@ -17,6 +17,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
+	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -76,8 +77,8 @@ type RunInput struct {
 	// Title is the owning task's display title. When present it becomes the
 	// run title directly — no model call, so a slow provider never leaves the
 	// Runs list with bare agent names (runtitle fallback ladder).
-	Title                  string        `json:"title,omitempty"`
-	Model                  string        `json:"model,omitempty"`
+	Title string `json:"title,omitempty"`
+	Model string `json:"model,omitempty"`
 	// ProviderID pins the agent's explicitly chosen provider: routing must go
 	// to THAT provider (verifying it serves the model), not to the first
 	// provider found declaring the same model name. Empty = search by model.
@@ -134,6 +135,16 @@ type RunInput struct {
 	// (docs/org-structure.md §20): trigger fires re-check its allowed lists and
 	// human_targets at every critical step. Empty for manual runs.
 	ExecutionIdentityID string `json:"execution_identity_id,omitempty"`
+	// Filesystem is the frozen filesystem-policy snapshot of the run
+	// (docs/filesystem-policy.md §6): resolved once at run start from the
+	// initiator's org position and inherited unchanged through delegation —
+	// the tree never picks up a looser policy re-resolved mid-flight. Nil =
+	// unrestricted (pre-filesystem semantics); an empty non-nil snapshot is a
+	// resolved "no rules" and also allows everything.
+	Filesystem *workspace.EffectiveFilesystem `json:"filesystem,omitempty"`
+	// PolicyVersion fingerprints the policy snapshot this run was authorized
+	// with (§6.3) — journaled with run.started for the audit trail.
+	PolicyVersion string `json:"policy_version,omitempty"`
 	// Policy-derived constraints (docs/org-structure.md §24): resolved from the
 	// org position at run start and enforced here, in the execution model.
 	RequireToolApproval bool `json:"require_tool_approval,omitempty"` // consequential tools need approval
@@ -247,13 +258,13 @@ type RunResult struct {
 }
 
 type ModelRequest struct {
-	Model    string        `json:"model"`
+	Model string `json:"model"`
 	// ProviderID pins the agent's explicitly chosen provider (docs/agents.md
 	// §routing): when set, routing must serve from THAT provider — no silent
 	// first-match search across other providers declaring the same model.
-	ProviderID string      `json:"provider_id,omitempty"`
-	Messages []llm.Message `json:"messages"`
-	Tools    []llm.ToolDef `json:"tools"`
+	ProviderID string        `json:"provider_id,omitempty"`
+	Messages   []llm.Message `json:"messages"`
+	Tools      []llm.ToolDef `json:"tools"`
 	// RunID + Turn enable live token streaming through the ephemeral TokenBus;
 	// empty RunID keeps the blocking non-streaming path (tests, helpers).
 	RunID string `json:"run_id,omitempty"`
@@ -301,6 +312,12 @@ type ToolRequest struct {
 	// Sandbox carries the run's resolved sandbox profile into the execution
 	// boundary (docs/sandbox-profiles.md §3.3); nil keeps the runner defaults.
 	Sandbox *SandboxSpec `json:"sandbox,omitempty"`
+	// Filesystem is the run's frozen filesystem-policy snapshot (docs/
+	// filesystem-policy.md §5): every filesystem access — native tools now,
+	// the sandbox later — consults this exact policy, never a re-resolved one.
+	Filesystem *workspace.EffectiveFilesystem `json:"filesystem,omitempty"`
+	// PolicyVersion of the snapshot — carried for the denial/audit trail (§8).
+	PolicyVersion string `json:"policy_version,omitempty"`
 }
 
 // SandboxSpec is the resolved sandbox profile of a run: the digest-pinned
@@ -308,8 +325,8 @@ type ToolRequest struct {
 // It rides unchanged from run-config resolution through the workflow to the
 // run_command activity — resolution never happens mid-run.
 type SandboxSpec struct {
-	Profile     string   `json:"profile,omitempty"` // profile id, for events and trace
-	Image       string   `json:"image,omitempty"`   // digest-pinned image reference
+	Profile string `json:"profile,omitempty"` // profile id, for events and trace
+	Image   string `json:"image,omitempty"`   // digest-pinned image reference
 	// Disabled marks the uniform switch (the trigger pattern): the profile
 	// exists but was turned off. run_command fails with an explicit error
 	// instead of falling back to another toolchain.
@@ -421,6 +438,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		}
 	}()
 	started := map[string]any{"task_id": input.TaskID, "role": input.Role, "parent_run_id": input.ParentRunID}
+	if input.PolicyVersion != "" {
+		// The policy snapshot this run is authorized with (docs/filesystem-
+		// policy.md §6.3): the audit anchor for any later policy dispute.
+		started["policy_version"] = input.PolicyVersion
+	}
 	if input.AgentID != "" {
 		started["agent_id"] = input.AgentID
 	}
@@ -549,7 +571,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			task := spec.Tasks[index]
 			childRunID := planTaskRunID(index, task.ID, 1)
 			var childInput RunInput
-			resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
+			resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &childInput)
 			if resolveErr != nil {
 				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
 					return "", nil, err
@@ -897,7 +919,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// front; a failure here fails only this task — nothing started for
 				// it, so the effect is none — and dependents are skipped honestly.
 				var child RunInput
-				if resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &child); resolveErr != nil {
+				if resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &child); resolveErr != nil {
 					statuses[task.ID] = planStatusFailed
 					outcomesByTask[task.ID] = planTaskOutcome{TaskID: task.ID, AgentID: task.AgentID, ChildRunID: childRunID, Status: planStatusFailed, Error: boundedFailureDetail(resolveErr)}
 					if err := emit(activityCtx, state, "plan.task.failed", map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "error_type": "agent_resolution_failed", "error": boundedFailureDetail(resolveErr), "effect": "none"}); err != nil {
@@ -1638,7 +1660,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			childRunID := fmt.Sprintf("%s/delegate/%02d", input.RunID, delegations)
 			resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
 			var childInput RunInput
-			resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: delegateAgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: delegatePrompt, ActorID: input.ActorID, MaxTurns: delegateMaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
+			resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: delegateAgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: delegatePrompt, ActorID: input.ActorID, MaxTurns: delegateMaxTurns, DelegationDepth: input.DelegationDepth + 1, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &childInput)
 			if resolveErr != nil {
 				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "delegate", "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
 					return "", false, err
@@ -2047,7 +2069,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 							HeartbeatTimeout:       90 * time.Second,
 							RetryPolicy:            &temporal.RetryPolicy{MaximumAttempts: 1},
 						})
-						future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox})
+						future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion})
 						if err := startTool(); err != nil {
 							return result, err
 						}
@@ -2061,7 +2083,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						// Wall latency from the workflow clock covers scheduling, retries
 						// and execution — the honest end-to-end cost of the operation.
 						toolStarted := workflow.Now(ctx)
-						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
+						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &toolResult); err != nil {
 							toolFailed = true
 							failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -2206,14 +2228,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					// timeout honest when the model passes a huge timeout_sec.
 					timeoutSec = sandbox.CommandTimeoutBackground(timeoutSec)
 					bgCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-						StartToCloseTimeout: time.Duration(timeoutSec)*time.Second + 10*time.Minute,
+						StartToCloseTimeout:    time.Duration(timeoutSec)*time.Second + 10*time.Minute,
 						ScheduleToCloseTimeout: time.Duration(timeoutSec)*time.Second + 15*time.Minute,
-						HeartbeatTimeout: 90 * time.Second,
+						HeartbeatTimeout:       90 * time.Second,
 						// Never re-execute a detached install/build on retry: the
 						// attach path in RunTool handles a worker death instead.
 						RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1},
 					})
-					future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox})
+					future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion})
 					if err := startTool(); err != nil {
 						return result, err
 					}
@@ -2232,37 +2254,37 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					// Same wall-clock semantics as the approval path: scheduling,
 					// retries and execution in one number.
 					toolStarted := workflow.Now(ctx)
-					if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
-					toolFailed = true
-					failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
-					failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
-					if eventErr := emit(activityCtx, state, "tool.failed", failure); eventErr != nil {
-						return result, eventErr
-					}
-					toolResult.Content = toolFailureMessage(call.Name, err)
-				} else {
-					completed := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "latency_ms": workflow.Now(ctx).Sub(toolStarted).Milliseconds()}
-					// Exit code makes tool completion a first-class trajectory fact:
-					// a command exiting non-zero is a failed attempt even though the
-					// tool activity itself succeeded.
-					if toolResult.ExitCode != nil {
-						completed["exit_code"] = *toolResult.ExitCode
-					}
-					// Truncated output for trace visibility.
-					if toolResult.Content != "" {
-						completed["output"] = compactJSON(toolResult.Content, 1000)
-					}
-					if eventErr := emit(activityCtx, state, "tool.completed", completed); eventErr != nil {
-						return result, eventErr
-					}
-					if proposal := executionObservationProposal(input, call, toolResult); proposal != nil {
-						if err := emitExecutionObservation(activityCtx, state, proposal, operationID, argumentsHash); err != nil {
-							return result, err
+					if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &toolResult); err != nil {
+						toolFailed = true
+						failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
+						failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
+						if eventErr := emit(activityCtx, state, "tool.failed", failure); eventErr != nil {
+							return result, eventErr
+						}
+						toolResult.Content = toolFailureMessage(call.Name, err)
+					} else {
+						completed := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "latency_ms": workflow.Now(ctx).Sub(toolStarted).Milliseconds()}
+						// Exit code makes tool completion a first-class trajectory fact:
+						// a command exiting non-zero is a failed attempt even though the
+						// tool activity itself succeeded.
+						if toolResult.ExitCode != nil {
+							completed["exit_code"] = *toolResult.ExitCode
+						}
+						// Truncated output for trace visibility.
+						if toolResult.Content != "" {
+							completed["output"] = compactJSON(toolResult.Content, 1000)
+						}
+						if eventErr := emit(activityCtx, state, "tool.completed", completed); eventErr != nil {
+							return result, eventErr
+						}
+						if proposal := executionObservationProposal(input, call, toolResult); proposal != nil {
+							if err := emitExecutionObservation(activityCtx, state, proposal, operationID, argumentsHash); err != nil {
+								return result, err
+							}
 						}
 					}
 				}
 			}
-		}
 			if !deferred {
 				// Deferred delegate calls skip the per-call tail: their tool message,
 				// executed entry and completion events land at await time instead.
@@ -2541,7 +2563,7 @@ func startTurnLimitContinuation(ctx workflow.Context, activityCtx workflow.Conte
 	// terminate the child if the parent ever died before it — ABANDON keeps
 	// the continuation alive as an independent run instead.
 	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
-		WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID),
+		WorkflowID:        WorkflowID(input.SourceID, input.Project, childRunID),
 		ParentClosePolicy: enums.PARENT_CLOSE_POLICY_ABANDON,
 	})
 	childFuture := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", child)
@@ -3360,7 +3382,7 @@ var policySafeTools = map[string]bool{
 	// Managing this run's own background operations is bookkeeping, not a side
 	// effect on the workspace (docs/agent-async-operations.md).
 	"kill_operation": true,
-	"skill_search": true, "skill_inspect": true, "skill_validate": true,
+	"skill_search":   true, "skill_inspect": true, "skill_validate": true,
 	"skill_history": true, "skill_executions": true, "skill_memory": true,
 	"skill_diff": true, "skill_evaluate": true, "knowledge_lookup": true,
 	"knowledge_explore": true,

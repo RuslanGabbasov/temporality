@@ -215,8 +215,10 @@ KERNEL_EMBEDDINGS_MODEL=intfloat/multilingual-e5-small
 навыков бейджи `draft` и «↺ N» — ожидающие черновики-редакции. Не копи неприменённые
 редакции: просматривай очередь по бейджу.
 
-**Артефакты** — справочные документы, которые агенты подгружают по требованию. Статусы:
-`draft / in_review / rejected / approved`. Ревью-цикл: submit (идемпотентен по версии) →
+**Артефакты** — документы, которые агенты подгружают по требованию. Статусы:
+`draft / in_review / rejected / approved / superseded` (жизненный цикл — на уровне
+версии: правка утверждённого — только новая редакция и повторное согласование).
+Ревью-цикл: submit (идемпотентен по версии) →
 уведомление ревьюерам → решение **только человеком** (само-одобрение запрещено на уровне
 API) → approved/rejected. Ревьюеры: режим `all` (все должны) или `any` (любого достаточно).
 Квота отправок на ран — `ARTIFACT_SUBMIT_PER_DAY`. Тела артефактов рендерят markdown
@@ -269,7 +271,9 @@ DNS работает, а отказ сопровождается понятно�
   воркспейсы агентов.
 - `KERNEL_SANDBOX_IMAGE` — образ песочницы; `TEMPORALITY_DOCKER_GID` — gid группы docker
   на хосте (сокет). `KERNEL_SANDBOX_PIDS`, `KERNEL_SANDBOX_SCRATCH_SIZE` — лимиты контейнера.
-- `KERNEL_TOOL_MAX_SECONDS` (900) — потолок одной команды; `TEMPORALITY_TOOL_ACTIVITY_TIMEOUT`
+- `KERNEL_TOOL_MAX_SECONDS` (900) — потолок одной команды;
+  `KERNEL_BG_TOOL_MAX_SECONDS` (3600) — потолок фоновой команды
+  (`run_command` c `background: true`); `TEMPORALITY_TOOL_ACTIVITY_TIMEOUT`
   (16m) — потолок активности `run_tool`.
 - Веб: `KERNEL_SEARXNG_URL` (поиск), `KERNEL_WEB_SEARCH_PER_MIN`/`KERNEL_BROWSER_PER_MIN`
   (rate-лимиты), `KERNEL_WEB_FETCH_ALLOW_PRIVATE` (по умолчанию private-сети запрещены —

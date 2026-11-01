@@ -272,8 +272,10 @@ knowledge-группе трейса — по ним оценивают поль�
 на <code>/skills</code>. Версии: черновик <code>0.x</code>, применение/отклонение редакций — человеком; в списке
 навыков бейджи <code>draft</code> и «↺ N» — ожидающие черновики-редакции. Не копи неприменённые
 редакции: просматривай очередь по бейджу.</p>
-<p><strong>Артефакты</strong> — справочные документы, которые агенты подгружают по требованию. Статусы:
-<code>draft / in_review / rejected / approved</code>. Ревью-цикл: submit (идемпотентен по версии) →
+<p><strong>Артефакты</strong> — документы, которые агенты подгружают по требованию. Статусы:
+<code>draft / in_review / rejected / approved / superseded</code> (жизненный цикл — на уровне
+версии: правка утверждённого — только новая редакция и повторное согласование).
+Ревью-цикл: submit (идемпотентен по версии) →
 уведомление ревьюерам → решение <strong>только человеком</strong> (само-одобрение запрещено на уровне
 API) → approved/rejected. Ревьюеры: режим <code>all</code> (все должны) или <code>any</code> (любого достаточно).
 Квота отправок на ран — <code>ARTIFACT_SUBMIT_PER_DAY</code>. Тела артефактов рендерят markdown
@@ -314,7 +316,9 @@ DNS работает, а отказ сопровождается понятно�
 воркспейсы агентов.</li>
 <li><code>KERNEL_SANDBOX_IMAGE</code> — образ песочницы; <code>TEMPORALITY_DOCKER_GID</code> — gid группы docker
 на хосте (сокет). <code>KERNEL_SANDBOX_PIDS</code>, <code>KERNEL_SANDBOX_SCRATCH_SIZE</code> — лимиты контейнера.</li>
-<li><code>KERNEL_TOOL_MAX_SECONDS</code> (900) — потолок одной команды; <code>TEMPORALITY_TOOL_ACTIVITY_TIMEOUT</code>
+<li><code>KERNEL_TOOL_MAX_SECONDS</code> (900) — потолок одной команды;
+<code>KERNEL_BG_TOOL_MAX_SECONDS</code> (3600) — потолок фоновой команды
+(<code>run_command</code> c <code>background: true</code>); <code>TEMPORALITY_TOOL_ACTIVITY_TIMEOUT</code>
 (16m) — потолок активности <code>run_tool</code>.</li>
 <li>Веб: <code>KERNEL_SEARXNG_URL</code> (поиск), <code>KERNEL_WEB_SEARCH_PER_MIN</code>/<code>KERNEL_BROWSER_PER_MIN</code>
 (rate-лимиты), <code>KERNEL_WEB_FETCH_ALLOW_PRIVATE</code> (по умолчанию private-сети запрещены —

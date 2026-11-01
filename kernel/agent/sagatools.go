@@ -314,8 +314,8 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 	// target at merge time and each source ceases to exist — no redirect rows.
 	// The journal's per-type queries are not globally chronological, so both
 	// the survival rule and the binding rewrite compare by timestamps.
-	mergedAt := map[string]time.Time{}      // source → when it was merged away
-	mergeTargets := map[string]string{}     // source → surviving target
+	mergedAt := map[string]time.Time{}  // source → when it was merged away
+	mergeTargets := map[string]string{} // source → surviving target
 	mergeTimeline := []struct {
 		source, target string
 		at             time.Time

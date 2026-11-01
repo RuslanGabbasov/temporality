@@ -80,9 +80,9 @@ func TestSecretBrokerDeniedOnNotFound(t *testing.T) {
 
 func TestSecretEnvVarName(t *testing.T) {
 	cases := map[string]string{
-		"github-token":          "SECRET_GITHUB_TOKEN",
-		"db.json":               "SECRET_DB_JSON",
-		"simple":                "SECRET_SIMPLE",
+		"github-token": "SECRET_GITHUB_TOKEN",
+		"db.json":      "SECRET_DB_JSON",
+		"simple":       "SECRET_SIMPLE",
 		// Spaces and other odd characters from a freestyle workspace name must
 		// sanitize away — a raw space used to fail docker --env and kill runs.
 		"azure devops project hrpro": "SECRET_AZURE_DEVOPS_PROJECT_HRPRO",

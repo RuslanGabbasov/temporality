@@ -93,7 +93,9 @@ up to the provider, not the model; &quot;the provider does not stream (a single
 chunk)&quot; — a gateway is buffering the response). It can be nudged with the <code>↻</code>
 button (the request is cancelled and the turn restarted) or cancelled. A
 running <code>run_command</code> shows a live console tail right in its line; after
-completion the output is available in the row details.</p>
+completion the output is available in the row details. Detached commands
+(<code>background: true</code>) never fall out of the trace window: a pinned &quot;Live
+background operations&quot; panel at the top streams each of them.</p>
 <p>A stuck run is stopped with the <strong>■ Stop</strong> action in the list (click twice to
 confirm): a forced workflow terminate that journals the terminal event — it
 lands even when a graceful cancel cannot reach the stuck workflow.</p>

@@ -693,15 +693,15 @@ func TestEnsureNetworkMemoizesInternalVerification(t *testing.T) {
 
 func TestDockerRunningForAge(t *testing.T) {
 	cases := map[string]time.Duration{
-		"5 seconds ago":          5 * time.Second,
-		"42 seconds ago":         42 * time.Second,
-		"About a minute ago":     time.Minute,
-		"3 minutes ago":          3 * time.Minute,
-		"17 minutes ago":         17 * time.Minute,
-		"About an hour ago":      time.Hour,
-		"2 hours ago":            2 * time.Hour,
-		"5 days ago":             5 * 24 * time.Hour,
-		"2 weeks ago":            14 * 24 * time.Hour,
+		"5 seconds ago":      5 * time.Second,
+		"42 seconds ago":     42 * time.Second,
+		"About a minute ago": time.Minute,
+		"3 minutes ago":      3 * time.Minute,
+		"17 minutes ago":     17 * time.Minute,
+		"About an hour ago":  time.Hour,
+		"2 hours ago":        2 * time.Hour,
+		"5 days ago":         5 * 24 * time.Hour,
+		"2 weeks ago":        14 * 24 * time.Hour,
 	}
 	for input, want := range cases {
 		got, ok := dockerRunningForAge(input)

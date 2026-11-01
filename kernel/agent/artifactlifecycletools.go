@@ -147,12 +147,12 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 // artifact_submit. The approval decision remains human.
 func (a *Activities) handleArtifactNewVersion(ctx context.Context, request ToolRequest, artifactID string) (ToolResult, error) {
 	payload := map[string]any{
-		"title":     artifactStringArg(request, "title"),
+		"title":       artifactStringArg(request, "title"),
 		"description": artifactStringArg(request, "description"),
-		"kind":      artifactStringArg(request, "kind"),
-		"content":   artifactStringArg(request, "content"),
-		"mime_type": artifactStringArg(request, "mime_type"),
-		"actor":     request.ActorID,
+		"kind":        artifactStringArg(request, "kind"),
+		"content":     artifactStringArg(request, "content"),
+		"mime_type":   artifactStringArg(request, "mime_type"),
+		"actor":       request.ActorID,
 	}
 	body, status, err := a.workspaceDo(ctx, http.MethodPost,
 		fmt.Sprintf("%s/v1/workspace/artifacts/%s/revision", a.WorkspaceURL, url.PathEscape(artifactID)), payload)

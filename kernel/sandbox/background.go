@@ -21,8 +21,12 @@ import (
 
 const opsDir = "/scratch/.ops"
 
-func opPidFile(operationID string) string  { return fmt.Sprintf("%s/%s.pid", opsDir, sanitizeOpToken(operationID)) }
-func opCodeFile(operationID string) string { return fmt.Sprintf("%s/%s.code", opsDir, sanitizeOpToken(operationID)) }
+func opPidFile(operationID string) string {
+	return fmt.Sprintf("%s/%s.pid", opsDir, sanitizeOpToken(operationID))
+}
+func opCodeFile(operationID string) string {
+	return fmt.Sprintf("%s/%s.code", opsDir, sanitizeOpToken(operationID))
+}
 
 // OpMarkerEnv is the environment entry the wrapper runs with; the kill path
 // matches it against the live process before killing anything.

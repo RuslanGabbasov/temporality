@@ -157,7 +157,7 @@ func TestMatrixPollerBuffersAcrossSyncBatches(t *testing.T) {
 			room := map[string]any{"timeline": map[string]any{"events": events}}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"next_batch": page.next,
-				"rooms": map[string]any{"join": map[string]any{"!r:hs": room}},
+				"rooms":      map[string]any{"join": map[string]any{"!r:hs": room}},
 			})
 		default:
 			http.NotFound(w, r)

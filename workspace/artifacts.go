@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -234,21 +234,21 @@ type ArtifactFilter struct {
 	// description and id — the search box for registries of tens of thousands.
 	Query string
 	// Tags is AND semantics: an artifact must carry every listed tag.
-		Tags []string
-		// Author narrows to one creator (origin_user, case-insensitive) — the
-		// «my artifacts» and per-author views.
-		Author string
-		// AuthorIDs is the exact-match form of Author: the handler resolves the
-		// operator's pick (a user id, name or email) into every identifier form
-		// that may appear in origin_user/contributors (ids there, names on older
-		// rows), and the row matches when any of them equals one of these.
-		AuthorIDs []string
-		// CreatedAt window: the new / this-week / this-month presets.
-		CreatedAfter  *time.Time
-		CreatedBefore *time.Time
-		Limit  int
-		Offset int
-	}
+	Tags []string
+	// Author narrows to one creator (origin_user, case-insensitive) — the
+	// «my artifacts» and per-author views.
+	Author string
+	// AuthorIDs is the exact-match form of Author: the handler resolves the
+	// operator's pick (a user id, name or email) into every identifier form
+	// that may appear in origin_user/contributors (ids there, names on older
+	// rows), and the row matches when any of them equals one of these.
+	AuthorIDs []string
+	// CreatedAt window: the new / this-week / this-month presets.
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+	Limit         int
+	Offset        int
+}
 
 // ListArtifactsVisible honors the org-visibility rule shared by every
 // workspace resource: org_unit_id IS NULL (installation-wide) or a unit on

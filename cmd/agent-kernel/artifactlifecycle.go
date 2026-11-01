@@ -220,7 +220,7 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			"id": review.ID, "artifact_id": review.ArtifactID, "artifact_version": review.ArtifactVersion,
 			"reviewers": review.Reviewers, "mode": review.Mode, "status": review.Status,
 			"note": review.Note, "requested_by": review.RequestedBy, "requested_at": review.RequestedAt,
-			"reviewers_resolved": resolvedIDs,
+			"reviewers_resolved":   resolvedIDs,
 			"reviewers_unresolved": unresolved,
 		})
 	})

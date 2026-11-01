@@ -228,6 +228,14 @@ type Policy struct {
 	// merged by UNION with the agent's own list — the policy is the shared
 	// baseline, the agent adds its specific exceptions.
 	EgressAllowlist []string `json:"egress_allowlist,omitempty"`
+	// Filesystem rules (docs/filesystem-policy.md §3.3): glob masks over
+	// normalized workspace-relative paths (read/write allow areas, absolute
+	// deny). nil = no filesystem restriction — the pre-filesystem semantics
+	// (§3.5), so existing rows constrain nothing. The runtime authority is
+	// the LAYERED MergeFilesystem(sources); this per-row shape cannot express
+	// the intersection, so MergePolicies leaves the field nil on the merged
+	// row on purpose.
+	Filesystem *FilesystemRules `json:"filesystem,omitempty"`
 	// IntakeMode denies channel-initiated tasks for the subtree
 	// (docs/inbound-messages.md §12 phase 4); enabling is per project —
 	// there is no 'allow' overlay, a child cannot loosen an ancestor's deny.
@@ -394,8 +402,8 @@ type Agent struct {
 	// agent cannot start new runs — API, intake, triggers and delegation all
 	// refuse; runs already in flight finish. Toggled through the dedicated
 	// /enabled endpoint, never by a config PUT.
-	Enabled     bool   `json:"enabled"`
-	ProjectID   string `json:"project_id,omitempty"`
+	Enabled   bool   `json:"enabled"`
+	ProjectID string `json:"project_id,omitempty"`
 	// Model configuration
 	Model        string   `json:"model"`
 	Provider     string   `json:"provider,omitempty"` // provider ID (see Provider)
@@ -522,16 +530,16 @@ type EventConfig struct {
 
 // Provider is an OpenAI-compatible model endpoint (e.g. z.ai, xiaomi).
 type Provider struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	BaseURL   string            `json:"base_url"`
-	APIKeyRef string            `json:"api_key_ref,omitempty"` // env var name or secret ref
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	BaseURL   string `json:"base_url"`
+	APIKeyRef string `json:"api_key_ref,omitempty"` // env var name or secret ref
 	// Enabled is the uniform on/off switch (the trigger/MCP pattern): a
 	// disabled provider refuses to serve model calls — runs referencing it
 	// fail loudly instead of looping on provider auth errors.
-	Enabled bool `json:"enabled"`
-	Models    []string          `json:"models,omitempty"`      // model IDs discovered or listed
-	Labels    map[string]string `json:"labels,omitempty"`
+	Enabled bool              `json:"enabled"`
+	Models  []string          `json:"models,omitempty"` // model IDs discovered or listed
+	Labels  map[string]string `json:"labels,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -709,25 +717,25 @@ type CreateOrgUnitRequest struct {
 
 // CreateAgentRequest is the payload for creating an agent.
 type CreateAgentRequest struct {
-	ID             string   `json:"id"`
-	ProjectID      string   `json:"project_id,omitempty"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description,omitempty"`
-	Model          string   `json:"model"`
-	Provider       string   `json:"provider,omitempty"`
-	SystemPrompt   string   `json:"system_prompt"`
-	Temperature    *float64 `json:"temperature,omitempty"`
-	MaxTokens      *int     `json:"max_tokens,omitempty"`
-	Skills         []string `json:"skills,omitempty"`
-	MCPServers     []string `json:"mcp_servers,omitempty"`
-	Secrets        []string `json:"secrets,omitempty"`
-	Tools          []string `json:"tools,omitempty"`
-	SandboxProfile string   `json:"sandbox_profile,omitempty"`
-	NetworkAccess  *bool    `json:"network_access,omitempty"`
-	ReadOnly       *bool    `json:"read_only,omitempty"`
-	MaxTurns       *int     `json:"max_turns,omitempty"`
-	TurnLimitRestarts *int  `json:"turn_limit_restarts,omitempty"`
-	ApprovalMode   *string  `json:"approval_mode,omitempty"`
+	ID                string   `json:"id"`
+	ProjectID         string   `json:"project_id,omitempty"`
+	Name              string   `json:"name"`
+	Description       string   `json:"description,omitempty"`
+	Model             string   `json:"model"`
+	Provider          string   `json:"provider,omitempty"`
+	SystemPrompt      string   `json:"system_prompt"`
+	Temperature       *float64 `json:"temperature,omitempty"`
+	MaxTokens         *int     `json:"max_tokens,omitempty"`
+	Skills            []string `json:"skills,omitempty"`
+	MCPServers        []string `json:"mcp_servers,omitempty"`
+	Secrets           []string `json:"secrets,omitempty"`
+	Tools             []string `json:"tools,omitempty"`
+	SandboxProfile    string   `json:"sandbox_profile,omitempty"`
+	NetworkAccess     *bool    `json:"network_access,omitempty"`
+	ReadOnly          *bool    `json:"read_only,omitempty"`
+	MaxTurns          *int     `json:"max_turns,omitempty"`
+	TurnLimitRestarts *int     `json:"turn_limit_restarts,omitempty"`
+	ApprovalMode      *string  `json:"approval_mode,omitempty"`
 	// EgressAllowlist (docs/agent-behavior-monitoring.md §7): destinations the
 	// agent may reach beyond the public internet. Entries: domain, *.glob,
 	// CIDR, host:port.

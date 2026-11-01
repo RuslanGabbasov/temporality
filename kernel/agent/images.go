@@ -194,7 +194,7 @@ func (a *Activities) handleViewImage(request ToolRequest) (ToolResult, error) {
 	if strings.TrimSpace(pathArg) == "" {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("view_image requires path"))
 	}
-	abs, err := a.resolveToolTarget(request, pathArg)
+	abs, err := a.resolveToolTarget(request, pathArg, fsOpRead)
 	if err != nil {
 		return ToolResult{}, err
 	}

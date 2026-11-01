@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,22 +40,25 @@ func ValidatePolicy(p Policy) error {
 	if !ValidPolicyIntakeModes[p.IntakeMode] {
 		return fmt.Errorf("unknown intake_mode %q (supported: deny)", p.IntakeMode)
 	}
+	if err := ValidateFilesystemRules(p.Filesystem); err != nil {
+		return err
+	}
 	return nil
 }
 
 const policyColumns = `id, org_unit_id, name, allowed_models, allowed_mcp,
 max_tokens, max_budget_usd, timeout_seconds, network_mode, sandbox_mode, approval_mode,
-egress_allowlist, intake_mode, enabled, created_at, updated_at`
+egress_allowlist, filesystem, intake_mode, enabled, created_at, updated_at`
 
 func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	var p Policy
 	var orgUnitID *string
-	var models, mcp, egress []byte
+	var models, mcp, egress, filesystem []byte
 	var maxTokens, timeout *int
 	var budget *float64
 	err := scanner.Scan(&p.ID, &orgUnitID, &p.Name, &models, &mcp,
 		&maxTokens, &budget, &timeout, &p.NetworkMode, &p.SandboxMode, &p.ApprovalMode,
-		&egress, &p.IntakeMode, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+		&egress, &filesystem, &p.IntakeMode, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return p, err
 	}
@@ -62,6 +66,13 @@ func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	p.AllowedModels = unmarshalStringList(models)
 	p.AllowedMCP = unmarshalStringList(mcp)
 	p.EgressAllowlist = unmarshalStringList(egress)
+	if len(filesystem) > 0 {
+		var fs FilesystemRules
+		if err := json.Unmarshal(filesystem, &fs); err != nil {
+			return p, fmt.Errorf("policy %s filesystem rules: %w", p.ID, err)
+		}
+		p.Filesystem = &fs
+	}
 	p.MaxTokens = maxTokens
 	p.MaxBudgetUSD = budget
 	p.TimeoutSeconds = timeout
@@ -85,11 +96,11 @@ func (s *Store) CreatePolicy(ctx context.Context, p *Policy) error {
 		`INSERT INTO org_policy
 		 (id, org_unit_id, name, allowed_models, allowed_mcp, max_tokens, max_budget_usd,
 		  timeout_seconds, network_mode, sandbox_mode, approval_mode, egress_allowlist,
-		  intake_mode, enabled, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		  filesystem, intake_mode, enabled, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
 		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
-		marshalStrings(p.EgressAllowlist), p.IntakeMode, p.Enabled, p.CreatedAt, p.UpdatedAt)
+		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode, p.Enabled, p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
@@ -138,11 +149,11 @@ func (s *Store) UpdatePolicy(ctx context.Context, p Policy) error {
 		 SET org_unit_id = $2, name = $3, allowed_models = $4, allowed_mcp = $5,
 		     max_tokens = $6, max_budget_usd = $7, timeout_seconds = $8,
 		     network_mode = $9, sandbox_mode = $10, approval_mode = $11,
-		     egress_allowlist = $12, intake_mode = $13, enabled = $14, updated_at = $15
+		     egress_allowlist = $12, filesystem = $13, intake_mode = $14, enabled = $15, updated_at = $16
 		 WHERE id = $1`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
 		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
-		marshalStrings(p.EgressAllowlist), p.IntakeMode, p.Enabled, p.UpdatedAt)
+		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode, p.Enabled, p.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -173,6 +184,21 @@ func normalizePolicyLists(p *Policy) {
 	if len(p.AllowedMCP) == 0 {
 		p.AllowedMCP = nil
 	}
+	normalizeFilesystemRules(p.Filesystem)
+}
+
+// marshalFilesystem renders the rules for JSONB storage; nil rules are NULL
+// ("no restriction"), keeping old and new rows indistinguishable to readers
+// that ignore the dimension.
+func marshalFilesystem(r *FilesystemRules) []byte {
+	if r == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(r)
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
 
 // MergePolicies folds policy rows into their restrictive combination
@@ -180,6 +206,12 @@ func normalizePolicyLists(p *Policy) {
 // restrictive mode values win. A child can never loosen what an ancestor set.
 // The returned effective policy carries the merged dimensions; sources lists
 // the contributing rows in input order.
+//
+// The FILESYSTEM dimension is deliberately not merged here: its restrictive
+// combination is a layered intersection (glob sets are not closed under
+// intersection), which MergeFilesystem(sources) resolves. A flat rule list
+// merged row-wise would read permissively where it must restrict — so the
+// merged Policy.Filesystem stays nil and the layered form is the authority.
 func MergePolicies(rows []Policy) (effective Policy, sources []Policy) {
 	effective = Policy{AllowedModels: nil, AllowedMCP: nil, Enabled: true}
 	// Non-nil from the start: JSON marshalling of a nil slice yields null,
