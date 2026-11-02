@@ -332,8 +332,6 @@ export const en: Record<string, string> = {
     'dashboard.server_memory': 'Memory',
     'dashboard.server_disk': 'disk',
     'dashboard.server_no_docker': 'docker unreachable',
-    'dashboard.server_mem_by_container': 'Memory by container',
-    'dashboard.server_mem_more': 'more',
     'dashboard.containers_n_one': 'container running',
     'dashboard.containers_n_few': 'containers running',
     'dashboard.containers_n_other': 'containers running',

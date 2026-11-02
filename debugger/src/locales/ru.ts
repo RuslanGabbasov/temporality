@@ -332,8 +332,6 @@ export const ru: Record<string, string> = {
     'dashboard.server_memory': 'Память',
     'dashboard.server_disk': 'диск',
     'dashboard.server_no_docker': 'docker недоступен',
-    'dashboard.server_mem_by_container': 'Память по контейнерам',
-    'dashboard.server_mem_more': 'ещё',
     'dashboard.containers_n_one': 'контейнер запущен',
     'dashboard.containers_n_few': 'контейнера запущено',
     'dashboard.containers_n_other': 'контейнеров запущено',

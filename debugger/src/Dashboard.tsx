@@ -540,7 +540,10 @@ export default function Dashboard({ project, setProject }: Props) {
 						                    </span>
 						                  </Fragment>
 						                ))}
-						<span style={{ color: 'var(--tm-text-3)' }}>docker</span>
+					<span style={{ color: 'var(--tm-text-3)' }}>docker</span>
+					<span
+						title={containerMemHint(syshealth.containers)}
+					>
 						{syshealth.docker.available ? (
 							<span>
 								{fmtBytes(syshealth.docker.images_bytes)}
@@ -549,30 +552,8 @@ export default function Dashboard({ project, setProject }: Props) {
 						) : (
 							<span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_no_docker') ?? 'docker unreachable'}</span>
 						)}
-					</div>
-					{/* Memory breakdown by container: the host line includes the whole stack
-					     (postgres, temporal, the kernel, page caches) — without this list a
-					     big «used» next to one small sandbox read as a leak. Top consumers
-					     first; the temporality sandboxes are in the widget above. */}
-					{syshealth.containers && syshealth.containers.length > 0 && (
-						<div style={{ borderTop: '1px solid var(--tm-border)', paddingTop: '0.4rem' }}>
-							<div style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>{t('dashboard.server_mem_by_container') ?? 'Memory by container'}</div>
-							{syshealth.containers.slice(0, 6).map((c) => (
-								<div key={c.name} title={c.image} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem', padding: '0.1rem 0' }}>
-									<span style={{ width: '4.5rem', textAlign: 'right', color: c.used_mb > 1024 ? 'var(--tm-amber)' : 'var(--tm-text-3)', fontWeight: c.used_mb > 1024 ? 600 : 400, flexShrink: 0 }}>{fmtBytes(c.used_mb * (1 << 20))}</span>
-									<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, color: 'var(--tm-text-2)' }}>{c.name.replace(/^temporality-/, '')}</span>
-									<span style={{ width: '4rem', flexShrink: 0 }}>
-										<span style={{ ...meterTrackStyle, display: 'block' }}>
-											<span style={{ ...meterFillStyle, display: 'block', width: meterWidth((c.percent ?? 0) / 100), background: meterColor((c.percent ?? 0) / 100) }} />
-										</span>
-									</span>
-								</div>
-							))}
-							{syshealth.containers.length > 6 && (
-								<div style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>+{syshealth.containers.length - 6} {t('dashboard.server_mem_more') ?? 'more'}</div>
-							)}
-						</div>
-					)}
+					</span>
+				</div>
 				</section>
             ) : busy && <SkeletonSection height="11rem" />}
             {health?.human ? (
@@ -944,6 +925,18 @@ const meterFillStyle: CSSProperties = { height: '100%', borderRadius: '3px' }
  *  size and color encode the integral resource load so the run hogging the
  *  host is visible at a glance. Hovering a ball swaps in a digest strip with
  *  the run identity; clicking it opens the run. */
+/** The hover hint for the Server widget's docker line: the per-container
+ *  memory breakdown answers «куда ушла память» without spending the widget
+ *  layout on it — the host line counts the whole stack, the sandbox list
+ *  only its own containers. */
+function containerMemHint(containers?: { name: string; used_mb: number; limit_mb?: number }[]): string {
+  const list = containers ?? []
+  if (list.length === 0) return ''
+  const lines = list.slice(0, 10).map((c) => `${c.name.replace(/^temporality-/, '')}: ${fmtBytes(c.used_mb * (1 << 20))}${c.limit_mb ? ` / ${fmtBytes(c.limit_mb * (1 << 20))}` : ''}`)
+  if (list.length > 10) lines.push(`… +${list.length - 10}`)
+  return `Memory by container:\n${lines.join('\n')}`
+}
+
 function SandboxBubbles({ containers, runTitles, userNames, agentNames, onOpenRun }: {
   containers: SandboxContainerInfo[]
   runTitles: Map<string, string>
