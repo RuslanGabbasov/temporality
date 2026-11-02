@@ -11,8 +11,10 @@ import type { Locale } from './locales'
  *  - plan.task.{skipped,invalidated,reopened,incomplete} → «изменения плана» (§5.4);
  *  - an approval pair (requested … granted/rejected/timed_out/auto) → one row (§5.5);
  *  - saga.*                       → one row per saga (§5.7);
- *  - ops noise (storage.snapshot, operation.reconciled, notification.sent,
- *    memory.read.failed)          → a folded, filterable «Эксплуатация» group (§5.7).
+ *  - ops noise (storage.snapshot, notification.sent, memory.read.failed)
+ *    → a folded, filterable «Эксплуатация» group (§5.7). operation.reconciled
+ *    is deliberately NOT noise: it is the supervisor's (or human's) verdict
+ *    on an uncertain step — the trace shows it on the step it settles.
  *
  * Everything else stays a standalone timeline row. Pure functions over the
  * already-loaded window — no network, no journal scans (NFR-9).
@@ -35,7 +37,7 @@ export type TraceItem =
  *  an audit fact the reader wants visible, not plumbing. run.started is not
  *  here either: it is the run's birth marker and renders as a standalone
  *  (non-expandable) row at the top of the trace. */
-const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed'])
+const NOISE_TYPES = new Set(['storage.snapshot', 'notification.sent', 'memory.read.failed'])
 
 /** §5.4: minor plan-task transitions fold into «изменения плана». */
 const MINOR_PLAN_TYPES = new Set(['plan.task.skipped', 'plan.task.invalidated', 'plan.task.reopened', 'plan.task.incomplete'])

@@ -1397,12 +1397,15 @@ export default function AgentRuns({ project }: { project: string }) {
                   const causes = Array.isArray(reconcileVerdict.data?.causes) ? reconcileVerdict.data.causes as string[] : []
                   const remedies = Array.isArray(reconcileVerdict.data?.remedies) ? reconcileVerdict.data.remedies as string[] : []
                   const fresh = selectedOps.length
+                  // This card is the supervisor's ALREADY-APPLIED verdict: the
+                  // operations are settled, nothing is waiting on the reader —
+                  // informational analysis, so neutral gray, not alarm red.
                   return (
-                    <Tile style={{ borderLeft: `3px solid ${needsAttention ? '#f7768e' : '#9ece6a'}` }}>
+                    <Tile style={{ borderLeft: `3px solid ${needsAttention ? 'var(--tm-border-strong)' : '#9ece6a'}` }}>
                       <Heading style={{ fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         🛰 {t('runs.reconcile_supervisor_title')}
                         {needsAttention
-                          ? <Tag type="red" size="sm">{t('runs.reconcile_attention')}</Tag>
+                          ? <Tag type="warm-gray" size="sm">{t('runs.reconcile_attention')}</Tag>
                           : <Tag type="green" size="sm">{t('runs.reconcile_no_attention')}</Tag>}
                       </Heading>
                       <p style={{ fontSize: '0.85rem', color: 'var(--tm-text)', margin: '0.5rem 0' }}>{String(reconcileVerdict.data?.summary ?? '')}</p>

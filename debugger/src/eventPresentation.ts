@@ -69,8 +69,11 @@ export interface TimelineRow {
  *  payloads do not swallow a real failure into a neutral row. */
 const FAILURE_FIELDS = ['error', 'error_type', 'denied_reason', 'fail_reason'] as const
 
-/** §5.7: ops noise — folded/filterable by default, never standalone rows. */
-const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed'])
+/** §5.7: ops noise — folded/filterable by default, never standalone rows.
+ *  operation.reconciled is deliberately NOT noise: it is the supervisor's
+ *  (or human's) verdict on an uncertain step — the trace shows it on the
+ *  step it settles (docs/failure-reconciliation.md). */
+const NOISE_TYPES = new Set(['storage.snapshot', 'notification.sent', 'memory.read.failed'])
 
 /** §5.2: streaming feeds — never rendered as timeline strings. */
 const STREAM_TYPES = new Set(['model.text_delta', 'model.reasoning'])
@@ -303,8 +306,28 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
     ].filter(Boolean).join(' · ')
     return { title: toolTitle(d, t), fact: parts, status: failed ? 'error' : 'ok' }
   },
-  'tool.failed': (d, { t }) => ({ title: toolTitle(d, t), status: 'error', fact: causeOf(d) || toolFact(d) }),
+  'tool.failed': (d, { t }) => {
+    // An uncertain-effect step is not a red error: the effect is unknown
+    // (usually a worker restart mid-command) and the verdict belongs to the
+    // reconciliation — the step renders ⚠ neutral until it lands.
+    if (d.effect === 'uncertain') {
+      return { title: `⚠ ${toolTitle(d, t)}`, status: 'none', fact: causeOf(d) || toolFact(d) }
+    }
+    return { title: toolTitle(d, t), status: 'error', fact: causeOf(d) || toolFact(d) }
+  },
   'tool.blocked': (d, { t }) => ({ title: `🚫 ${t('runs.event.blocked')}`, status: 'error', fact: squash(d.reason) }),
+  // The supervisor's (or human's) verdict on an uncertain step, collapsed on
+  // the step line: effect + why. supervisor: prefix is the machine verdict —
+  // shown with the satellite, human verdicts keep the scales.
+  'operation.reconciled': (d, { t }) => {
+    const note = squash(d.note).replace(/^supervisor:\s*/, '')
+    const supervisor = String(d.note ?? '').startsWith('supervisor:')
+    return {
+      title: `${supervisor ? '🛰' : '⚖'} ${t('runs.event.operation_reconciled')}`,
+      fact: [squash(d.effect), note.slice(0, 80)].filter(Boolean).join(' · '),
+      status: 'none',
+    }
+  },
   // ── §5.4 delegation / plans ──
   'delegation.started': (d, { t }) => ({ title: t('runs.event.delegation'), fact: `→ ${squash(d.agent_id ?? '?')}`, status: 'running' }),
   'delegation.completed': (d, { t }) => ({ title: t('runs.event.delegation_completed'), fact: squash(d.agent_id), status: 'ok' }),
