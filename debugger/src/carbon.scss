@@ -22,7 +22,10 @@ $css--font-face: false;
   --tm-raised: #203A35;
   --tm-border: rgba(237, 232, 223, 0.10);
   --tm-border-strong: rgba(237, 232, 223, 0.18);
-  --tm-skeleton-wave: rgba(247, 245, 240, 0.07);
+  // Skeletons sit one whisper above the surface — a translucent tint, so the
+  // placeholder never outshines the content it stands in for.
+  --tm-skeleton-base: rgba(237, 232, 223, 0.055);
+  --tm-skeleton-wave: rgba(247, 245, 240, 0.05);
 
   /* Text — warm neutrals */
   --tm-text: #EDE8DF;
@@ -82,7 +85,8 @@ $css--font-face: false;
   --tm-raised: #E2DDD4;
   --tm-border: rgba(15, 31, 29, 0.12);
   --tm-border-strong: rgba(15, 31, 29, 0.20);
-  --tm-skeleton-wave: rgba(255, 255, 255, 0.65);
+  --tm-skeleton-base: rgba(15, 31, 29, 0.055);
+  --tm-skeleton-wave: rgba(255, 255, 255, 0.40);
 
   --tm-text: #0F1F1D;
   --tm-text-2: #56635F;
@@ -2599,12 +2603,13 @@ button.header-nav-link {
 
 // Skeleton loaders: a quiet shimmer standing in for slow-loading content —
 // the layout keeps its shape while the data is in flight, so a surface never
-// collapses to an empty block or a premature «пусто» message. Colors ride
-// the theme variables: raised base, elevated highlight — both themes.
+// collapses to an empty block or a premature «пусто» message. Deliberately
+// low-contrast: a translucent tint on whatever surface it sits on, with a
+// barely-there wave — the placeholder is structure, not decoration.
 .tm-skeleton {
   position: relative;
   overflow: hidden;
-  background: var(--tm-raised);
+  background: var(--tm-skeleton-base);
 
   &::after {
     content: '';
