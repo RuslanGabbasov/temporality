@@ -773,7 +773,7 @@ export function UsersTableRow({ row, expanded, onOpen }: { row: UserMetricsRow; 
 // what waits on them (open asks), what they already decided. The server
 // rolls the numbers up (exec_context actor + resolved_user); this renders.
 function UsersTab() {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const [rows, setRows] = useState<UserMetricsRow[] | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -850,7 +850,7 @@ function UsersTab() {
                         <span>
                           {t('dashboard.users_last_run_did') ?? 'Last'}: <strong style={{ color: 'var(--tm-text)' }}>{row.last_run.title || row.last_run.run_id}</strong>
                           {' '}· [{row.last_run.project}] · {runStatusLabel(row.last_run.status, t)}
-                          {row.failed_runs > 0 && <span style={{ color: 'var(--tm-danger)' }}> · ⚠ {t('dashboard.users_failed_n', { count: String(row.failed_runs) })}</span>}
+                          {row.failed_runs > 0 && <span style={{ color: 'var(--tm-danger)' }}> · ⚠ {pluralT(t, locale, 'dashboard.users_failed_n', row.failed_runs)}</span>}
                         </span>
                       )}
                       {row.last_ask_question && (
