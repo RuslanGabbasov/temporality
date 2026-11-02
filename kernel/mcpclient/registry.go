@@ -97,10 +97,13 @@ func NewRegistry() *Registry {
 }
 
 // Apply reconciles one server in the registry. Disabled configs are removed.
-// For a config equal to the registered one a failed refresh keeps the stale
-// tool set (a transient outage must not silently strip tools); a changed
-// config that fails to connect removes the previous tools instead. Sessions
-// outlive calls, so any client displaced here is closed with its transport.
+// For a config equal to the registered one the LIVE client is refreshed in
+// place — the reconcile tick used to build a fresh client and close the
+// previous session every minute, which broke in-flight calls and made the
+// tool catalog blink. A failed refresh keeps the stale tool set (a transient
+// outage must not silently strip tools); a changed config that fails to
+// connect removes the previous tools instead. Sessions outlive calls, so any
+// client displaced here is closed with its transport.
 func (r *Registry) Apply(ctx context.Context, cfg ServerConfig) error {
 	if !cfg.Enabled {
 		r.Remove(cfg.ID)
@@ -109,24 +112,47 @@ func (r *Registry) Apply(ctx context.Context, cfg ServerConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	r.mu.RLock()
+	previous := r.servers[cfg.ID]
+	r.mu.RUnlock()
+	if previous != nil && sameConfig(previous.cfg, cfg) {
+		return previous.Refresh(ctx)
+	}
 	client := NewClient(cfg)
 	if err := client.Refresh(ctx); err != nil {
 		r.mu.Lock()
-		if previous, ok := r.servers[cfg.ID]; ok && !sameConfig(previous.cfg, cfg) {
+		if prev, ok := r.servers[cfg.ID]; ok && !sameConfig(prev.cfg, cfg) {
 			delete(r.servers, cfg.ID)
-			previous.Close()
+			prev.Close()
 		}
 		r.mu.Unlock()
 		return err
 	}
 	r.mu.Lock()
-	previous := r.servers[cfg.ID]
+	prev := r.servers[cfg.ID]
 	r.servers[cfg.ID] = client
 	r.mu.Unlock()
-	if previous != nil {
-		previous.Close()
+	if prev != nil {
+		prev.Close()
 	}
 	return nil
+}
+
+// ServerToolCount reports how many tools the registered server currently
+// advertises: 0 means unregistered or a discovery that returned nothing —
+// exactly the silent gap that used to scar whole sessions with a mutilated
+// tool schema.
+func (r *Registry) ServerToolCount(id string) int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	client := r.servers[id]
+	if client == nil {
+		return 0
+	}
+	return len(client.ToolDefs())
 }
 
 // Remove drops a server and its tools from the registry, closing its session.

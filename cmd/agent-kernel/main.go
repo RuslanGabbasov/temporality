@@ -509,7 +509,7 @@ func main() {
 	activities.Embedder = func(ctx context.Context, texts []string) ([][]float32, error) {
 		return activities.EmbedTexts(ctx, "", agent.EmbedQuery, texts)
 	}
-	loadMCPServers(ctx, log, ws, activities.MCP, secretMasterKey)
+	activities.MCPReload = loadMCPServers(ctx, log, ws, activities.MCP, secretMasterKey)
 	// The Temporal server has no compose healthcheck and starts slower than
 	// the journal: an immediate Dial + os.Exit turned a cold `compose up`
 	// into a dependency-failure dice roll. Retry instead — the kernel waits
@@ -9585,7 +9585,11 @@ func builtinToolInfo(a *agent.Activities) []mcpclient.ToolInfo {
 // secret:// references in env and headers are resolved here, at apply time:
 // the registry only ever sees plaintext connection credentials, while the
 // stored config keeps the references.
-func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, registry *mcpclient.Registry, masterKey []byte) {
+// loadMCPServers reconciles the workspace MCP server registry at startup and
+// keeps it fresh on a ticker. The returned func re-runs the reconcile on
+// demand — PrepareRun's self-heal calls it when a requested server has no
+// discovered tools. The ticker is a safety net, not the only loader.
+func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, registry *mcpclient.Registry, masterKey []byte) func() {
 	apply := func() {
 		servers, err := ws.ListAllMCPServers(context.Background())
 		if err != nil {
@@ -9616,6 +9620,7 @@ func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, 
 			}
 		}
 	}()
+	return apply
 }
 
 // loadSecretMasterKey reads the envelope-encryption key (32 bytes, hex or

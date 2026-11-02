@@ -84,8 +84,13 @@ type Activities struct {
 	// used by the event outbox publisher.
 	APIToken string
 	MCP      *mcpclient.Registry
-	SourceID string
-	Sandbox  SandboxRunner
+	// MCPReload re-runs the workspace MCP server reconcile on demand
+	// (wired in main to loadMCPServers' apply): PrepareRun calls it once when
+	// a requested server has no discovered tools — a boot race or a transient
+	// outage must not silently scar the run's tool schema.
+	MCPReload func()
+	SourceID  string
+	Sandbox   SandboxRunner
 	// Secrets resolves agent-granted secret names into values at the execution
 	// boundary; nil disables secret injection (tests, env-only setups).
 	Secrets *SecretBroker
@@ -332,6 +337,19 @@ func (a *Activities) ApprovalToolsFor(servers []string) []string {
 
 func (a *Activities) PrepareRun(input *RunInput) error {
 	input.SourceID = a.SourceID
+	// A requested MCP server that advertises no tools means discovery has not
+	// landed (a boot race) or the server is down. Starting the run anyway
+	// silently mutilates the tool schema — the model then improvises around
+	// tools it never received. Heal once on demand, then fail the run start
+	// naming the server (the HTTP paths surface this as 422).
+	if missing := a.missingMCPServers(input.MCPServers); len(missing) > 0 {
+		if a.MCPReload != nil {
+			a.MCPReload()
+		}
+		if missing = a.missingMCPServers(input.MCPServers); len(missing) > 0 {
+			return fmt.Errorf("MCP server(s) %s unavailable: discovery returned no tools — fix the server or the agent's mcp_servers list, then start the run again", strings.Join(missing, ", "))
+		}
+	}
 	input.Tools = a.ToolDefsFor(input.MCPServers)
 	input.ApprovalTools = a.ApprovalToolsFor(input.MCPServers)
 	input.AutoApproveTools = nil
@@ -387,6 +405,18 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 		}
 	}
 	return nil
+}
+
+// missingMCPServers lists the requested servers that currently advertise no
+// tools — the silent schema gap PrepareRun refuses to ship.
+func (a *Activities) missingMCPServers(ids []string) []string {
+	var missing []string
+	for _, id := range ids {
+		if a.MCP.ServerToolCount(id) == 0 {
+			missing = append(missing, id)
+		}
+	}
+	return missing
 }
 
 // ResolveAgentRequest asks the workspace for the enforced run configuration of
