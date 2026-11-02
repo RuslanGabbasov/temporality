@@ -171,6 +171,31 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
   return [...clustered, ...loose.sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1))]
 }
 
+// ── Shared queue accounting (the dashboard tab badge reads the same truth
+// ── the queue renders — divergent bookkeeping was the phantom-badge bug).
+
+/** The union of every ack source: the durable supervisor_ack table (the
+ *  truth; batch bulk-skips only live there) plus the legacy journal ack
+ *  events in both shapes — one id per event, and the batch audit event that
+ *  carries the whole array. */
+export function supervisorAckedIds(ackEvents: ObservationEvent[], durableIds: string[]): Set<string> {
+  const ack = new Set<string>(durableIds)
+  for (const event of ackEvents) {
+    if (event.data?.verdict_event_id) ack.add(String(event.data.verdict_event_id))
+    for (const id of (event.data?.verdict_event_ids as string[] | undefined) ?? []) ack.add(String(id))
+  }
+  return ack
+}
+
+/** How many queue rows the reader actually sees as unresolved: verdicts
+ *  clustered the way the queue renders them, reconciliation verdicts (the
+ *  supervisor's applied work) excluded, a row pending until every one of its
+ *  event ids is acked. */
+export function supervisorPendingCount(verdicts: ObservationEvent[], acked: Set<string>): number {
+  const clusters = clusterVerdicts(verdicts.filter((event) => event.data?.kind !== 'reconciliation'))
+  return clusters.filter((row) => !row.eventIDs.every((id) => acked.has(id))).length
+}
+
 // SupervisorPanels is the whole supervisor surface without the page chrome —
 // the /supervisor page and the dashboard's supervisor tab render the same
 // panels (docs/supervisor-model.md §7).
@@ -232,13 +257,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       // removal of the wall threshold would otherwise flood this queue with
       // one auto-closed row per run.
       setVerdicts((verdictPage.events ?? []).filter((event) => event.data?.kind !== 'reconciliation'))
-      setInsights(insightPage.events ?? [])
-      const ackSet = new Set<string>(acksPage.ids ?? [])
-      for (const event of ackPage.events ?? []) {
-        // Legacy single acks carry one id; batch acks carry an array.
-        if (event.data?.verdict_event_id) ackSet.add(String(event.data.verdict_event_id))
-        for (const id of (event.data?.verdict_event_ids as string[] | undefined) ?? []) ackSet.add(String(id))
-      }
+      const acked = supervisorAckedIds(ackPage.events ?? [], acksPage.ids ?? [])
       // MERGE, never replace: acknowledgements ride the async outbox (the POST
       // 200s before the journal has the event), so a fresh reload can be
       // missing the just-clicked ids. Replacing resurrected the row and made
@@ -247,7 +266,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       // always safe.
       setAcknowledged((prev) => {
         const next = new Set(prev)
-        for (const id of ackSet) next.add(id)
+        for (const id of supervisorAckedIds(ackPage.events ?? [], acksPage.ids ?? [])) next.add(id)
         return next
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
