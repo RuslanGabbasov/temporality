@@ -86,6 +86,17 @@ services:
     command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal-dev.db"]
     volumes:
       - temporality-temporal:/data
+    # The kernel hard-depends on Temporal (its worker dials 7233 before
+    # serving anything) — compose must wait for the frontend port, not just
+    # "started": the server takes tens of seconds over its SQLite init, and
+    # that gap was the flaky agent-kernel dependency failure on cold starts.
+    # Alpine image: nc (busybox) probes the gRPC port.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 7233 || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
     restart: unless-stopped
     ports:
       - "7233:7233"
@@ -280,7 +291,7 @@ services:
       journal:
         condition: service_healthy
       temporal:
-        condition: service_started
+        condition: service_healthy
       searxng:
         condition: service_started
     healthcheck:

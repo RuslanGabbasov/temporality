@@ -510,10 +510,26 @@ func main() {
 		return activities.EmbedTexts(ctx, "", agent.EmbedQuery, texts)
 	}
 	loadMCPServers(ctx, log, ws, activities.MCP, secretMasterKey)
-	temporalClient, err := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", client.DefaultHostPort)})
-	if err != nil {
-		log.Error("connect Temporal", "error", err)
-		os.Exit(1)
+	// The Temporal server has no compose healthcheck and starts slower than
+	// the journal: an immediate Dial + os.Exit turned a cold `compose up`
+	// into a dependency-failure dice roll. Retry instead — the kernel waits
+	// for its dependency the same way the journal waits for Postgres.
+	var temporalClient client.Client
+	for attempt := 1; ; attempt++ {
+		c, dialErr := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", client.DefaultHostPort)})
+		if dialErr == nil {
+			temporalClient = c
+			break
+		}
+		if attempt == 1 {
+			log.Warn("Temporal is not reachable yet — retrying", "address", env("TEMPORAL_ADDRESS", client.DefaultHostPort), "error", dialErr)
+		}
+		select {
+		case <-ctx.Done():
+			log.Error("shutdown while waiting for Temporal", "error", ctx.Err())
+			os.Exit(1)
+		case <-time.After(2 * time.Second):
+		}
 	}
 	defer temporalClient.Close()
 	go events.RunPublisher(ctx)
