@@ -22,6 +22,8 @@ const fsOf = (p: Policy | null, initialUnitId: string) => ({
   max_tokens: p?.max_tokens != null ? String(p.max_tokens) : '',
   max_budget_usd: p?.max_budget_usd != null ? String(p.max_budget_usd) : '',
   timeout_seconds: p?.timeout_seconds != null ? String(p.timeout_seconds) : '',
+  max_concurrent_runs: p?.max_concurrent_runs != null ? String(p.max_concurrent_runs) : '',
+  memory_budget_mb: p?.memory_budget_mb != null ? String(p.memory_budget_mb) : '',
   network_mode: p?.network_mode ?? '',
   sandbox_mode: p?.sandbox_mode ?? '',
   approval_mode: p?.approval_mode ?? '',
@@ -230,6 +232,8 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
         max_tokens: optionalNumber(form.max_tokens),
         max_budget_usd: optionalNumber(form.max_budget_usd),
         timeout_seconds: optionalNumber(form.timeout_seconds),
+        max_concurrent_runs: optionalNumber(form.max_concurrent_runs) ?? 0,
+        memory_budget_mb: optionalNumber(form.memory_budget_mb) ?? 0,
         network_mode: form.network_mode,
         sandbox_mode: form.sandbox_mode,
         approval_mode: form.approval_mode,
@@ -345,6 +349,13 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
               <TextInput id="policy-budget" labelText={t('org.policy_budget_label') ?? 'Max cost, USD'} value={form.max_budget_usd} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, max_budget_usd: e.target.value })} placeholder="5" />
               <TextInput id="policy-timeout" labelText={t('org.policy_timeout_label') ?? 'Max time, s'} value={form.timeout_seconds} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, timeout_seconds: e.target.value })} placeholder="1800" />
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              <TextInput id="policy-max-runs" labelText={t('org.policy_max_runs_label') ?? 'Max concurrent runs (unit)'} value={form.max_concurrent_runs} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, max_concurrent_runs: e.target.value })} placeholder="10" />
+              <TextInput id="policy-mem-budget" labelText={t('org.policy_mem_budget_label') ?? 'Memory budget, MB (unit)'} value={form.memory_budget_mb} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, memory_budget_mb: e.target.value })} placeholder="4096" />
+            </div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: 0 }}>
+              {t('org.policy_quota_hint') ?? 'Memory quota for this unit: when the running requests sum up to the memory budget, new ones wait in a queue and start automatically as slots free up. 0 or empty = no restriction.'}
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
               <Select id="policy-sandbox" labelText={t('org.policy_sandbox_label') ?? 'Sandbox'} value={form.sandbox_mode} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_mode: e.target.value })}>
                 <SelectItem value="" text={t('org.policy_sandbox.default') ?? 'standard'} />

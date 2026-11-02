@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,13 @@ import (
 // agent with a 4g sandbox must not cost the same — a flat call-count cap
 // cannot express that, a ledger can.
 //
+// On top of the host budget, a run may carry a UNIT quota from its policy
+// (docs/org-structure.md §24): max_concurrent_runs + memory_budget_mb — the
+// unit's own ceiling, merged restrictively down the org tree and frozen with
+// the policy snapshot. Runs sharing one quota scope sum together; a scope is
+// keyed by its caps (every run resolved under the same effective policy
+// values shares the same bucket).
+//
 // The state is in-process on purpose: a worker restart drops the ledger with
 // the dead process, and the replaying workflows re-acquire — nothing to
 // recover, nothing to leak.
@@ -28,7 +36,7 @@ type ModelGate struct {
 	mu       sync.Mutex
 	max      int     // absolute concurrent-runs ceiling (runaway guard)
 	budgetMB int     // the host's runnable budget in MB
-	floorPct float64 // pause admitting below this % of MemAvailable
+	floorPct float64 // pause admitting below this % of MemAvailable; 0 = no check
 	memory   func() (uint64, uint64, bool)
 	entries  map[string]*budgetEntry
 	order    []string // FIFO of queued run ids, for the reported position
@@ -37,6 +45,7 @@ type ModelGate struct {
 
 type budgetEntry struct {
 	memoryMB  int
+	quotaKey  string
 	lastRenew time.Time
 }
 
@@ -49,15 +58,6 @@ var (
 // carries no explicit memory — the kernel's own KERNEL_SANDBOX_MEMORY
 // default, mirrored here at boot.
 var gateDefaultRunMemoryMB = 1024
-
-// sandboxMemorySpec returns the run's declared sandbox memory spec (the
-// same --memory its container gets); empty when the profile says nothing.
-func sandboxMemorySpec(input RunInput) string {
-	if input.Sandbox != nil {
-		return strings.TrimSpace(input.Sandbox.Memory)
-	}
-	return ""
-}
 
 // ConfigureModelGate installs the budget: max concurrent runs (absolute
 // runaway guard), the host budget in MB, the memory floor percent, the
@@ -133,17 +133,35 @@ func ParseMemoryMB(raw string) int {
 	return value * multiplier
 }
 
+// quotaScopeKey scopes the unit-quota accounting: runs resolved under the
+// same effective caps share one bucket.
+func quotaScopeKey(quotaMB, quotaRuns int) string {
+	if quotaMB <= 0 && quotaRuns <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d", quotaMB, quotaRuns)
+}
+
+// sandboxMemorySpec returns the run's declared sandbox memory spec (the
+// same --memory its container gets); empty when the profile says nothing.
+func sandboxMemorySpec(input RunInput) string {
+	if input.Sandbox != nil {
+		return strings.TrimSpace(input.Sandbox.Memory)
+	}
+	return ""
+}
+
 // Verdict answers "is it my turn": zero wait admits a run with the given
-// sandbox memory; otherwise WaitSeconds is the next poll delay and Position
-// is the human-facing queue place (1 = next).
-func (g *ModelGate) Verdict(runID string, memoryMB int) (waitSeconds int, position int) {
+// sandbox memory under the given unit quota; otherwise WaitSeconds is the
+// next poll delay and Position is the human-facing queue place (1 = next).
+func (g *ModelGate) Verdict(runID string, memoryMB, quotaMB, quotaRuns int) (waitSeconds int, position int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.expireLocked()
 	if memoryMB <= 0 {
-		memoryMB = 512
+		memoryMB = gateDefaultRunMemoryMB
 	}
-	if g.fitsLocked(memoryMB) {
+	if g.fitsLocked(runID, memoryMB, quotaScopeKey(quotaMB, quotaRuns), quotaMB, quotaRuns) {
 		return 0, 0
 	}
 	return 10, len(g.order) + 1
@@ -151,17 +169,18 @@ func (g *ModelGate) Verdict(runID string, memoryMB int) (waitSeconds int, positi
 
 // Acquire claims the budget for a run. A lost race with another run comes
 // back as ModelGateBusy — the workflow polls again.
-func (g *ModelGate) Acquire(runID string, memoryMB int) error {
+func (g *ModelGate) Acquire(runID string, memoryMB, quotaMB, quotaRuns int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.expireLocked()
 	if memoryMB <= 0 {
-		memoryMB = 512
+		memoryMB = gateDefaultRunMemoryMB
 	}
-	if len(g.entries)+1 > g.max || !g.fitsLocked(memoryMB) {
+	key := quotaScopeKey(quotaMB, quotaRuns)
+	if len(g.entries)+1 > g.max || !g.fitsLocked(runID, memoryMB, key, quotaMB, quotaRuns) {
 		return ErrModelGateBusy
 	}
-	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, lastRenew: time.Now()}
+	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, quotaKey: key, lastRenew: time.Now()}
 	g.order = append(g.order, runID)
 	return nil
 }
@@ -171,7 +190,7 @@ func (g *ModelGate) Acquire(runID string, memoryMB int) error {
 // whose entry expired under a long model call — it is still the run's
 // budget to reclaim if the host can carry it; if not, the renew call fails
 // and the run keeps polling).
-func (g *ModelGate) Renew(runID string, memoryMB int) (admitted bool) {
+func (g *ModelGate) Renew(runID string, memoryMB, quotaMB, quotaRuns int) (admitted bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.expireLocked()
@@ -180,12 +199,13 @@ func (g *ModelGate) Renew(runID string, memoryMB int) (admitted bool) {
 		return true
 	}
 	if memoryMB <= 0 {
-		memoryMB = 512
+		memoryMB = gateDefaultRunMemoryMB
 	}
-	if len(g.entries)+1 > g.max || !g.fitsLocked(memoryMB) {
+	key := quotaScopeKey(quotaMB, quotaRuns)
+	if len(g.entries)+1 > g.max || !g.fitsLocked(runID, memoryMB, key, quotaMB, quotaRuns) {
 		return false
 	}
-	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, lastRenew: time.Now()}
+	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, quotaKey: key, lastRenew: time.Now()}
 	g.order = append(g.order, runID)
 	return true
 }
@@ -206,13 +226,33 @@ func (g *ModelGate) Release(runID string) {
 	}
 }
 
-func (g *ModelGate) fitsLocked(memoryMB int) bool {
-	used := 0
-	for _, entry := range g.entries {
+// fitsLocked checks both floors: the host budget (sum of all admitted
+// requirements) and — when the run carries a unit quota — the sum of the
+// runs sharing that same quota scope, plus the absolute ceiling. A run's
+// own entry is already on the books (renew of an admitted run): it does not
+// compete with itself.
+func (g *ModelGate) fitsLocked(runID string, memoryMB int, quotaKey string, quotaMB, quotaRuns int) bool {
+	used, quotaUsed, quotaCount := 0, 0, 0
+	for id, entry := range g.entries {
+		if id == runID {
+			continue
+		}
 		used += entry.memoryMB
+		if quotaKey != "" && entry.quotaKey == quotaKey {
+			quotaUsed += entry.memoryMB
+			quotaCount++
+		}
 	}
 	if used+memoryMB > g.budgetMB {
 		return false
+	}
+	if quotaKey != "" {
+		if quotaMB > 0 && quotaUsed+memoryMB > quotaMB {
+			return false
+		}
+		if quotaRuns > 0 && quotaCount+1 > quotaRuns {
+			return false
+		}
 	}
 	if g.floorPct > 0 && g.memory != nil {
 		if total, available, ok := g.memory(); ok && total > 0 {

@@ -66,6 +66,11 @@ export interface Policy {
   approval_mode?: string // '' | 'auto' | 'tools'
   egress_allowlist?: string[] | null // centralized baseline, UNION with the agent's own list
   intake_mode?: string // '' | 'deny' — overlay that can only narrow, never widen (docs/inbound-messages.md §12)
+  // Memory quota dimensions (the model gate): the unit's concurrent-runs
+  // ceiling and the unit's sandbox-memory budget. 0/absent = no restriction;
+  // the merge takes the minimum down the org tree.
+  max_concurrent_runs?: number | null
+  memory_budget_mb?: number | null
   filesystem?: FilesystemRules | null
   enabled: boolean
   created_at: string

@@ -218,6 +218,12 @@ type Policy struct {
 	MaxTokens      *int     `json:"max_tokens,omitempty"`
 	MaxBudgetUSD   *float64 `json:"max_budget_usd,omitempty"`
 	TimeoutSeconds *int     `json:"timeout_seconds,omitempty"`
+	// Memory quota dimensions (the model gate): MaxConcurrentRuns caps how
+	// many runs of this unit execute at once; MemoryBudgetMB caps the SUM of
+	// their sandbox memory requirements. NULL = uncapped; the merge takes the
+	// minimum down the org tree (restrictive, like every other cap).
+	MaxConcurrentRuns *int `json:"max_concurrent_runs,omitempty"`
+	MemoryBudgetMB    *int `json:"memory_budget_mb,omitempty"`
 	// Modes: '' keeps the inherited/default behavior, the listed restrictive
 	// value wins during the merge.
 	NetworkMode  string `json:"network_mode,omitempty"`  // 'deny' restricts

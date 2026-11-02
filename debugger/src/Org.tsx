@@ -50,6 +50,10 @@ function policySummaryTags(p: Policy, t: (k: string, v?: Record<string, string>)
   if (fs && ((fs.read?.length ?? 0) + (fs.write?.length ?? 0) + (fs.deny?.length ?? 0)) > 0) {
     tags.push({ key: 'fs', text: `${t('org.policy_fs_tag') ?? 'Files'}: ${fs.read?.length ?? 0}/${fs.write?.length ?? 0}/${fs.deny?.length ?? 0}` })
   }
+  // The memory quota: the unit's gate caps as runs/MB.
+  if ((p.max_concurrent_runs ?? 0) > 0 || (p.memory_budget_mb ?? 0) > 0) {
+    tags.push({ key: 'quota', text: `${t('org.policy_quota_tag') ?? 'Quota'}: ${(p.max_concurrent_runs ?? 0) || '∞'}× / ${(p.memory_budget_mb ?? 0) || '∞'}MB` })
+  }
   if (p.max_tokens != null) tags.push({ key: 'tokens', text: t('org.policy_tokens_tag', { count: String(p.max_tokens) }) ?? `≤ ${p.max_tokens} tokens` })
   if (p.max_budget_usd != null) tags.push({ key: 'budget', text: t('org.policy_budget_tag', { amount: String(p.max_budget_usd) }) ?? `≤ $${p.max_budget_usd}` })
   if (p.timeout_seconds != null) tags.push({ key: 'timeout', text: t('org.policy_timeout_tag', { count: String(p.timeout_seconds) }) ?? `≤ ${p.timeout_seconds}s` })

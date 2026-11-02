@@ -30,18 +30,29 @@ type ModelGateVerdictResult struct {
 	Position    int `json:"position"`
 }
 
-func (a *Activities) ModelGateVerdict(ctx context.Context, runID string, memoryMB int) (ModelGateVerdictResult, error) {
-	wait, position := gate().Verdict(runID, memoryMB)
+// ModelGateAdmission: the run's identity + its sandbox requirement + the
+// unit quota from its frozen policy snapshot (docs/org-structure.md §24).
+type ModelGateAdmission struct {
+	RunID     string
+	MemoryMB  int
+	QuotaMB   int // the unit's concurrent sandbox-memory budget; 0 = none
+	QuotaRuns int // the unit's concurrent-runs ceiling; 0 = none
+}
+
+func (a *Activities) ModelGateVerdict(ctx context.Context, admission ModelGateAdmission) (ModelGateVerdictResult, error) {
+	wait, position := gate().Verdict(admission.RunID, admission.MemoryMB, admission.QuotaMB, admission.QuotaRuns)
 	return ModelGateVerdictResult{WaitSeconds: wait, Position: position}, nil
 }
 
-// ModelGateBudgetInput carries the run's memory requirement (MB) and the
-// operation: acquire (claim the budget), renew (prove the run is alive),
-// release (the run finished — hand the budget back).
+// ModelGateBudgetInput carries the run's memory requirement (MB), the unit
+// quota, and the operation: acquire (claim the budget), renew (prove the run
+// is alive), release (the run finished — hand the budget back).
 type ModelGateBudgetInput struct {
-	Op       string // acquire | renew | release
-	RunID    string
-	MemoryMB int
+	Op        string // acquire | renew | release
+	RunID     string
+	MemoryMB  int
+	QuotaMB   int
+	QuotaRuns int
 }
 
 type ModelGateBudgetResult struct {
@@ -51,9 +62,9 @@ type ModelGateBudgetResult struct {
 func (a *Activities) ModelGateBudget(ctx context.Context, input ModelGateBudgetInput) (ModelGateBudgetResult, error) {
 	switch input.Op {
 	case "acquire":
-		return ModelGateBudgetResult{Admitted: gate().Acquire(input.RunID, input.MemoryMB) == nil}, nil
+		return ModelGateBudgetResult{Admitted: gate().Acquire(input.RunID, input.MemoryMB, input.QuotaMB, input.QuotaRuns) == nil}, nil
 	case "renew":
-		return ModelGateBudgetResult{Admitted: gate().Renew(input.RunID, input.MemoryMB)}, nil
+		return ModelGateBudgetResult{Admitted: gate().Renew(input.RunID, input.MemoryMB, input.QuotaMB, input.QuotaRuns)}, nil
 	case "release":
 		gate().Release(input.RunID)
 		return ModelGateBudgetResult{Admitted: false}, nil

@@ -9367,6 +9367,16 @@ func applyRunPolicy(ctx context.Context, ws *workspace.Store, prices cost.Config
 	if effective.TimeoutSeconds != nil {
 		input.TimeoutSeconds = *effective.TimeoutSeconds
 	}
+	// Memory quota caps (the model gate): frozen like the filesystem snapshot
+	// so a delegation child inherits the same unit scope instead of re-resolving
+	// it (§6.2–§6.3: changes mid-flight never widen a running tree). The gate
+	// tracks every admitted run under this scope until the run releases it.
+	if effective.MaxConcurrentRuns != nil {
+		input.MaxConcurrentRuns = *effective.MaxConcurrentRuns
+	}
+	if effective.MemoryBudgetMB != nil {
+		input.MemoryBudgetMB = *effective.MemoryBudgetMB
+	}
 	// Filesystem policy (docs/filesystem-policy.md §6): freeze the effective
 	// file rules once, at run start. The layered form is the runtime authority
 	// (MergePolicies deliberately leaves the flat dimension unmerged); the

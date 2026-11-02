@@ -48,17 +48,19 @@ func ValidatePolicy(p Policy) error {
 
 const policyColumns = `id, org_unit_id, name, allowed_models, allowed_mcp,
 max_tokens, max_budget_usd, timeout_seconds, network_mode, sandbox_mode, approval_mode,
-egress_allowlist, filesystem, intake_mode, enabled, created_at, updated_at`
+egress_allowlist, filesystem, intake_mode, max_concurrent_runs, memory_budget_mb,
+enabled, created_at, updated_at`
 
 func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	var p Policy
 	var orgUnitID *string
 	var models, mcp, egress, filesystem []byte
-	var maxTokens, timeout *int
+	var maxTokens, timeout, maxConcurrentRuns, memoryBudgetMB *int
 	var budget *float64
 	err := scanner.Scan(&p.ID, &orgUnitID, &p.Name, &models, &mcp,
 		&maxTokens, &budget, &timeout, &p.NetworkMode, &p.SandboxMode, &p.ApprovalMode,
-		&egress, &filesystem, &p.IntakeMode, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+		&egress, &filesystem, &p.IntakeMode, &maxConcurrentRuns, &memoryBudgetMB,
+		&p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return p, err
 	}
@@ -76,6 +78,8 @@ func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	p.MaxTokens = maxTokens
 	p.MaxBudgetUSD = budget
 	p.TimeoutSeconds = timeout
+	p.MaxConcurrentRuns = maxConcurrentRuns
+	p.MemoryBudgetMB = memoryBudgetMB
 	return p, nil
 }
 
@@ -96,11 +100,12 @@ func (s *Store) CreatePolicy(ctx context.Context, p *Policy) error {
 		`INSERT INTO org_policy
 		 (id, org_unit_id, name, allowed_models, allowed_mcp, max_tokens, max_budget_usd,
 		  timeout_seconds, network_mode, sandbox_mode, approval_mode, egress_allowlist,
-		  filesystem, intake_mode, enabled, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+		  filesystem, intake_mode, max_concurrent_runs, memory_budget_mb, enabled, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
 		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
-		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode, p.Enabled, p.CreatedAt, p.UpdatedAt)
+		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode,
+		p.MaxConcurrentRuns, p.MemoryBudgetMB, p.Enabled, p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
@@ -149,11 +154,13 @@ func (s *Store) UpdatePolicy(ctx context.Context, p Policy) error {
 		 SET org_unit_id = $2, name = $3, allowed_models = $4, allowed_mcp = $5,
 		     max_tokens = $6, max_budget_usd = $7, timeout_seconds = $8,
 		     network_mode = $9, sandbox_mode = $10, approval_mode = $11,
-		     egress_allowlist = $12, filesystem = $13, intake_mode = $14, enabled = $15, updated_at = $16
+		     egress_allowlist = $12, filesystem = $13, intake_mode = $14,
+		     max_concurrent_runs = $15, memory_budget_mb = $16, enabled = $17, updated_at = $18
 		 WHERE id = $1`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
 		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
-		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode, p.Enabled, p.UpdatedAt)
+		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode,
+		p.MaxConcurrentRuns, p.MemoryBudgetMB, p.Enabled, p.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -183,6 +190,14 @@ func normalizePolicyLists(p *Policy) {
 	}
 	if len(p.AllowedMCP) == 0 {
 		p.AllowedMCP = nil
+	}
+	// Memory quota caps: 0/negative reads back as NULL ("not set") — the same
+	// nil-vs-zero discipline as the lists above, §3.5 semantics.
+	if p.MaxConcurrentRuns != nil && *p.MaxConcurrentRuns <= 0 {
+		p.MaxConcurrentRuns = nil
+	}
+	if p.MemoryBudgetMB != nil && *p.MemoryBudgetMB <= 0 {
+		p.MemoryBudgetMB = nil
 	}
 	normalizeFilesystemRules(p.Filesystem)
 }
@@ -245,6 +260,10 @@ func MergePolicies(rows []Policy) (effective Policy, sources []Policy) {
 		effective.MaxTokens = minIntPtr(effective.MaxTokens, p.MaxTokens)
 		effective.MaxBudgetUSD = minFloatPtr(effective.MaxBudgetUSD, p.MaxBudgetUSD)
 		effective.TimeoutSeconds = minIntPtr(effective.TimeoutSeconds, p.TimeoutSeconds)
+		// Memory quota caps merge restrictive: the smallest configured value
+		// wins down the tree — a child unit cannot out-bid its ancestors.
+		effective.MaxConcurrentRuns = minIntPtr(effective.MaxConcurrentRuns, p.MaxConcurrentRuns)
+		effective.MemoryBudgetMB = minIntPtr(effective.MemoryBudgetMB, p.MemoryBudgetMB)
 		if p.NetworkMode == "deny" {
 			effective.NetworkMode = "deny"
 		}
