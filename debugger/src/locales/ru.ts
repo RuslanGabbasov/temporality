@@ -83,6 +83,8 @@ export const ru: Record<string, string> = {
     'project.saga_attach_n': 'Привязать к саге',
     'project.saga_create_n': 'Создать сагу',
     'project.saga_pick': 'Выберите сагу…',
+    'project.saga_pick_search': 'Начните вводить название или id…',
+    'project.saga_pick_hint': 'Саг в проекте: {{count}} — фильтруйте вводом',
     'project.unbound_select_all': 'Выбрать все',
     'project.unbound_tasks_n_one': 'Выбрана 1 задача — она переедет в сагу целиком.',
     'project.unbound_tasks_n_few': 'Выбрано {{count}} задачи — они переедут в сагу целиком.',

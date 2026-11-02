@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Heading, InlineNotification, Tag, Tile, Button, Stack, TextInput, TextArea, Select, SelectItem } from '@carbon/react'
+import { Heading, InlineNotification, Tag, Tile, Button, Stack, TextInput, TextArea, ComboBox } from '@carbon/react'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
 import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, type ProjectBudget, type SagaRollup, type TaskRollup } from './kernelApi'
 import ProjectRequired from './ProjectRequired'
@@ -11,6 +11,36 @@ import { cacheGet, cacheSet } from './tabCache'
 import { SkeletonBox, SkeletonTiles } from './Skeleton'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
+
+/** Saga picker with typeahead search (docs/sagas.md): hundreds of sagas
+ *  stopped fitting a plain select — the combobox filters by title/id as you
+ *  type and shows the task count next to each option. */
+function SagaComboBox({ id, labelText, sagas, exclude, value, onChange }: {
+  id: string
+  labelText: string
+  sagas: SagaRollup[]
+  exclude?: string[]
+  value: string
+  onChange: (sagaID: string) => void
+}) {
+  const { t } = useI18n()
+  const items = sagas
+    .filter((s) => !exclude?.includes(s.saga_id))
+    .map((s) => ({ id: s.saga_id, text: `${s.title || s.saga_id} (${s.task_ids.length})` }))
+  return (
+    <ComboBox
+      id={id}
+      size="sm"
+      items={items}
+      itemToString={(item) => (item ? item.text : '')}
+      selectedItem={items.find((item) => item.id === value) ?? null}
+      onChange={({ selectedItem }) => onChange((selectedItem as { id: string } | null)?.id ?? '')}
+      placeholder={t('project.saga_pick_search') ?? 'Search by title or id…'}
+      titleText={labelText}
+      helperText={sagas.length > 10 ? (t('project.saga_pick_hint', { count: String(sagas.length) }) ?? `${sagas.length} sagas — type to filter`) : undefined}
+    />
+  )
+}
 
 // The last computed budget of a project (tabCache): the overview is the slow
 // sagas tab, and every dashboard visit remounted it into a blank page. The
@@ -453,17 +483,14 @@ export default function ProjectOverview({ project }: Props) {
                 </span>
               ))}
             </div>
-            <Select
+            <SagaComboBox
               id="saga-merge-target"
               labelText={t('project.saga_merge_target') ?? 'Merge into'}
+              sagas={liveSagas}
+              exclude={dialog.sources}
               value={formSaga}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormSaga(e.target.value)}
-            >
-              <SelectItem value="" text="—" />
-              {liveSagas.filter((s) => !dialog.sources.includes(s.saga_id)).map((s) => (
-                <SelectItem key={s.saga_id} value={s.saga_id} text={s.title || s.saga_id} />
-              ))}
-            </Select>
+              onChange={setFormSaga}
+            />
             {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
             <div className="form-actions" style={{ marginTop: 0 }}>
               <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
@@ -485,17 +512,13 @@ export default function ProjectOverview({ project }: Props) {
             <div style={{ fontSize: '0.85rem', color: 'var(--tm-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {dialog.task.title || dialog.task.task_id}
             </div>
-            <Select
+            <SagaComboBox
               id="task-saga-select"
               labelText={t('project.saga_col') ?? 'Saga'}
+              sagas={liveSagas}
               value={formSaga}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormSaga(e.target.value)}
-            >
-              <SelectItem value="" text="—" />
-              {liveSagas.map((s) => (
-                <SelectItem key={s.saga_id} value={s.saga_id} text={`${s.title || s.saga_id} (${s.task_ids.length})`} />
-              ))}
-            </Select>
+              onChange={setFormSaga}
+            />
             {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
             <div className="form-actions" style={{ marginTop: 0 }}>
               <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
@@ -550,15 +573,13 @@ export default function ProjectOverview({ project }: Props) {
             <div style={{ fontSize: '0.85rem', color: 'var(--tm-text-2)' }}>
               {pluralT(t, locale, 'project.unbound_tasks_n', dialog.tasks.length)}
             </div>
-            <Select
+            <SagaComboBox
               id="bulk-attach-target"
               labelText={t('project.saga_merge_target') ?? 'Merge into'}
+              sagas={liveSagas}
               value={formSaga}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormSaga(e.target.value)}
-            >
-              <option value="">{t('project.saga_pick') ?? 'Выберите сагу…'}</option>
-              {liveSagas.map((s) => <SelectItem key={s.saga_id} value={s.saga_id} text={s.title || s.saga_id} />)}
-            </Select>
+              onChange={setFormSaga}
+            />
             {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
             <div className="form-actions" style={{ marginTop: 0 }}>
               <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
