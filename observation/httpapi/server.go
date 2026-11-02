@@ -1797,7 +1797,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
-	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs, Embedding: input.Embedding, KnowledgeEmbeddings: knowledgeEmbeddings})
+	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs, Embedding: input.Embedding, KnowledgeEmbeddings: knowledgeEmbeddings, Now: time.Now()})
 	activationID := newUUID()
 	context := observation.Context{Project: input.Project, Run: input.Run, Task: input.Task, Actor: input.Actor}
 	// Activation telemetry in one frame: hint.query plus one hint.offered per

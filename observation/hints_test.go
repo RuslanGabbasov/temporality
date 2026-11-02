@@ -31,6 +31,89 @@ func hintKnowledge(t *testing.T, events []Event) []Knowledge {
 	return knowledge
 }
 
+func hintVerdictEvent(eventID, knowledgeID, outcome, reason string, at time.Time) Event {
+	return Event{
+		Schema:     Schema,
+		EventID:    eventID,
+		OccurredAt: at,
+		Source:     Source{ID: "kernel", Integration: "temporality-agent-kernel"},
+		Context:    Context{Project: "repo-a", Run: "run-1", Actor: Actor{ID: "agent", Type: "agent"}},
+		Type:       "hint.outcome",
+		Data:       map[string]any{"hint_id": "h-" + knowledgeID, "knowledge_id": knowledgeID, "outcome": outcome, "reason": reason},
+	}
+}
+
+// Run verdicts drive the knowledge lifecycle (docs/knowledge-evolution.md):
+// a judged-helpful hint confirms a proposal, one harmful verdict challenges
+// it with the run's reason recorded in history, two unsupported harmful
+// verdicts invalidate it — and a later re-proposal creates a fresh node, no
+// tombstones.
+func TestHintOutcomesDriveLifecycle(t *testing.T) {
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-helpful", "claim", "Редкое правило про penpot-сервер", nil, base),
+		hintVerdictEvent("e2", "k-helpful", "helpful", "повторилось на практике", base.Add(time.Hour)),
+
+		hintProposalEvent("e3", "k-challenged", "claim", "Правило про botaccount-справочник", nil, base),
+		hintVerdictEvent("e4", "k-challenged", "harmful", "не сработало: rm теперь блокируется", base.Add(2*time.Hour)),
+
+		hintProposalEvent("e5", "k-dead", "claim", "Правило про ветку rnd/ai", nil, base),
+		hintVerdictEvent("e6", "k-dead", "harmful", "опровергнуто первым раном", base.Add(time.Hour)),
+		hintVerdictEvent("e7", "k-dead", "harmful", "опровергнуто вторым раном", base.Add(2*time.Hour)),
+
+		hintProposalEvent("e8", "k-mixed", "claim", "Правило про дедупликацию отчётов", nil, base),
+		hintVerdictEvent("e9", "k-mixed", "harmful", "в одном ране навредило", base.Add(time.Hour)),
+		hintVerdictEvent("e10", "k-mixed", "helpful", "в другом помогло", base.Add(2*time.Hour)),
+		hintVerdictEvent("e11", "k-mixed", "harmful", "и снова навредило", base.Add(3*time.Hour)),
+	}
+	byID := make(map[string]Knowledge)
+	for _, item := range hintKnowledge(t, events) {
+		byID[item.ID] = item
+	}
+
+	if byID["k-helpful"].State != "confirmed" {
+		t.Errorf("helpful verdict must confirm a proposal, got %q", byID["k-helpful"].State)
+	}
+	challenged := byID["k-challenged"]
+	if challenged.State != "challenged" {
+		t.Errorf("one harmful verdict must challenge, got %q", challenged.State)
+	}
+	if n := len(challenged.History); n == 0 || challenged.History[n-1].Reason != "не сработало: rm теперь блокируется" || challenged.History[n-1].State != "challenged" {
+		t.Errorf("the refutation reason must be recorded in history, got %+v", challenged.History)
+	}
+	if byID["k-dead"].State != "invalidated" {
+		t.Errorf("two unsupported harmful verdicts must invalidate, got %q", byID["k-dead"].State)
+	}
+	if byID["k-mixed"].State != "challenged" {
+		t.Errorf("conflicting verdicts must stay challenged for review, got %q", byID["k-mixed"].State)
+	}
+}
+
+// The re-verification clock: a candidate nothing confirmed for two weeks is
+// demoted below an equally-matched fresh one and carries a caution — time
+// raises doubt, only evidence kills.
+func TestFindHintsStaleCandidatesDemotedWithCaution(t *testing.T) {
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-old", "claim", "Старое правило про квоту номер один", []string{"quota-bucket"}, base),
+		hintProposalEvent("e2", "k-new", "claim", "Свежее правило про квоту номер два", []string{"quota-bucket"}, base.Add(27*24*time.Hour)),
+	}
+	knowledge := hintKnowledge(t, events)
+	hints := FindHints(knowledge, HintQuery{Entities: []string{"quota-bucket"}, Limit: 8, Now: base.Add(30 * 24 * time.Hour)})
+	if len(hints) != 2 {
+		t.Fatalf("expected both candidates, got %+v", hints)
+	}
+	if hints[0].KnowledgeID != "k-new" || hints[1].KnowledgeID != "k-old" {
+		t.Fatalf("the stale candidate must rank below the fresh equal match, got %q, %q", hints[0].KnowledgeID, hints[1].KnowledgeID)
+	}
+	if !strings.Contains(hints[1].Caution, "not re-verified") {
+		t.Errorf("the stale candidate must carry a re-verification caution, got %q", hints[1].Caution)
+	}
+	if strings.Contains(hints[0].Caution, "not re-verified") {
+		t.Errorf("the fresh candidate must stay caution-free, got %q", hints[0].Caution)
+	}
+}
+
 func TestFindHintsOffersReplacementForRetiredMatch(t *testing.T) {
 	// The replacement contract: a retired rule that matched the task must not
 	// surface itself, but its named successor is offered in its place with an

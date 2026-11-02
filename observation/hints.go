@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -33,6 +34,10 @@ type HintQuery struct {
 	// prompt. They are admitted as direct candidates a tier below entity
 	// matches — visible everywhere, outranked by exact hits.
 	TeamRunKnowledgeIDs []string
+	// Now arms the re-verification clock: candidates nothing confirmed for
+	// hintStaleAfterDays lose rank to fresh equals and carry a caution. Zero
+	// disables the clock (pure matching, tests).
+	Now time.Time
 }
 
 // HintSkill is one active skill of the querying agent: identity plus the
@@ -58,7 +63,13 @@ type hintCandidate struct {
 	hint      Hint
 	matchTier int
 	kindTier  int
+	// stateTier ranks trust: confirmed knowledge outranks proposals, and a
+	// challenged item is offered last with its caution.
 	stateTier int
+	// staleTier (re-verification clock) demotes candidates nothing confirmed
+	// for hintStaleAfterDays: time raises doubt, only evidence kills.
+	staleTier    int
+	lastEvidence time.Time
 	// usefulTier (B4) demotes candidates whose recorded outcomes contradict
 	// their usefulness and promotes proven-helpful ones at otherwise equal
 	// rank: 0 helpful-dominant, 1 insufficient data, 2 harmful-dominant.
@@ -86,6 +97,10 @@ const (
 	hintMaxPerTopic         = 2
 	hintOutcomeMinSamples   = 3
 	hintSkillDupContainment = 0.75
+	// hintStaleAfterDays arms the re-verification clock: an item nothing
+	// confirmed for this long is offered with a caution and demoted below
+	// equally-matched fresh candidates. Mirrors the proposal aging horizon.
+	hintStaleAfterDays = 14
 )
 
 // Semantic tier (docs/supervisor-model.md §6): candidates below every lexical
@@ -277,6 +292,24 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 			}
 		}
 	}
+	// Re-verification clock (docs/knowledge-evolution.md): an item nothing
+	// confirmed for hintStaleAfterDays is offered with a caution and demoted
+	// below equally-matched fresh candidates — «подтверждённое когда-то» is
+	// not «true forever», and time only raises doubt, never kills.
+	if !query.Now.IsZero() {
+		for i := range candidates {
+			days := int(query.Now.Sub(candidates[i].lastEvidence).Hours() / 24)
+			if days < hintStaleAfterDays {
+				continue
+			}
+			candidates[i].staleTier = 1
+			note := fmt.Sprintf("not re-verified for %d days", days)
+			if candidates[i].hint.Caution != "" {
+				candidates[i].hint.Caution += "; "
+			}
+			candidates[i].hint.Caution += note
+		}
+	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].matchTier != candidates[j].matchTier {
 			return candidates[i].matchTier < candidates[j].matchTier
@@ -289,6 +322,11 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		}
 		if candidates[i].stateTier != candidates[j].stateTier {
 			return candidates[i].stateTier < candidates[j].stateTier
+		}
+		// Staleness is a doubt signal at the same trust level: a stale
+		// confirmed item ranks below a fresh proposal of equal match.
+		if candidates[i].staleTier != candidates[j].staleTier {
+			return candidates[i].staleTier < candidates[j].staleTier
 		}
 		// Proven usefulness (B4) breaks ties between equally trusted items:
 		// rank stays grounded in the current match, but a track record of
@@ -350,7 +388,7 @@ func makeHintCandidate(item Knowledge, matched []string, matchTier int, skillTok
 		KnowledgeID: item.ID, Proposition: item.Proposition, State: item.State,
 		MatchedBy: boundedStrings(matched, 8), Caution: caution,
 		Evidence: boundedEvidence(item.Evidence, 8), History: boundedHistory(item.History, 5),
-	}, matchTier: matchTier, kindTier: kindTier, stateTier: stateTier, usefulTier: usefulnessTier(item), noveltyTier: noveltyTier(item, skillTokens), topic: primaryTopic(item)}, true
+	}, matchTier: matchTier, kindTier: kindTier, stateTier: stateTier, staleTier: 0, lastEvidence: LastEvidenceAt(item), usefulTier: usefulnessTier(item), noveltyTier: noveltyTier(item, skillTokens), topic: primaryTopic(item)}, true
 }
 
 // usefulnessTier ranks recorded hint outcomes (B4, plan §11): only judged

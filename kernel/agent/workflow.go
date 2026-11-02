@@ -4761,6 +4761,12 @@ func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, 
 	}
 	for _, outcome := range extraction.HintOutcomes {
 		data := map[string]any{"hint_id": outcome.HintID, "knowledge_id": outcome.KnowledgeID, "outcome": outcome.Outcome, "matcher": "extraction-judgment.v1"}
+		if outcome.Reason != "" {
+			// The run's justification becomes the recorded confirmation/
+			// refutation in the knowledge history (and the caution text of a
+			// challenged hint).
+			data["reason"] = outcome.Reason
+		}
 		if tier, ok := feedbackByKnowledge[outcome.KnowledgeID]; ok {
 			data["matched_by"] = tier
 		}
@@ -4892,14 +4898,26 @@ func emitAgingChallenge(ctx workflow.Context, activityCtx workflow.Context, look
 	if err := workflow.ExecuteActivity(lookupCtx, ActivityKnowledgeLookup, KnowledgeLookupQuery{Project: input.Project, KnowledgeID: aging.KnowledgeID}).Get(ctx, &lookup); err != nil {
 		return false
 	}
-	if !lookup.Exists || lookup.State != "proposed" {
+	// Replay-safe state expectation: pre-aging-state candidates carry an empty
+	// State and always meant "proposed" — the fallback keeps their recorded
+	// command sequence identical.
+	expectedState := aging.State
+	if expectedState == "" {
+		expectedState = "proposed"
+	}
+	if !lookup.Exists || lookup.State != expectedState {
 		return false
+	}
+	reason := fmt.Sprintf("unconfirmed for %.0f days without any use", aging.AgeDays)
+	if expectedState == "confirmed" {
+		reason = fmt.Sprintf("confirmed but not re-verified for %.0f days", aging.AgeDays)
 	}
 	data := map[string]any{
 		"knowledge_id":      aging.KnowledgeID,
 		"proposition":       lookup.Proposition,
 		"rule":              AgingRule,
-		"reason":            fmt.Sprintf("unconfirmed for %.0f days without any use", aging.AgeDays),
+		"reason":            reason,
+		"state":             expectedState,
 		"extractor_version": ExtractorVersion,
 		"extraction_id":     extractionID,
 	}

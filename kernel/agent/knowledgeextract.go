@@ -64,6 +64,11 @@ const AgingRule = "aging.v1"
 // re-derivation confirms it again, so aging is reversible.
 const AgingThreshold = 14 * 24 * time.Hour
 
+// ConfirmedAgingThreshold is the confirmed-item equivalent: a confirmed fact
+// that nothing re-verified for twice the proposal horizon goes back under
+// review — confirmation is evidence of its time, not a permanent title.
+const ConfirmedAgingThreshold = 2 * AgingThreshold
+
 // agingMaxPerPass bounds the aging sweep so one extraction pass cannot flood
 // the journal with challenge events.
 const agingMaxPerPass = 10
@@ -113,7 +118,10 @@ type KnowledgeCandidate struct {
 type AgingCandidate struct {
 	KnowledgeID string
 	Proposition string
-	AgeDays     float64
+	// State the item was seen in — the workflow re-checks it and the hygiene
+	// verdict renders it (proposals and confirmed age differently).
+	State   string
+	AgeDays float64
 }
 
 // HintFeedback reports whether a hint offered to this run was actually
@@ -134,6 +142,9 @@ type HintOutcome struct {
 	HintID      string
 	KnowledgeID string
 	Outcome     string // helpful | harmful
+	// Reason is the run's one-phrase justification — it lands in the
+	// knowledge history as the recorded confirmation/refutation.
+	Reason string
 }
 
 // KnowledgeExtractResult reports what the extractor produced.
@@ -378,7 +389,7 @@ You read one completed agent run and decide which durable facts are worth rememb
 
 Answer with a single JSON object and nothing else. No markdown fences, no commentary.
 Schema:
-{"candidates": [{"kind": "observation|claim", "proposition": "...", "topics": ["2-3 short lowercase themes"], "entities": ["named tools, files, services"], "evidence": ["event id from the trajectory"], "confidence": 0.0-1.0, "contradicts": "optional: existing knowledge id this run disproves"}], "hint_outcomes": [{"hint_id": "id of an offered hint from the context", "outcome": "helpful|harmful"}]}
+{"candidates": [{"kind": "observation|claim", "proposition": "...", "topics": ["2-3 short lowercase themes"], "entities": ["named tools, files, services"], "evidence": ["event id from the trajectory"], "confidence": 0.0-1.0, "contradicts": "optional: existing knowledge id this run disproves"}], "hint_outcomes": [{"hint_id": "id of an offered hint from the context", "outcome": "helpful|harmful", "reason": "short phrase: what this run proved about the hint"}]}
 
 What qualifies:
 - Facts that will help a future run in this project: how it is built, tested, deployed; non-obvious tool or CLI behavior; environment quirks; verified workarounds; documentation that turned out to be stale.
@@ -399,7 +410,7 @@ Rules:
 Hint outcomes (fill only when the context lists offered hints):
 - "helpful" = the run used the hint and it clearly moved the result forward (a command worked, an error was avoided, the answer got grounded in it).
 - "harmful" = following the hint wasted work or pushed the run in a wrong direction.
-- A hint with no clear effect on the result must NOT appear in hint_outcomes; an empty or absent hint_outcomes is the expected answer for most runs.
+- A hint with no clear effect on the result must NOT appear in hint_outcomes; an empty or absent hint_outcomes is the expected answer for most runs. Every verdict carries a short reason — one phrase on what the run PROVED about the hint («повторилось на практике», «не сработало: rm теперь блокируется») — it becomes the recorded confirmation/refutation in the knowledge history.
 - Only ids of hints listed in the context, each at most once.`
 
 // renderExtractionContext builds the compact extraction context (§7): the
@@ -480,6 +491,7 @@ type extractionCandidate struct {
 type extractionHintOutcome struct {
 	HintID  string `json:"hint_id"`
 	Outcome string `json:"outcome"`
+	Reason  string `json:"reason"`
 }
 
 // parseExtractionCandidates tolerates reasoning blocks, fences and prose
@@ -622,25 +634,30 @@ func normalizeAreaLabels(values []string) []string {
 	return normalized
 }
 
-// agingCandidates selects stale proposals for the aging sweep (rule aging.v1):
-// knowledge still in "proposed" that has neither been confirmed nor used for
-// AgingThreshold. Hint offers do not reset the clock — an item that keeps being
-// offered but never used is exactly the noise the sweep retires. Oldest first.
+// agingCandidates selects stale knowledge for the aging sweep (rule
+// aging.v1): proposals unconfirmed and unused past AgingThreshold, and
+// CONFIRMED items nothing re-verified past ConfirmedAgingThreshold —
+// «подтверждённое когда-то» не делает знание истинным навсегда, и вопрос
+// «а не устарело ли?» должен задаваться всем типам знаний. The clock resets on
+// confirming evidence only (re-derivation, use, a judged hint outcome) — hint
+// offers do not reset it: an item that keeps being offered but never
+// exercised is exactly the noise the sweep retires. Oldest first.
 func agingCandidates(knowledge []observation.Knowledge, now time.Time) []AgingCandidate {
 	var candidates []AgingCandidate
 	for _, item := range knowledge {
-		if item.State != "proposed" {
+		threshold := AgingThreshold
+		switch item.State {
+		case "proposed":
+		case "confirmed":
+			threshold = ConfirmedAgingThreshold
+		default:
+			continue // challenged and terminal items are already under review
+		}
+		age := now.Sub(observation.LastEvidenceAt(item))
+		if age < threshold {
 			continue
 		}
-		anchor := item.CreatedAt
-		if item.LastUsedAt != nil && item.LastUsedAt.After(anchor) {
-			anchor = *item.LastUsedAt
-		}
-		age := now.Sub(anchor)
-		if age < AgingThreshold {
-			continue
-		}
-		candidates = append(candidates, AgingCandidate{KnowledgeID: item.ID, Proposition: item.Proposition, AgeDays: age.Hours() / 24})
+		candidates = append(candidates, AgingCandidate{KnowledgeID: item.ID, Proposition: item.Proposition, State: item.State, AgeDays: age.Hours() / 24})
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].AgeDays > candidates[j].AgeDays })
 	if len(candidates) > agingMaxPerPass {
@@ -698,7 +715,7 @@ func validateHintOutcomes(raw []extractionHintOutcome, offered []offeredHint) []
 			continue
 		}
 		seen[hintID] = true
-		outcomes = append(outcomes, HintOutcome{HintID: hintID, KnowledgeID: hint.KnowledgeID, Outcome: outcome})
+		outcomes = append(outcomes, HintOutcome{HintID: hintID, KnowledgeID: hint.KnowledgeID, Outcome: outcome, Reason: truncateRunes(strings.TrimSpace(item.Reason), 200)})
 	}
 	if len(outcomes) == 0 {
 		return nil

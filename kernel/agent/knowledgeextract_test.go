@@ -236,6 +236,29 @@ func TestAgingCandidatesSelectsStaleProposals(t *testing.T) {
 	require.InDelta(t, 21.0, candidates[0].AgeDays, 0.1)
 }
 
+// Confirmed knowledge ages too (re-verification clock): nothing re-verified
+// past ConfirmedAgingThreshold goes back under review — «подтверждённое» is
+// evidence of its time, not a permanent title. Any confirming evidence
+// resets the clock.
+func TestAgingCandidatesAgesConfirmedKnowledge(t *testing.T) {
+	now := time.Now()
+	staleConfirmed := now.Add(-35 * 24 * time.Hour)
+	freshEnough := now.Add(-20 * 24 * time.Hour)
+	refreshed := now.Add(-60 * 24 * time.Hour)
+	verifiedAt := now.Add(-3 * 24 * time.Hour)
+	knowledge := []observation.Knowledge{
+		{ID: "ext/stale-confirmed", Proposition: "Old confirmed fact.", State: "confirmed", CreatedAt: staleConfirmed},
+		{ID: "ext/fresh-confirmed", Proposition: "Recently confirmed fact.", State: "confirmed", CreatedAt: freshEnough},
+		{ID: "ext/re-verified", Proposition: "Old but re-verified fact.", State: "confirmed", CreatedAt: refreshed,
+			History: []observation.KnowledgeTransition{{Type: "knowledge.confirmed", At: verifiedAt}}},
+	}
+	candidates := agingCandidates(knowledge, now)
+	require.Len(t, candidates, 1)
+	require.Equal(t, "ext/stale-confirmed", candidates[0].KnowledgeID)
+	require.Equal(t, "confirmed", candidates[0].State)
+	require.InDelta(t, 35.0, candidates[0].AgeDays, 0.1)
+}
+
 func TestAgingCandidatesCapsAndOrdersOldestFirst(t *testing.T) {
 	now := time.Now()
 	knowledge := make([]observation.Knowledge, 0, agingMaxPerPass+2)
@@ -408,19 +431,19 @@ func TestValidateHintOutcomesKeepsOnlyRealOffers(t *testing.T) {
 		{HintID: "h2", KnowledgeID: "ext/2", Proposition: "The indexer skips vendored directories."},
 	}
 	raw := []extractionHintOutcome{
-		{HintID: "h1", Outcome: "helpful"},
+		{HintID: "h1", Outcome: "helpful", Reason: "подтвердилось на практике"},
 		// Same hint judged twice — the second verdict is dropped.
 		{HintID: "h1", Outcome: "harmful"},
 		// A hint this run never saw: hallucinated id, must not survive.
 		{HintID: "h-ghost", Outcome: "helpful"},
 		// Not a verdict the contract knows.
 		{HintID: "h2", Outcome: "neutral"},
-		{HintID: "h2", Outcome: "harmful"},
+		{HintID: "h2", Outcome: "harmful", Reason: " rm теперь блокируется "},
 	}
 	outcomes := validateHintOutcomes(raw, offered)
 	require.Len(t, outcomes, 2)
-	require.Equal(t, HintOutcome{HintID: "h1", KnowledgeID: "ext/1", Outcome: "helpful"}, outcomes[0])
-	require.Equal(t, HintOutcome{HintID: "h2", KnowledgeID: "ext/2", Outcome: "harmful"}, outcomes[1])
+	require.Equal(t, HintOutcome{HintID: "h1", KnowledgeID: "ext/1", Outcome: "helpful", Reason: "подтвердилось на практике"}, outcomes[0])
+	require.Equal(t, HintOutcome{HintID: "h2", KnowledgeID: "ext/2", Outcome: "harmful", Reason: "rm теперь блокируется"}, outcomes[1])
 
 	// No offers means nothing to judge — even a full list of verdicts.
 	require.Empty(t, validateHintOutcomes(raw, nil))

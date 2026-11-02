@@ -32,6 +32,13 @@ func usefulnessFixture(t *testing.T, first []Event, second []Event) []Hint {
 	}
 	events = append(events, first...)
 	events = append(events, second...)
+	// Re-verify both after any verdicts: these tests judge RANKING at equal
+	// state — the verdict-driven lifecycle itself (helpful confirms, harmful
+	// challenges, unsupported harmful invalidates) is covered by
+	// TestHintOutcomesDriveLifecycle.
+	events = append(events,
+		transitionEvent("rz1", "k-b", "knowledge.confirmed", base.Add(20*time.Minute)),
+		transitionEvent("rz2", "k-a", "knowledge.confirmed", base.Add(21*time.Minute)))
 	return FindHints(hintKnowledge(t, events), HintQuery{Text: "reindex with the indexer", Entities: []string{"indexer"}, Limit: 8})
 }
 
@@ -53,8 +60,11 @@ func TestFindHintsUsefulnessPromotesProvenHelpful(t *testing.T) {
 
 func TestFindHintsUsefulnessDemotesHarmful(t *testing.T) {
 	base := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	// Harmful-majority record: a mixed verdict set (unsupported harmful×2
+	// would invalidate the node outright — see the lifecycle test), so the
+	// ranking factor is what decides here.
 	harmful := []Event{
-		hintOutcomeEvent("o1", "h1", "k-a", "harmful", base.Add(4*time.Minute)),
+		hintOutcomeEvent("o1", "h1", "k-a", "helpful", base.Add(4*time.Minute)),
 		hintOutcomeEvent("o2", "h2", "k-a", "harmful", base.Add(5*time.Minute)),
 		hintOutcomeEvent("o3", "h3", "k-a", "harmful", base.Add(6*time.Minute)),
 	}

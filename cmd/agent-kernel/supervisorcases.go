@@ -434,8 +434,14 @@ func triageKnowledgeCases(ctx context.Context, log *slog.Logger, activities *age
 			if !caseDue(done, agent.CaseKnowledgeHygiene, knowledgeID) {
 				continue
 			}
+			// The state the sweep found the item in (proposals and confirmed age
+			// differently); events predating the field are proposal challenges.
+			itemState, _ := challenge.Data["state"].(string)
+			if itemState == "" {
+				itemState = "proposed"
+			}
 			verdict, err := agent.HygieneCase(ctx, client, agent.HygieneCaseInput{
-				KnowledgeID: knowledgeID, Proposition: proposition, Reason: reason, State: "proposed",
+				KnowledgeID: knowledgeID, Proposition: proposition, Reason: reason, State: itemState,
 			})
 			if err != nil {
 				log.Warn("supervisor cases: hygiene", "knowledge", knowledgeID, "error", err.Error())

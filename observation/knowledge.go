@@ -116,8 +116,26 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			switch stringValue(event.Data, "outcome") {
 			case "helpful":
 				item.HelpfulOutcomes++
+				if item.State == "proposed" {
+					// A run judged this hint helpful in practice — the strongest
+					// confirmation short of a re-derivation.
+					item.State = "confirmed"
+				}
 			case "harmful":
 				item.HarmfulOutcomes++
+				switch {
+				case item.HarmfulOutcomes >= 2 && item.HelpfulOutcomes == 0:
+					// Two independent refutations and zero support: the run
+					// feedback loop kills the item. Re-proposing the fact later
+					// creates a fresh node — no tombstones (docs/knowledge-
+					// evolution.md).
+					item.State = "invalidated"
+				case item.State != "invalidated" && item.State != "superseded" && item.State != "corrected":
+					// One refutation — or conflicting verdicts — challenges: the
+					// hint block keeps offering it with the recorded reason as
+					// caution until a later verdict or a human settles it.
+					item.State = "challenged"
+				}
 			}
 		}
 		appendKnowledgeTransition(item, event)
@@ -457,6 +475,28 @@ func appendKnowledgeTransition(item *Knowledge, event Event) {
 		rule = "scope-promotion.v1"
 	}
 	item.History = append(item.History, KnowledgeTransition{EventID: event.EventID, SourceID: event.Source.ID, Type: event.Type, State: item.State, Rule: rule, At: event.OccurredAt, Actor: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...), Reason: stringValue(event.Data, "reason")})
+}
+
+// LastEvidenceAt returns the timestamp of the newest confirming evidence for
+// an item: creation, use, or a judged event (re-derivation, use, a hint
+// outcome). Hint OFFERS are deliberately not evidence — an item that keeps
+// being offered but never exercised keeps aging (aging.v1, docs/knowledge-
+// evolution.md §re-verification). The aging sweep and the hint staleness
+// clock both anchor on it.
+func LastEvidenceAt(item Knowledge) time.Time {
+	anchor := item.CreatedAt
+	if item.LastUsedAt != nil && item.LastUsedAt.After(anchor) {
+		anchor = *item.LastUsedAt
+	}
+	for _, transition := range item.History {
+		switch transition.Type {
+		case "knowledge.confirmed", "knowledge.used", "hint.used", "hint.outcome":
+			if transition.At.After(anchor) {
+				anchor = transition.At
+			}
+		}
+	}
+	return anchor
 }
 
 func appendUniqueEvidence(existing []Evidence, additions ...Evidence) []Evidence {
