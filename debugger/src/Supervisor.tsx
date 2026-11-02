@@ -664,8 +664,15 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                               onClick={async () => {
                                 setBusyAck(busyKey)
                                 try {
-                                  await workspaceApi.acknowledgeSupervisorVerdict(event.event_id)
-                                  await load(true)
+                                  // Durable ack set — the same endpoint the queue
+                                  // uses. The legacy journal-only ack rode the async
+                                  // outbox: a silent reload could land BEFORE the
+                                  // journal event did, the row resurrected, and the
+                                  // dismiss took a second click to stick.
+                                  await workspaceApi.ackSupervisorVerdicts([event.event_id])
+                                  // Merge-never-replace keeps the row hidden even if
+                                  // a reload races the outbox; no reload needed here.
+                                  setAcknowledged((prev) => new Set(prev).add(event.event_id))
                                 } catch (failure) {
                                   setError(message(failure))
                                 } finally {
