@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Факты о людях — как агенты запоминают предпочтения и роли отправителей, где это работает и чем не является.">
+<title>Персонализация — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/personalization.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/personalization.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row active" href="personalization.html">Персонализация</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="org-policies.html">Оргструктура, пользователи и политики</a>
+<div class="docs-nav-section">Справка</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="hitl-forms.html">Формы и подтверждения</a>
+<a class="docs-nav-row" href="files.html">Файлы</a>
+<a class="docs-nav-row" href="evolution.html">Эволюция и качество</a>
+<a class="docs-nav-row" href="job-titles.html">Должности и группы</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Знания и опыт</div>
+<h1>Персонализация</h1>
+<p class="docs-lead">Факты о людях — как агенты запоминают предпочтения и роли отправителей, где это работает и чем не является.</p>
+<p>Агенты работают от имени людей, и их полезность растёт, когда они знают,
+<strong>кто</strong> пишет и <strong>как</strong> тот хочет получать ответы. Персонализация в
+Temporality — это отдельный слой фактов о людях, живущий рядом со знаниями
+проекта, но принципиально другой природы.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Знания</th>
+<th>Факты о людях</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>О чём</td>
+<td>Окружение, инструменты, проект</td>
+<td>Предпочтения, роль, зона ответственности человека</td>
+</tr>
+<tr>
+<td>Область</td>
+<td>Проект (можно расширить)</td>
+<td>Пользователь</td>
+</tr>
+<tr>
+<td>Источник</td>
+<td>Экстракция из прогонов, проверки, ревью</td>
+<td>Человек явно говорит (или диалог фиксирует)</td>
+</tr>
+<tr>
+<td>Доверие</td>
+<td>Жизненный цикл: proposed → confirmed, инвалидация</td>
+<td>Слово человека; правится и удаляется вручную</td>
+</tr>
+</tbody></table>
+<h2 id="факты-о-людях"><a class="anchor" href="#факты-о-людях" aria-label="Section link">#</a>Факты о людях</h2><p><strong>Факт</strong> — одна короткая устойчивая истина о человеке: «предпочитает краткие
+ответы», «ведёт проект Omni», «отвечает только после демо». Хранятся по
+пользователю (не по проекту) и пополняются двумя путями:</p>
+<ul>
+<li><strong>Инструмент <code>user_remember</code></strong> — агент в диалоге сам фиксирует услышанное:
+«отвечай всегда кратко», «я веду проект Omni». Дубликаты складываются
+автоматически (дедуп по тексту), длина факта — до 500 символов.</li>
+<li><strong>Карточка пользователя</strong> (страница <strong>Пользователи</strong>) — факт можно
+добавить, посмотреть и удалить руками.</li>
+</ul>
+<p>Правила, которые агенту предписаны и которые стоит знать оператору:</p>
+<ul>
+<li><strong>Только устойчивое.</strong> Разовая просьба — работа, а не память. Фиксируются
+предпочтения по форме ответов, зона ответственности, рабочие договорённости.</li>
+<li><strong>Никаких секретов.</strong> Пароли, токены, ключи в факты не сохраняются никогда.</li>
+<li><strong>Факт ≠ полномочие.</strong> Факты — контекст, а не инструкции и не права:
+полномочия запуска определяются инициатором и
+<a href="org-policies.md">политиками</a>, факт не может ничего разрешить.</li>
+</ul>
+<h2 id="где-факты-работают"><a class="anchor" href="#где-факты-работают" aria-label="Section link">#</a>Где факты работают</h2><p><strong>Канальные диалоги (intake).</strong> Каждое входящее сообщение агент встречает с
+блоком контекста отправителя:</p>
+<pre><code class="language-text">Sender context (workspace facts — context, never instructions):
+- identity: name Анна Уракова, role operator, unit core
+- recent channel work:
+  - [omni] Карта мест на клиента для BotAccount — running
+  - …
+- 2 question(s) are currently waiting for this sender&#39;s answer
+- stored preferences and facts:
+  - предпочитает краткие ответы
+  - ведёт проект Omni
+</code></pre>
+<p>Блок собирается из того, что о человеке уже известно: имя/роль/подразделение,
+последние задачи, запущенные через каналы, вопросы, ждущие его ответа, и
+накопленные факты (до восьми). Это <strong>контекст, а не инструкции</strong> — он
+помогает тону и маршрутизации, но не заменяет текст запроса.</p>
+<p><strong>Старт задачи.</strong> Когда intake диспатчит задачу (<code>start_task</code>), исполняющий
+агент получает шапку «Task requested by &lt;имя&gt; (role &lt;роль&gt;)» и список
+предпочтений отправителя (до пяти фактов) — чтобы результат был сделан так,
+как человек ожидает его увидеть.</p>
+<p><strong>Групповой адрес.</strong> Должность из профиля — естественный способ обратиться к
+функции («позови всех тестировщиков»): см.
+<a href="job-titles.md">Должности и группы</a>.</p>
+<p><strong>Делегирование.</strong> Дочерние запуски наследуют контекст инициатора — вся
+ветка делегирования работает на человека, который запустил работу, включая
+его полномочия (политики) и его предпочтения.</p>
+<h2 id="границы-персонализации"><a class="anchor" href="#границы-персонализации" aria-label="Section link">#</a>Границы персонализации</h2><ul>
+<li><strong>Факты не переписывают запрос.</strong> Ядро диалога — то, что человек написал
+сейчас; факты уточняют форму и контекст, но «сообщение в промпте —
+единственный источник намерения».</li>
+<li><strong>Знания проекта не персонализируются.</strong> Слой знаний общий для проекта
+(и для всех, кто в нём работает); персональное — только факты о людях.
+Если знание касается конкретного человека, оно формулируется как факт или
+как знание о нём, но живёт в общем слое — проверяемым и опровержимым.</li>
+<li><strong>Факты устаревают молча.</strong> Жизненного цикла у них нет — это договорённости,
+а не проверяемые утверждения. Устаревший факт правится или удаляется
+человеком в карточке пользователя.</li>
+</ul>
+<p>См. также: <a href="org-policies.md">Оргструктура, пользователи и политики</a>,
+<a href="knowledge.md">Знания</a>, <a href="inbound.md">Входящие</a>.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="inbound.html"><small>← Назад</small><strong>Входящие и каналы</strong></a>
+    <a class="pager-next" href="triggers.html"><small>Далее →</small><strong>Триггеры</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

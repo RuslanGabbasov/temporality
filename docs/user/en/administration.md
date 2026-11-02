@@ -83,7 +83,9 @@ user cannot sign in (token or password) and drops out of delivery.
 
 A project scope limits visibility: a user sees only the allowed projects (or
 all with `*`). Login is password-first: the "Password | API token" form, with
-the token as a secondary mode for service accounts and scripts.
+the token as a secondary mode for service accounts and scripts. On facts
+about people (preferences, roles — agent personalization) — see
+[Personalization](personalization.md).
 
 ### Changing the password
 
@@ -93,13 +95,18 @@ sets its first one with an empty current field (minimum 8 characters, the
 session is not interrupted). With SSO enabled, password login remains for the
 admin only — IdP unavailability does not block operations (break-glass).
 
-## Org structure
+## Org structure and policies
 
 The **Organization** page (`/org`, admin): the department tree, users on
-nodes, node **policies** (model/MCP/token/network/sandbox restrictions; a ban
-on channel tasks for a subtree) and inheritance modes. A project binds to a
-node and inherits its policies and visibility: team access is configured by
-the structure, not by lists.
+nodes, node **policies** and role grants. A project binds to a node and
+inherits its policies and visibility: team access is configured by the
+structure, not by lists.
+
+The full model — **[Org structure, users and policies](org-policies.md)**:
+the tree and heads, roles and grants, every policy dimension (models, MCP,
+budgets, network, sandboxes, approval, egress, intake, filesystem areas),
+inheritance and the run's effective policy, execution identities for
+automated runs.
 
 ## Providers and models
 

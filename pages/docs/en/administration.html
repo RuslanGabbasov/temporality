@@ -25,11 +25,16 @@
 <a class="docs-nav-row" href="artifacts.html">Artifacts</a>
 <div class="docs-nav-section">Automation</div>
 <a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="personalization.html">Personalization</a>
+<div class="docs-nav-section">Automation</div>
 <a class="docs-nav-row" href="triggers.html">Triggers</a>
 <div class="docs-nav-section">Administration</div>
 <a class="docs-nav-row active" href="administration.html">Administration</a>
 <div class="docs-nav-section">Integrations</div>
 <a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="org-policies.html">Org structure, users and policies</a>
 <div class="docs-nav-section">Reference</div>
 <a class="docs-nav-row" href="reference.html">Reference</a>
 <div class="docs-nav-section">Operations</div>
@@ -128,17 +133,23 @@ user cannot sign in (token or password) and drops out of delivery.</p>
 </tbody></table>
 <p>A project scope limits visibility: a user sees only the allowed projects (or
 all with <code>*</code>). Login is password-first: the &quot;Password | API token&quot; form, with
-the token as a secondary mode for service accounts and scripts.</p>
+the token as a secondary mode for service accounts and scripts. On facts
+about people (preferences, roles — agent personalization) — see
+<a href="personalization.md">Personalization</a>.</p>
 <h3 id="changing-the-password"><a class="anchor" href="#changing-the-password" aria-label="Section link">#</a>Changing the password</h3><p>Your own — via the account menu (<code>POST /v1/auth/password</code>): an account with a
 password confirms the current one; an SSO account without a local password
 sets its first one with an empty current field (minimum 8 characters, the
 session is not interrupted). With SSO enabled, password login remains for the
 admin only — IdP unavailability does not block operations (break-glass).</p>
-<h2 id="org-structure"><a class="anchor" href="#org-structure" aria-label="Section link">#</a>Org structure</h2><p>The <strong>Organization</strong> page (<code>/org</code>, admin): the department tree, users on
-nodes, node <strong>policies</strong> (model/MCP/token/network/sandbox restrictions; a ban
-on channel tasks for a subtree) and inheritance modes. A project binds to a
-node and inherits its policies and visibility: team access is configured by
-the structure, not by lists.</p>
+<h2 id="org-structure-and-policies"><a class="anchor" href="#org-structure-and-policies" aria-label="Section link">#</a>Org structure and policies</h2><p>The <strong>Organization</strong> page (<code>/org</code>, admin): the department tree, users on
+nodes, node <strong>policies</strong> and role grants. A project binds to a node and
+inherits its policies and visibility: team access is configured by the
+structure, not by lists.</p>
+<p>The full model — <strong><a href="org-policies.md">Org structure, users and policies</a></strong>:
+the tree and heads, roles and grants, every policy dimension (models, MCP,
+budgets, network, sandboxes, approval, egress, intake, filesystem areas),
+inheritance and the run&#39;s effective policy, execution identities for
+automated runs.</p>
 <h2 id="providers-and-models"><a class="anchor" href="#providers-and-models" aria-label="Section link">#</a>Providers and models</h2><p>The <strong>Providers</strong> page (<code>/providers</code>): OpenAI-compatible endpoints (base URL,
 key, model catalog — fetched automatically on the <code>KERNEL_PROVIDER_MODELS_REFRESH</code>
 schedule plus a manual refresh and a probe check). A run&#39;s model is routed to

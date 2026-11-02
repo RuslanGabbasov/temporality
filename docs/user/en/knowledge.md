@@ -15,6 +15,10 @@ environment, tools and solutions, extracted from real trajectories. Unlike a
 status and a change history. The **Knowledge** page (`/knowledge`) serves both
 humans and agents (the `knowledge_explore` tool).
 
+Knowledge is about the project and its environment; personal preferences and
+people's roles live in a separate layer of facts — see
+[Personalization](personalization.md).
+
 ## Lifecycle
 
 ```

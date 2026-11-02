@@ -25,11 +25,16 @@
 <a class="docs-nav-row" href="artifacts.html">Артефакты</a>
 <div class="docs-nav-section">Автоматизация</div>
 <a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="personalization.html">Персонализация</a>
+<div class="docs-nav-section">Автоматизация</div>
 <a class="docs-nav-row" href="triggers.html">Триггеры</a>
 <div class="docs-nav-section">Администрирование</div>
 <a class="docs-nav-row active" href="administration.html">Администрирование</a>
 <div class="docs-nav-section">Интеграции</div>
 <a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="org-policies.html">Оргструктура, пользователи и политики</a>
 <div class="docs-nav-section">Справка</div>
 <a class="docs-nav-row" href="reference.html">Справочник</a>
 <div class="docs-nav-section">Эксплуатация</div>
@@ -128,17 +133,23 @@ tar песочниц в <code>./backups</code>, хранит 14 последни
 </tbody></table>
 <p>Область проектов ограничивает видимость: пользователь видит только
 разрешённые проекты (или все при <code>*</code>). Вход password-first: форма «Пароль |
-API-токен», токен — вторичный режим для сервисных аккаунтов и скриптов.</p>
+API-токен», токен — вторичный режим для сервисных аккаунтов и скриптов.
+О фактах о людях (предпочтения, роли — персонализация агентов) —
+<a href="personalization.md">Персонализация</a>.</p>
 <h3 id="смена-пароля"><a class="anchor" href="#смена-пароля" aria-label="Section link">#</a>Смена пароля</h3><p>Своя — через меню аккаунта (<code>POST /v1/auth/password</code>): аккаунт с паролем
 подтверждает текущий, SSO-аккаунт без локального пароля задаёт первый с пустым
 полем current (минимум 8 символов, сессия не прерывается). При включённом SSO
 парольный вход остаётся только у admin — недоступность IdP не блокирует
 эксплуатацию (break-glass).</p>
-<h2 id="оргструктура"><a class="anchor" href="#оргструктура" aria-label="Section link">#</a>Оргструктура</h2><p>Страница <strong>Организация</strong> (<code>/org</code>, admin): дерево подразделений, пользователи
-на узлах, <strong>политики</strong> на узлах (ограничения моделей, MCP, токенов, сети,
-песочниц; запрет канальных задач для поддерева) и режимы наследования.
-Проект привязывается к узлу — наследует его политики и область видимости:
-доступы команд настраиваются структурой, а не списками.</p>
+<h2 id="оргструктура-и-политики"><a class="anchor" href="#оргструктура-и-политики" aria-label="Section link">#</a>Оргструктура и политики</h2><p>Страница <strong>Организация</strong> (<code>/org</code>, admin): дерево подразделений, пользователи
+на узлах, <strong>политики</strong> на узлах и гранты ролей. Проект привязывается к узлу —
+наследует его политики и область видимости: доступы команд настраиваются
+структурой, а не списками.</p>
+<p>Полный разбор модели — <strong><a href="org-policies.md">Оргструктура, пользователи и политики</a></strong>:
+дерево и руководители, роли и гранты, все измерения политик (модели, MCP,
+бюджеты, сеть, песочницы, approval, egress, intake, файловые области),
+наследование и effective-политика запуска, execution identity для
+автоматических запусков.</p>
 <h2 id="провайдеры-и-модели"><a class="anchor" href="#провайдеры-и-модели" aria-label="Section link">#</a>Провайдеры и модели</h2><p>Страница <strong>Провайдеры</strong> (<code>/providers</code>): OpenAI-совместимые эндпоинты
 (base URL, ключ, каталог моделей — автополучение по расписанию
 <code>KERNEL_PROVIDER_MODELS_REFRESH</code> + ручной refresh и probe-проверка). Модель

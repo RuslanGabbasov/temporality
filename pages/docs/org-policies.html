@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Дерево подразделений, роли и гранты, проекты и видимость. Политики Org Policies — все измерения, наследование и effective-политика запуска.">
+<title>Оргструктура, пользователи и политики — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/org-policies.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/org-policies.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="personalization.html">Персонализация</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row active" href="org-policies.html">Оргструктура, пользователи и политики</a>
+<div class="docs-nav-section">Справка</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="hitl-forms.html">Формы и подтверждения</a>
+<a class="docs-nav-row" href="files.html">Файлы</a>
+<a class="docs-nav-row" href="evolution.html">Эволюция и качество</a>
+<a class="docs-nav-row" href="job-titles.html">Должности и группы</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Администрирование</div>
+<h1>Оргструктура, пользователи и политики</h1>
+<p class="docs-lead">Дерево подразделений, роли и гранты, проекты и видимость. Политики Org Policies — все измерения, наследование и effective-политика запуска.</p>
+<p>Три слоя доступа в Temporality работают вместе: <strong>кто человек</strong> (пользователь,
+роль, должность), <strong>где он стоит</strong> (оргструктура, подразделения, проекты) и
+<strong>что ему разрешено</strong> (политики на подразделениях). Управление — страница
+<strong>Организация</strong> (<code>/org</code>, admin) и <strong>Пользователи</strong> (<code>/users</code>, admin).</p>
+<h2 id="оргструктура"><a class="anchor" href="#оргструктура" aria-label="Section link">#</a>Оргструктура</h2><p>Дерево подразделений — способ выразить, как устроена компания, и через него
+настраиваются доступы: структурой, а не разрозненными списками.</p>
+<ul>
+<li><strong>Узел</strong> (<code>OrgUnit</code>) — подразделение: корень или ребёнок другого узла, у
+каждого есть стабильный id и тип (<code>kind</code> — отдел, команда, направление).</li>
+<li><strong>Руководитель узла</strong> (<code>head</code>) — явная грань «начальник»: цель эскалаций и
+адресат по умолчанию для командных запросов. Руководитель наследуется
+снизу вверх: узел без своего руководителя берёт ближайшего от предка.</li>
+<li><strong>Проект привязывается к узлу</strong> — наследует его политики и входит в его
+область видимости. Один проект — одна привязка; через неё действуют
+политики подразделения.</li>
+<li><strong>Пользователь принадлежит одному узлу</strong> (<code>org_unit_id</code>). Пустой узел =
+«вне структуры»: видит больше (переходная семантика на время раскатки —
+назначьте узлы, чтобы сузить).</li>
+</ul>
+<p>Историческая деталь: знания и доступы команд настраиваются именно
+структурой — при росте компании вы переносите людей по дереву, а не
+переписываете списки.</p>
+<h2 id="пользователи-и-роли"><a class="anchor" href="#пользователи-и-роли" aria-label="Section link">#</a>Пользователи и роли</h2><p>Страница <strong>Пользователи</strong> (<code>/users</code>): создание, роль, должность, узел,
+bearer-токены, пароль, каналы уведомлений, тумблер активности.</p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Значение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Роль</strong></td>
+<td>Платформенные права: <code>reader &lt; writer &lt; operator &lt; admin</code> (алиас <code>viewer</code> = <code>reader</code>)</td>
+</tr>
+<tr>
+<td><strong>Должность</strong></td>
+<td>Функция человека («Инженер тестирования») — естественный адрес для групповых вопросов, см. <a href="job-titles.md">Должности и группы</a></td>
+</tr>
+<tr>
+<td><strong>Узел</strong></td>
+<td>Положение в оргструктуре — ведёт к политикам подразделения</td>
+</tr>
+<tr>
+<td><strong>Проекты</strong></td>
+<td>Область видимости: только разрешённые проекты (или все при <code>*</code>)</td>
+</tr>
+</tbody></table>
+<table>
+<thead>
+<tr>
+<th>Роль</th>
+<th>Может</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>reader</td>
+<td>Читать: дашборд, трассы, знания, таймлайн</td>
+</tr>
+<tr>
+<td>writer</td>
+<td>Запускать задачи, создавать ресурсы проекта</td>
+</tr>
+<tr>
+<td>operator</td>
+<td>Подтверждения, reconcile неопределённых операций, invalidation знаний</td>
+</tr>
+<tr>
+<td>admin</td>
+<td>Пользователи, провайдеры, каналы, оргструктура, всё остальное</td>
+</tr>
+</tbody></table>
+<p><strong>Гранты ролей на подразделении</strong> (<code>org_unit_role</code>) повышают роль человека
+локально: грант <code>operator</code> на узле действует на узле и всём его поддереве,
+не меняя глобальную роль. Так «старший инженер своего отдела» получает
+права оператора только в своей части структуры.</p>
+<p>Аутентификация — пароль-first (форма «Пароль | API-токен»), токен — для
+сервисных аккаунтов и скриптов; внешний SSO (OIDC) с JIT-провижинингом —
+<a href="administration.md">Администрирование → Внешняя аутентификация</a>.</p>
+<h2 id="политики-org-policies"><a class="anchor" href="#политики-org-policies" aria-label="Section link">#</a>Политики (Org Policies)</h2><p>Политика — набор ограничений, висящих на узле оргструктуры (или на
+установке целиком, если узел не указан). Наследование сверху вниз: на
+запуск действует <strong>слияние всех политик</strong> позиции — глобальной, узлов
+проекта и узла инициатора — по принципу «только сужает». Дочерняя политика
+не может ослабить ограничение предка.</p>
+<table>
+<thead>
+<tr>
+<th>Измерение</th>
+<th>Что ограничивает</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>allowed_models</code></td>
+<td>Какие модели может использовать агент (список имён; пусто — любые)</td>
+</tr>
+<tr>
+<td><code>allowed_mcp</code></td>
+<td>Какие MCP-серверы доступны</td>
+</tr>
+<tr>
+<td><code>max_tokens</code>, <code>max_budget_usd</code>, <code>timeout_seconds</code></td>
+<td>Потолок одного запуска: токены, доллары, время</td>
+</tr>
+<tr>
+<td><code>network_mode: deny</code></td>
+<td>Полностью отключает сеть песочницы</td>
+</tr>
+<tr>
+<td><code>sandbox_mode: read_only</code></td>
+<td>Песочница только на чтение</td>
+</tr>
+<tr>
+<td><code>approval_mode: tools</code></td>
+<td>Значимые инструменты требуют подтверждения человека (+ поведенческий мониторинг)</td>
+</tr>
+<tr>
+<td><code>egress_allowlist</code></td>
+<td>Базовый список внешних адресов (объединяется со списком агента — политика расширяет базу)</td>
+</tr>
+<tr>
+<td><code>intake_mode: deny</code></td>
+<td>Запрещает канальные задачи для поддерева</td>
+</tr>
+<tr>
+<td><code>filesystem: read / write / deny</code></td>
+<td>Области файловой системы: чтение, запись (запись всегда внутри чтения), абсолютный запрет — см. ниже</td>
+</tr>
+</tbody></table>
+<h3 id="файловые-правила"><a class="anchor" href="#файловые-правила" aria-label="Section link">#</a>Файловые правила</h3><p><code>filesystem</code> задаётся glob-масками над путями проекта:</p>
+<pre><code class="language-json">{
+  &quot;filesystem&quot;: {
+    &quot;read&quot;:  [&quot;**&quot;],
+    &quot;write&quot;: [&quot;src/**&quot;, &quot;tests/**&quot;, &quot;docs/**&quot;],
+    &quot;deny&quot;:  [&quot;secrets/**&quot;, &quot;deploy/production/**&quot;]
+  }
+}
+</code></pre>
+<ul>
+<li><code>read</code> / <code>write</code> — разрешённые области; <strong>запись никогда не бывает без
+чтения</strong>: область записи — пересечение write и read.</li>
+<li><code>deny</code> — абсолютный запрет на чтение и запись; объединяется по уровням
+слияния (запрет предка не отменяется дочерней политикой).</li>
+<li>Пустое/неуказанное значение = без ограничений. Маски: <code>**</code>, <code>a/b/**</code>,
+<code>*</code>, <code>?</code>, <code>[...]</code> — нормализованные относительные пути через <code>/</code>.</li>
+<li>Ограничения работают на уровне исполнения: встроенные файловые
+инструменты ядра и команды в песочнице (Landlock) получают одну и ту же
+политику — обойти через <code>run_command</code> нельзя.</li>
+</ul>
+<h3 id="effective-политика-запуска"><a class="anchor" href="#effective-политика-запуска" aria-label="Section link">#</a>Effective-политика запуска</h3><p>Политика <strong>фиксируется при старте запуска</strong> и не меняется по ходу:
+изменения политик не повышают полномочий уже работающего процесса (новые
+запуски берут актуальную). В журнале запуска сохраняется версия снимка
+(<code>policy_version</code>) — по ней видно, какими правилами был авторизован ран.</p>
+<p><strong>Делегирование не расширяет доступ</strong>: дочерние запуски получают security
+context инициатора — вся ветка дерева делегирования работает полномочиями
+человека, который запустил работу, независимо от ролей Lead/Coder/Reviewer
+у агентов.</p>
+<p><strong>Автоматические запуски</strong> (webhook, расписание, триггеры) работают от
+имени <strong>execution identity</strong> — сервисной идентичности со своими
+разрешёнными списками и перепроверяемыми на каждом критическом шаге
+целями-людьми (<code>human_targets</code>). Политики для них считаются от позиции
+идентичности.</p>
+<h3 id="как-это-выглядит-в-интерфейсе"><a class="anchor" href="#как-это-выглядит-в-интерфейсе" aria-label="Section link">#</a>Как это выглядит в интерфейсе</h3><ul>
+<li><strong>Организация</strong> (<code>/org</code>): дерево, пользователи на узлах, политики на
+узлах, гранты ролей. У политики — карточка с источниками: видно, какой
+уровень что ограничил.</li>
+<li><strong>Организация → Effective-политика</strong>: итоговое слияние для узла со всеми
+вкладами предков.</li>
+</ul>
+<p>См. также: <a href="personalization.md">Персонализация</a> — как знания агентов
+учитывают людей; внутренняя детали — <code>docs/org-structure.md</code>.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="external-agents.html"><small>← Назад</small><strong>Внешние агенты (experience-слой)</strong></a>
+    <a class="pager-next" href="reference.html"><small>Далее →</small><strong>Справочник</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

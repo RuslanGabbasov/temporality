@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="The department tree, roles and grants, projects and visibility. Org Policies — every dimension, inheritance and the run's effective policy.">
+<title>Org structure, users and policies — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../org-policies.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/org-policies.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="personalization.html">Personalization</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<div class="docs-nav-section">Integrations</div>
+<a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row active" href="org-policies.html">Org structure, users and policies</a>
+<div class="docs-nav-section">Reference</div>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="hitl-forms.html">Forms & approvals</a>
+<a class="docs-nav-row" href="files.html">Files</a>
+<a class="docs-nav-row" href="evolution.html">Evolution & quality</a>
+<a class="docs-nav-row" href="job-titles.html">Job titles & groups</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Administration</div>
+<h1>Org structure, users and policies</h1>
+<p class="docs-lead">The department tree, roles and grants, projects and visibility. Org Policies — every dimension, inheritance and the run's effective policy.</p>
+<p>Three access layers work together in Temporality: <strong>who the person is</strong>
+(user, role, job title), <strong>where they stand</strong> (org structure, units,
+projects) and <strong>what they are allowed to do</strong> (policies on units). Managed
+on the <strong>Organization</strong> page (<code>/org</code>, admin) and <strong>Users</strong> (<code>/users</code>, admin).</p>
+<h2 id="org-structure"><a class="anchor" href="#org-structure" aria-label="Section link">#</a>Org structure</h2><p>The department tree expresses how the company is organized — and configures
+access through it: by structure, not by scattered lists.</p>
+<ul>
+<li><strong>Unit</strong> (<code>OrgUnit</code>) — a department: a root or a child of another unit,
+with a stable id and a <code>kind</code> (department, team, direction).</li>
+<li><strong>Unit head</strong> — the explicit manager edge: the escalation target and the
+default addressee for team requests. Heads resolve bottom-up: a unit
+without its own head inherits the nearest ancestor&#39;s.</li>
+<li><strong>A project binds to one unit</strong> — inheriting its policies and visibility
+scope. One project, one binding; the unit&#39;s policies act through it.</li>
+<li><strong>A user belongs to one unit</strong> (<code>org_unit_id</code>). An empty unit = &quot;outside
+the structure&quot;: sees more (transition semantics while you roll out —
+assign units to narrow down).</li>
+</ul>
+<h2 id="users-and-roles"><a class="anchor" href="#users-and-roles" aria-label="Section link">#</a>Users and roles</h2><p>The <strong>Users</strong> page (<code>/users</code>): creation, role, job title, unit, bearer
+tokens, password, notification channels, the active toggle.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Role</strong></td>
+<td>Platform permissions: <code>reader &lt; writer &lt; operator &lt; admin</code> (alias <code>viewer</code> = <code>reader</code>)</td>
+</tr>
+<tr>
+<td><strong>Job title</strong></td>
+<td>The person&#39;s function (&quot;QA engineer&quot;) — the natural address for group questions, see <a href="job-titles.md">Job titles and groups</a></td>
+</tr>
+<tr>
+<td><strong>Unit</strong></td>
+<td>Position in the org structure — leads to the unit&#39;s policies</td>
+</tr>
+<tr>
+<td><strong>Projects</strong></td>
+<td>Visibility scope: only allowed projects (or all with <code>*</code>)</td>
+</tr>
+</tbody></table>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Can</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>reader</td>
+<td>Read: dashboard, traces, knowledge, timeline</td>
+</tr>
+<tr>
+<td>writer</td>
+<td>Start tasks, create project resources</td>
+</tr>
+<tr>
+<td>operator</td>
+<td>Approvals, reconcile undecided operations, knowledge invalidation</td>
+</tr>
+<tr>
+<td>admin</td>
+<td>Users, providers, channels, org structure, everything else</td>
+</tr>
+</tbody></table>
+<p><strong>Org-unit role grants</strong> (<code>org_unit_role</code>) upgrade a person&#39;s role locally:
+a grant of <code>operator</code> on a unit applies to the unit and its whole subtree
+without changing the global role — &quot;senior engineer of their department&quot;
+gets operator rights only in their part of the structure.</p>
+<p>Authentication is password-first (the &quot;Password | API token&quot; form); tokens
+serve service accounts and scripts; external SSO (OIDC) with JIT
+provisioning — <a href="administration.md">Administration → External authentication</a>.</p>
+<h2 id="policies-org-policies"><a class="anchor" href="#policies-org-policies" aria-label="Section link">#</a>Policies (Org Policies)</h2><p>A policy is a set of restrictions attached to an org unit (or to the whole
+installation when no unit is set). Inheritance flows top-down: a run is
+governed by the <strong>merge of every policy</strong> in its position — global, the
+project&#39;s units and the initiator&#39;s unit — by the rule &quot;can only narrow&quot;.
+A child policy can never loosen an ancestor&#39;s restriction.</p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Restricts</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>allowed_models</code></td>
+<td>Which models the agent may use (name list; empty = any)</td>
+</tr>
+<tr>
+<td><code>allowed_mcp</code></td>
+<td>Which MCP servers are available</td>
+</tr>
+<tr>
+<td><code>max_tokens</code>, <code>max_budget_usd</code>, <code>timeout_seconds</code></td>
+<td>Per-run ceilings: tokens, dollars, time</td>
+</tr>
+<tr>
+<td><code>network_mode: deny</code></td>
+<td>Disables the sandbox network entirely</td>
+</tr>
+<tr>
+<td><code>sandbox_mode: read_only</code></td>
+<td>Read-only sandbox</td>
+</tr>
+<tr>
+<td><code>approval_mode: tools</code></td>
+<td>Consequential tools require human approval (+ behavior monitoring)</td>
+</tr>
+<tr>
+<td><code>egress_allowlist</code></td>
+<td>The external-destination baseline (unioned with the agent&#39;s own list)</td>
+</tr>
+<tr>
+<td><code>intake_mode: deny</code></td>
+<td>Bans channel-initiated tasks for the subtree</td>
+</tr>
+<tr>
+<td><code>filesystem: read / write / deny</code></td>
+<td>Filesystem areas: read, write (write is always inside read), absolute deny — see below</td>
+</tr>
+</tbody></table>
+<h3 id="file-rules"><a class="anchor" href="#file-rules" aria-label="Section link">#</a>File rules</h3><p><code>filesystem</code> uses glob masks over project paths:</p>
+<pre><code class="language-json">{
+  &quot;filesystem&quot;: {
+    &quot;read&quot;:  [&quot;**&quot;],
+    &quot;write&quot;: [&quot;src/**&quot;, &quot;tests/**&quot;, &quot;docs/**&quot;],
+    &quot;deny&quot;:  [&quot;secrets/**&quot;, &quot;deploy/production/**&quot;]
+  }
+}
+</code></pre>
+<ul>
+<li><code>read</code> / <code>write</code> — allowed areas; <strong>write never exists without read</strong>:
+the writable area is the intersection of write and read.</li>
+<li><code>deny</code> — an absolute ban on reading and writing; unions across merge
+levels (a child policy cannot un-deny an ancestor&#39;s ban).</li>
+<li>Empty/unset means no restriction. Masks: <code>**</code>, <code>a/b/**</code>, <code>*</code>, <code>?</code>, <code>[...]</code>
+over normalized relative paths with <code>/</code>.</li>
+<li>Enforcement happens at execution: the kernel&#39;s built-in file tools and
+sandbox commands (Landlock) get the same policy — <code>run_command</code> cannot
+bypass it.</li>
+</ul>
+<h3 id="the-run39s-effective-policy"><a class="anchor" href="#the-run39s-effective-policy" aria-label="Section link">#</a>The run&#39;s effective policy</h3><p>The policy is <strong>frozen at run start</strong> and never changes mid-run: policy
+changes do not raise a running process&#39;s privileges (new runs take the
+current one). The journal keeps the snapshot version (<code>policy_version</code>) —
+it shows which rules authorized the run.</p>
+<p><strong>Delegation never widens access</strong>: child runs inherit the initiator&#39;s
+security context — the whole delegation tree works with the permissions of
+the human who started the work, regardless of the agents&#39; Lead/Coder/
+Reviewer roles.</p>
+<p><strong>Automated runs</strong> (webhooks, schedules, triggers) act as an <strong>execution
+identity</strong> — a service identity with its own allowed lists and
+human_targets re-checked at every critical step. Policies resolve from the
+identity&#39;s org position.</p>
+<h3 id="in-the-interface"><a class="anchor" href="#in-the-interface" aria-label="Section link">#</a>In the interface</h3><ul>
+<li><strong>Organization</strong> (<code>/org</code>): the tree, users on units, policies on units,
+role grants. A policy card shows its sources — which level restricted
+what.</li>
+<li><strong>Organization → Effective policy</strong>: the merged result for a unit with
+every ancestor&#39;s contribution.</li>
+</ul>
+<p>See also: <a href="personalization.md">Personalization</a> — how agent knowledge
+accounts for people; internals — <code>docs/org-structure.md</code>.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="external-agents.html"><small>← Previous</small><strong>External agents (experience layer)</strong></a>
+    <a class="pager-next" href="reference.html"><small>Next →</small><strong>Reference</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

@@ -89,6 +89,9 @@ The full list with semantics is in the root `README.md` and `docs/runbook.md`.
 - **Amendment** — a channel message continuing an existing task.
 - **Saga** — tracked long-running work across several runs and agents.
 - **Knowledge** — a statement with provenance, a status and a history.
+- **User fact** — a durable statement about a person (preferences, role, ownership); context for agents, never a permission or an instruction.
+- **Policy (Org Policy)** — a set of restrictions on an org unit (models, MCP, budgets, network, sandbox, egress, intake, filesystem areas); inherited and merged restrictively.
+- **Execution identity** — the service identity of automated runs (webhooks, schedules, triggers) with its own allowed lists.
 - **Hint** — a compact excerpt of experience fed to the agent.
 - **Skill** — a versioned procedure with a contract and evaluations.
 - **Artifact** — a document in the registry with versions and human approval, loaded on demand.
@@ -100,7 +103,8 @@ The full list with semantics is in the root `README.md` and `docs/runbook.md`.
 The architecture and internals are described in the repository's `docs/`:
 `architecture.md` (overview), `event-model.md`, `knowledge-model.md`,
 `agent-quality-loop.md`, `living-skills.md`, `agent-delegation.md`,
-`inbound-messages.md`, `sandbox-security-matrix.md`,
+`inbound-messages.md`, `org-structure.md` (org structure, policies,
+execution identity), `sandbox-security-matrix.md`,
 `failure-model.md`, `failure-reconciliation.md`, `resilience-and-scale.md`
 (fault tolerance and scale bounds: replay, workflow history, Continue-As-New),
 `runbook.md` (operations) and others.

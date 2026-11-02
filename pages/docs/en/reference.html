@@ -25,11 +25,16 @@
 <a class="docs-nav-row" href="artifacts.html">Artifacts</a>
 <div class="docs-nav-section">Automation</div>
 <a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="personalization.html">Personalization</a>
+<div class="docs-nav-section">Automation</div>
 <a class="docs-nav-row" href="triggers.html">Triggers</a>
 <div class="docs-nav-section">Administration</div>
 <a class="docs-nav-row" href="administration.html">Administration</a>
 <div class="docs-nav-section">Integrations</div>
 <a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="org-policies.html">Org structure, users and policies</a>
 <div class="docs-nav-section">Reference</div>
 <a class="docs-nav-row active" href="reference.html">Reference</a>
 <div class="docs-nav-section">Operations</div>
@@ -348,6 +353,9 @@
 <li><strong>Amendment</strong> — a channel message continuing an existing task.</li>
 <li><strong>Saga</strong> — tracked long-running work across several runs and agents.</li>
 <li><strong>Knowledge</strong> — a statement with provenance, a status and a history.</li>
+<li><strong>User fact</strong> — a durable statement about a person (preferences, role, ownership); context for agents, never a permission or an instruction.</li>
+<li><strong>Policy (Org Policy)</strong> — a set of restrictions on an org unit (models, MCP, budgets, network, sandbox, egress, intake, filesystem areas); inherited and merged restrictively.</li>
+<li><strong>Execution identity</strong> — the service identity of automated runs (webhooks, schedules, triggers) with its own allowed lists.</li>
 <li><strong>Hint</strong> — a compact excerpt of experience fed to the agent.</li>
 <li><strong>Skill</strong> — a versioned procedure with a contract and evaluations.</li>
 <li><strong>Artifact</strong> — a document in the registry with versions and human approval, loaded on demand.</li>
@@ -357,14 +365,15 @@
 <h2 id="engineering-documents"><a class="anchor" href="#engineering-documents" aria-label="Section link">#</a>Engineering documents</h2><p>The architecture and internals are described in the repository&#39;s <code>docs/</code>:
 <code>architecture.md</code> (overview), <code>event-model.md</code>, <code>knowledge-model.md</code>,
 <code>agent-quality-loop.md</code>, <code>living-skills.md</code>, <code>agent-delegation.md</code>,
-<code>inbound-messages.md</code>, <code>sandbox-security-matrix.md</code>,
+<code>inbound-messages.md</code>, <code>org-structure.md</code> (org structure, policies,
+execution identity), <code>sandbox-security-matrix.md</code>,
 <code>failure-model.md</code>, <code>failure-reconciliation.md</code>, <code>resilience-and-scale.md</code>
 (fault tolerance and scale bounds: replay, workflow history, Continue-As-New),
 <code>runbook.md</code> (operations) and others.</p>
 
 
   <nav class="docs-pager">
-    <a class="pager-prev" href="external-agents.html"><small>← Previous</small><strong>External agents (experience layer)</strong></a>
+    <a class="pager-prev" href="org-policies.html"><small>← Previous</small><strong>Org structure, users and policies</strong></a>
     <a class="pager-next" href="operations.html"><small>Next →</small><strong>Harness Operations</strong></a>
   </nav>
 </article>

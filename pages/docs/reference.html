@@ -25,11 +25,16 @@
 <a class="docs-nav-row" href="artifacts.html">Артефакты</a>
 <div class="docs-nav-section">Автоматизация</div>
 <a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="personalization.html">Персонализация</a>
+<div class="docs-nav-section">Автоматизация</div>
 <a class="docs-nav-row" href="triggers.html">Триггеры</a>
 <div class="docs-nav-section">Администрирование</div>
 <a class="docs-nav-row" href="administration.html">Администрирование</a>
 <div class="docs-nav-section">Интеграции</div>
 <a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="org-policies.html">Оргструктура, пользователи и политики</a>
 <div class="docs-nav-section">Справка</div>
 <a class="docs-nav-row active" href="reference.html">Справочник</a>
 <div class="docs-nav-section">Эксплуатация</div>
@@ -348,6 +353,9 @@
 <li><strong>Поправка (amendment)</strong> — канальное сообщение, продолжающее существующую задачу.</li>
 <li><strong>Сага</strong> — отслеживаемая длительная работа через несколько ранов и агентов.</li>
 <li><strong>Знание</strong> — утверждение с происхождением, статусом и историей.</li>
+<li><strong>Факт о пользователе</strong> — устойчивое утверждение о человеке (предпочтения, роль, зона ответственности); контекст для агентов, не право и не инструкция.</li>
+<li><strong>Политика (Org Policy)</strong> — набор ограничений на узле оргструктуры (модели, MCP, бюджеты, сеть, песочница, egress, intake, файловые области); наследуется и сливается рестриктивно.</li>
+<li><strong>Execution identity</strong> — сервисная идентичность автоматических запусков (webhook, расписание, триггеры) со своими разрешёнными списками.</li>
 <li><strong>Подсказка (hint)</strong> — компактная выдержка опыта, подставляемая агенту.</li>
 <li><strong>Навык</strong> — версионируемая процедура с контрактом и оценками.</li>
 <li><strong>Артефакт</strong> — документ в реестре с версиями и согласованием, подгружаемый по требованию.</li>
@@ -357,6 +365,7 @@
 <h2 id="инженерные-документы"><a class="anchor" href="#инженерные-документы" aria-label="Section link">#</a>Инженерные документы</h2><p>Архитектура и внутренние механизмы описаны в <code>docs/</code> репозитория: <code>architecture.md</code>
 (общая), <code>event-model.md</code>, <code>knowledge-model.md</code>, <code>agent-quality-loop.md</code>,
 <code>living-skills.md</code>, <code>agent-delegation.md</code>, <code>inbound-messages.md</code>,
+<code>org-structure.md</code> (оргструктура, политики, execution identity),
 <code>sandbox-security-matrix.md</code>, <code>failure-model.md</code>, <code>failure-reconciliation.md</code>,
 <code>resilience-and-scale.md</code> (отказоустойчивость и границы масштаба: replay,
 история воркфлоу, Continue-As-New), <code>runbook.md</code>
@@ -364,7 +373,7 @@
 
 
   <nav class="docs-pager">
-    <a class="pager-prev" href="external-agents.html"><small>← Назад</small><strong>Внешние агенты (experience-слой)</strong></a>
+    <a class="pager-prev" href="org-policies.html"><small>← Назад</small><strong>Оргструктура, пользователи и политики</strong></a>
     <a class="pager-next" href="operations.html"><small>Далее →</small><strong>Эксплуатация харнеса</strong></a>
   </nav>
 </article>
