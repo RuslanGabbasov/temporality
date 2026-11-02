@@ -638,24 +638,7 @@ func (a *Activities) visionModelFor(ctx context.Context) string {
 }
 
 func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.Completion, error) {
-	// Memory quota gate: a short bounded claim — the workflow owns the real
-	// waiting (it polls the gate verdict and sleeps deterministically), so a
-	// busy gate here means "lost the race this round": retryable error, the
-	// activity retry ladder re-claims, and the slot dies with the process —
-	// exactly right on a worker restart: the replaying workflows re-acquire.
-	if gateErr := gate().Enter(); gateErr == nil {
-		defer gate().Leave()
-	} else {
-		return llm.Completion{}, temporal.NewApplicationError("model gate: at capacity, re-claiming", "ModelGateBusy", gateErr)
-	}
 	// A retried attempt is the frozen-host recovery path (see the workflow
-	// comment on call_model options): after a sleeping machine burns the
-	// StartToClose ceiling, this is a fresh start. The journal cannot rely on
-	// model.started (emitted once per turn by the deterministic workflow), so
-	// retried attempts and stream fallbacks are journaled directly through the
-	// outbox under non-colliding ids — without them a dead provider looks like
-	// a dead run for the whole silent retry ladder. GetLogger panics outside a
-	// real activity context, hence the IsActivity guard.
 	attempt := 1
 	activityID := ""
 	if activity.IsActivity(ctx) {

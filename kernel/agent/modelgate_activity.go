@@ -6,14 +6,18 @@ import (
 	"strings"
 )
 
-// The queue side of the model gate: a fast in-process verdict the waiting
-// workflows poll, and a plain-text delivery of the queue position to the
-// run starter's channels — every enabled channel at once, WITHOUT the
-// human_request row (a queue notice is a status, not a question).
+// The queue side of the memory budget gate: a fast in-process verdict the
+// waiting workflows poll, budget claiming/renewal/release, and a plain-text
+// delivery of the queue position to the run starter's channels — every
+// enabled channel at once, WITHOUT the human_request row (a queue notice is
+// a status, not a question).
 
 const (
 	// ActivityModelGateVerdict answers "is it my turn" in microseconds.
 	ActivityModelGateVerdict = "kernel.model_gate_verdict"
+	// ActivityModelGateBudget claims/renews/releases the run's memory budget
+	// (op: acquire | renew | release).
+	ActivityModelGateBudget = "kernel.model_gate_budget"
 	// ActivityNotifyActorText delivers one plain text to the actor's enabled
 	// channels (no inbox row, no answer round-trip).
 	ActivityNotifyActorText = "kernel.notify_actor_text"
@@ -26,9 +30,35 @@ type ModelGateVerdictResult struct {
 	Position    int `json:"position"`
 }
 
-func (a *Activities) ModelGateVerdict(ctx context.Context) (ModelGateVerdictResult, error) {
-	wait, position := gate().Verdict()
+func (a *Activities) ModelGateVerdict(ctx context.Context, runID string, memoryMB int) (ModelGateVerdictResult, error) {
+	wait, position := gate().Verdict(runID, memoryMB)
 	return ModelGateVerdictResult{WaitSeconds: wait, Position: position}, nil
+}
+
+// ModelGateBudgetInput carries the run's memory requirement (MB) and the
+// operation: acquire (claim the budget), renew (prove the run is alive),
+// release (the run finished — hand the budget back).
+type ModelGateBudgetInput struct {
+	Op       string // acquire | renew | release
+	RunID    string
+	MemoryMB int
+}
+
+type ModelGateBudgetResult struct {
+	Admitted bool `json:"admitted"`
+}
+
+func (a *Activities) ModelGateBudget(ctx context.Context, input ModelGateBudgetInput) (ModelGateBudgetResult, error) {
+	switch input.Op {
+	case "acquire":
+		return ModelGateBudgetResult{Admitted: gate().Acquire(input.RunID, input.MemoryMB) == nil}, nil
+	case "renew":
+		return ModelGateBudgetResult{Admitted: gate().Renew(input.RunID, input.MemoryMB)}, nil
+	case "release":
+		gate().Release(input.RunID)
+		return ModelGateBudgetResult{Admitted: false}, nil
+	}
+	return ModelGateBudgetResult{}, fmt.Errorf("unknown gate op %q", input.Op)
 }
 
 // NotifyActorTextInput: recipient-less by design — the text always goes to

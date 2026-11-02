@@ -409,29 +409,44 @@ func main() {
 		log.Error("configure activities", "error", err)
 		os.Exit(1)
 	}
-	// Memory quota gate (the OOM guard): concurrent model calls are capped,
-	// runs above the cap queue at the gate and drain in order. Capacity
-	// defaults to a conservative 8 concurrent model calls; the memory floor
-	// pauses new admissions below 10% MemAvailable even when slots are free.
-	// Both are env-tunable for hosts of any size.
-	gateMax := 8
-	if raw := strings.TrimSpace(os.Getenv("KERNEL_MODEL_GATE_MAX")); raw != "" {
+	// Memory budget gate (the OOM guard): every run declares its sandbox
+	// memory (the same --memory its container gets); the gate admits runs
+	// while the SUM of their requirements fits the host budget, and queues
+	// the rest. The budget defaults to 70% of MemTotal (read at boot — the
+	// reserve covers the OS, the kernel process and the database); the
+	// memory floor pauses new admissions below 10% MemAvailable even when
+	// the ledger looks fine.
+	gateBudgetMB := 0
+	gateFloor := 10.0
+	if health := storage.ReadHostHealth(); health.Memory.TotalBytes > 0 {
+		gateBudgetMB = int(health.Memory.TotalBytes / (1 << 20) * 70 / 100)
+	}
+	gateMax := gateBudgetMB / 256 // one run never reserves less than ~256MB
+	if raw := strings.TrimSpace(os.Getenv("KERNEL_MEMORY_BUDGET_MB")); raw != "" {
+		if parsed, perr := strconv.Atoi(raw); perr == nil && parsed > 0 {
+			gateBudgetMB = parsed
+		}
+	}
+	if raw := strings.TrimSpace(os.Getenv("KERNEL_MAX_CONCURRENT_RUNS")); raw != "" {
 		if parsed, perr := strconv.Atoi(raw); perr == nil && parsed > 0 {
 			gateMax = parsed
 		}
 	}
-	gateFloor := 10.0
 	if raw := strings.TrimSpace(os.Getenv("KERNEL_MODEL_GATE_MEMORY_FLOOR_PERCENT")); raw != "" {
 		if parsed, perr := strconv.ParseFloat(raw, 64); perr == nil && parsed >= 0 && parsed < 100 {
 			gateFloor = parsed
 		}
 	}
+	gateDefaultRunMB := 1024
+	if parsed := agent.ParseMemoryMB(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_MEMORY"))); parsed > 0 {
+		gateDefaultRunMB = parsed
+	}
 	gateMemory := func() (total uint64, available uint64, ok bool) {
 		health := storage.ReadHostHealth()
 		return health.Memory.TotalBytes, health.Memory.AvailableBytes, health.Memory.TotalBytes > 0
 	}
-	agent.ConfigureModelGate(gateMax, gateFloor, gateMemory)
-	log.Info("model gate configured", "max_concurrent", gateMax, "memory_floor_percent", gateFloor)
+	agent.ConfigureModelGate(gateMax, gateBudgetMB, gateFloor, gateMemory, gateDefaultRunMB)
+	log.Info("memory budget gate configured", "budget_mb", gateBudgetMB, "max_concurrent", gateMax, "default_run_mb", gateDefaultRunMB, "memory_floor_percent", gateFloor)
 	// A missing default model is legal on a clean install (providers get
 	// configured through onboarding); say so loudly instead of failing later
 	// with a cryptic per-run error.
@@ -551,6 +566,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.ResolveAgent, activity.RegisterOptions{Name: agent.ActivityResolveAgent})
 	temporalWorker.RegisterActivityWithOptions(activities.ResolveCollaborator, activity.RegisterOptions{Name: agent.ActivityResolveCollaborator})
 	temporalWorker.RegisterActivityWithOptions(activities.ModelGateVerdict, activity.RegisterOptions{Name: agent.ActivityModelGateVerdict})
+	temporalWorker.RegisterActivityWithOptions(activities.ModelGateBudget, activity.RegisterOptions{Name: agent.ActivityModelGateBudget})
 	temporalWorker.RegisterActivityWithOptions(activities.NotifyActorText, activity.RegisterOptions{Name: agent.ActivityNotifyActorText})
 	temporalWorker.RegisterActivityWithOptions(activities.GenerateTitle, activity.RegisterOptions{Name: agent.ActivityGenerateTitle})
 	temporalWorker.RegisterActivityWithOptions(activities.ExtractKnowledge, activity.RegisterOptions{Name: agent.ActivityExtractKnowledge})

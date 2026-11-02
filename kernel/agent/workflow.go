@@ -1401,56 +1401,80 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// (next up, first in line); delegated children stay silent, their trace
 	// rows tell the story. A queued-too-long run ends honestly instead of
 	// surfacing on a swapping host.
-	if modelGate == 1 && gateQueuedTotal < ModelGateQueueTimeout {
+	// Memory budget gate: the run declares its sandbox memory requirement
+	// (SandboxSpec.Memory — the same --memory its container gets) and the
+	// gate admits it when the SUM of admitted runs' requirements fits the
+	// host budget. While queued the run sleeps deterministically — no
+	// activity timeouts, no wall-clock spend; the starter's channels get one
+	// notice on entry and one at the milestones. Delegated children stay
+	// silent, their trace rows tell the story.
+	gateMemoryMB := ParseMemoryMB(sandboxMemorySpec(input))
+	if gateMemoryMB <= 0 {
+		gateMemoryMB = gateDefaultRunMemoryMB
+	}
+	for modelGate == 1 && gateQueuedTotal < ModelGateQueueTimeout {
 		gateCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		noticeCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+		budgetCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		var verdict ModelGateVerdictResult
-		if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict).Get(ctx, &verdict); err == nil && verdict.WaitSeconds > 0 {
-			queuedAt := workflow.Now(ctx)
-			notifiedPosition := verdict.Position
-			if err := emit(activityCtx, state, "run.queued", map[string]any{"position": verdict.Position, "wait_seconds": verdict.WaitSeconds}); err != nil {
-				return result, err
+		if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict, input.RunID, gateMemoryMB).Get(ctx, &verdict); err != nil || verdict.WaitSeconds == 0 {
+			// Admitted (or the gate itself failed — never wedge a run on a
+			// broken probe): claim the budget for the whole run lifetime and
+			// proceed; the ledger entry renews per turn and expires if the
+			// run dies.
+			var budget ModelGateBudgetResult
+			if err := workflow.ExecuteActivity(budgetCtx, ActivityModelGateBudget, ModelGateBudgetInput{Op: "acquire", RunID: input.RunID, MemoryMB: gateMemoryMB}).Get(ctx, &budget); err != nil || budget.Admitted {
+				break
 			}
-			// One channel notice at entry: only directly-started runs speak —
-			// delegated children answer to their parent, not to a human.
-			if input.DelegationDepth == 0 {
-				_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict.Position)}).Get(ctx, nil)
+			// Lost the race after the verdict — one poll cycle, then re-verdict.
+			workflow.Sleep(ctx, 10*time.Second)
+			gateQueuedTotal = workflow.Now(ctx).Sub(runStartedAt)
+			continue
+		}
+		queuedAt := workflow.Now(ctx)
+		notifiedPosition := verdict.Position
+		if err := emit(activityCtx, state, "run.queued", map[string]any{"position": verdict.Position, "wait_seconds": verdict.WaitSeconds, "memory_mb": gateMemoryMB}); err != nil {
+			return result, err
+		}
+		// One channel notice at entry: only directly-started runs speak —
+		// delegated children answer to their parent, not to a human.
+		if input.DelegationDepth == 0 {
+			_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict.Position)}).Get(ctx, nil)
+		}
+		for verdict.WaitSeconds > 0 && workflow.Now(ctx).Sub(queuedAt) < ModelGateQueueTimeout {
+			workflow.Sleep(ctx, time.Duration(verdict.WaitSeconds)*time.Second)
+			gateQueuedTotal = workflow.Now(ctx).Sub(queuedAt)
+			if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict, input.RunID, gateMemoryMB).Get(ctx, &verdict); err != nil {
+				break
 			}
-			for verdict.WaitSeconds > 0 && workflow.Now(ctx).Sub(queuedAt) < ModelGateQueueTimeout {
-				workflow.Sleep(ctx, time.Duration(verdict.WaitSeconds)*time.Second)
-				gateQueuedTotal = workflow.Now(ctx).Sub(queuedAt)
-				if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict).Get(ctx, &verdict); err != nil {
-					break
-				}
-				if verdict.WaitSeconds == 0 {
-					break
-				}
-				// Milestone notices: «you are next» and «one ahead of you» —
-				// the positions a human can still act on, without spamming
-				// the channels on every poll.
-				if input.DelegationDepth == 0 && gateQueuedTotal >= time.Minute {
-					for _, milestone := range QueueNoticeMilestones {
-						if verdict.Position <= milestone && notifiedPosition > milestone {
-							_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict.Position)}).Get(ctx, nil)
-							notifiedPosition = verdict.Position
-							break
-						}
+			if verdict.WaitSeconds == 0 {
+				break
+			}
+			// Milestone notices: «you are next» and «one ahead of you» —
+			// the positions a human can still act on, without spamming
+			// the channels on every poll.
+			if input.DelegationDepth == 0 && gateQueuedTotal >= time.Minute {
+				for _, milestone := range QueueNoticeMilestones {
+					if verdict.Position <= milestone && notifiedPosition > milestone {
+						_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict.Position)}).Get(ctx, nil)
+						notifiedPosition = verdict.Position
+						break
 					}
 				}
 			}
-			if verdict.WaitSeconds > 0 {
-				// Day-scale queue timeout: the run never started — finish
-				// honestly, nothing ran and nothing is uncertain.
-				if err := emit(activityCtx, state, "run.queued_expired", map[string]any{"queued_for_seconds": int(gateQueuedTotal.Seconds())}); err != nil {
-					return result, err
-				}
-				result.Status = "failed"
-				result.Answer = "The server stayed at capacity too long — this request was queued and never started. Nothing ran; retry when the load drops."
-				return result, nil
-			}
-			if err := emit(activityCtx, state, "run.queued_cleared", map[string]any{"queued_for_seconds": int(gateQueuedTotal.Seconds())}); err != nil {
+		}
+		if verdict.WaitSeconds > 0 {
+			// Day-scale queue timeout: the run never started — finish
+			// honestly, nothing ran and nothing is uncertain.
+			if err := emit(activityCtx, state, "run.queued_expired", map[string]any{"queued_for_seconds": int(gateQueuedTotal.Seconds())}); err != nil {
 				return result, err
 			}
+			result.Status = "failed"
+			result.Answer = "The server stayed at capacity too long — this request was queued and never started. Nothing ran; retry when the load drops."
+			return result, nil
+		}
+		if err := emit(activityCtx, state, "run.queued_cleared", map[string]any{"queued_for_seconds": int(gateQueuedTotal.Seconds())}); err != nil {
+			return result, err
 		}
 	}
 	for turn := 1; turn <= input.MaxTurns; turn++ {
@@ -1472,6 +1496,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		frames = append(frames, frame)
 		if err := emit(activityCtx, state, "turn.started", map[string]any{"turn": turn}); err != nil {
 			return result, err
+		}
+		// Keep the memory-budget ledger entry alive: a run that stopped
+		// renewing is considered dead and its budget expires (the gate's
+		// TTL), so a crashed workflow cannot pin the host's capacity forever.
+		if modelGate == 1 && gateMemoryMB > 0 {
+			renewCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+			_ = workflow.ExecuteActivity(renewCtx, ActivityModelGateBudget, ModelGateBudgetInput{Op: "renew", RunID: input.RunID, MemoryMB: gateMemoryMB}).Get(ctx, nil)
 		}
 		// User notes (chat messages sent mid-run) are drained at turn boundaries:
 		// the history stays append-only, so the prompt-cache prefix keeps its
@@ -1643,6 +1674,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			if err := emit(activityCtx, state, "run.completed", runCompletedTotals(turn, result.TotalTokens, result.CostUSD)); err != nil {
 				return result, err
+			}
+			// The run is done: its sandbox memory requirement leaves the host
+			// ledger (the TTL expiry is the safety net, not the primary path).
+			if modelGate == 1 && gateMemoryMB > 0 {
+				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB}).Get(ctx, nil)
 			}
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
@@ -2764,6 +2800,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emit(activityCtx, state, "run.completed", completedData); err != nil {
 				return result, err
 			}
+			if modelGate == 1 && gateMemoryMB > 0 {
+				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB}).Get(ctx, nil)
+			}
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
 			}
@@ -2922,6 +2961,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if err := emit(activityCtx, state, "run.completed", runData); err != nil {
 		return result, err
 	}
+	// The run is done: its sandbox memory requirement leaves the host ledger
+	// (the TTL expiry is the safety net, not the primary path).
+	if modelGate == 1 && gateMemoryMB > 0 {
+		_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB}).Get(ctx, nil)
+	}
 	if result.Answer != "" {
 		if err := emitAgentSummary(activityCtx, state, result.Answer, frames, finaleTurn); err != nil {
 			return result, err
@@ -2929,6 +2973,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	startKnowledgeExtraction(ctx, activityCtx, state, input)
 	return result, nil
+}
+
+/** The activity options of the memory-budget ledger calls (renew/release):
+ *  cheap, single-attempt, never failing the run — the TTL expiry is the
+ *  safety net for a lost call. */
+func renewCtx0(activityCtx workflow.Context) workflow.Context {
+	return workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 }
 
 // startTurnLimitContinuation spawns the continuation child run for the
