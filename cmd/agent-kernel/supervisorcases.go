@@ -831,6 +831,24 @@ func auditIntakeClassifications(ctx context.Context, log *slog.Logger, activitie
 		log.Warn("supervisor cases: list started runs", "error", err.Error())
 		return
 	}
+	// The message→run dispatch link (docs/inbound-messages.md): intake.routed
+	// is journaled by start_task with message_id → run_id/project_id. Without
+	// it the audit cannot tell «dispatched» from «not dispatched» — the old
+	// heuristic matched run.started by project and reported «nothing started»
+	// for EVERY dispatched task (classified events live in the system
+	// "intake" project, dispatched runs execute in the TARGET project),
+	// flooding the queue with false «never dispatched» verdicts.
+	routedEvents, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "intake.routed", 200)
+	if err != nil {
+		log.Warn("supervisor cases: list routed runs", "error", err.Error())
+		return
+	}
+	routedByMessage := make(map[string]journalEvent, len(routedEvents))
+	for _, event := range routedEvents {
+		if messageID, _ := event.Data["message_id"].(string); messageID != "" {
+			routedByMessage[messageID] = event
+		}
+	}
 	audited := 0
 	for _, event := range classified {
 		if audited >= 1 {
@@ -863,16 +881,9 @@ func auditIntakeClassifications(ctx context.Context, log *slog.Logger, activitie
 			// the real text or nothing at all.
 			continue
 		}
-		// The run the router started right after this classification: same
-		// project, newest first (both listings are newest-first already).
-		startedRun := "(nothing started)"
-		for _, run := range started {
-			if run.Project == event.Project {
-				title, _ := run.Data["title"].(string)
-				startedRun = title
-				break
-			}
-		}
+		// What the router actually dispatched for this message — resolved from
+		// the intake.routed link, not guessed by project proximity.
+		startedRun := intakeDispatchSummary(routedByMessage, started, subject)
 		verdict, err := agent.IntakeAuditCase(ctx, client, agent.IntakeAuditCaseInput{
 			Classification: classification, MessageText: messageText, StartedRun: startedRun,
 		})
@@ -891,6 +902,34 @@ func auditIntakeClassifications(ctx context.Context, log *slog.Logger, activitie
 		}
 		audited++
 	}
+}
+
+// intakeDispatchSummary renders «what was started» for one classified message
+// from its intake.routed dispatch link (message_id → run_id/project_id),
+// looking the run's title up in the run.started listing by run id. No link
+// means nothing was dispatched — the one case where "(nothing started)" is
+// the honest answer and the audit is legitimately useful.
+func intakeDispatchSummary(routedByMessage map[string]journalEvent, started []journalEvent, subject string) string {
+	link, ok := routedByMessage[subject]
+	if !ok {
+		return "(nothing started)"
+	}
+	runID, _ := link.Data["run_id"].(string)
+	projectID, _ := link.Data["project_id"].(string)
+	title := ""
+	for _, run := range started {
+		if run.Run == runID {
+			title, _ = run.Data["title"].(string)
+			break
+		}
+	}
+	if title == "" {
+		title = "(title unavailable)"
+	}
+	if projectID == "" {
+		return title
+	}
+	return title + " (project " + projectID + ")"
 }
 
 // ── B3: development narrative ───────────────────────────────────────────────
