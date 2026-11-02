@@ -227,7 +227,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
         workspaceApi.getSupervisorSettings().catch(() => null),
         observationApi.hintEffectiveness().catch(() => null),
       ])
-      setVerdicts(verdictPage.events ?? [])
+      // Reconciliation verdicts are the supervisor's ALREADY-APPLIED work —
+      // they render on the run (card + trace), never as queue rows: the
+      // removal of the wall threshold would otherwise flood this queue with
+      // one auto-closed row per run.
+      setVerdicts((verdictPage.events ?? []).filter((event) => event.data?.kind !== 'reconciliation'))
       setInsights(insightPage.events ?? [])
       const ackSet = new Set<string>(acksPage.ids ?? [])
       for (const event of ackPage.events ?? []) {

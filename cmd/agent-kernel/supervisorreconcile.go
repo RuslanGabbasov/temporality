@@ -1,10 +1,9 @@
 package main
 
 // Supervisor reconciliation pass (docs/failure-reconciliation.md, wave S1):
-// a long run piles up dozens of uncertain operations, and a flat wall of
-// per-op effect questions is unreviewable cognitive load — the operator will
-// not check 40 side effects one by one. This pass hands the whole wall to the
-// supervisor model and applies its ONE integrated conclusion per run:
+// a run's pile of uncertain operations — one operation or forty — hands the
+// whole wall to the supervisor model and applies its ONE integrated
+// conclusion per run:
 //
 //   - the model's per-operation effect verdicts are recorded as
 //     supervisor-actor reconciliations (the same code path a human verdict
@@ -15,9 +14,10 @@ package main
 //   - needs_attention=false means nothing requires action in an external
 //     system — the pile closes quietly and nobody is bothered.
 //
-// Dedup: one reconciliation verdict per run, ever — the wall grows
-// monotonically and the integrated conclusion covers the whole history of
-// the run's uncertainty.
+// No size threshold and no per-pass cap: EVERY wall goes to the supervisor
+// (a one-operation wall is still a question the model answers better than a
+// human skims), and the pass drains every pending wall in one go. Budget is
+// bounded by the dedup below — one verdict per run, ever — not by pacing.
 
 import (
 	"context"
@@ -29,14 +29,6 @@ import (
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/llm"
 )
-
-// A run's wall qualifies for supervisor reconciliation when it holds at least
-// this many unresolved operations — below that the per-op cards are still
-// readable by a human.
-const supervisorReconcileWallThreshold = 5
-
-// Bounded per pass so a burst of walls cannot burn the model budget.
-const supervisorReconcilePassCap = 2
 
 func runSupervisorReconcilePass(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string, liveness agent.WorkflowLiveness, modelClient func(ctx context.Context) (*llm.Client, error)) {
 	journalToken := os.Getenv("TEMPORALITY_API_TOKEN")
@@ -80,13 +72,10 @@ func runSupervisorReconcilePass(ctx context.Context, log *slog.Logger, activitie
 	}
 	analyzed := 0
 	for _, runID := range runOrder {
-		if analyzed >= supervisorReconcilePassCap {
-			break
-		}
-		ops := walls[runID]
-		if len(ops) < supervisorReconcileWallThreshold || done[runID] {
+		if done[runID] {
 			continue
 		}
+		ops := walls[runID]
 		ids := make([]string, 0, len(ops))
 		for _, op := range ops {
 			ids = append(ids, op.OperationID)

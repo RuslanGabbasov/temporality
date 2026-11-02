@@ -258,7 +258,9 @@ export default function Dashboard({ project, setProject }: Props) {
         ])
         if (cancelled) return
         const ack = new Set((ackPage.events ?? []).map((e) => String(e.data?.verdict_event_id ?? '')))
-        const pending = (verdictPage.events ?? []).filter((e) => !ack.has(e.event_id)).length
+        // Reconciliation verdicts are the supervisor's applied work, not queue
+        // rows — they render on their runs and never count toward the badge.
+        const pending = (verdictPage.events ?? []).filter((e) => e.data?.kind !== 'reconciliation' && !ack.has(e.event_id)).length
         setSupervisorPending(pending)
       } catch { /* badge is best-effort */ }
     })()
