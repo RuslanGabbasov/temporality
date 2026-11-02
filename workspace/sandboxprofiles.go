@@ -763,7 +763,10 @@ func (s *Store) UpdateSandboxProfile(ctx context.Context, p SandboxProfile) erro
 // rejects it explicitly (a silent drop would be a substitution, §4.3).
 // Editing a recipe invalidates the pinned image: the digest on the row would
 // silently not match what the recipe now produces — the same holds for the
-// operator override text (D2.3).
+// operator override text (D2.3). Runtime-only edits (memory, cpus,
+// scratch/tmp sizes, cache env, docker socket, name/description) keep the
+// built image: они не требуют пересборки и не должны сбрасывать профиль в
+// «нужна сборка».
 func prepareSandboxProfileUpdate(existing, incoming SandboxProfile) SandboxProfile {
 	if existing.Builtin {
 		incoming.Name = existing.Name
@@ -780,7 +783,17 @@ func prepareSandboxProfileUpdate(existing, incoming SandboxProfile) SandboxProfi
 	if existing.Base != incoming.Base ||
 		!equalStrings(existing.Packages, incoming.Packages) ||
 		existing.DockerfileOverride != incoming.DockerfileOverride {
+		// A recipe change invalidates the pinned digest.
 		incoming.Image = ""
+	} else if existing.Base != "" || existing.DockerfileOverride != "" {
+		// Recipe-based profile: the digest is the OUTPUT of that recipe — a
+		// runtime-only PUT keeps it, and a PUT cannot re-point it by hand
+		// (the form sends no image here; trust the stored pin).
+		incoming.Image = existing.Image
+	} else if incoming.Image == "" {
+		// External-image profile with a blank image in the PUT (resource
+		// edit): keep the current pin.
+		incoming.Image = existing.Image
 	}
 	return incoming
 }
