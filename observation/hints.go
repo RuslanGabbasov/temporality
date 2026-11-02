@@ -128,7 +128,7 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 	}
 	queryEntities := normalizedSet(query.Entities)
 	queryTopics := normalizedSet(query.Topics)
-	queryTokens := contentTokens(query.Text)
+	queryTokens := discriminativeTokens(query.Text, knowledge)
 	queryPhrase := strings.ToLower(strings.TrimSpace(query.Text))
 	candidates := make([]hintCandidate, 0)
 	direct := make(map[string]hintCandidate)
@@ -304,6 +304,7 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		return candidates[i].hint.KnowledgeID < candidates[j].hint.KnowledgeID
 	})
 	candidates = diversifyCandidates(candidates)
+	candidates = reserveSemanticSlots(candidates, query.Limit)
 	if len(candidates) > query.Limit {
 		candidates = candidates[:query.Limit]
 	}
@@ -593,5 +594,107 @@ func contentTokens(value string) map[string]bool {
 		}
 	}
 	flush()
+	return result
+}
+
+// discriminativeTokens keeps only query tokens that can actually tell
+// candidates apart: a token living in a large share of the corpus («не»,
+// «файл», an org name, a path fragment) matches everything and was the
+// mechanism behind the «одинаковые подсказки на любой запрос» noise — two
+// glue words satisfied the term gate for half the knowledge base. IDF-style:
+// common = present in ≥5 items AND ≥5% of the corpus — the absolute floor
+// keeps tiny corpora (and their tests) behaving as before, where frequency
+// carries no information.
+func discriminativeTokens(text string, corpus []Knowledge) map[string]bool {
+	tokens := contentTokens(text)
+	if len(tokens) == 0 || len(corpus) == 0 {
+		return tokens
+	}
+	frequency := make(map[string]int, len(tokens))
+	for _, item := range corpus {
+		itemTokens := contentTokens(item.Proposition)
+		for token := range tokens {
+			if itemTokens[token] {
+				frequency[token]++
+			}
+		}
+	}
+	result := make(map[string]bool, len(tokens))
+	for token := range tokens {
+		common := frequency[token] >= 5 && frequency[token]*20 >= len(corpus)
+		if !common {
+			result[token] = true
+		}
+	}
+	return result
+}
+
+// hintSemanticReserve is the share of the hint budget guaranteed to the
+// semantic tier: lexical garbage (glue-word term matches) must not crowd
+// meaning-level matches out of the block entirely.
+const hintSemanticReserve = 2
+
+// reserveSemanticSlots re-picks the final budget so the semantic tier keeps
+// up to hintSemanticReserve seats even when lexical candidates fill the
+// limit. Original rank order is preserved among the kept candidates.
+func reserveSemanticSlots(candidates []hintCandidate, limit int) []hintCandidate {
+	if limit <= 0 || len(candidates) <= limit {
+		return candidates
+	}
+	isSemantic := func(c hintCandidate) bool {
+		return len(c.hint.MatchedBy) > 0 && strings.HasPrefix(c.hint.MatchedBy[0], "semantic:")
+	}
+	semanticCount := 0
+	for _, c := range candidates {
+		if isSemantic(c) {
+			semanticCount++
+		}
+	}
+	if semanticCount == 0 {
+		return candidates
+	}
+	reserve := hintSemanticReserve
+	if reserve > semanticCount {
+		reserve = semanticCount
+	}
+	if reserve > limit {
+		reserve = limit
+	}
+	kept := make([]bool, len(candidates))
+	keptCount := 0
+	lexicalSeats := limit - reserve
+	for i, c := range candidates {
+		if keptCount >= lexicalSeats {
+			break
+		}
+		if !isSemantic(c) {
+			kept[i] = true
+			keptCount++
+		}
+	}
+	for i, c := range candidates {
+		if keptCount >= limit {
+			break
+		}
+		if isSemantic(c) && !kept[i] {
+			kept[i] = true
+			keptCount++
+		}
+	}
+	for i := range candidates {
+		if keptCount >= limit {
+			break
+		}
+		if !kept[i] {
+			kept[i] = true
+			keptCount++
+		}
+	}
+	result := make([]hintCandidate, 0, keptCount)
+	for i, c := range candidates {
+		if kept[i] {
+			result = append(result, c)
+		}
+	}
 	return result
 }

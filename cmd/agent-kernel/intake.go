@@ -212,7 +212,12 @@ func (r *intakeRunner) start(ctx context.Context, message agent.InboundMessage, 
 		RunID:   runID,
 		Project: IntakeProjectID,
 		Prompt:  intakePrompt(message, senderUser, senderProfileBlock(ctx, r.ws, senderUser)),
-		ActorID: senderUser.ID,
+		// Hint matching runs on the message body, not the assembled prompt:
+		// the prompt's instruction template (intake_decide, start_task…) matched
+		// meta-knowledge about past classifications and surfaced the same hints
+		// for every message regardless of content.
+		HintQuery: message.Text,
+		ActorID:   senderUser.ID,
 	}
 	if agentCfg != nil {
 		applyAgentConfig(ctx, r.ws, agentCfg, &input)

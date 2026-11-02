@@ -322,3 +322,72 @@ func TestFindHintsSemanticTier(t *testing.T) {
 		t.Errorf("orthogonal vectors must not admit semantic hints: %+v", hints)
 	}
 }
+
+// Corpus-common tokens are glue, not signal: a word living in ≥5 items and
+// ≥5% of the corpus («файл», «не», an org name) matched everything and made
+// the same hints surface for every query. Only discriminative query tokens
+// may gate a term match.
+func TestFindHintsIgnoresCorpusCommonTokens(t *testing.T) {
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	var events []Event
+	for i := 0; i < 6; i++ {
+		events = append(events, hintProposalEvent(
+			"e"+string(rune('0'+i)), "k-common-"+string(rune('0'+i)), "claim",
+			"Правило про выгрузку файла номер "+string(rune('0'+i)), nil, base.Add(time.Duration(i)*time.Minute)))
+	}
+	knowledge := hintKnowledge(t, events)
+
+	// Glue only: every token is corpus-common → nothing discriminates.
+	if hints := FindHints(knowledge, HintQuery{Text: "файла выгрузку", Limit: 8}); len(hints) != 0 {
+		t.Fatalf("glue-only query must yield no hints, got %+v", hints)
+	}
+
+	// Glue + one rare token: only the rare token may decide, and it must.
+	events = append(events, hintProposalEvent("e9", "k-rare", "claim", "Настройка penpot-сервера поднимает сессии редактирования", nil, base.Add(9*time.Minute)))
+	knowledge = hintKnowledge(t, events)
+	hints := FindHints(knowledge, HintQuery{Text: "файла penpot-сервера выгрузку", Limit: 8})
+	if len(hints) != 1 || hints[0].KnowledgeID != "k-rare" {
+		t.Fatalf("the rare token must decide the match, got %+v", hints)
+	}
+	for _, mark := range hints[0].MatchedBy {
+		if mark == "term:файла" || mark == "term:выгрузку" {
+			t.Errorf("glue tokens must not appear as match reasons: %v", hints[0].MatchedBy)
+		}
+	}
+}
+
+// The semantic tier keeps reserved seats in the budget: a flood of lexical
+// candidates must not crowd meaning-level matches out of the hint block
+// entirely. The flood is entity-matched here so the test exercises the quota,
+// not token statistics.
+func TestFindHintsSemanticQuotaSurvivesLexicalFlood(t *testing.T) {
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	var events []Event
+	for i := 0; i < 6; i++ {
+		events = append(events, hintProposalEvent(
+			"e"+string(rune('0'+i)), "k-lex-"+string(rune('0'+i)), "claim",
+			"Правило квоты номер "+string(rune('0'+i)), []string{"quota-bucket"}, base.Add(time.Duration(i)*time.Minute)))
+	}
+	// Semantically on-topic wording the lexical tiers cannot see.
+	events = append(events, hintProposalEvent("e9", "k-sem", "claim", "Смысловое правило про документооборот", nil, base.Add(9*time.Minute)))
+	knowledge := hintKnowledge(t, events)
+
+	query := HintQuery{Text: "квота документооборот", Entities: []string{"quota-bucket"}, Limit: 2,
+		Embedding: []float32{1, 0, 0},
+		KnowledgeEmbeddings: map[string][]float32{
+			"k-sem": {0.95, 0.1, 0},
+		}}
+	hints := FindHints(knowledge, query)
+	if len(hints) != 2 {
+		t.Fatalf("budget must be filled, got %d hints", len(hints))
+	}
+	foundSemantic := false
+	for _, hint := range hints {
+		if hint.KnowledgeID == "k-sem" {
+			foundSemantic = true
+		}
+	}
+	if !foundSemantic {
+		t.Fatalf("the semantic candidate must keep its reserved seat, got %+v", hints)
+	}
+}

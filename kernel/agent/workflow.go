@@ -79,6 +79,13 @@ type RunInput struct {
 	TaskID  string `json:"task_id"`
 	ActorID string `json:"actor_id"`
 	Prompt  string `json:"prompt"`
+	// HintQuery is the user-intent text for prior-knowledge hint selection:
+	// the assembled prompt carries instruction templates («Classify it
+	// (intake_decide), search_projects, start_task…») whose words matched
+	// meta-knowledge and surfaced the same hints for every message — runs
+	// built from a template (intake) pass the raw message instead. Empty =
+	// the prompt (the pre-existing behavior).
+	HintQuery string `json:"hint_query,omitempty"`
 	// PriorTail carries the journal tail of the interrupted previous attempt
 	// of the same task (failed/cancelled): rendered as a system block so a
 	// «давай продолжим» run resumes instead of starting blind.
@@ -1465,12 +1472,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if modelSchedStart == 1 {
 			modelOpts.ScheduleToStartTimeout = 5 * time.Minute
 		}
+		modelStarted := workflow.Now(ctx)
 		if err := executeModelWithNudge(ctx, activityCtx, state, modelOpts, modelReq, turn, &completion); err != nil {
-			failureDetail := boundedFailureDetail(err)
-			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "model": input.Model, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
+			failure := modelFailureData(err, workflow.Now(ctx).Sub(modelStarted), turn, input.Model)
+			if eventErr := emit(activityCtx, state, "model.failed", failure); eventErr != nil {
 				return result, eventErr
 			}
-			if eventErr := emit(activityCtx, state, "run.failed", map[string]any{"turn": turn, "error_type": "model_call_failed", "error": failureDetail}); eventErr != nil {
+			runFailure := maps.Clone(failure)
+			runFailure["error_type"] = "model_call_failed"
+			if eventErr := emit(activityCtx, state, "run.failed", runFailure); eventErr != nil {
 				return result, eventErr
 			}
 			result.Status = "failed"
@@ -2780,12 +2790,16 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// same frozen-host recovery (fresh Temporal attempt after the machine
 	// wakes up instead of a dead run).
 	modelCtx := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, HeartbeatTimeout: 90 * time.Second, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
+	finaleStarted := workflow.Now(ctx)
 	if err := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, ProviderID: input.ProviderID, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finale); err != nil {
-		failureDetail := boundedFailureDetail(err)
-		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "model": input.Model, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
+		failure := modelFailureData(err, workflow.Now(ctx).Sub(finaleStarted), finaleTurn, input.Model)
+		failure["forced_finale"] = true
+		if eventErr := emit(activityCtx, state, "model.failed", failure); eventErr != nil {
 			return result, eventErr
 		}
-		if eventErr := emit(activityCtx, state, "run.failed", map[string]any{"turn": finaleTurn, "error_type": "finale_model_call_failed", "error": failureDetail}); eventErr != nil {
+		runFailure := maps.Clone(failure)
+		runFailure["error_type"] = "finale_model_call_failed"
+		if eventErr := emit(activityCtx, state, "run.failed", runFailure); eventErr != nil {
 			return result, eventErr
 		}
 		result.Status = "failed"
@@ -2991,13 +3005,26 @@ func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state 
 	// A team program run has no model turns at the root, so prior-knowledge
 	// hints would never be consumed (docs/agent-teams.md §9).
 	needHints := input.Team == nil && !input.SkipKnowledge
-	hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+	hintQuery := input.Prompt
+	if input.HintQuery != "" {
+		hintQuery = input.HintQuery
+	}
+	// Hint selection measured 2–10s on a large corpus and delegated children
+	// start in fan-out: the old 20s/20s budget blew the attempt AND the manual
+	// retry, leaving every child with memory.read.failed («Ошибка чтения
+	// памяти»). Version-gated so replayed histories keep their command
+	// attributes; new runs get the roomy budget.
+	hintsStartToClose, hintsScheduleToClose := 20*time.Second, 20*time.Second
+	if workflow.GetVersion(ctx, "hints-timeout-budget", workflow.DefaultVersion, 1) == 1 {
+		hintsStartToClose, hintsScheduleToClose = 60*time.Second, 2*time.Minute
+	}
+	hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: hintsStartToClose, ScheduleToCloseTimeout: hintsScheduleToClose, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 	var titleFuture workflow.Future
 	var hintsFuture workflow.Future
 	if titleParallel == 1 && needTitle && needHints {
 		titleCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		titleFuture = workflow.ExecuteActivity(titleCtx, ActivityGenerateTitle, TitleRequest{Prompt: input.Prompt})
-		hintsFuture = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID})
+		hintsFuture = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID})
 	}
 	if input.ParentRunID == "" {
 		// Root runs get a short human title for the Runs list; delegated child
@@ -3035,7 +3062,7 @@ func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state 
 		if hintsFuture != nil {
 			hintsErr = hintsFuture.Get(ctx, &priorHints)
 		} else {
-			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
+			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
 		}
 		if hintsErr != nil {
 			// The common miss is the boot-order race (kernel up, journal still
@@ -3044,7 +3071,7 @@ func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state 
 			// The parallel path retries only after the first attempt's future has
 			// been resolved, so the recorded command order stays deterministic.
 			workflow.Sleep(ctx, 3*time.Second)
-			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
+			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
 		}
 		if hintsErr != nil {
 			// Retrieval is best-effort, but the miss is still part of the trajectory.
@@ -3164,6 +3191,39 @@ func boundedFailureDetail(err error) string {
 		return detail[:failureDetailBytes] + "…"
 	}
 	return detail
+}
+
+// servedByProvider extracts the serving provider from a model-call failure
+// ("… (served by provider Xiaomi) …") so the human failure copy can name who
+// went silent. Empty when the error carries no route information.
+func servedByProvider(errText string) string {
+	i := strings.Index(errText, "served by ")
+	if i < 0 {
+		return ""
+	}
+	rest := errText[i+len("served by "):]
+	if j := strings.IndexByte(rest, ')'); j >= 0 {
+		rest = rest[:j]
+	}
+	return strings.TrimPrefix(strings.TrimSpace(rest), "provider ")
+}
+
+// modelFailureData builds the model-failure payloads: the bounded raw detail
+// for the details layer, plus the human facts — who served the call and how
+// long it was silent — the localized chat copy is written from. The raw
+// activity chain alone is unreadable for a user ("activity error (type:
+// kernel.call_model, scheduledEventID …)"), so the friendly layer never has
+// to parse it.
+func modelFailureData(err error, elapsed time.Duration, turn int, model string) map[string]any {
+	detail := boundedFailureDetail(err)
+	data := map[string]any{"turn": turn, "model": model, "error_type": "activity_failed", "error": detail}
+	if elapsed > 0 {
+		data["elapsed_ms"] = elapsed.Milliseconds()
+	}
+	if provider := servedByProvider(detail); provider != "" {
+		data["provider"] = provider
+	}
+	return data
 }
 
 // modelObservability projects client-side model-call observability onto the
