@@ -7939,6 +7939,8 @@ func main() {
 		fetchTelemetry: relationTelemetryFetcher(observationURL, os.Getenv("TEMPORALITY_API_TOKEN")),
 		fetchVerdicts:  relationVerdictFetcher(observationURL, os.Getenv("TEMPORALITY_API_TOKEN")),
 		judge:          relationJudgeAdapter(ctx, func(ctx context.Context) (*llm.Client, error) { return judgeModelClient(ctx, ws, secretMasterKey) }),
+		fetchConflicts: relationConflictFetcher(observationURL, os.Getenv("TEMPORALITY_API_TOKEN")),
+		judgeConflict:  relationConflictJudgeAdapter(ctx, func(ctx context.Context) (*llm.Client, error) { return judgeModelClient(ctx, ws, secretMasterKey) }),
 	})
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	// Golden eval-case candidates (specs/quality-loop.md §4): review

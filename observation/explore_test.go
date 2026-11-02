@@ -303,7 +303,12 @@ func TestExploreCompareExplicitCandidateAndResolvedConflicts(t *testing.T) {
 	knowledge := exploreFixture()
 	knowledge = append(knowledge, Knowledge{ID: "K-cache-off", Proposition: "Кэш ответов выключен по умолчанию", State: "confirmed", Topics: []string{"производительность"}, Project: "other-project", CreatedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)})
 
-	result := ExploreKnowledge(knowledge, ExploreQuery{Operation: ExploreCompare})
+	// The deploy pair is about one fact (how deploys run) — close in
+	// embedding space, so the candidate gate lets it through.
+	result := ExploreKnowledgeWithEmbeddings(knowledge, map[string][]float32{
+		"K-old-deploy": {1, 0},
+		"K-new-deploy": {1, 0.1},
+	}, ExploreQuery{Operation: ExploreCompare})
 	byBasis := map[string]int{}
 	for _, conflict := range result.Conflicts {
 		byBasis[conflict.Basis]++
@@ -462,7 +467,14 @@ func TestExploreCompareCandidateRequiresTextOverlap(t *testing.T) {
 		{ID: "K-mig-retired", Proposition: "Миграции базы данных запускает отдельный сервис автоматически", State: "invalidated", Topics: []string{"tooling"}, Project: "demo", CreatedAt: time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)},
 	}
 
-	result := ExploreKnowledge(knowledge, ExploreQuery{Operation: ExploreCompare})
+	// The candidates pass the same-fact gate on their vectors: the migration
+	// pair is one subject seen differently; the noise pair is two islands.
+	result := ExploreKnowledgeWithEmbeddings(knowledge, map[string][]float32{
+		"K-mig-note":        {1, 0, 0},
+		"K-mig-retired":     {1, 0.1, 0},
+		"K-git-grep":        {0, 1, 0},
+		"K-skills-registry": {0, 0, 1},
+	}, ExploreQuery{Operation: ExploreCompare})
 	paired := map[string]bool{}
 	for _, conflict := range result.Conflicts {
 		if conflict.Basis != "candidate:same-topic-different-state" {
@@ -476,5 +488,84 @@ func TestExploreCompareCandidateRequiresTextOverlap(t *testing.T) {
 	}
 	if !paired["K-mig-note|K-mig-retired"] {
 		t.Fatalf("the genuinely diverging pair must be a candidate, got %v", paired)
+	}
+}
+
+// The candidate pool needs the SAME FACT, not merely shared words: with
+// vectors in hand, unrelated same-topic neighbours die on the similarity
+// floor even when one side denies something, paraphrase-close pairs pass the
+// top lane, moderately-close same-subject pairs pass the related lane, and a
+// denial lowers the bar but never below its own floor.
+func TestExploreCompareCandidateRequiresSameFact(t *testing.T) {
+	base := time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
+	older := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+	knowledge := []Knowledge{
+		// A: shared words, one side denies — but the subjects are islands.
+		{ID: "K-repo-path", Proposition: "Репозиторий проекта omni лежит в /workspace/omni-tfs и это рабочая ветка проекта", State: "proposed", Topics: []string{"git"}, Project: "demo", CreatedAt: base},
+		{ID: "K-branch-gone", Proposition: "Ветка проекта omni не существует ни локально ни на origin и ветка потеряна", State: "challenged", Topics: []string{"git"}, Project: "demo", CreatedAt: older},
+		// B: one subject, paraphrase-close — a real disagreement.
+		{ID: "K-auth-git", Proposition: "git fetch требует явных учётных данных при работе с сервером", State: "proposed", Topics: []string{"authentication"}, Project: "demo", CreatedAt: base},
+		{ID: "K-auth-token", Proposition: "git fetch требует явных учётных данных иначе сервер отклоняет запрос", State: "challenged", Topics: []string{"authentication"}, Project: "demo", CreatedAt: older},
+		// C: same subject, moderately close, no denial — still a candidate.
+		{ID: "K-mig-manual", Proposition: "Миграции базы данных применяются вручную на стенде", State: "proposed", Topics: []string{"tooling"}, Project: "demo", CreatedAt: base},
+		{ID: "K-mig-auto", Proposition: "Миграции базы данных запускает отдельный сервис автоматически", State: "challenged", Topics: []string{"tooling"}, Project: "demo", CreatedAt: older},
+		// D: shared words, no denial, far apart — noise.
+		{ID: "K-cache-on", Proposition: "Кэш ответов включён по умолчанию для производительности", State: "proposed", Topics: []string{"tooling"}, Project: "demo", CreatedAt: base},
+		{ID: "K-report", Proposition: "Кэш отчётов очищается по пятницам для производительности", State: "challenged", Topics: []string{"tooling"}, Project: "demo", CreatedAt: older},
+	}
+	result := ExploreKnowledgeWithEmbeddings(knowledge, map[string][]float32{
+		"K-repo-path":   {1, 0, 0, 0, 0},
+		"K-branch-gone": {0, 1, 0, 0, 0},
+		"K-auth-git":    {0, 0, 1, 0},
+		"K-auth-token":  {0, 0, 0.85, 0.15},
+		"K-mig-manual":  {0, 0, 0, 1, 0},
+		"K-mig-auto":    {0, 0, 0, 0.75, 0.66},
+		"K-cache-on":    {1, 0},
+		"K-report":      {0, 0.2},
+	}, ExploreQuery{Operation: ExploreCompare})
+	paired := map[string]bool{}
+	for _, conflict := range result.Conflicts {
+		if conflict.Basis != "candidate:same-topic-different-state" {
+			continue
+		}
+		paired[strings.Join(conflict.KnowledgeIDs, "|")] = true
+	}
+	if paired["K-branch-gone|K-repo-path"] {
+		t.Fatal("unrelated neighbours must not pair even with a denial on one side")
+	}
+	if !paired["K-auth-git|K-auth-token"] {
+		t.Fatalf("paraphrase-close disagreement must pair, got %v", paired)
+	}
+	if !paired["K-mig-auto|K-mig-manual"] {
+		t.Fatalf("moderately-close same-subject pair must pair, got %v", paired)
+	}
+	if paired["K-cache-on|K-report"] {
+		t.Fatalf("far-apart same-topic noise must not pair, got %v", paired)
+	}
+}
+
+// Without vectors only lexical evidence can speak: a denial on exactly one
+// side plus real overlap keeps the pair; plain word overlap does not.
+func TestExploreCompareCandidateOppositionLaneWithoutVectors(t *testing.T) {
+	base := time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
+	older := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+	knowledge := []Knowledge{
+		{ID: "K-branch-exists", Proposition: "Ветка fix/flaky-e2e существует в origin и содержит фиксы для тестов", State: "proposed", Topics: []string{"git"}, Project: "demo", CreatedAt: base},
+		{ID: "K-branch-denied", Proposition: "Ветка fix/flaky-e2e не существует в origin и фиксы для тестов утеряны", State: "challenged", Topics: []string{"git"}, Project: "demo", CreatedAt: older},
+		{ID: "K-cache-weekly", Proposition: "Кэш отчётов очищается по пятницам для производительности", State: "proposed", Topics: []string{"tooling"}, Project: "demo", CreatedAt: base},
+		{ID: "K-cache-size", Proposition: "Кэш отчётов ограничен размером для производительности", State: "challenged", Topics: []string{"tooling"}, Project: "demo", CreatedAt: older},
+	}
+	result := ExploreKnowledge(knowledge, ExploreQuery{Operation: ExploreCompare})
+	paired := map[string]bool{}
+	for _, conflict := range result.Conflicts {
+		if conflict.Basis == "candidate:same-topic-different-state" {
+			paired[strings.Join(conflict.KnowledgeIDs, "|")] = true
+		}
+	}
+	if !paired["K-branch-denied|K-branch-exists"] {
+		t.Fatalf("a denial pair with real overlap must pair without vectors, got %v", paired)
+	}
+	if paired["K-cache-size|K-cache-weekly"] {
+		t.Fatalf("plain overlap without opposition must not pair, got %v", paired)
 	}
 }

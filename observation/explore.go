@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Knowledge exploration engine (docs/agent-knowledge-exploration.md §4): six
@@ -167,8 +168,12 @@ type ExploreConflict struct {
 	// ContextDifferences lists material scope/time/context splits that may
 	// make the statements non-contradictory in practice (§4.5).
 	ContextDifferences []string `json:"context_differences,omitempty"`
-	Resolved           bool     `json:"resolved"`
-	Resolution         string   `json:"resolution,omitempty"`
+	// Similarity is the cosine closeness of the two statements' embeddings
+	// (0 when either side has no vector): the evidence behind a candidate's
+	// "same fact" claim, shown instead of asking a human to guess it.
+	Similarity float64 `json:"similarity,omitempty"`
+	Resolved   bool    `json:"resolved"`
+	Resolution string  `json:"resolution,omitempty"`
 }
 
 // ExploreSynthesis is the compact research dossier (§4.6).
@@ -230,6 +235,14 @@ type ExploreResult struct {
 // base. It returns a result even when nothing matches: absence of findings is
 // reported, never treated as an error.
 func ExploreKnowledge(knowledge []Knowledge, query ExploreQuery) ExploreResult {
+	return ExploreKnowledgeWithEmbeddings(knowledge, nil, query)
+}
+
+// ExploreKnowledgeWithEmbeddings is ExploreKnowledge with statement vectors
+// in hand: the conflict candidates use them to separate "two statements about
+// the same fact" (a possible contradiction) from "two statements sharing
+// topic words" (queue noise).
+func ExploreKnowledgeWithEmbeddings(knowledge []Knowledge, embeddings map[string][]float32, query ExploreQuery) ExploreResult {
 	result := ExploreResult{Operation: query.Operation, AlgorithmVersion: ExploreAlgorithmVersion, Completeness: "complete"}
 	if result.Operation == "" {
 		result.Operation = ExploreSearch
@@ -261,7 +274,7 @@ func ExploreKnowledge(knowledge []Knowledge, query ExploreQuery) ExploreResult {
 		// present everywhere (and therefore unselective) sink toward zero.
 		return math.Log(1 + float64(len(knowledge))/float64(1+documentFrequency[token]))
 	}
-	engine := exploreEngine{knowledge: knowledge, byID: byID, tokensByID: tokensByID, idf: idf}
+	engine := exploreEngine{knowledge: knowledge, byID: byID, tokensByID: tokensByID, idf: idf, embeddings: embeddings}
 	switch result.Operation {
 	case ExploreOrient:
 		engine.orient(&result, query)
@@ -287,6 +300,10 @@ type exploreEngine struct {
 	byID       map[string]Knowledge
 	tokensByID map[string]map[string]bool
 	idf        func(token string) float64
+	// embeddings maps knowledge id → statement vector. May be nil or
+	// partial: a missing vector reads as "similarity unknown", which only the
+	// lexical opposition lane may bridge.
+	embeddings map[string][]float32
 }
 
 // knowledgeItemTokens builds the searchable feature set of one item:
@@ -987,10 +1004,18 @@ func (e exploreEngine) collectConflicts(targets []Knowledge) []ExploreConflict {
 				}
 				// A shared topic word alone is not a contradiction signal:
 				// generic topics ("tooling", "testing") collect unrelated
-				// statements from every run. Require real text overlap — two
-				// meaningful tokens beyond the topic word itself — before the
-				// pair is worth a human's queue slot.
-				if contentTokenOverlap(left.Proposition, right.Proposition) < 2 {
+				// statements from every run. Two meaningful tokens of overlap are
+				// the entry ticket — and the pair must still look like the SAME
+				// fact: paraphrase-level embedding closeness, or an opposition
+				// signal (denial on exactly one side) over a plausibility floor.
+				// Unrelated neighbours that merely share words ("repo layout" vs
+				// "a branch name") die here instead of landing in a human's queue.
+				overlap := contentTokenOverlap(left.Proposition, right.Proposition)
+				if overlap < 2 {
+					continue
+				}
+				similarity, hasVectors := e.similarity(left.ID, right.ID)
+				if !sameFactCandidate(similarity, hasVectors, overlap, left.Proposition, right.Proposition) {
 					continue
 				}
 				conflict := ExploreConflict{
@@ -998,6 +1023,9 @@ func (e exploreEngine) collectConflicts(targets []Knowledge) []ExploreConflict {
 					Basis:              "candidate:same-topic-different-state",
 					Detail:             fmt.Sprintf("items share topic %q but carry states %s and %s; this is a heuristic candidate, not a recorded contradiction", topic, left.State, right.State),
 					ContextDifferences: contextDifferences(left, right),
+				}
+				if hasVectors {
+					conflict.Similarity = similarity
 				}
 				addConflict(conflict)
 				break
@@ -1027,6 +1055,85 @@ func contentTokenOverlap(left, right string) int {
 		}
 	}
 	return n
+}
+
+// Conflict-candidate precision floor: text overlap earns a pair a look,
+// these signals decide whether the two statements could be about one fact.
+const (
+	// candidateConflictMinCosine admits paraphrase-close pairs — the same
+	// "worth a conflict judgment" band the kernel's conflict predictor uses
+	// (cmd/agent-kernel/embeddingsbackfill.go conflictScoreMin).
+	candidateConflictMinCosine = 0.85
+	// candidateConflictRelatedMinCosine is the same-subject plausibility
+	// floor with vectors in hand: "the branch exists" vs "the branch does
+	// not" scores high; "git credentials" vs "REST token scopes" does not.
+	candidateConflictRelatedMinCosine = 0.6
+	// candidateConflictOppositionMinCosine is the lowered floor for a denial
+	// pair (exactly one side denies): denials reword what they deny.
+	candidateConflictOppositionMinCosine = 0.5
+	// candidateConflictUnknownOverlap is the lexical bar for pairs whose
+	// vectors are missing: without similarity evidence, the opposition lane
+	// needs real word overlap to compensate.
+	candidateConflictUnknownOverlap = 3
+)
+
+// sameFactCandidate is the precision gate of the heuristic candidate pool.
+func sameFactCandidate(similarity float64, hasVectors bool, overlap int, left, right string) bool {
+	switch {
+	case hasVectors && similarity >= candidateConflictMinCosine:
+		return true
+	case hasVectors:
+		if oppositionSignal(left, right) {
+			return similarity >= candidateConflictOppositionMinCosine
+		}
+		return similarity >= candidateConflictRelatedMinCosine
+	default:
+		// No vectors yet (a fresh statement minutes before its embedding
+		// lands): lexical evidence only — opposition plus real overlap.
+		return oppositionSignal(left, right) && overlap >= candidateConflictUnknownOverlap
+	}
+}
+
+// similarity between two statements' embeddings. ok=false when either vector
+// is missing — unknown similarity is its own lane (lexical opposition only),
+// never mistaken for a measured low one.
+func (e exploreEngine) similarity(a, b string) (float64, bool) {
+	if e.embeddings == nil {
+		return 0, false
+	}
+	score, ok := cosineSimilarity(e.embeddings[a], e.embeddings[b])
+	return float64(score), ok
+}
+
+// negationMarkers are standalone denial words (RU/EN) matched as whole
+// tokens, so «и не в» counts while «интернет» does not.
+var negationMarkers = map[string]bool{
+	"не": true, "нет": true, "нету": true, "отсутствует": true, "отсутствуют": true,
+	"отсутствовал": true, "отсутствовала": true, "невозможно": true, "невозможен": true,
+	"невозможна": true, "нельзя": true, "без": true,
+	"not": true, "no": true, "never": true, "cannot": true, "can't": true, "without": true,
+	"absent": true, "missing": true, "impossible": true,
+}
+
+// containsDenial scans whole words for denial markers (plus the English
+// contraction suffix n't).
+func containsDenial(text string) bool {
+	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && r != '\''
+	}) {
+		word = strings.Trim(word, "'")
+		if negationMarkers[word] || strings.HasSuffix(word, "n't") {
+			return true
+		}
+	}
+	return false
+}
+
+// oppositionSignal reports whether exactly one side denies something — the
+// lexical shape of a disagreement ("the branch exists" vs "the branch does
+// not"). Both sides denying, or neither, is not opposition.
+func oppositionSignal(left, right string) bool {
+	return containsDenial(left) != containsDenial(right)
 }
 
 // stateWeight maps lifecycle states onto a doubt scale: live proposals and

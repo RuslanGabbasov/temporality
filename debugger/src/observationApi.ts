@@ -151,6 +151,10 @@ export const observationApi = {
     }),
   challenge: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/challenge', body),
+  /** The curator verdict «this pair is not a conflict»: the pair leaves every
+   *  future candidate pool (knowledge.relation_dismissed). */
+  dismissRelation: (body: { project: string; knowledge_id: string; target_id: string; actor: ObservationActor; reason?: string; evidence?: ObservationEvidence[] }) =>
+    post<ObservationEvent>('/v1/observations/knowledge/relations/dismiss', body),
   promote: (body: { knowledge_id: string; project: string; actor: ObservationActor; scope_kind: 'org_unit' | 'organization'; scope_id?: string; reason: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/promote', body),
   hints: (body: { project: string; query?: string; tool?: string; tool_result?: string; entities?: string[]; topics?: string[]; limit?: number }) =>
@@ -343,6 +347,8 @@ export interface ExploreConflict {
   basis: string
   detail: string
   context_differences?: string[]
+  /** Cosine closeness of the two statements' embeddings (absent = no vectors). */
+  similarity?: number
   resolved: boolean
   resolution?: string
 }

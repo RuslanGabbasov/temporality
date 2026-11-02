@@ -175,6 +175,7 @@ func NewServer(store observation.Store, log *slog.Logger, gate *controlplane.Gat
 	mux.HandleFunc("GET /v1/observations/runs/compare", s.compareRuns)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/challenge", s.challengeObservationKnowledge)
+	mux.HandleFunc("POST /v1/observations/knowledge/relations/dismiss", s.dismissKnowledgeRelation)
 	mux.HandleFunc("POST /v1/observations/knowledge/promote", s.promoteObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/explore", s.exploreObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
@@ -1425,6 +1426,95 @@ func (s *Server) challengeObservationKnowledge(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusCreated, event)
 }
 
+type knowledgeRelationVerdictRequest struct {
+	Project     string                 `json:"project"`
+	KnowledgeID string                 `json:"knowledge_id"`
+	TargetID    string                 `json:"target_id"`
+	Actor       observation.Actor      `json:"actor"`
+	Reason      string                 `json:"reason,omitempty"`
+	Evidence    []observation.Evidence `json:"evidence,omitempty"`
+}
+
+// dismissKnowledgeRelation records the human verdict «this pair is not a
+// conflict» (knowledge.relation_dismissed): the pair leaves every future
+// candidate pool for good (pairDismissed), which is the only way a curator
+// can drain heuristic noise without touching either statement's lifecycle.
+func (s *Server) dismissKnowledgeRelation(w http.ResponseWriter, r *http.Request) {
+	var input knowledgeRelationVerdictRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.Project = strings.TrimSpace(input.Project)
+	input.KnowledgeID = strings.TrimSpace(input.KnowledgeID)
+	input.TargetID = strings.TrimSpace(input.TargetID)
+	input.Actor.ID = strings.TrimSpace(input.Actor.ID)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.Project == "" || input.KnowledgeID == "" || input.TargetID == "" || input.Actor.ID == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("project, knowledge_id, target_id, and actor.id are required"))
+		return
+	}
+	if input.KnowledgeID == input.TargetID {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id and target_id must differ"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleOperator, input.Project) {
+		return
+	}
+	// Both endpoints must be visible to the caller: a verdict about unseen
+	// knowledge is a guess, not a decision.
+	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
+		return
+	}
+	knowledge, err := observation.ProjectKnowledge(events)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
+	seen := map[string]bool{}
+	for i := range knowledge {
+		if knowledge[i].ID == input.KnowledgeID || knowledge[i].ID == input.TargetID {
+			seen[knowledge[i].ID] = true
+		}
+	}
+	if !seen[input.KnowledgeID] {
+		writeError(w, http.StatusNotFound, observation.ErrKnowledgeNotFound)
+		return
+	}
+	if !seen[input.TargetID] {
+		writeError(w, http.StatusNotFound, errors.New("target knowledge not found in this project"))
+		return
+	}
+	if input.Reason == "" {
+		input.Reason = "not a contradiction (human verdict, no comment)"
+	}
+	event := observation.Event{
+		Schema: observation.Schema, EventID: newUUID(), OccurredAt: s.now().UTC(),
+		Source:  observation.Source{ID: "temporality-manual", Integration: "temporality", Version: "1"},
+		Context: observation.Context{Project: input.Project, Actor: input.Actor},
+		Type:    "knowledge.relation_dismissed",
+		Data: map[string]any{
+			"knowledge_id": input.KnowledgeID, "target_id": input.TargetID,
+			"relation": "unrelated", "method": "manual", "reason": input.Reason,
+		},
+		Evidence: input.Evidence,
+	}
+	if err = event.Validate(); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	event.ReceivedAt = s.now().UTC()
+	if _, err = s.store.AppendObservation(r.Context(), event); err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not record the relation verdict"))
+		return
+	}
+	s.invalidateKnowledge(input.Project)
+	writeJSON(w, http.StatusCreated, event)
+}
+
 // filterKnowledgeVisible narrows a projected knowledge list to what the
 // project may see: own items, organization-scoped items, and org_unit-scoped
 // items whose unit is in the project's visibility chain.
@@ -1646,7 +1736,18 @@ func (s *Server) exploreObservationKnowledge(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
 		return
 	}
-	result := observation.ExploreKnowledge(knowledge, observation.ExploreQuery{
+	// Statement vectors sharpen the conflict candidates ("same fact" vs
+	// "same topic words"): best-effort — a store without embeddings keeps the
+	// lexical gate. Only the conflict-bearing operations pay the load.
+	var embeddings map[string][]float32
+	if input.Operation == observation.ExploreCompare || input.Operation == observation.ExploreSynthesize {
+		if store, ok := s.store.(mapStore); ok {
+			if vectors, err := store.ListKnowledgeEmbeddings(r.Context(), "", nil); err == nil {
+				embeddings = vectors
+			}
+		}
+	}
+	result := observation.ExploreKnowledgeWithEmbeddings(knowledge, embeddings, observation.ExploreQuery{
 		Operation: input.Operation, Question: input.Question, Targets: input.Targets,
 		Relations: input.Relations, MaxDepth: input.MaxDepth, MaxItems: input.MaxItems,
 		IncludeCandidates: input.IncludeCandidates,

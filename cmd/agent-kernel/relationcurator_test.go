@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -16,7 +17,8 @@ import (
 // confirms, the judge resolves, dismissals stick.
 
 type curatorActivitiesFake struct {
-	emitted []relationVerdictRecord
+	emitted          []relationVerdictRecord
+	conflictsEmitted []conflictVerdictRecord
 }
 
 type relationVerdictRecord struct {
@@ -25,10 +27,24 @@ type relationVerdictRecord struct {
 	method, explanation            string
 }
 
+type conflictVerdictRecord struct {
+	project, knowledgeID, targetID string
+	confirmed                      bool
+	method, explanation            string
+}
+
 func (f *curatorActivitiesFake) EmitRelationVerdict(_ context.Context, project, knowledgeID, targetID string, dismissed bool, method, explanation string, _ map[string]any) error {
 	f.emitted = append(f.emitted, relationVerdictRecord{
 		project: project, knowledgeID: knowledgeID, targetID: targetID,
 		dismissed: dismissed, method: method, explanation: explanation,
+	})
+	return nil
+}
+
+func (f *curatorActivitiesFake) EmitContradictionVerdict(_ context.Context, project, knowledgeID, targetID string, confirmed bool, method, explanation string, _ map[string]any) error {
+	f.conflictsEmitted = append(f.conflictsEmitted, conflictVerdictRecord{
+		project: project, knowledgeID: knowledgeID, targetID: targetID,
+		confirmed: confirmed, method: method, explanation: explanation,
 	})
 	return nil
 }
@@ -200,4 +216,84 @@ func proposedKnowledgeEvent(project, eventID, knowledgeID, proposition string) o
 			"topics": []string{"topic"}, "scope_kind": "project",
 		},
 	}
+}
+
+// The contradiction queue drains through the pair question: «genuinely
+// contradict or merely overlap?» — "no" dismisses the pair forever (a
+// non-contradiction has no wrong side a human could act on), "yes" promotes
+// it to an explicit contradicts edge.
+func TestCurateContradictionsJudgesThePairQuestion(t *testing.T) {
+	fake := &curatorActivitiesFake{}
+	judgeCalls := 0
+	verdicts := map[string]bool{} // the journal twin: verdicts persist between passes
+	deps := relationCuratorDeps{
+		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		fetchMeta: func(context.Context) ([]relationKnowledgeMeta, error) {
+			return []relationKnowledgeMeta{
+				metaItem("k1", "репозиторий проекта лежит в /workspace/omni-tfs", "git"),
+				metaItem("k2", "ветка flaky-e2e не существует в origin", "git"),
+				metaItem("k3", "git fetch требует явных учётных данных", "auth"),
+				metaItem("k4", "git fetch без учётных данных отклоняется сервером", "auth"),
+			}, nil
+		},
+		fetchTelemetry: func(context.Context) ([]hintEvent, error) { return nil, nil },
+		fetchVerdicts:  func(context.Context) (map[string]bool, error) { return verdicts, nil },
+		fetchConflicts: func(_ context.Context, project string) ([]conflictCandidatePair, error) {
+			require.Equal(t, "proj", project)
+			return []conflictCandidatePair{{A: "k1", B: "k2"}, {A: "k3", B: "k4"}}, nil
+		},
+		judgeConflict: func(_ context.Context, a, b relationKnowledgeMeta) (bool, string, error) {
+			judgeCalls++
+			if a.ID == "k1" {
+				return false, "different subjects — both can hold", nil
+			}
+			return true, "one asserts what the other denies", nil
+		},
+	}
+	sweep := relationCuratorSweep{deps: deps, emit: fake, conflicts: fake}
+	sweep.curate(context.Background())
+
+	require.Equal(t, 2, judgeCalls)
+	require.Len(t, fake.conflictsEmitted, 2)
+	byKey := map[string]conflictVerdictRecord{}
+	for _, record := range fake.conflictsEmitted {
+		byKey[pairKey(record.knowledgeID, record.targetID)] = record
+	}
+	dismissed := byKey[pairKey("k1", "k2")]
+	require.False(t, dismissed.confirmed, "a non-contradiction must be dismissed, not promoted")
+	require.Equal(t, "judge", dismissed.method)
+	confirmed := byKey[pairKey("k3", "k4")]
+	require.True(t, confirmed.confirmed, "a genuine contradiction must become an explicit edge")
+	require.Equal(t, "judge", confirmed.method)
+
+	// A second pass never re-judges a settled pair.
+	sweep.curate(context.Background())
+	require.Equal(t, 2, judgeCalls)
+	require.Len(t, fake.conflictsEmitted, 2)
+}
+
+// Fail-open on judge errors: the pair stays a candidate for the next pass —
+// a model hiccup must cost one tick, never a verdict.
+func TestCurateContradictionsFailsOpenOnJudgeError(t *testing.T) {
+	fake := &curatorActivitiesFake{}
+	deps := relationCuratorDeps{
+		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		fetchMeta: func(context.Context) ([]relationKnowledgeMeta, error) {
+			return []relationKnowledgeMeta{
+				metaItem("k1", "одно утверждение про ветку", "git"),
+				metaItem("k2", "другое утверждение про ветку", "git"),
+			}, nil
+		},
+		fetchTelemetry: func(context.Context) ([]hintEvent, error) { return nil, nil },
+		fetchVerdicts:  func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil },
+		fetchConflicts: func(context.Context, string) ([]conflictCandidatePair, error) {
+			return []conflictCandidatePair{{A: "k1", B: "k2"}}, nil
+		},
+		judgeConflict: func(context.Context, relationKnowledgeMeta, relationKnowledgeMeta) (bool, string, error) {
+			return false, "", fmt.Errorf("judge unavailable")
+		},
+	}
+	sweep := relationCuratorSweep{deps: deps, emit: fake, conflicts: fake}
+	sweep.curate(context.Background())
+	require.Empty(t, fake.conflictsEmitted)
 }

@@ -1542,6 +1542,60 @@ func TestKnowledgeManualChallenge(t *testing.T) {
 	}
 }
 
+// The pair verdict «not a contradiction» is recorded and sticky: the pair
+// leaves every future candidate pool (pairDismissed), so heuristic noise
+// drains with one click instead of resurfacing on every visit.
+func TestKnowledgeRelationDismissVerdict(t *testing.T) {
+	handler := newTestServer(t)
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{
+			proposedEvent("lighthouse", "evt-d1", "K1", "the repo lives in /workspace/omni-tfs and the working branch is rnd/ai"),
+			proposedEvent("lighthouse", "evt-d2", "K2", "the branch fix/flaky-e2e does not exist in origin"),
+		},
+	}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/knowledge/relations/dismiss", map[string]any{
+		"project": "lighthouse", "knowledge_id": "K1", "target_id": "K2",
+		"actor": map[string]any{"id": "operator", "type": "human"},
+	}); res.StatusCode != http.StatusCreated {
+		t.Fatalf("dismiss status = %d, want 201, body = %v", res.StatusCode, body)
+	}
+	// A verdict about unseen knowledge is a guess — refused.
+	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/relations/dismiss", map[string]any{
+		"project": "lighthouse", "knowledge_id": "K1", "target_id": "K404",
+		"actor": map[string]any{"id": "operator", "type": "human"},
+	}); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("dismiss of unknown target status = %d, want 404", res.StatusCode)
+	}
+
+	// The negative review lives on BOTH endpoints — whichever side a compare
+	// starts from, the pair is already settled.
+	res, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("knowledge listing status = %d, body = %v", res.StatusCode, body)
+	}
+	items, _ := body["knowledge"].([]any)
+	dismissedTargets := map[string]map[string]bool{}
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		id, _ := item["id"].(string)
+		relations, _ := item["dismissed_relations"].([]any)
+		for _, rel := range relations {
+			relMap, _ := rel.(map[string]any)
+			target, _ := relMap["target_id"].(string)
+			if dismissedTargets[id] == nil {
+				dismissedTargets[id] = map[string]bool{}
+			}
+			dismissedTargets[id][target] = true
+		}
+	}
+	if !dismissedTargets["K1"]["K2"] || !dismissedTargets["K2"]["K1"] {
+		t.Fatalf("the dismiss verdict must stick on both endpoints, got %v", dismissedTargets)
+	}
+}
+
 func TestObservationHintsScopedToTeamRunTree(t *testing.T) {
 	// Team-run scoping (docs/agent-teams.md §8): a slot asking for hints with
 	// its team root sees knowledge produced by any run of that tree, even for

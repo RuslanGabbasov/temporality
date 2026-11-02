@@ -103,6 +103,10 @@ export default function ConflictPanel({ project, conflicts: given, revision = 0,
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
   const [localRev, setLocalRev] = useState(0)
+  // «Пропустить» hides a pair without a verdict — reading the queue is not a
+  // decision; only an explicit verdict (dismiss) is sticky.
+  const [skipped, setSkipped] = useState<Set<string>>(new Set())
+  const [showCandidates, setShowCandidates] = useState(false)
   const seq = useRef(0)
 
   useEffect(() => {
@@ -157,24 +161,32 @@ export default function ConflictPanel({ project, conflicts: given, revision = 0,
     }
   }
 
-  return (
-    <div>
-      {discovery && (
-        <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)', marginBottom: '0.6rem' }}>
-          {t('explorer.conflicts_hint') ?? ''}
-        </div>
-      )}
-      {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.6rem' }} />}
-      {actionError && <InlineNotification kind="error" title="Error" subtitle={actionError} onClose={() => setActionError('')} lowContrast style={{ marginBottom: '0.6rem' }} />}
-      {loading && <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', marginBottom: '0.5rem' }}>…</div>}
+  const conflictKey = (conflict: ExploreConflict) => conflict.knowledge_ids.join('|')
 
-      {conflicts.length === 0 && !loading && (
-        <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
-          {t('explorer.conflicts_empty') ?? 'No contradictions found in the visible base.'}
-        </div>
-      )}
+  // «Не противоречие» is the one click a non-contradiction deserves: the
+  // verdict is recorded (knowledge.relation_dismissed) and the pair never
+  // returns to any candidate pool.
+  async function dismissPair(conflict: ExploreConflict) {
+    const [a, b] = conflict.knowledge_ids
+    setBusy(true); setActionError('')
+    try {
+      const actor = { id: 'human', type: 'human' as const }
+      await observationApi.dismissRelation({ project, knowledge_id: a, target_id: b, actor, reason: reason.trim() || undefined })
+      setReason('')
+      setLocalRev((r) => r + 1)
+      onChanged?.()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setBusy(false)
+    }
+  }
 
-      {conflicts.map((conflict, i) => {
+  const visible = conflicts.filter((conflict) => !skipped.has(conflictKey(conflict)))
+  const real = visible.filter((conflict) => !conflict.basis.startsWith('candidate:'))
+  const candidates = visible.filter((conflict) => conflict.basis.startsWith('candidate:'))
+
+  const renderCard = (conflict: ExploreConflict, i: number) => {
         const [leftID, rightID] = conflict.knowledge_ids
         return (
           <div key={`${conflict.knowledge_ids.join('-')}-${i}`} style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.6rem' }}>
@@ -182,6 +194,11 @@ export default function ConflictPanel({ project, conflicts: given, revision = 0,
               <Tag type={BASIS_TAG[conflict.basis] ?? 'gray'} size="sm">{conflictBasisLabel(conflict.basis, t)}</Tag>
               {conflict.resolved && <Tag type="green" size="sm">{t('explorer.conflict_resolved_tag') ?? 'resolved'}</Tag>}
               <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)' }}>{conflict.detail}</span>
+              {typeof conflict.similarity === 'number' && conflict.similarity > 0 && (
+                <span style={{ fontSize: '0.68rem', color: 'var(--tm-muted)', whiteSpace: 'nowrap' }}>
+                  {t('explorer.conflict_similarity', { value: conflict.similarity.toFixed(2) }) ?? `similarity ${conflict.similarity.toFixed(2)}`}
+                </span>
+              )}
             </div>
 
             {(conflict.context_differences ?? []).length > 0 && (
@@ -202,7 +219,7 @@ export default function ConflictPanel({ project, conflicts: given, revision = 0,
             ) : (
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                 <TextInput
-                  id={`conflict-reason-${i}`}
+                  id={`conflict-reason-${conflictKey(conflict)}`}
                   size="sm" labelText="" hideLabel style={{ flex: 1, minWidth: '220px' }}
                   placeholder={t('runs.knowledge_reason_placeholder') ?? 'Reason'}
                   value={reason} onChange={(e) => setReason(e.target.value)}
@@ -211,11 +228,61 @@ export default function ConflictPanel({ project, conflicts: given, revision = 0,
                 <Button size="sm" kind="secondary" disabled={!reason.trim() || busy} onClick={() => void resolve('challenge', rightID)}>{t('explorer.conflict_challenge_right') ?? 'Challenge →'}</Button>
                 <Button size="sm" kind="secondary" disabled={!reason.trim() || busy} onClick={() => void resolve('prefer', leftID, rightID)}>{t('explorer.conflict_prefer_left') ?? 'Keep ←'}</Button>
                 <Button size="sm" kind="secondary" disabled={!reason.trim() || busy} onClick={() => void resolve('prefer', rightID, leftID)}>{t('explorer.conflict_prefer_right') ?? 'Keep →'}</Button>
+                <Button
+                  size="sm" kind="ghost" disabled={busy}
+                  title={t('explorer.conflict_dismiss_pair_hint') ?? 'The pair is not a conflict — never suggested again'}
+                  onClick={() => void dismissPair(conflict)}
+                >{t('explorer.conflict_dismiss_pair') ?? 'Not a conflict'}</Button>
+                <Button size="sm" kind="ghost" disabled={busy} onClick={() => setSkipped((prev) => new Set(prev).add(conflictKey(conflict)))}>{t('explorer.conflict_skip_pair') ?? 'Skip'}</Button>
               </div>
             )}
           </div>
         )
-      })}
+  }
+
+  return (
+    <div>
+      {discovery && (
+        <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)', marginBottom: '0.6rem' }}>
+          {t('explorer.conflicts_hint') ?? ''}
+        </div>
+      )}
+      {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.6rem' }} />}
+      {actionError && <InlineNotification kind="error" title="Error" subtitle={actionError} onClose={() => setActionError('')} lowContrast style={{ marginBottom: '0.6rem' }} />}
+      {loading && <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', marginBottom: '0.5rem' }}>…</div>}
+
+      {conflicts.length === 0 && !loading && (
+        <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
+          {t('explorer.conflicts_empty') ?? 'No contradictions found in the visible base.'}
+        </div>
+      )}
+
+      {real.length > 0 && (
+        <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--tm-text-2)', margin: '0.2rem 0 0.5rem' }}>
+          {t('explorer.conflict_real_header') ?? 'Contradictions'}
+        </div>
+      )}
+      {real.map(renderCard)}
+
+      {candidates.length > 0 && (
+        <div style={{ marginTop: '0.8rem' }}>
+          <button
+            onClick={() => setShowCandidates((open) => !open)}
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600, color: 'var(--tm-text-2)', display: 'flex', gap: '0.45rem', alignItems: 'baseline' }}
+            title={t('explorer.conflict_candidates_hint') ?? 'Heuristic candidates: same topic, different states — not recorded contradictions'}
+          >
+            {t('explorer.conflict_candidates_header') ?? 'Candidates (heuristic)'}
+            <span style={{ fontWeight: 400, color: 'var(--tm-muted)' }}>({candidates.length})</span>
+            <span style={{ fontWeight: 400, color: 'var(--tm-muted)' }}>{showCandidates ? '▴' : '▾'}</span>
+          </button>
+          {!showCandidates && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.2rem' }}>
+              {t('explorer.conflict_candidates_hint') ?? 'Heuristic candidates: same topic, different states — not recorded contradictions'}
+            </div>
+          )}
+          {showCandidates && <div style={{ marginTop: '0.5rem' }}>{candidates.map(renderCard)}</div>}
+        </div>
+      )}
 
       {notes.length > 0 && !loading && (
         <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{notes.join(' · ')}</div>

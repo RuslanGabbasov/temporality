@@ -16,11 +16,16 @@ package main
 // Best-effort on every pass; a failure costs one tick, never knowledge.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,6 +41,9 @@ const (
 	// relationJudgeBudget caps model calls per pass — same philosophy as the
 	// conflict predictor: a stalled or expensive judge must not dominate.
 	relationJudgeBudget = 6
+	// conflictJudgeBudget caps contradiction-judgment calls per pass: the
+	// heuristic queue drains over passes, verdicts are sticky.
+	conflictJudgeBudget = 6
 )
 
 // relationCuratorDeps is the sweep's surface; *agent.Activities and the
@@ -52,6 +60,19 @@ type relationCuratorDeps struct {
 	fetchVerdicts func(ctx context.Context) (map[string]bool, error)
 	// judge resolves one pair; nil or error = fail-open (skip, no verdict).
 	judge func(ctx context.Context, a, b relationKnowledgeMeta) (related bool, explanation string, err error)
+	// fetchConflicts lists the explore surface's heuristic contradiction
+	// candidates per project — the queue a human cannot drain by clicking
+	// (a non-contradiction has no wrong side to act on).
+	fetchConflicts func(ctx context.Context, project string) ([]conflictCandidatePair, error)
+	// judgeConflict answers the contradiction question for one pair; nil or
+	// error = fail-open (skip, no verdict).
+	judgeConflict func(ctx context.Context, a, b relationKnowledgeMeta) (conflicts bool, explanation string, err error)
+}
+
+// conflictCandidatePair is one heuristic contradiction candidate (explore
+// basis candidate:*), judged into an explicit verdict by the curator.
+type conflictCandidatePair struct {
+	A, B string
 }
 
 type relationKnowledgeMeta struct {
@@ -107,7 +128,7 @@ func pairKey(a, b string) string {
 // curateRelations is one pass: telemetry confirms, the judge resolves the
 // rest, both write sticky verdicts. Production emitter = the activities.
 func curateRelations(ctx context.Context, deps relationCuratorDeps) {
-	relationCuratorSweep{deps: deps, emit: deps.activities}.curate(ctx)
+	relationCuratorSweep{deps: deps, emit: deps.activities, conflicts: deps.activities}.curate(ctx)
 }
 
 // relationVerdictEmitter is the journal-write surface; *agent.Activities
@@ -116,10 +137,17 @@ type relationVerdictEmitter interface {
 	EmitRelationVerdict(ctx context.Context, project, knowledgeID, targetID string, dismissed bool, method, explanation string, stats map[string]any) error
 }
 
+// conflictVerdictEmitter is the contradiction-verdict write surface; tests
+// may leave it nil (the contradiction pass then stays off).
+type conflictVerdictEmitter interface {
+	EmitContradictionVerdict(ctx context.Context, project, knowledgeID, targetID string, confirmed bool, method, explanation string, stats map[string]any) error
+}
+
 // relationCuratorSweep is one stateless pass over the base.
 type relationCuratorSweep struct {
-	deps relationCuratorDeps
-	emit relationVerdictEmitter
+	deps      relationCuratorDeps
+	emit      relationVerdictEmitter
+	conflicts conflictVerdictEmitter
 }
 
 func (s relationCuratorSweep) curate(ctx context.Context) {
@@ -283,6 +311,140 @@ func (s relationCuratorSweep) curate(ctx context.Context) {
 		}
 		verdicts[key] = true
 	}
+	s.curateContradictions(ctx, byID, verdicts)
+}
+
+// curateContradictions drains the heuristic contradiction queue the way the
+// relation pass drains relation candidates: the judge asks the pair question
+// («genuinely contradict or merely overlap?») — "no" dismisses the pair
+// forever (it leaves every future candidate pool), "yes" promotes it to an
+// explicit contradicts edge the contradictions surface can act on. A human
+// clicking buttons cannot drain this queue: a non-contradiction has no wrong
+// side to challenge or supersede.
+func (s relationCuratorSweep) curateContradictions(ctx context.Context, byID map[string]relationKnowledgeMeta, verdicts map[string]bool) {
+	deps := s.deps
+	if s.conflicts == nil || deps.fetchConflicts == nil || deps.judgeConflict == nil {
+		return
+	}
+	projects := make([]string, 0)
+	seen := map[string]bool{}
+	for _, item := range byID {
+		if item.Project != "" && !seen[item.Project] {
+			seen[item.Project] = true
+			projects = append(projects, item.Project)
+		}
+	}
+	sort.Strings(projects)
+	judged := 0
+	for _, project := range projects {
+		pairs, err := deps.fetchConflicts(ctx, project)
+		if err != nil {
+			deps.log.Warn("relation curator: load conflict candidates", "project", project, "error", err.Error())
+			continue
+		}
+		for _, pair := range pairs {
+			if ctx.Err() != nil {
+				return
+			}
+			if judged >= conflictJudgeBudget {
+				return
+			}
+			key := pairKey(pair.A, pair.B)
+			if verdicts[key] {
+				continue
+			}
+			a, b := byID[pair.A], byID[pair.B]
+			if a.ID == "" || b.ID == "" {
+				continue
+			}
+			conflicts, explanation, err := deps.judgeConflict(ctx, a, b)
+			if err != nil {
+				deps.log.Warn("relation curator: judge conflict", "pair", key, "error", err.Error())
+				continue // fail-open: the pair stays a candidate for the next pass
+			}
+			judged++
+			if err := s.conflicts.EmitContradictionVerdict(ctx, project, a.ID, b.ID, conflicts, "judge", explanation, map[string]any{"basis": "candidate:same-topic-different-state"}); err != nil {
+				deps.log.Warn("relation curator: conflict verdict", "pair", key, "error", err.Error())
+				continue
+			}
+			if conflicts {
+				deps.log.Info("relation curator: judge confirmed contradiction", "a", a.ID, "b", b.ID, "explanation", explanation)
+			} else {
+				deps.log.Info("relation curator: judge dismissed contradiction", "a", a.ID, "b", b.ID, "explanation", explanation)
+			}
+			verdicts[key] = true
+		}
+	}
+}
+
+// relationConflictFetcher lists the explore surface's heuristic
+// contradiction candidates per project (basis candidate:*).
+func relationConflictFetcher(observationURL, journalToken string) func(ctx context.Context, project string) ([]conflictCandidatePair, error) {
+	return func(ctx context.Context, project string) ([]conflictCandidatePair, error) {
+		body, err := journalPost(ctx, observationURL, journalToken, "/v1/observations/knowledge/explore", map[string]any{"project": project, "operation": "compare", "max_items": 100})
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Conflicts []struct {
+				KnowledgeIDs []string `json:"knowledge_ids"`
+				Basis        string   `json:"basis"`
+			} `json:"conflicts"`
+		}
+		if err := jsonUnmarshal(body, &page); err != nil {
+			return nil, err
+		}
+		var out []conflictCandidatePair
+		for _, conflict := range page.Conflicts {
+			if !strings.HasPrefix(conflict.Basis, "candidate:") || len(conflict.KnowledgeIDs) != 2 {
+				continue
+			}
+			out = append(out, conflictCandidatePair{A: conflict.KnowledgeIDs[0], B: conflict.KnowledgeIDs[1]})
+		}
+		return out, nil
+	}
+}
+
+// relationConflictJudgeAdapter wires the contradiction question to the
+// supervisor model — the same judge the conflict predictor uses
+// (kernel/agent.ConflictPredictionCase).
+func relationConflictJudgeAdapter(ctx context.Context, clientFn func(ctx context.Context) (*llm.Client, error)) func(ctx context.Context, a, b relationKnowledgeMeta) (bool, string, error) {
+	return func(ctx context.Context, a, b relationKnowledgeMeta) (bool, string, error) {
+		client, err := clientFn(ctx)
+		if err != nil {
+			return false, "", err
+		}
+		verdict, err := agent.ConflictPredictionCase(ctx, client, a.Proposition, b.Proposition)
+		if err != nil {
+			return false, "", err
+		}
+		return verdict.Conflict, verdict.Explanation, nil
+	}
+}
+
+// journalPost is the journal write-side fetcher (journalGet's POST twin).
+func journalPost(ctx context.Context, observationURL, apiToken, path string, payload map[string]any) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, observationURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if apiToken != "" {
+		request.Header.Set("Authorization", "Bearer "+apiToken)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		return nil, fmt.Errorf("journal %s: status %d", path, response.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(response.Body, 32<<20))
 }
 
 func itoa(n int) string {

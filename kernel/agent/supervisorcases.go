@@ -71,6 +71,19 @@ func (a *Activities) PublishSupervisorCase(ctx context.Context, model, caseID, s
 // to an explicit related_to edge, dismissed suppresses it from every future
 // candidate pool. Deterministic provenance in method+stats; best-effort.
 func (a *Activities) EmitRelationVerdict(ctx context.Context, project, knowledgeID, targetID string, dismissed bool, method, explanation string, stats map[string]any) error {
+	return a.emitPairVerdict(ctx, project, knowledgeID, targetID, "related_to", dismissed, method, explanation, stats, "relation-review", "relation-curator")
+}
+
+// EmitContradictionVerdict journals the conflict curator's decision about
+// one heuristic contradiction pair: dismissed records «not a contradiction»
+// (the pair leaves every future candidate pool), confirmed promotes it to an
+// explicit contradicts edge — the recorded contradiction the contradictions
+// surface and its humans can act on.
+func (a *Activities) EmitContradictionVerdict(ctx context.Context, project, knowledgeID, targetID string, confirmed bool, method, explanation string, stats map[string]any) error {
+	return a.emitPairVerdict(ctx, project, knowledgeID, targetID, "contradicts", !confirmed, method, explanation, stats, "conflict-review", "conflict-curator")
+}
+
+func (a *Activities) emitPairVerdict(ctx context.Context, project, knowledgeID, targetID, relation string, dismissed bool, method, explanation string, stats map[string]any, idPrefix, actorID string) error {
 	if a.Events == nil {
 		return nil
 	}
@@ -80,17 +93,17 @@ func (a *Activities) EmitRelationVerdict(ctx context.Context, project, knowledge
 	}
 	data := map[string]any{
 		"knowledge_id": knowledgeID, "target_id": targetID,
-		"relation": "related_to", "method": method, "reason": explanation,
+		"relation": relation, "method": method, "reason": explanation,
 	}
 	for k, v := range stats {
 		data[k] = v
 	}
 	event := observation.Event{
 		Schema:     observation.Schema,
-		EventID:    fmt.Sprintf("relation-review/%s/%s/%d", knowledgeID, targetID, time.Now().UnixNano()),
+		EventID:    fmt.Sprintf("%s/%s/%s/%d", idPrefix, knowledgeID, targetID, time.Now().UnixNano()),
 		OccurredAt: time.Now().UTC(),
 		Source:     observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "1"},
-		Context:    observation.Context{Project: project, Actor: observation.Actor{ID: "relation-curator", Type: "system"}},
+		Context:    observation.Context{Project: project, Actor: observation.Actor{ID: actorID, Type: "system"}},
 		Type:       eventType,
 		Data:       data,
 	}
