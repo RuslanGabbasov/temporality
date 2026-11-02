@@ -184,6 +184,9 @@ export const EVENT_CATALOG: EventMeta[] = [
   E('collab', 'agent.answer.received', 'Ответ агента получен', 'Ответ на свой запрос доставлен отправителю через steering.', 'Agent answer received', 'A reply to this run\'s earlier ask was delivered to the asker via steering.'),
   E('collab', 'agent.ask_expired', 'Ожидание ответа истекло', 'Синхронное ожидание истекло — запрос остаётся у получателя, поздний ответ придёт асинхронно.', 'Ask wait expired', 'A synchronous wait timed out — the request stays with the recipient; a late reply arrives asynchronously.'),
   E('collab', 'agent.ask_undeliverable', 'Запрос не доставлен', 'Адресат не найден в области саги или не принимает сообщения.', 'Ask undeliverable', 'The target was not found in the saga scope or no longer accepts messages.'),
+  E('runs', 'run.queued', 'Ран в очереди', 'Сервер на квоте памяти: ран ждёт слота, стартует автоматически.', 'Run queued', 'The server is at its memory quota: the run waits for a slot and starts automatically.'),
+  E('runs', 'run.queued_cleared', 'Очередь пройдена', 'Гейт памяти впустил ран — выполнение началось.', 'Queue cleared', 'The memory gate admitted the run — execution started.'),
+  E('runs', 'run.queued_expired', 'Очередь истекла', 'Ран прождал очередь слишком долго и не стартовал — ничего не выполнилось.', 'Queue expired', 'The run waited in the queue too long and never started — nothing executed.'),
   // ── ops ──
   E('ops', 'notification.sent', 'Уведомление отправлено', 'Каналу доставлено уведомление.', 'Notification sent', 'A notification was delivered to a channel.'),
   E('ops', 'operation.reconciled', 'Операция сверена', 'Неопределённая операция закрыта решением человека.', 'Operation reconciled', 'An uncertain operation was closed by a human decision.'),

@@ -470,6 +470,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// runs replayed from older histories keep draining nothing, exactly as
 	// recorded.
 	agentCollab := workflow.GetVersion(ctx, "agent-collaboration", workflow.DefaultVersion, 1)
+	// Model gate (memory quota): version 1 makes runs poll the kernel's
+	// admission verdict before their first model call and queue (deterministic
+	// sleeps, outside any activity timeout) while the host is at capacity.
+	modelGate := workflow.GetVersion(ctx, "model-gate", workflow.DefaultVersion, 1)
 	// The team root seeds the shared context handle: every child run of the
 	// program (slots, reviewers, delegates below them) inherits it so scratch
 	// paths and run-scoped hints stay addressable across the tree.
@@ -559,6 +563,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	usedTokens := 0
 	usedCostUSD := 0.0
 	runStartedAt := workflow.Now(ctx)
+	// Model-gate bookkeeping: time spent waiting at the memory gate does not
+	// consume the run's wall-clock budget — the run was honest about its
+	// planned work, the host just could not take it yet.
+	var gateQueuedTotal time.Duration
 	forcedFinaleReason := "" // empty = turn budget; policy checks set their own
 	// Subtree spend rollup: every awaited child run (delegate or plan task)
 	// adds its own totals here, so run.completed and team.completed report
@@ -1387,9 +1395,69 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// askRelays counts follow-up runs launched on this run's behalf — the
 	// deterministic ordinal of <target>/ask/NN run ids.
 	askRelays := 0
+	// Memory quota gate: while the host is at capacity the run queues here —
+	// deterministic sleeps, no activity timeouts, no wall-clock spend. The
+	// starter's channels get one notice on entry and one at the milestones
+	// (next up, first in line); delegated children stay silent, their trace
+	// rows tell the story. A queued-too-long run ends honestly instead of
+	// surfacing on a swapping host.
+	if modelGate == 1 && gateQueuedTotal < ModelGateQueueTimeout {
+		gateCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+		noticeCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+		var verdict ModelGateVerdictResult
+		if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict).Get(ctx, &verdict); err == nil && verdict.WaitSeconds > 0 {
+			queuedAt := workflow.Now(ctx)
+			notifiedPosition := verdict.Position
+			if err := emit(activityCtx, state, "run.queued", map[string]any{"position": verdict.Position, "wait_seconds": verdict.WaitSeconds}); err != nil {
+				return result, err
+			}
+			// One channel notice at entry: only directly-started runs speak —
+			// delegated children answer to their parent, not to a human.
+			if input.DelegationDepth == 0 {
+				_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict.Position)}).Get(ctx, nil)
+			}
+			for verdict.WaitSeconds > 0 && workflow.Now(ctx).Sub(queuedAt) < ModelGateQueueTimeout {
+				workflow.Sleep(ctx, time.Duration(verdict.WaitSeconds)*time.Second)
+				gateQueuedTotal = workflow.Now(ctx).Sub(queuedAt)
+				if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict).Get(ctx, &verdict); err != nil {
+					break
+				}
+				if verdict.WaitSeconds == 0 {
+					break
+				}
+				// Milestone notices: «you are next» and «one ahead of you» —
+				// the positions a human can still act on, without spamming
+				// the channels on every poll.
+				if input.DelegationDepth == 0 && gateQueuedTotal >= time.Minute {
+					for _, milestone := range QueueNoticeMilestones {
+						if verdict.Position <= milestone && notifiedPosition > milestone {
+							_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict.Position)}).Get(ctx, nil)
+							notifiedPosition = verdict.Position
+							break
+						}
+					}
+				}
+			}
+			if verdict.WaitSeconds > 0 {
+				// Day-scale queue timeout: the run never started — finish
+				// honestly, nothing ran and nothing is uncertain.
+				if err := emit(activityCtx, state, "run.queued_expired", map[string]any{"queued_for_seconds": int(gateQueuedTotal.Seconds())}); err != nil {
+					return result, err
+				}
+				result.Status = "failed"
+				result.Answer = "The server stayed at capacity too long — this request was queued and never started. Nothing ran; retry when the load drops."
+				return result, nil
+			}
+			if err := emit(activityCtx, state, "run.queued_cleared", map[string]any{"queued_for_seconds": int(gateQueuedTotal.Seconds())}); err != nil {
+				return result, err
+			}
+		}
+	}
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
-		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
+		// Queued time at the memory gate does not spend the run's budget: the
+		// wall clock ran, but the run was honest about its planned work.
+		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt)-gateQueuedTotal >= time.Duration(input.TimeoutSeconds)*time.Second {
 			forcedFinaleReason = policyStopTime
 			if err := emit(activityCtx, state, "policy.limit", policyLimitData("time_exhausted", turn, input, usedTokens, usedCostUSD)); err != nil {
 				return result, err
