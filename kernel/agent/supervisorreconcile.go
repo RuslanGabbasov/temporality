@@ -27,11 +27,24 @@ type SupervisorReconcileVerdict struct {
 	Summary        string   `json:"summary"`
 	Causes         []string `json:"causes"`
 	Remedies       []string `json:"remedies"`
+	// Lesson is the GENERALIZABLE rule the pile revealed (e.g. «long builds
+	// need timeout_sec ≥ 600»), empty when the pile taught nothing durable.
+	// Proposed into the knowledge layer so future runs get it as a priming
+	// hint — the supervisor's conclusions then change behavior, not just the
+	// audit trail.
+	Lesson *SupervisorLesson `json:"lesson,omitempty"`
 	// Per-operation effects: the model's best answer to «did the side effect
 	// happen» for every operation it was shown. Recorded as supervisor-actor
 	// reconciliations; ops the model is unsure about stay «unknown» — the
 	// honest answer.
 	Verdicts []SupervisorOpVerdict `json:"verdicts"`
+}
+
+// SupervisorLesson is one durable, self-contained proposition distilled from
+// a reconciliation: a rule that applies beyond this run.
+type SupervisorLesson struct {
+	Proposition string   `json:"proposition"`
+	Topics      []string `json:"topics,omitempty"`
 }
 
 type SupervisorOpVerdict struct {
@@ -62,9 +75,10 @@ Then the integrated conclusion:
 - needs_attention: true only when something in this pile requires action in an EXTERNAL system (cleanup, rollback, notification) or reveals a repeating defect worth fixing now.
 - causes: the distinct root causes behind the pile (1-3 items, plain language).
 - remedies: concrete next steps for the administrator (0-3 items). Empty when needs_attention is false.
+- lesson: when the pile revealed a GENERALIZABLE rule a future run should follow (an operation needs a specific timeout, a command needs a pre-check, a tool is unusable for a class of tasks), distill it into one durable, self-contained proposition — no run ids, no one-off details; add 1-3 topics. Empty when the pile taught nothing durable: never generalize a one-off incident.
 
 Respond with one JSON object:
-{"needs_attention": <bool>, "summary": "<2-4 sentences>", "causes": ["..."], "remedies": ["..."], "verdicts": [{"operation_id": "<id>", "effect": "occurred|none|unknown", "why": "<short>"}]}
+{"needs_attention": <bool>, "summary": "<2-4 sentences>", "causes": ["..."], "remedies": ["..."], "lesson": {"proposition": "<durable rule or empty>", "topics": ["..."]}, "verdicts": [{"operation_id": "<id>", "effect": "occurred|none|unknown", "why": "<short>"}]}
 
 Rules: ground every claim in the lines below; cover EVERY operation_id exactly once; if the run itself failed with the same root cause, say so in the summary — an operator reading it must understand the pile in one glance.`)
 	fmt.Fprintf(&b, "\nrun_id: %s\n", digest.RunID)
@@ -82,7 +96,11 @@ type supervisorReconcileReply struct {
 	Summary        string
 	Causes         []string
 	Remedies       []string
-	Verdicts       []struct {
+	Lesson         *struct {
+		Proposition string   `json:"proposition"`
+		Topics      []string `json:"topics"`
+	} `json:"lesson"`
+	Verdicts []struct {
 		OperationID string `json:"operation_id"`
 		Effect      string `json:"effect"`
 		Why         string `json:"why"`
@@ -118,6 +136,22 @@ func parseSupervisorReconcileReply(content string, knownOps map[string]bool) (Su
 		Causes:         cleanVerdictStrings(reply.Causes),
 		Remedies:       cleanVerdictStrings(reply.Remedies),
 	}
+	// The lesson: only attention-worthy piles may teach (a quiet pile taught
+	// nothing), the proposition must be self-contained, and it is capped —
+	// a knowledge proposition is a rule, not a report.
+	if reply.NeedsAttention && reply.Lesson != nil {
+		proposition := strings.TrimSpace(reply.Lesson.Proposition)
+		if len(proposition) > 400 {
+			proposition = proposition[:400]
+		}
+		if proposition != "" {
+			topics := cleanVerdictStrings(reply.Lesson.Topics)
+			if len(topics) > 5 {
+				topics = topics[:5]
+			}
+			verdict.Lesson = &SupervisorLesson{Proposition: proposition, Topics: topics}
+		}
+	}
 	// Every known op must be covered exactly once; unknown effects are the
 	// honest default for ops the model skipped or hallucinated ids for.
 	seen := map[string]bool{}
@@ -141,6 +175,52 @@ func parseSupervisorReconcileReply(content string, knownOps map[string]bool) (Su
 		}
 	}
 	return verdict, nil
+}
+
+// PublishSupervisorLesson proposes the reconciliation's durable lesson into
+// the knowledge layer (knowledge.proposed through the same ingest the
+// extraction pass uses): the idempotent knowledge_id strengthens an existing
+// node instead of duplicating it, semantic-layer dedup and the conflict
+// queue keep the quality, and knowledge priming delivers the rule to future
+// runs — the lesson starts changing behavior instead of rotting in the
+// journal. Only attention-worthy verdicts teach (§ pass: a quiet pile
+// taught nothing). Best-effort: a failed proposal is logged and skipped —
+// the reconciliations themselves are already recorded.
+func (a *Activities) PublishSupervisorLesson(ctx context.Context, runID, project string, verdict SupervisorReconcileVerdict) error {
+	if a.Events == nil || verdict.Lesson == nil || !verdict.NeedsAttention {
+		return nil
+	}
+	proposition := strings.TrimSpace(verdict.Lesson.Proposition)
+	if proposition == "" {
+		return nil
+	}
+	knowledgeID := "supervisor-" + shortHash(proposition)
+	topics := verdict.Lesson.Topics
+	if len(topics) > 5 {
+		topics = topics[:5]
+	}
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("supervisor-lesson/%s/%d", knowledgeID, time.Now().UnixNano()),
+		OccurredAt: time.Now().UTC(),
+		Source:     observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "1"},
+		Context: observation.Context{
+			Project: project, Run: runID,
+			Actor: observation.Actor{ID: "supervisor", Type: "agent"},
+		},
+		Type: "knowledge.proposed",
+		Data: map[string]any{
+			"knowledge_id": knowledgeID,
+			"proposition":  proposition,
+			"topics":       topics,
+			"origin":       "supervisor-reconciliation",
+			"run_id":       runID,
+		},
+	}
+	if err := a.Events.Enqueue(ctx, event); err != nil {
+		return fmt.Errorf("enqueue knowledge.proposed: %w", err)
+	}
+	return nil
 }
 
 // ReconcileFailedRunWall asks the supervisor model for the integrated

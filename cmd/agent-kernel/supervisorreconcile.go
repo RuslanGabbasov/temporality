@@ -122,6 +122,14 @@ func runSupervisorReconcilePass(ctx context.Context, log *slog.Logger, activitie
 			log.Warn("supervisor reconcile: publish", "run", runID, "error", err.Error())
 			continue
 		}
+		// The durable lesson: an attention-worthy pile may have taught a
+		// generalizable rule — propose it into the knowledge layer so future
+		// runs get it as a priming hint. Best-effort, logged.
+		if err := activities.PublishSupervisorLesson(ctx, runID, project, verdict); err != nil {
+			log.Warn("supervisor reconcile: lesson", "run", runID, "error", err.Error())
+		} else if verdict.Lesson != nil {
+			log.Info("supervisor lesson proposed", "run", runID, "topic_count", len(verdict.Lesson.Topics))
+		}
 		analyzed++
 		log.Info("supervisor reconciliation recorded", "run", runID, "operations", len(ops), "applied", applied, "needs_attention", verdict.NeedsAttention)
 	}

@@ -69,3 +69,57 @@ func TestBuildWallDigestBoundsDetail(t *testing.T) {
 		t.Fatalf("error = %q", digest.Error)
 	}
 }
+
+// The lesson is the supervisor's path into the knowledge layer: only an
+// attention-worthy pile may teach, the proposition is self-contained and
+// bounded, topics are capped.
+func TestParseSupervisorReconcileLesson(t *testing.T) {
+	content := `{"needs_attention": true, "summary": "timeouts", "lesson": {"proposition": "Long builds in run_command need timeout_sec >= 600; the model-guessed budget is not enough for cold dependency installs", "topics": ["timeouts", "run_command"]}, "verdicts": [{"operation_id": "a", "effect": "occurred"}]}`
+	verdict, err := parseSupervisorReconcileReply(content, map[string]bool{"a": true})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if verdict.Lesson == nil {
+		t.Fatal("the lesson must survive the parse")
+	}
+	if !strings.Contains(verdict.Lesson.Proposition, "timeout_sec >= 600") {
+		t.Fatalf("proposition lost: %q", verdict.Lesson.Proposition)
+	}
+	if len(verdict.Lesson.Topics) != 2 {
+		t.Fatalf("topics = %v", verdict.Lesson.Topics)
+	}
+}
+
+func TestParseSupervisorReconcileLessonRequiresAttention(t *testing.T) {
+	// A quiet pile taught nothing: the lesson is dropped even when the model
+	// offered one — only real problems may write into the knowledge layer.
+	content := `{"needs_attention": false, "summary": "quiet", "lesson": {"proposition": "always do X"}, "verdicts": [{"operation_id": "a", "effect": "none"}]}`
+	verdict, err := parseSupervisorReconcileReply(content, map[string]bool{"a": true})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if verdict.Lesson != nil {
+		t.Fatalf("a needs_attention=false verdict must not carry a lesson: %+v", verdict.Lesson)
+	}
+}
+
+func TestParseSupervisorReconcileLessonBounds(t *testing.T) {
+	long := make([]string, 600)
+	for i := range long {
+		long[i] = "x"
+	}
+	content := `{"needs_attention": true, "summary": "s", "lesson": {"proposition": "` + strings.Join(long, "") + `", "topics": ["a", "b", "c", "d", "e", "f", "g"]}, "verdicts": [{"operation_id": "a", "effect": "occurred"}]}`
+	verdict, err := parseSupervisorReconcileReply(content, map[string]bool{"a": true})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if verdict.Lesson == nil {
+		t.Fatal("lesson lost")
+	}
+	if len(verdict.Lesson.Proposition) > 400 {
+		t.Fatalf("proposition must be bounded to 400, got %d", len(verdict.Lesson.Proposition))
+	}
+	if len(verdict.Lesson.Topics) > 5 {
+		t.Fatalf("topics must be capped to 5, got %d", len(verdict.Lesson.Topics))
+	}
+}
