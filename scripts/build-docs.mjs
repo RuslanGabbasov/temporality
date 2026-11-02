@@ -94,7 +94,11 @@ function makeRenderer() {
   renderer.link = function ({ href, tokens }) {
     const text = this.parser.parseInline(tokens)
     const external = /^[a-z]+:/i.test(href)
-    return `<a href="${href}"${external ? ' target="_blank" rel="noreferrer"' : ''}>${text}${external ? '&nbsp;<span class="ext">↗</span>' : ''}</a>`
+    // Internal cross-references stay written as .md in the sources (natural
+    // in the repo), but the site serves .html slugs — rewrite so no generated
+    // page ever links at a markdown file.
+    const target = external ? href : href.replace(/\.md(?=($|[?#]))/, '.html')
+    return `<a href="${target}"${external ? ' target="_blank" rel="noreferrer"' : ''}>${text}${external ? '&nbsp;<span class="ext">↗</span>' : ''}</a>`
   }
   return renderer
 }
