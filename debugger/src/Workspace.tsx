@@ -24,7 +24,7 @@ import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import ProjectRequired from './ProjectRequired'
 import { useI18n, pluralT } from './i18n'
-import { pseudoToolLabel, formatDuration } from './eventSummary'
+import { pseudoToolLabel, formatDuration, friendlyRunFailure } from './eventSummary'
 import { randomUUID } from './uuid'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -1301,7 +1301,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const line = formatStreamEvent('run.failed', outer, t, locale)
         if (line) lines.push(line)
         stopLinesTimer()
-        updateMsg(convId, runId, { content: t('chat.stream.failed', { error: String(d.error ?? 'unknown') }), status: 'failed', streamLines: [...lines] })
+        // Human copy first: a model call that timed out reads as «провайдер
+        // не отвечал N мин», not as an activity-error wall — the raw chain is
+        // details-layer material (the trace and the call report keep it).
+        updateMsg(convId, runId, { content: friendlyRunFailure(t, d), status: 'failed', streamLines: [...lines] })
       } catch {
         stopLinesTimer()
         updateMsg(convId, runId, { content: t('chat.run_failed') ?? 'Run failed', status: 'failed', streamLines: [...lines] })
@@ -1539,6 +1542,25 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     } finally { setLoading(false) }
   }
 
+  // «Продолжить» after a failed run: start a new attempt of the same task —
+  // the kernel feeds it the previous attempt's journal tail (PriorTail), so
+  // the work resumes from where it stopped instead of starting blind.
+  const continueRun = async (conv: Conversation) => {
+    if (!conv.taskId || loading) return
+    setLoading(true)
+    try {
+      const result = await workspaceApi.startRun(conv.taskId, { agent_id: conv.agentId || undefined })
+      const runId = result.run_id
+      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [`${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}`] }
+      setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, messages: [...c.messages, assistantMsg] } : c))
+      streamRun(runId, conv.id)
+    } catch (f) {
+      setError(message(f))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Chats, files and the project inbox are anchored to one project
   // (docs/activity-scoping.md §7): the global filter has nothing to open.
   if (!project.trim()) return <ProjectRequired what={t('workspace.title') ?? 'Workspace'} />
@@ -1770,7 +1792,16 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                           >{t('chat.branch') ?? 'Branch'}</button>
                         )}
                         {msg.status === 'failed' && msg.runId && activeConv && (
-                          <CallReportButton runId={msg.runId} project={project} onOpen={(event) => setCallReport({ runId: msg.runId!, event })} />
+                          <>
+                            {activeConv.taskId && (
+                              <button
+                                onClick={() => void continueRun(activeConv)}
+                                style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem', marginLeft: 'auto' }}
+                                title={t('chat.continue_title') ?? 'Resume the task from where it stopped'}
+                              >{t('chat.continue') ?? 'Continue'}</button>
+                            )}
+                            <CallReportButton runId={msg.runId} project={project} onOpen={(event) => setCallReport({ runId: msg.runId!, event })} />
+                          </>
                         )}
                       </div>
                     )}

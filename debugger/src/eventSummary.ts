@@ -21,6 +21,40 @@ export interface KernelErrorInfo {
 
 const TEMPORAL_ENVELOPE = /^(?:child workflow execution|activity) error \(type: ([A-Za-z0-9_.]+),[^)]*\): (.+)$/s
 
+/** Human chat copy for a failed run: model-call failures become a localized
+ *  sentence built from the human facts the kernel records (the serving
+ *  provider, the silent wait) — never the raw Temporal activity chain
+ *  ("activity error (type: kernel.call_model, scheduledEventID …)"), which
+ *  is details-layer material. Unknown classes fall back to the peeled
+ *  cause. */
+export function friendlyRunFailure(t: TranslateFn, d: Record<string, unknown>): string {
+  const explained = explainKernelError(String(d.error ?? ''))
+  const modelCall = /model_call/.test(String(d.error_type ?? '')) || explained.chain.includes('kernel.call_model')
+  // The payload carries the provider for new events; older ones only have it
+  // inside the error text ("… (served by provider Xiaomi) …").
+  const provider = String(d.provider ?? '') || (/served by (?:provider )?([^)]+)/.exec(explained.cause)?.[1]?.trim() ?? '')
+  const elapsedMs = typeof d.elapsed_ms === 'number' && d.elapsed_ms > 0 ? d.elapsed_ms : 0
+  if (modelCall && explained.timeout && elapsedMs > 0) {
+    return provider
+      ? t('chat.fail_model_timeout', { name: provider, wait: waitLabel(t, elapsedMs) })
+      : t('chat.fail_model_timeout_noname', { wait: waitLabel(t, elapsedMs) })
+  }
+  if (modelCall) {
+    return t('chat.fail_model', { cause: explained.cause.slice(0, 200) })
+  }
+  return t('chat.stream.failed', { error: explained.cause.slice(0, 300) || 'unknown' })
+}
+
+/** Localized wait duration for failure copy: «3 мин», «45 с», «2 мин 30 с». */
+function waitLabel(t: TranslateFn, ms: number): string {
+  const totalSeconds = Math.round(ms / 1000)
+  const m = Math.floor(totalSeconds / 60)
+  const s = totalSeconds % 60
+  if (m <= 0) return t('chat.wait_s', { s: String(s) })
+  if (s === 0) return t('chat.wait_m', { m: String(m) })
+  return t('chat.wait_ms', { m: String(m), s: String(s) })
+}
+
 /** Peel Temporal error envelopes ("child workflow execution error (type: X, …): …",
  * "activity error (type: Y, …): …") so the UI can show the actual cause instead
  * of workflow plumbing. */

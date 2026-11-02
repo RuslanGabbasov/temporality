@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { eventSummary, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
+import { eventSummary, friendlyRunFailure, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
 import { foldDelegations } from './DelegationTree'
 import { foldPlans } from './PlanGraph'
 import { ru } from './locales/ru'
@@ -609,4 +609,34 @@ describe('raw types never leak into the summary label', () => {
       expect(summary.label).not.toMatch(/^[a-z_]+(\.[a-z_]+)+$/)
     })
   }
+})
+
+describe('friendlyRunFailure', () => {
+  const tr = (key: string, vars?: Record<string, string>) => {
+    let s = (ru as Record<string, string>)[key] ?? key
+    for (const [k, v] of Object.entries(vars ?? {})) s = s.replaceAll(`{{${k}}}`, v)
+    return s
+  }
+  const timeoutError = 'activity error (type: kernel.call_model, scheduledEventID: 594, startedEventID: 595, identity: 1@073eb7d1d63d@): context deadline exceeded (Client.Timeout or context cancellation while reading body) (served by provider Xiaomi) (type: wrapError, retryable: true): context deadline exceeded (Client.Timeout or context cancellation while reading body) (type: timeoutError, retryable: true)'
+
+  it('writes a model timeout as a human sentence with provider and wait', () => {
+    const text = friendlyRunFailure(tr, { error: timeoutError, error_type: 'model_call_failed', elapsed_ms: 210_000, provider: 'Xiaomi' })
+    expect(text).toContain('Xiaomi')
+    expect(text).toContain('3 мин 30 с')
+    expect(text).toContain('Продолжить')
+    expect(text).not.toContain('activity error')
+    expect(text).not.toContain('scheduledEventID')
+  })
+
+  it('names the provider parsed from the error when the payload has none', () => {
+    const text = friendlyRunFailure(tr, { error: timeoutError, error_type: 'model_call_failed', elapsed_ms: 60_000 })
+    expect(text).toContain('Xiaomi')
+    expect(text).toContain('1 мин')
+  })
+
+  it('peels the temporal envelope for unknown failure classes', () => {
+    const text = friendlyRunFailure(tr, { error: 'activity error (type: kernel.run_tool, scheduledEventID: 1, startedEventID: 2, identity: x): boom', error_type: 'tool_failed' })
+    expect(text).toContain('boom')
+    expect(text).not.toContain('scheduledEventID')
+  })
 })

@@ -3135,3 +3135,26 @@ func TestNormalizeTurnBudgetHonorsConfiguredValues(t *testing.T) {
 		}
 	}
 }
+
+// The human chat copy is built from these facts: the serving provider and the
+// silent wait ride the failure payload, so the localized sentence never has
+// to parse the raw activity chain.
+func TestModelFailureDataCarriesProviderAndElapsed(t *testing.T) {
+	detail := "context deadline exceeded (Client.Timeout or context cancellation while reading body) (served by provider Xiaomi) (type: timeoutError, retryable: true)"
+	if got := servedByProvider(detail); got != "Xiaomi" {
+		t.Fatalf("servedByProvider = %q, want Xiaomi", got)
+	}
+	if got := servedByProvider("boom"); got != "" {
+		t.Fatalf("servedByProvider with no route must be empty, got %q", got)
+	}
+	data := modelFailureData(errors.New(detail), 210*time.Second, 3, "glm-5.3")
+	if data["elapsed_ms"] != int64(210_000) {
+		t.Fatalf("elapsed_ms = %v, want 210000", data["elapsed_ms"])
+	}
+	if data["provider"] != "Xiaomi" || data["model"] != "glm-5.3" || data["turn"] != 3 {
+		t.Fatalf("the payload lost its human facts: %v", data)
+	}
+	if !strings.Contains(data["error"].(string), "timeoutError") {
+		t.Fatalf("the raw detail must survive for the details layer: %v", data["error"])
+	}
+}
