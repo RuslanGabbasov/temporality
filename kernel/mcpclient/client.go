@@ -50,6 +50,10 @@ type Client struct {
 	mu      sync.Mutex
 	session *mcp.ClientSession
 	http    *http.Client // shared keep-alive client for sse/http transports
+	// dialCancel owns the dial context the live session's streams and stdio
+	// process run on: Close cancels it, replacing a session cancels the
+	// previous dial.
+	dialCancel context.CancelFunc
 
 	// connectFn is the transport seam used by tests to stand up in-memory
 	// servers; production clients always use (*Client).connect.
@@ -112,6 +116,11 @@ func (c *Client) redial(ctx context.Context, dead *mcp.ClientSession) (*mcp.Clie
 func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.dialCancel != nil {
+		// The dial context owns the session's streams and the stdio process.
+		c.dialCancel()
+		c.dialCancel = nil
+	}
 	if c.session == nil {
 		return nil
 	}
@@ -376,8 +385,19 @@ func (c *Client) sharedHTTPClient() *http.Client {
 	return c.http
 }
 
+// mcpDialTimeout bounds one connect+initialize handshake. A server that
+// accepts the connection and never answers must fail its own dial, not stall
+// whoever called: the reconcile pass feeds every server through one loop, and
+// one hung dial used to bury all the others (plus every run that froze its
+// tool schema while the pass was stuck).
+var mcpDialTimeout = 30 * time.Second
+
 func (c *Client) connect(ctx context.Context) (*mcp.ClientSession, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "temporality-agent-kernel", Version: "0.1.0"}, nil)
+	// The stream and the stdio process live on this context — it must outlive
+	// the caller (a per-request context must not kill them), but the timeout
+	// path below cancels it to tear a half-open dial down.
+	dialCtx, cancelDial := context.WithCancel(context.WithoutCancel(ctx))
 	var transport mcp.Transport
 	switch c.cfg.Type {
 	case TypeSSE:
@@ -385,25 +405,56 @@ func (c *Client) connect(ctx context.Context) (*mcp.ClientSession, error) {
 	case TypeHTTP:
 		transport = &mcp.StreamableClientTransport{Endpoint: c.cfg.URL, HTTPClient: c.sharedHTTPClient()}
 	default: // stdio
-		cmd := exec.CommandContext(ctx, c.cfg.Command, c.cfg.Args...)
+		cmd := exec.CommandContext(dialCtx, c.cfg.Command, c.cfg.Args...)
 		cmd.Stderr = os.Stderr // surface server panics/errors in kernel logs
 		if len(c.cfg.Env) > 0 {
 			cmd.Env = append(os.Environ(), c.cfg.Env...)
 		}
 		transport = &mcp.CommandTransport{Command: cmd}
 	}
-	session, err := client.Connect(ctx, transport, nil)
-	if err != nil {
-		// A legacy SSE client against a Streamable HTTP server either waits
-		// for an endpoint event that never comes or dies mid-handshake — both
-		// surface as cryptic EOF. Name the likely mismatch so the operator can
-		// fix the type.
-		if c.cfg.Type == TypeSSE && strings.Contains(err.Error(), "EOF") {
-			return nil, fmt.Errorf("connect MCP server %q: %w — endpoint did not behave as a legacy SSE server; if it speaks Streamable HTTP, set the server type to http", c.cfg.Name, err)
-		}
-		return nil, fmt.Errorf("connect MCP server %q: %w", c.cfg.Name, err)
+	// The handshake is watched from outside: its own context cannot carry a
+	// deadline (that would kill the living session at expiry), so a watchdog
+	// returns the timeout and cancels the dial while the late handshake is
+	// closed whenever it lands.
+	type dialResult struct {
+		session *mcp.ClientSession
+		err     error
 	}
-	return session, nil
+	dials := make(chan dialResult, 1)
+	go func() {
+		session, err := client.Connect(dialCtx, transport, nil)
+		dials <- dialResult{session, err}
+	}()
+	select {
+	case dial := <-dials:
+		if dial.err != nil {
+			cancelDial()
+			// A legacy SSE client against a Streamable HTTP server either waits
+			// for an endpoint event that never comes or dies mid-handshake — both
+			// surface as cryptic EOF. Name the likely mismatch so the operator can
+			// fix the type.
+			if c.cfg.Type == TypeSSE && strings.Contains(dial.err.Error(), "EOF") {
+				return nil, fmt.Errorf("connect MCP server %q: %w — endpoint did not behave as a legacy SSE server; if it speaks Streamable HTTP, set the server type to http", c.cfg.Name, dial.err)
+			}
+			return nil, fmt.Errorf("connect MCP server %q: %w", c.cfg.Name, dial.err)
+		}
+		// Success: ownership of dialCtx transfers to the client — Close cancels
+		// it when the session dies with the client.
+		if c.dialCancel != nil {
+			c.dialCancel()
+		}
+		c.dialCancel = cancelDial
+		return dial.session, nil
+	case <-time.After(mcpDialTimeout):
+		cancelDial() // kill the half-open dial now (stdio process included)
+		go func() {
+			// The late dial is never handed out — close whatever it produced.
+			if dial := <-dials; dial.session != nil {
+				_ = dial.session.Close()
+			}
+		}()
+		return nil, fmt.Errorf("connect MCP server %q: no initialize response within %s", c.cfg.Name, mcpDialTimeout)
+	}
 }
 
 func contentText(content []mcp.Content) string {

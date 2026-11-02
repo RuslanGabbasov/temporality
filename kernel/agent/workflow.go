@@ -116,6 +116,11 @@ type RunInput struct {
 	// MCPServers selects registry servers for this run; empty keeps the
 	// legacy env server (docs: MCP server registry).
 	MCPServers []string `json:"mcp_servers,omitempty"`
+	// MCPUnavailable names the requested MCP servers whose tools could not be
+	// discovered at run start (down or still loading): their tools are absent
+	// from this run's schema and the model is told so explicitly — one dead
+	// server costs its own tools, never the others'.
+	MCPUnavailable []string `json:"mcp_unavailable,omitempty"`
 	// Secrets are the workspace secret names granted to this run's agent
 	// (docs/secrets-management.md §8): resolved to SECRET_<NAME> sandbox env
 	// vars at the execution boundary. Names only — values never enter the
@@ -546,6 +551,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	if input.PriorTail != "" {
 		messages = append(messages, llm.Message{Role: "system", Content: input.PriorTail})
+	}
+	if len(input.MCPUnavailable) > 0 {
+		messages = append(messages, llm.Message{Role: "system", Content: mcpUnavailableNotice(input.MCPUnavailable)})
 	}
 	// Hint usage is NOT recorded here: injection is an offer, not a use. The
 	// honest used/ignored signal is derived from the run's own output after it
@@ -3679,6 +3687,14 @@ func openContainers(p []byte) []byte {
 
 // advertisedTools merges kernel and configured MCP tools, then applies the
 // run's tool allowlist when one is set.
+// mcpUnavailableNotice tells the model which requested MCP servers lost the
+// race to be discoverable: their mcp__ tools are missing from the schema by
+// cause, not by accident — so the model reports the gap instead of inventing
+// calls for tools it never received.
+func mcpUnavailableNotice(ids []string) string {
+	return fmt.Sprintf("MCP server(s) %s are unavailable in this run: their tools (mcp__<server>__*) are missing from your toolset. Do not attempt to call them; say so if the task needs them.", strings.Join(ids, ", "))
+}
+
 func advertisedTools(input *RunInput) []llm.ToolDef {
 	tools := append(KernelTools(), input.Tools...)
 	// The intake dialog tools only work in the intake project's own dialog

@@ -3,8 +3,10 @@ package mcpclient
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -117,5 +119,27 @@ func TestServerToolCountUnknownServerIsZero(t *testing.T) {
 	var nilRegistry *Registry
 	if got := nilRegistry.ServerToolCount("nope"); got != 0 {
 		t.Fatalf("nil registry count = %d, want 0", got)
+	}
+}
+
+// A server that accepts the connection and never answers initialize must
+// fail its own dial — one hung dial used to stall the reconcile loop and
+// bury every other server behind it.
+func TestConnectTimesOutOnSilentServer(t *testing.T) {
+	defer func(prev time.Duration) { mcpDialTimeout = prev }(mcpDialTimeout)
+	mcpDialTimeout = 300 * time.Millisecond
+	c := NewClient(ServerConfig{ID: "mute", Name: "Mute", Type: TypeStdio, Command: "sh", Args: []string{"-c", "cat >/dev/null"}, Enabled: true})
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.connect(context.Background())
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "no initialize response") {
+			t.Fatalf("a silent server must fail its own dial, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a silent server must not stall the caller")
 	}
 }

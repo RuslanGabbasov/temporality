@@ -337,18 +337,17 @@ func (a *Activities) ApprovalToolsFor(servers []string) []string {
 
 func (a *Activities) PrepareRun(input *RunInput) error {
 	input.SourceID = a.SourceID
-	// A requested MCP server that advertises no tools means discovery has not
-	// landed (a boot race) or the server is down. Starting the run anyway
-	// silently mutilates the tool schema — the model then improvises around
-	// tools it never received. Heal once on demand, then fail the run start
-	// naming the server (the HTTP paths surface this as 422).
+	// Per-server honesty: a requested server with no discovered tools is one
+	// missing hand, not a dead run. Heal once on demand; whatever stays
+	// missing is named to the model (MCPUnavailable rides a system notice) and
+	// its tools are simply absent from the schema. Never silently mutilate the
+	// schema — and never let one dead server block the tools that arrived.
 	if missing := a.missingMCPServers(input.MCPServers); len(missing) > 0 {
 		if a.MCPReload != nil {
 			a.MCPReload()
+			missing = a.missingMCPServers(input.MCPServers)
 		}
-		if missing = a.missingMCPServers(input.MCPServers); len(missing) > 0 {
-			return fmt.Errorf("MCP server(s) %s unavailable: discovery returned no tools — fix the server or the agent's mcp_servers list, then start the run again", strings.Join(missing, ", "))
-		}
+		input.MCPUnavailable = missing
 	}
 	input.Tools = a.ToolDefsFor(input.MCPServers)
 	input.ApprovalTools = a.ApprovalToolsFor(input.MCPServers)

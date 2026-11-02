@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -9596,16 +9597,27 @@ func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, 
 			log.Error("list mcp servers", "error", err)
 			return
 		}
+		// Per-server isolation: every server reconciles on its own goroutine —
+		// one dead or hung server must never delay or block the registration of
+		// the others. The registry starts empty at boot, so a stalled pass used
+		// to leave every agent of every run without its mcp tools.
+		var wg sync.WaitGroup
 		for _, server := range servers {
-			cfg, rErr := resolveMCPConfigSecrets(context.Background(), ws, mcpConfig(server), masterKey)
-			if rErr != nil {
-				log.Error("resolve mcp server secrets", "server", server.ID, "error", rErr)
-				continue
-			}
-			if err := registry.Apply(context.Background(), cfg); err != nil {
-				log.Error("apply mcp server", "server", server.ID, "error", err)
-			}
+			server := server
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cfg, rErr := resolveMCPConfigSecrets(context.Background(), ws, mcpConfig(server), masterKey)
+				if rErr != nil {
+					log.Error("resolve mcp server secrets", "server", server.ID, "error", rErr)
+					return
+				}
+				if err := registry.Apply(context.Background(), cfg); err != nil {
+					log.Error("apply mcp server", "server", server.ID, "error", err)
+				}
+			}()
 		}
+		wg.Wait()
 	}
 	apply()
 	go func() {
