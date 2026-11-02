@@ -272,7 +272,7 @@ confidence: ...
 
 ### Важное требование
 
-Не вводить на первом этапе обязательное заполнение:
+Не делать обязательным заполнение:
 
 ```text
 topics
@@ -281,11 +281,12 @@ tags
 categories
 ```
 
-агентом или extractor-моделью.
+агентом или extractor-моделью. В текущей реализации extractor заполняет
+`topics`/`entities` (0–3 нормализованных значений) — это контекст для
+retrieval, не обязательная часть knowledge creation.
 
-Эти данные не должны становиться обязательной частью knowledge creation.
-
-Если они необходимы для retrieval, их следует получать отдельным этапом enrichment либо вычислять из самого knowledge.
+Если они необходимы для retrieval, они вычисляются из самого knowledge и
+нормализуются судейским проходом (карта областей).
 
 ---
 
@@ -492,20 +493,22 @@ knowledge A
 
 При этом создание связей не должно быть обязательным для каждого knowledge candidate.
 
-Минимальный MVP может начать только с:
+Минимальный MVP мог начать только с:
 
 ```text
 knowledge.proposed
     + evidence
 ```
 
-а linking реализовать отдельным этапом.
+а linking — отдельным этапом. Сейчас linking реализован: `contradicts`
+создаёт вызов опровержения, куратор отношений подтверждает/отклоняет
+связи (`knowledge.relation_confirmed/dismissed`).
 
 ---
 
 # 16. Confirmation
 
-Extraction **не подтверждает knowledge автоматически только потому, что его предложила LLM**.
+Extraction **не подтверждает knowledge автоматически только потому, что его предложила LLM**. Исключение — ре-деривация: повторное извлечение уже известного утверждения подтверждает его (`execution-reverification`/`extraction-reverification`), а последующие — фиксируют использование (`knowledge.used`). И отдельно: judged-подсказка `hint.outcome: helpful` подтверждает proposal прямо из проекции.
 
 После:
 
@@ -645,6 +648,9 @@ extractor
 
 # 21. Пилот на реальных задачах
 
+Статус: **проведён** — extractor v4 работает в проде (topics/entities,
+contradicts, hint_outcomes, ре-деривация).
+
 До реализации сложной схемы необходимо проверить гипотезу на уже выполненных реальных run.
 
 Взять несколько существующих задач Temporality, в которых:
@@ -743,18 +749,18 @@ knowledge.extraction.completed
 
 ```text
 candidates_count
-accepted_count
-rejected_count
-```
-
-При необходимости:
-
-```text
-extraction.duration
+proposed
+strengthened
+challenged
+aged
+duplicates_skipped
+invalid_skipped
+duration_ms
 model
-token usage
-trajectory size
 ```
+
+(фактические поля `knowledge.extraction.completed`; `knowledge.extraction.failed`
+— отдельное событие сбоя.)
 
 Extraction не должен быть «магией», которую невозможно диагностировать.
 
@@ -875,18 +881,17 @@ evidence
 
 ---
 
-# 29. Следующий этап
+# 29. Что сделано из «следующего этапа»
 
-После успешного MVP:
-
-1. промежуточный extraction после содержательных блоков работы;
-2. enrichment `topics/entities`;
-3. automatic linking;
-4. challenge/correction существующих знаний;
-5. human review;
-6. автоматическое подтверждение некоторых observations;
-7. knowledge quality metrics;
-8. анализ evolution знаний между run.
+1. enrichment `topics/entities` — ✅ (плюс судейская нормализация областей);
+2. automatic linking — ✅ (`contradicts`, куратор отношений);
+3. challenge/correction существующих знаний — ✅ (opровержения, aging sweep,
+   переходы состояний от `hint.outcome`);
+4. human review — ✅ через supervisor-кейсы (`knowledge_hygiene`,
+   `knowledge_contradiction`) и ручные действия в Explorer;
+5. автоматическое подтверждение observations — ✅ (ре-деривация);
+6. промежуточный extraction после содержательных блоков и quality metrics —
+   остаётся будущим.
 
 ---
 

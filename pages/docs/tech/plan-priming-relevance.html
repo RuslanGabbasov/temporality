@@ -69,6 +69,11 @@
 <div class="docs-eyebrow">Инженерные документы</div>
 <h1>Priming v2: от каталога знаний к полезным рекомендациям</h1>
 
+<blockquote>
+<p><strong>Статус: реализовано.</strong> Документ — план эпохи принятия; что изменилось
+в текущей реализации после внедрения (IDF-фильтр, семантический тир с
+квотой, часы переподтверждения, переходы состояний), — в §18.</p>
+</blockquote>
 <h2 id="1-цель-и-ключевой-принцип"><a class="anchor" href="#1-цель-и-ключевой-принцип" aria-label="Section link">#</a>1. Цель и ключевой принцип</h2><p>Подсказки (hints) — это <strong>не каталог знаний, а ограниченный по бюджету набор рекомендаций, предназначенных повлиять на конкретное решение агента в текущей задаче</strong>.</p>
 <p>Из этого принципа следуют требования к системе priming:</p>
 <ul>
@@ -80,7 +85,9 @@
 <p>Документ фиксирует ревизию текущей реализации, целевую модель отбора и план работ P0/P1/P2. Жизненный цикл Hint (proposed → used/ignored → outcome) и разделение Experience/Knowledge/Skill/Hint определены в <code>docs/knowledge-evolution.md</code> и здесь не пересматриваются.</p>
 <p>Связанные документы: <code>knowledge-evolution.md</code> (модель опыта), <code>knowledge-extraction.md</code> (появление Knowledge), <code>knowledge-model.md</code> (сущность Knowledge и связи), <code>living-skills.md</code> §14–16 (связь навыков и знаний), <code>agent-teams.md</code> §9 (программные раны без подсказок).</p>
 <hr>
-<h2 id="2-ревизия-текущей-реализации"><a class="anchor" href="#2-ревизия-текущей-реализации" aria-label="Section link">#</a>2. Ревизия текущей реализации</h2><p>В коде сосуществуют <strong>два механизма</strong> формирования подсказок. Это важно зафиксировать до любых улучшений: часть критики относится к прототипу, часть — к рабочему контуру, а лечить нужно один механизм, а не оба.</p>
+<h2 id="2-ревизия-реализации-на-момент-проектирования"><a class="anchor" href="#2-ревизия-реализации-на-момент-проектирования" aria-label="Section link">#</a>2. Ревизия реализации на момент проектирования</h2><p>На момент написания в коде сосуществовали <strong>два механизма</strong> формирования
+подсказок — рабочий контур и параллельный прототип (§2.2). Проблема
+устранена: прототип удалён, единственный движок — <code>observation.FindHints</code>.</p>
 <h3 id="21-рабочий-контур-активации-observationhintsgo"><a class="anchor" href="#21-рабочий-контур-активации-observationhintsgo" aria-label="Section link">#</a>2.1. Рабочий контур активации (observation/hints.go)</h3><p>Путь, который реально исполняется в рантайме:</p>
 <ol>
 <li><code>AgentRun</code> (<code>kernel/agent/workflow.go</code>) перед циклом ходов вызывает activity <code>kernel.knowledge_hints</code> с <code>query = input.Prompt</code>; лимит зашит в activity — <strong>8 подсказок</strong>. Обращение best-effort: при недоступности пишется <code>memory.read.failed</code>, ран продолжается.</li>
@@ -95,7 +102,7 @@
 <li>cautions для <code>proposed</code> / <code>challenged</code> / <code>at_risk</code>; evidence ≤8, history ≤5.</li>
 </ul>
 </li>
-<li>Workflow вставляет каждую подсказку <strong>отдельным system-сообщением</strong>: <code>Temporality context (prior knowledge, inspect provenance): {proposition} [{state}] {caution}</code> — без ограничения длины.</li>
+<li>Workflow вставляет подсказки <strong>одним блоком</strong> (см. §18; на момент проектирования — отдельным system-сообщением на подсказку).</li>
 <li>Обратная связь уже существует: extraction вычисляет <code>hint.used</code> / <code>hint.ignored</code> по отражению терминов пропозиции в ответе модели, а также фиксирует <code>hint.outcome</code>.</li>
 </ol>
 <p><strong>Что уже хорошо и сохраняется в v2:</strong> единица отбора — отдельное знание; детерминированная сортировка с tie-breaker; исключение терминальных состояний из выдачи; cautions; события полного цикла offered → used/ignored → outcome.</p>
@@ -416,7 +423,7 @@ knowledge_id=K123
 </ul>
 <hr>
 <h2 id="12-benchmark-качества"><a class="anchor" href="#12-benchmark-качества" aria-label="Section link">#</a>12. Benchmark качества</h2><p>Главная недостающая вещь: никакие существующие тесты (<code>priming_test.go</code>, <code>server_test.go</code>) не доказывают, что подсказки <strong>помогают решать задачи</strong>.</p>
-<h3 id="121-корпус"><a class="anchor" href="#121-корпус" aria-label="Section link">#</a>12.1. Корпус</h3><p>Постоянный набор из <strong>30–50 реальных задач</strong> из запусков Temporality (затравка — сценарии gatekeeper/nightlybox из фикстур experiment4–6). Для каждой задачи фиксируется:</p>
+<h3 id="121-корпус"><a class="anchor" href="#121-корпус" aria-label="Section link">#</a>12.1. Корпус</h3><p>Постоянный набор из <strong>30–50 реальных задач</strong> из запусков Temporality (затравка — сценарии из фикстур benchmark-корпуса). Для каждой задачи фиксируется:</p>
 <ul>
 <li>описание задачи;</li>
 <li>доступные на тот момент Knowledge со состояниями и связями;</li>
@@ -467,7 +474,9 @@ knowledge_id=K123
 </ul>
 <hr>
 <h2 id="14-план-работ"><a class="anchor" href="#14-план-работ" aria-label="Section link">#</a>14. План работ</h2><h3 id="статус-реализации-2026-10-10"><a class="anchor" href="#статус-реализации-2026-10-10" aria-label="Section link">#</a>Статус реализации (2026-10-10)</h3><blockquote>
-<p>Происхождение реализации: P0 доставлена в main веткой <code>feat/priming-relevance-budget</code> (merge <code>b061771</code>); P1 — последующими коммитами <code>46bcbfc</code> (diversification), <code>56baebb</code> (replacement), <code>c268a9e</code> (usefulness loop + benchmark corpus).</p>
+<p>Происхождение реализации: P0 доставлена в main одной веткой, P1 —
+последующими коммитами (diversification, replacement, usefulness loop +
+benchmark-корпус).</p>
 </blockquote>
 <p>Сделано в рамках P0:</p>
 <ul>
@@ -483,7 +492,7 @@ knowledge_id=K123
 <ul>
 <li>п.9 — ✅ контекст агента (§7): <code>HintQuery.ActiveSkills</code> + <code>IssuedKnowledgeIDs</code>; ядро передаёт дайджесты активных навыков (<code>HintRequest.Skills</code> → <code>active_skills</code> в <code>/v1/observations/hints</code>), движок понижает (не исключает) кандидатов, чьё содержание покрыто навыком на 2/3+ токенов (containment ≥ 0.75); уже выданное в ранее знание подавляется;</li>
 <li>п.12 — ✅ замыкание полезности (§11): extractor (уже существующим вызовом модели, <code>ExtractorVersion</code> → <code>knowledge-extractor.v3</code>) оценивает <code>hint_outcomes</code> для реально предложенных подсказок — helpful/harmful, «нет явного эффекта» не эмитится; workflow пишет <code>hint.outcome</code> (<code>matcher=extraction-judgment.v1</code>), проекция агрегирует <code>helpful/harmful_outcomes</code>; фактор B4 в ранжировании — 2/3-большинство при ≥3 исходах (целочисленно, симметрично), статистика видна в панели Observability; used ≠ helpful сохранён: механическое отражение терминов остаётся <code>hint.used</code>;</li>
-<li>п.11 — ✅ benchmark-корпус (§12): 34 кейса в <code>observation/testdata/priming/*.json</code> (затравка — сценарии gatekeeper/nightlybox + дедупликация, lifecycle, контекст навыков, бюджеты, ru/en); ранер <code>TestPrimingBenchmarkCorpusQuality</code> в CI: жёсткие инварианты (stale leakage = 0, детерминизм, бюджет блока, порядок) + метрики с полами (captured: precision@k = 1.000, recall@budget = 0.992, redundancy = 0.000, эффективность 18.7 полезных cue / 1000 токенов; полы 0.90 / 0.85 / 0.05 / 5.0). Behavioral impact — осознанно вне CI (требует модельных прогонов), остаётся ручным пилотом;</li>
+<li>п.11 — ✅ benchmark-корпус (§12): 34 кейса в <code>observation/testdata/priming/*.json</code> (затравка — сценарии бенчмарка + дедупликация, lifecycle, контекст навыков, бюджеты, ru/en); ранер <code>TestPrimingBenchmarkCorpusQuality</code> в CI: жёсткие инварианты (stale leakage = 0, детерминизм, бюджет блока, порядок) + метрики с полами (captured: precision@k = 1.000, recall@budget = 0.992, redundancy = 0.000, эффективность 18.7 полезных cue / 1000 токенов; полы 0.90 / 0.85 / 0.05 / 5.0). Behavioral impact — осознанно вне CI (требует модельных прогонов), остаётся ручным пилотом;</li>
 <li>п.13 — осознанно дескоупнуто: Experience Pattern как слой подачи (объединение отобранных знаний в один cue) не подтверждён потребностью — компактный cue-контракт уже держит бюджет, а группировка до отбора была исходным дефектом (§3.1); вернуть при появлении свидетельств от бенчмарка.</li>
 </ul>
 <p>Попутно исправлено: <code>RenderHintBlock</code> не учитывал руны-разделители <code>\n</code> при склейке блока — блок мог превысить бюджет на ~1 токен; теперь каждая строка несёт свой сепаратор (ceil субаддитивен, инвариант доказуем), <code>RenderResult.KeptIDs</code> открывает попозиционный учёт.</p>
@@ -540,7 +549,8 @@ knowledge_id=K123
 <h2 id="16-что-не-входит-в-скоуп"><a class="anchor" href="#16-что-не-входит-в-скоуп" aria-label="Section link">#</a>16. Что не входит в скоуп</h2><ul>
 <li>изменение контракта extraction и правил появления Knowledge (<code>knowledge-extraction.md</code>);</li>
 <li>пересмотр жизненного цикла Hint и разделения Experience/Knowledge/Skill/Hint (<code>knowledge-evolution.md</code>);</li>
-<li>векторная БД / полноценный semantic retrieval по всей базе знаний (только префикс-фильтрация кандидатов в P2);</li>
+<li>векторный семантический тир — вне скоупа этого плана, но реализован
+отдельно (см. §18);</li>
 <li>изменение модели доступа — используются существующие проверки видимости (<code>org-structure.md</code>).</li>
 </ul>
 <hr>
@@ -548,8 +558,38 @@ knowledge_id=K123
 <li>Значения весов факторов B1–B5 и порогов — подбираются на бенчмарке P0/P1; стартовые зафиксировать в конфиге с версией.</li>
 <li>Хранение агрегированной полезности (<code>applied/helpful</code>) — в journal рядом со знанием или в observation-слое.</li>
 <li>Должен ли <code>knowledge_lookup</code> возвращать связанные знания одним ответом (граф) — решить при реализации инструмента.</li>
-<li>Формат корпуса бенчмарка: наследовать ли схему фикстур experiment4–6 или завести отдельную.</li>
+<li>Формат корпуса бенчмарка: наследовать ли схему существующих фикстур или завести отдельную.</li>
 </ul>
+<hr>
+<h2 id="18-что-изменилось-после-внедрения-текущее-состояние"><a class="anchor" href="#18-что-изменилось-после-внедрения-текущее-состояние" aria-label="Section link">#</a>18. Что изменилось после внедрения (текущее состояние)</h2><p>План выше выполнен, но механика выросла за его пределы:</p>
+<ul>
+<li><strong>Порядок сортировки</strong> — не score: <code>matchTier → kindTier → stateTier → staleTier → usefulTier → noveltyTier → KnowledgeID</code> (см. «Политика
+состояний» ниже и §8).</li>
+<li><strong>IDF-фильтр вместо IDF-весов</strong>: токены запроса, живущие в ≥5 знаниях и
+≥5% корпуса, отбрасываются как неразличающие (<code>discriminativeTokens</code>) —
+«клеевые» слова вида «не»/«файл» больше не проводят мусорные совпадения.</li>
+<li><strong>Семантический тир</strong>: косинусная близость на эмбеддингах (порог 0.35,
+до 3 кандидатов), <code>semantic:&lt;score&gt;</code> в <code>matched_by</code>; квота
+(<code>reserveSemanticSlots</code>) держит до 2 мест бюджета под семантику, чтобы
+лексический шум не вытеснял смысловые совпадения.</li>
+<li><strong>Часы переподтверждения</strong>: якорь <code>LastEvidenceAt</code> (создание, использование,
+judged-вердикт; предложение подсказки часы не сбрасывает); знание без
+подтверждений дольше 14 дней выдаётся с caution «not re-verified for N
+days» и уступает свежим равным (<code>staleTier</code>).</li>
+<li><strong>Aging sweep</strong> (<code>aging.v1</code>): proposal старше 14 дней и confirmed старше
+28 дней без перепроверки получают <code>knowledge.challenged</code> и попадают в
+триаж гигиены.</li>
+<li><strong>Вердикты ранов двигают состояние</strong>: <code>hint.outcome: helpful</code> подтверждает
+proposal; <code>harmful</code> с причиной переводит в <code>challenged</code>; два независимых
+вреда без поддержки — <code>invalidated</code>; смешанные вердикты остаются спорными.</li>
+<li><strong>Формат cue</strong> (<code>renderCue</code>): <code>- правило [state] (match: …) knowledge_id=…; caution: …</code> — без отдельного «условия применимости».</li>
+<li><strong>Payload <code>hint.offered</code></strong>: <code>hint_id</code>, <code>activation_id</code>, <code>knowledge_id</code>,
+<code>state</code>, <code>matched_by</code>, <code>proposition</code>, <code>algorithm_version</code>.</li>
+<li><strong>Команды</strong>: у слотов есть <code>TeamRunKnowledgeIDs</code> — знания, подтверждённые
+в командном дереве, видны последующим слотам и держатся когортой выше
+лексических совпадений.</li>
+</ul>
+<p>Полезность (B4), новизна (B5), дедупликация и бюджеты — как в плане.</p>
 
 
   <nav class="docs-pager">

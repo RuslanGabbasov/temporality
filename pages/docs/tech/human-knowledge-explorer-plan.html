@@ -89,7 +89,7 @@ organization);</li>
 promote) и цепочка (<code>knowledge/chain</code>);</li>
 <li>предпросмотр подсказок (<code>POST /v1/observations/hints</code>).</li>
 </ul>
-<p>Ограничения против ТЗ (совпадают с жалобами пользователя):</p>
+<p>Ограничения против ТЗ (по итогам полевого тестирования):</p>
 <table>
 <thead>
 <tr>
@@ -234,12 +234,13 @@ selected/…), добавляются <code>area</code>, <code>entity</code>, <c
 debugger/src/explorer/
   AreaMap.tsx        — SVG-карта областей (orient)
   Dossier.tsx        — досье знания (trace + chain + lifecycle)
+  (фактические пути: debugger/src/Dossier.tsx, debugger/src/explorer/*)
   RelationGraph.tsx  — локальный граф (expand), SVG без зависимостей
   ConflictPanel.tsx  — сравнение противоречий (compare)
   HistoryTimeline.tsx— временная история (trace + diff)
-  session.ts         — стек переходов + сохранение сессии
+  sessions.ts        — стек переходов + сохранение сессии
 debugger/src/observationApi.ts       + explore(), facets (расширенные)
-observation/knowledge_query.go       + facets topics/entities/projects/kinds/risk
+observation/httpapi/knowledge_query.go   + facets topics/entities/projects/kinds/risk
 observation/httpapi/server.go        + GET /v1/observations/events/{id} (опц.)
 </code></pre>
 <p>Правила: вся выборка — через существующий API журнала; UI не считает связи
@@ -272,7 +273,7 @@ challenge/correct).</li>
 evidence), перенос lifecycle-панели из Observability, удаление старой
 вкладки.</li>
 </ul>
-<p>Оценки: этапы 2–4 сопоставимы с волнами E–G команд агентов.</p>
+<p>Оценки: этапы 2–4 — по оценкам командной работы.</p>
 <h2 id="7-открытые-вопросы-решения-2026-10-16"><a class="anchor" href="#7-открытые-вопросы-решения-2026-10-16" aria-label="Section link">#</a>7. Открытые вопросы — решения (2026-10-16)</h2><ol>
 <li>Минимальный объём v1 (§5) утверждён без графа связей — граф в этапе 3.</li>
 <li><code>GET /v1/observations/events/{id}</code> — добавлен (этап 2).</li>
@@ -331,7 +332,7 @@ promote / correct с указанием приемника) для карточ�
 конфликтов).</li>
 </ul>
 <h2 id="10-статус-этапа-4-реализовано"><a class="anchor" href="#10-статус-этапа-4-реализовано" aria-label="Section link">#</a>10. Статус этапа 4 (реализовано)</h2><ul>
-<li>Серверное хранилище сессий: миграция 000066
+<li>Серверное хранилище сессий: таблица <code>workspace_research_session</code> (в squashed baseline <code>0001_baseline_v2026.2.21</code>)
 (<code>workspace_research_session</code>: project, title, created_by, payload jsonb,
 updated_at), Store-методы (<code>workspace/researchsession.go</code>, список — без
 payload), маршруты <code>/v1/workspace/research-sessions</code> (GET-список/GET-одна —

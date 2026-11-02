@@ -23,7 +23,7 @@
   promote) и цепочка (`knowledge/chain`);
 - предпросмотр подсказок (`POST /v1/observations/hints`).
 
-Ограничения против ТЗ (совпадают с жалобами пользователя):
+Ограничения против ТЗ (по итогам полевого тестирования):
 
 | Требование ТЗ | Текущее состояние |
 |---|---|
@@ -98,12 +98,13 @@ debugger/src/KnowledgeExplorer.tsx   — страница Explorer (этап 2+)
 debugger/src/explorer/
   AreaMap.tsx        — SVG-карта областей (orient)
   Dossier.tsx        — досье знания (trace + chain + lifecycle)
+  (фактические пути: debugger/src/Dossier.tsx, debugger/src/explorer/*)
   RelationGraph.tsx  — локальный граф (expand), SVG без зависимостей
   ConflictPanel.tsx  — сравнение противоречий (compare)
   HistoryTimeline.tsx— временная история (trace + diff)
-  session.ts         — стек переходов + сохранение сессии
+  sessions.ts        — стек переходов + сохранение сессии
 debugger/src/observationApi.ts       + explore(), facets (расширенные)
-observation/knowledge_query.go       + facets topics/entities/projects/kinds/risk
+observation/httpapi/knowledge_query.go   + facets topics/entities/projects/kinds/risk
 observation/httpapi/server.go        + GET /v1/observations/events/{id} (опц.)
 ```
 
@@ -141,7 +142,7 @@ observation/httpapi/server.go        + GET /v1/observations/events/{id} (опц.
   evidence), перенос lifecycle-панели из Observability, удаление старой
   вкладки.
 
-Оценки: этапы 2–4 сопоставимы с волнами E–G команд агентов.
+Оценки: этапы 2–4 — по оценкам командной работы.
 
 ## 7. Открытые вопросы — решения (2026-10-16)
 
@@ -206,7 +207,7 @@ UI-only поверх существующего движка explore (серве
 
 ## 10. Статус этапа 4 (реализовано)
 
-- Серверное хранилище сессий: миграция 000066
+- Серверное хранилище сессий: таблица `workspace_research_session` (в squashed baseline `0001_baseline_v2026.2.21`)
   (`workspace_research_session`: project, title, created_by, payload jsonb,
   updated_at), Store-методы (`workspace/researchsession.go`, список — без
   payload), маршруты `/v1/workspace/research-sessions` (GET-список/GET-одна —

@@ -206,9 +206,12 @@ noexec <code>/tmp</code>, uid 10001. Профиль меняет только т
 через сборку — рукописный digest при заданном <code>base</code> отвергается;</li>
 <li><code>packages</code> требуют <code>base</code>; имена пакетов — строгий allowlist
 <code>[a-z0-9][a-z0-9.+_-]*</code> (интерполяция в RUN-слой = защита от инъекций);</li>
-<li>правка рецепта (<code>base</code>/<code>packages</code>) сбрасывает закреплённый <code>image</code> —
-digest перестал соответствовать рецепту, профиль ждёт пересборки;</li>
-<li>миграция 000071 добавляет колонки <code>base</code>, <code>packages</code>.</li>
+<li>правка рецепта (<code>base</code>/<code>packages</code>/<code>dockerfile_override</code>) сбрасывает
+закреплённый <code>image</code> — digest перестал соответствовать рецепту, профиль
+ждёт пересборки; правка runtime-параметров (memory, cpus, scratch/tmp,
+cache_env, docker_socket) <strong>не</strong> сбрасывает собранный образ — «нужна
+сборка» появляется только после изменения рецепта;</li>
+<li>колонки <code>base</code>, <code>packages</code> — в squashed baseline <code>0001_baseline_v2026.2.21</code>.</li>
 </ul>
 <h3 id="52-конструктор-из-описания-визард"><a class="anchor" href="#52-конструктор-из-описания-визард" aria-label="Section link">#</a>5.2. Конструктор из описания (визард)</h3><p>Тот же паттерн, что у визардов агентов и команд: оператор описывает
 задачи агента обычным языком, модель-супервайзер (<code>POST …/builder</code>)
@@ -239,7 +242,7 @@ digest перестал соответствовать рецепту, проф�
 <li>при старте команды сокет проверяется: отсутствие сокета при
 включённом флаге — явная ошибка команды, а не загадочный сбой
 монтирования;</li>
-<li>миграция 000075 добавляет колонку <code>docker_socket</code>.</li>
+<li>колонка <code>docker_socket</code> — в squashed baseline <code>0001_baseline_v2026.2.21</code>.</li>
 </ul>
 <h3 id="54-операторский-рецепт-свой-dockerfile"><a class="anchor" href="#54-операторский-рецепт-свой-dockerfile" aria-label="Section link">#</a>5.4. Операторский рецепт (свой Dockerfile)</h3><p>У кастомного профиля вместо <code>base</code>/<code>packages</code> может стоять
 <code>dockerfile_override</code> — полный текст Dockerfile, который оператор пишет
@@ -315,6 +318,12 @@ docs/tasks/2026-10-21-sandbox-dockerfile-editing):</p>
 </tr>
 <tr>
 <td>POST</td>
+<td><code>/v1/workspace/sandbox-profiles/{id}/pull</code></td>
+<td>writer</td>
+<td>скачать внешний образ и закрепить его digest в профиле</td>
+</tr>
+<tr>
+<td>POST</td>
 <td><code>/v1/workspace/sandbox-profiles/builder</code></td>
 <td>writer</td>
 <td>конструктор: текстовое описание задач агента → черновик профиля от модели-супервайзера (не сохраняет, только предлагает)</td>
@@ -344,8 +353,8 @@ digest, ресурсы, статус «собран/не собран»), кно
 <li>Визард создания агента больше не предлагает уровень песочницы:
 среда исполнения назначается профилем осознанно, а не генерируется.</li>
 </ul>
-<h2 id="9-фазы-реализации"><a class="anchor" href="#9-фазы-реализации" aria-label="Section link">#</a>9. Фазы реализации</h2><h3 id="фаза-1-реестр-и-назначение-текущая"><a class="anchor" href="#фаза-1-реестр-и-назначение-текущая" aria-label="Section link">#</a>Фаза 1 — реестр и назначение (текущая)</h3><ul>
-<li>Сущность <code>workspace_sandbox_profile</code>, миграция 000070; мёртвые значения
+<h2 id="9-фазы-реализации"><a class="anchor" href="#9-фазы-реализации" aria-label="Section link">#</a>9. Фазы реализации</h2><h3 id="фаза-1-реестр-и-назначение-реализовано"><a class="anchor" href="#фаза-1-реестр-и-назначение-реализовано" aria-label="Section link">#</a>Фаза 1 — реестр и назначение (реализовано)</h3><ul>
+<li>Сущность <code>workspace_sandbox_profile</code> (squashed baseline <code>0001_baseline_v2026.2.21</code>); мёртвые значения
 <code>restricted/standard/privileged</code> в карточках агентов мигрируются в пустое.</li>
 <li>Каталог встроенных профилей (node, python, browser-e2e) с сидингом.</li>
 <li><code>SandboxSpec</code> в <code>RunInput</code>/<code>ToolRequest</code>; образ, ресурсы и кэш-переменные
@@ -354,12 +363,12 @@ digest, ресурсы, статус «собран/не собран»), кно
 <li>API каталога + сборка + аудит/события; валидация при сохранении агента.</li>
 <li>UI: страница «Песочницы», селект профиля в карточке агента.</li>
 </ul>
-<h3 id="фаза-2-управление-образами"><a class="anchor" href="#фаза-2-управление-образами" aria-label="Section link">#</a>Фаза 2 — управление образами</h3><ul>
+<h3 id="фаза-2-управление-образами-частично"><a class="anchor" href="#фаза-2-управление-образами-частично" aria-label="Section link">#</a>Фаза 2 — управление образами (частично)</h3><ul>
 <li>Конструктор образов из компонентов (по мотивам devcontainer features):
-базовый профиль + слои тулчейнов без ручного написания Dockerfile.</li>
-<li>Внешние реестры образов (pull через digest, pinning), сканирование
-образов перед закреплением.</li>
-<li>Версии образов профиля: digest в карточке профиля + история сборок.</li>
+базовый профиль + слои тулчейнов без ручного написания Dockerfile — ✅.</li>
+<li>Внешние реестры образов: pull через digest с pinning — ✅ (<code>POST …/pull</code>);
+сканирование образов перед закреплением — нет.</li>
+<li>Версии образов профиля: digest в карточке + история сборок — ✅.</li>
 </ul>
 <h3 id="фаза-3-политики"><a class="anchor" href="#фаза-3-политики" aria-label="Section link">#</a>Фаза 3 — политики</h3><ul>
 <li>Org-политики разрешённых профилей по структурным единицам.</li>

@@ -172,6 +172,10 @@ name          TEXT
 path          TEXT
               -- materialized path предков
 
+head_user_id  TEXT NULL
+              -- руководитель узла: цель эскалаций и дефолтный адресат
+              -- командных запросов; наследуется снизу вверх по дереву
+
 created_at
 updated_at
 ```
@@ -1146,9 +1150,11 @@ GET    /v1/org/units/{id}
 PUT    /v1/org/units/{id}
 DELETE /v1/org/units/{id}
 
-GET    /v1/org/units/{id}/users
 GET    /v1/org/units/{id}/resources
-GET    /v1/org/units/{id}/projects
+GET    /v1/org/units/{id}/roles
+PUT    /v1/org/units/{id}/roles/{userID}
+DELETE /v1/org/units/{id}/roles/{userID}
+GET    /v1/org/units/{id}/effective-policy
 ```
 
 Изменять дерево может только соответствующий администратор.

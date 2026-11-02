@@ -90,7 +90,9 @@
 <li><strong>артефакт значит артефакт</strong> — рабочий продукт для человека регистрируется
 в реестре; файл в воркспейсе — черновик, а не артефакт.</li>
 </ul>
-<h2 id="2-проблематика-текущего-состояния"><a class="anchor" href="#2-проблематика-текущего-состояния" aria-label="Section link">#</a>2. Проблематика текущего состояния</h2><p>Раскладка сегодня (<code>kernel/sandbox/docker.go</code>, <code>kernel/agent/activities.go</code>):</p>
+<h2 id="2-проблематика-на-момент-проектирования"><a class="anchor" href="#2-проблематика-на-момент-проектирования" aria-label="Section link">#</a>2. Проблематика (на момент проектирования)</h2><p>Фаза 1 (инвентаризация, снапшоты, файловый API) закрыла пункты ниже; уборка
+и квоты — следующие фазы.</p>
+<p>Раскладка сегодня (<code>kernel/sandbox/docker.go</code>, <code>kernel/agent/activities.go</code>):</p>
 <table>
 <thead>
 <tr>
@@ -182,10 +184,12 @@ Git-контент (отслеживаемые файлы, <code>.git/</code>) �
 <code>busy_grace</code> (по умолчанию 24 ч), и воркспейсы проектов с активными ранами.</li>
 </ul>
 <p>Политики — настройки инсталляции (<code>workspace_setting</code>), не код.</p>
-<h3 id="34-квота-quota"><a class="anchor" href="#34-квота-quota" aria-label="Section link">#</a>3.4. Квота (quota)</h3><p>Мягкий лимит <code>workspace_quota_per_project</code> (по умолчанию 50 GiB):
-превышение — предупреждение на дашборде и событие <code>storage.quota_exceeded</code>;
-жёсткая грань (фаза 3) — отказ новых <code>run_command</code> проекта с явной ошибкой
-«превышена дисковая квота проекта» до уборки.</p>
+<h3 id="34-квота-quota"><a class="anchor" href="#34-квота-quota" aria-label="Section link">#</a>3.4. Квота (quota)</h3><p>Мягкий лимит: <strong>фаза 1</strong> — env <code>KERNEL_STORAGE_DEFAULT_QUOTA_BYTES</code>
+(по умолчанию 50 GiB на проект); per-project настройка
+(<code>workspace_quota_per_project</code>) и событие <code>storage.quota_exceeded</code> —
+фаза 2, не реализованы. Жёсткая грань (фаза 3) — отказ новых
+<code>run_command</code> проекта с явной ошибкой «превышена дисковая квота проекта»
+до уборки.</p>
 <h2 id="4-принципы"><a class="anchor" href="#4-принципы" aria-label="Section link">#</a>4. Принципы</h2><ol>
 <li><strong>Серверная агрегация.</strong> Обход ФС и подсчёт размеров — в ядре, с лимитом
 глубины и времени; фронтенд только рендерит (тот же вывод, что
@@ -219,10 +223,11 @@ docs/system-dashboard.md §1).</li>
 <p>Источник — свежий снапшот (кэш в памяти ядра; <code>?refresh=1</code> — пересчёт).</p>
 <h3 id="52-детали-проекта"><a class="anchor" href="#52-детали-проекта" aria-label="Section link">#</a>5.2. Детали проекта</h3><p><code>GET /v1/workspace/storage/projects/{id}?depth=4</code> — дерево с размерами и
 mtimes до глубины N, топ файлов по размеру. Reader.</p>
-<h3 id="53-ручная-уборка"><a class="anchor" href="#53-ручная-уборка" aria-label="Section link">#</a>5.3. Ручная уборка</h3><p><code>POST /v1/workspace/storage/projects/{id}/sweep</code>
+<h3 id="53-ручная-уборка-фаза-2-не-реализована"><a class="anchor" href="#53-ручная-уборка-фаза-2-не-реализована" aria-label="Section link">#</a>5.3. Ручная уборка (фаза 2, не реализована)</h3><p><code>POST /v1/workspace/storage/projects/{id}/sweep</code>
 <code>{ &quot;dry_run&quot;: true, &quot;areas&quot;: [&quot;cache&quot;, &quot;workspace&quot;] }</code> (operator).
 Возвращает план и факт: что удалено/будет удалено, сколько байт освобождено.
-Аудит + событие.</p>
+Аудит + событие. Реализованный файловый API (фаза 1): <code>GET dir/file</code>,
+<code>POST files</code>, <code>DELETE file</code> — на <code> /v1/workspace/storage/...</code>.</p>
 <h3 id="54-здоровье-сервера"><a class="anchor" href="#54-здоровье-сервера" aria-label="Section link">#</a>5.4. Здоровье сервера</h3><p><code>GET /v1/system/health</code> (reader):</p>
 <pre><code class="language-json">{
   &quot;disk&quot;: [{ &quot;path&quot;: &quot;/srv/temporality/.sandbox&quot;, &quot;total_bytes&quot;: 1e12, &quot;free_bytes&quot;: 2.3e11 }],
@@ -235,17 +240,18 @@ mtimes до глубины N, топ файлов по размеру. Reader.</
 (в стандартном Docker это хостовые значения), <code>docker system df</code> — по
 существующему docker-бинарному пути ядра.</p>
 <h3 id="55-события-журнала"><a class="anchor" href="#55-события-журнала" aria-label="Section link">#</a>5.5. События журнала</h3><ul>
-<li><code>storage.snapshot</code> — итоги планового обхода (по проектам, свободное место);</li>
-<li><code>storage.evicted</code> — каждое удаление (путь, байты, политика);</li>
-<li><code>storage.quota_exceeded</code> — проект вышел за квоту;</li>
-<li><code>storage.swept</code> — сводка цикла уборки (освобождено байт, длительность).</li>
+<li><code>storage.snapshot</code> — итоги планового обхода (по проектам, свободное место) — <strong>реализовано</strong>;</li>
+<li><code>storage.evicted</code> — каждое удаление (путь, байты, политика) — фаза 2;</li>
+<li><code>storage.quota_exceeded</code> — проект вышел за квоту — фаза 2;</li>
+<li><code>storage.swept</code> — сводка цикла уборки (освобождено байт, длительность) — фаза 2.</li>
 </ul>
 <h2 id="6-sweeper-в-ядре"><a class="anchor" href="#6-sweeper-в-ядре" aria-label="Section link">#</a>6. Sweeper в ядре</h2><p>Не внешний cron: ядро уже владеет docker-бинарем, journal и настройками.</p>
 <ul>
-<li>Тикер в <code>agent-kernel</code> (старт при буте): обход раз в час, политика уборки
-раз в сутки; включается <code>KERNEL_STORAGE_SWEEPER=on</code> (default on),
-интервалы — <code>workspace_setting</code>.</li>
-<li>Порядок: снапшот → квоты (<code>storage.quota_exceeded</code>) → политика кэша →
+<li>Тикер в <code>agent-kernel</code> (старт при буте): обход-снапшот раз в час
+(<code>storage.snapshot</code>, <code>KERNEL_STORAGE_SWEEPER</code>, default on); политика
+уборки (квоты → кэш → мусор, удаления) — фаза 2, пока обход ничего
+не удаляет.</li>
+<li>Порядок (план): снапшот → квоты (<code>storage.quota_exceeded</code>) → политика кэша →
 политика мусора воркспейса → <code>storage.swept</code>.</li>
 <li>Каждый шаг логируется slog-ом и журналом; ошибка обхода одного проекта не
 останавливает остальные.</li>
