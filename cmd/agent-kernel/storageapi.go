@@ -142,6 +142,11 @@ type storageHealthView struct {
 	storage.HostHealth
 	Docker    storage.DockerFootprint    `json:"docker"`
 	Sandboxes []storage.SandboxContainer `json:"sandboxes,omitempty"`
+	// Memory breakdown over ALL running containers (top consumers first): the
+	// Sandboxes widget covers only temporality sandboxes, while the host
+	// memory line includes the whole stack — without this breakdown a 20 GiB
+	// «used» next to a 244 MB sandbox read as a leak.
+	Containers []storage.ContainerMemory `json:"containers,omitempty"`
 }
 
 // RegisterStorageRoutes mounts the read-only storage inventory and host
@@ -252,7 +257,7 @@ func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleP
 		}
 		health := storage.ReadHostHealth(paths...)
 		docker := storage.ReadDockerFootprint(r.Context(), dockerBinary)
-		writeJSON(w, 200, storageHealthView{HostHealth: health, Docker: docker, Sandboxes: storage.ReadSandboxContainers(r.Context(), dockerBinary)})
+		writeJSON(w, 200, storageHealthView{HostHealth: health, Docker: docker, Sandboxes: storage.ReadSandboxContainers(r.Context(), dockerBinary), Containers: storage.ReadContainerMemory(r.Context(), dockerBinary)})
 	})
 }
 

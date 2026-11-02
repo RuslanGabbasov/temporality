@@ -506,51 +506,74 @@ export default function Dashboard({ project, setProject }: Props) {
               </section>
             ) : busy && <SkeletonSection height="11rem" />}
             {syshealth ? (
-              <section style={{ minWidth: 0 }}>
-                <PanelHeader title={t('dashboard.server') ?? 'Server'} hint={t('dashboard.server_hint') ?? undefined} />
-                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem', display: 'grid', gridTemplateColumns: 'minmax(7rem, 0.8fr) minmax(9rem, 1.4fr)', rowGap: '0.45rem', alignItems: 'center' }}>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_load') ?? 'load 1/5m'}</span>
-                <span style={{ color: syshealth.cpu.cores > 0 && syshealth.cpu.load1 > syshealth.cpu.cores ? 'var(--tm-danger)' : 'var(--tm-text)' }}>
-                  {syshealth.cpu.load1.toFixed(2)} / {syshealth.cpu.load5.toFixed(2)}
-                  <span style={{ color: 'var(--tm-text-3)' }}> · {syshealth.cpu.cores} vCPU</span>
-                </span>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_memory') ?? 'Memory'}</span>
-                {syshealth.memory.total_bytes > 0 ? (() => {
-                  const used = syshealth.memory.total_bytes - syshealth.memory.available_bytes
-                  const ratio = used / syshealth.memory.total_bytes
-                  return (
-                    <span>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
-                        <span>{fmtBytes(used)} / {fmtBytes(syshealth.memory.total_bytes)}</span>
-                        <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.storage_free') ?? 'free'} {fmtBytes(syshealth.memory.available_bytes)}</span>
-                      </span>
-                      <span style={{ ...meterTrackStyle, display: 'block', marginTop: '0.2rem' }}>
-                        <span style={{ ...meterFillStyle, display: 'block', width: meterWidth(ratio), background: meterColor(ratio) }} />
-                      </span>
-                    </span>
-                  )
-                })() : <span style={{ color: 'var(--tm-text-3)' }}>—</span>}
-                {syshealth.disk.map((d) => (
-                  <Fragment key={d.path}>
-                    <span title={d.path} style={{ color: 'var(--tm-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('dashboard.server_disk') ?? 'disk'} {d.path}</span>
-                    <span style={{ color: d.total_bytes > 0 && d.free_bytes / d.total_bytes < 0.1 ? 'var(--tm-danger)' : 'var(--tm-text)' }}>
-                      <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.storage_free') ?? 'free'} </span>
-                      {fmtBytes(d.free_bytes)}
-                      <span style={{ color: 'var(--tm-text-3)' }}> / {fmtBytes(d.total_bytes)}</span>
-                    </span>
-                  </Fragment>
-                ))}
-                <span style={{ color: 'var(--tm-text-3)' }}>docker</span>
-                {syshealth.docker.available ? (
-                  <span>
-                    {fmtBytes(syshealth.docker.images_bytes)}
-                    <span style={{ color: 'var(--tm-text-3)' }}> · {pluralT(t, locale, 'dashboard.containers_n', syshealth.docker.containers_running)}</span>
-                  </span>
-                ) : (
-                  <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_no_docker') ?? 'docker unreachable'}</span>
-                )}
-              </div>
-              </section>
+				<section style={{ minWidth: 0 }}>
+					<PanelHeader title={t('dashboard.server') ?? 'Server'} hint={t('dashboard.server_hint') ?? undefined} />
+					<div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem', display: 'grid', gridTemplateColumns: 'minmax(7rem, 0.8fr) minmax(9rem, 1.4fr)', rowGap: '0.45rem', alignItems: 'center' }}>
+						<span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_load') ?? 'load 1/5m'}</span>
+						<span style={{ color: syshealth.cpu.cores > 0 && syshealth.cpu.load1 > syshealth.cpu.cores ? 'var(--tm-danger)' : 'var(--tm-text)' }}>
+							{syshealth.cpu.load1.toFixed(2)} / {syshealth.cpu.load5.toFixed(2)}
+							<span style={{ color: 'var(--tm-text-3)' }}> · {syshealth.cpu.cores} vCPU</span>
+						</span>
+						<span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_memory') ?? 'Memory'}</span>
+						{syshealth.memory.total_bytes > 0 ? (() => {
+							const used = syshealth.memory.total_bytes - syshealth.memory.available_bytes
+							const ratio = used / syshealth.memory.total_bytes
+							return (
+								<span>
+									<span style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+										<span>{fmtBytes(used)} / {fmtBytes(syshealth.memory.total_bytes)}</span>
+										<span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.storage_free') ?? 'free'} {fmtBytes(syshealth.memory.available_bytes)}</span>
+									</span>
+									<span style={{ ...meterTrackStyle, display: 'block', marginTop: '0.2rem' }}>
+										<span style={{ ...meterFillStyle, display: 'block', width: meterWidth(ratio), background: meterColor(ratio) }} />
+									</span>
+								</span>
+							)
+						})() : <span style={{ color: 'var(--tm-text-3)' }}>—</span>}
+						                {syshealth.disk.map((d) => (
+						                  <Fragment key={d.path}>
+						                    <span title={d.path} style={{ color: 'var(--tm-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('dashboard.server_disk') ?? 'disk'} {d.path}</span>
+						                    <span style={{ color: d.total_bytes > 0 && d.free_bytes / d.total_bytes < 0.1 ? 'var(--tm-danger)' : 'var(--tm-text)' }}>
+						                      <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.storage_free') ?? 'free'} </span>
+						                      {fmtBytes(d.free_bytes)}
+						                      <span style={{ color: 'var(--tm-text-3)' }}> / {fmtBytes(d.total_bytes)}</span>
+						                    </span>
+						                  </Fragment>
+						                ))}
+						<span style={{ color: 'var(--tm-text-3)' }}>docker</span>
+						{syshealth.docker.available ? (
+							<span>
+								{fmtBytes(syshealth.docker.images_bytes)}
+								<span style={{ color: 'var(--tm-text-3)' }}> · {pluralT(t, locale, 'dashboard.containers_n', syshealth.docker.containers_running)}</span>
+							</span>
+						) : (
+							<span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_no_docker') ?? 'docker unreachable'}</span>
+						)}
+					</div>
+					{/* Memory breakdown by container: the host line includes the whole stack
+					     (postgres, temporal, the kernel, page caches) — without this list a
+					     big «used» next to one small sandbox read as a leak. Top consumers
+					     first; the temporality sandboxes are in the widget above. */}
+					{syshealth.containers && syshealth.containers.length > 0 && (
+						<div style={{ borderTop: '1px solid var(--tm-border)', paddingTop: '0.4rem' }}>
+							<div style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>{t('dashboard.server_mem_by_container') ?? 'Memory by container'}</div>
+							{syshealth.containers.slice(0, 6).map((c) => (
+								<div key={c.name} title={c.image} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem', padding: '0.1rem 0' }}>
+									<span style={{ width: '4.5rem', textAlign: 'right', color: c.used_mb > 1024 ? 'var(--tm-amber)' : 'var(--tm-text-3)', fontWeight: c.used_mb > 1024 ? 600 : 400, flexShrink: 0 }}>{fmtBytes(c.used_mb * (1 << 20))}</span>
+									<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, color: 'var(--tm-text-2)' }}>{c.name.replace(/^temporality-/, '')}</span>
+									<span style={{ width: '4rem', flexShrink: 0 }}>
+										<span style={{ ...meterTrackStyle, display: 'block' }}>
+											<span style={{ ...meterFillStyle, display: 'block', width: meterWidth((c.percent ?? 0) / 100), background: meterColor((c.percent ?? 0) / 100) }} />
+										</span>
+									</span>
+								</div>
+							))}
+							{syshealth.containers.length > 6 && (
+								<div style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>+{syshealth.containers.length - 6} {t('dashboard.server_mem_more') ?? 'more'}</div>
+							)}
+						</div>
+					)}
+				</section>
             ) : busy && <SkeletonSection height="11rem" />}
             {health?.human ? (
               <section style={{ minWidth: 0 }}>

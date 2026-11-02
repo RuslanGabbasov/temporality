@@ -573,6 +573,9 @@ export interface SystemHealth {
   memory: { total_bytes: number; available_bytes: number }
   docker: { images_bytes: number; containers_running: number; available: boolean }
   sandboxes?: SandboxContainerInfo[]
+  // Memory breakdown over ALL running containers (top consumers first):
+  // answers «куда ушла память» when the host line dwarfs the sandbox list.
+  containers?: { name: string; image?: string; used_mb: number; limit_mb?: number; percent?: number }[]
 }
 
 export function systemHealth(): Promise<SystemHealth> {
