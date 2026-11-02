@@ -258,20 +258,6 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
 
   useEffect(() => { void load() }, [load])
 
-  const acknowledge = async (eventID: string) => {
-    setBusyAck(eventID)
-    try {
-      // Durable ack: the server-side set is the truth; the endpoint also
-      // journals the audit event.
-      await workspaceApi.ackSupervisorVerdicts([eventID])
-      setAcknowledged((prev) => new Set(prev).add(eventID))
-    } catch (failure) {
-      setError(message(failure))
-    } finally {
-      setBusyAck('')
-    }
-  }
-
   // One-click resolutions for a knowledge_conflict verdict: invalidate the
   // losing knowledge through the knowledge API, then acknowledge the verdict
   // (it leaves the queue). The keep-both path only acknowledges.
@@ -343,9 +329,13 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       // The helper adds each id to the session ack-set optimistically: the
       // acks ride the async outbox, so the reload below cannot see them yet —
       // without the optimistic add the row resurrected and looked broken.
-      for (const eventID of row.eventIDs) {
-        await acknowledge(eventID)
-      }
+      // One batch POST for the whole row, then the durable set is the truth.
+      await workspaceApi.ackSupervisorVerdicts(row.eventIDs)
+      setAcknowledged((prev) => {
+        const next = new Set(prev)
+        for (const eventID of row.eventIDs) next.add(eventID)
+        return next
+      })
       setGeneralize(null)
       await load(true)
     } catch (failure) {
@@ -431,9 +421,13 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       }
       // Same optimistic ack-set add: invalidate → acknowledge → refresh must
       // hide the row on the first click, not after the next manual reload.
-      for (const eventID of row.eventIDs) {
-        await acknowledge(eventID)
-      }
+      // One batch round-trip for the row's events, not one POST per id.
+      await workspaceApi.ackSupervisorVerdicts(row.eventIDs)
+      setAcknowledged((prev) => {
+        const next = new Set(prev)
+        for (const eventID of row.eventIDs) next.add(eventID)
+        return next
+      })
       await load(true)
     } catch (failure) {
       setError(message(failure))
@@ -610,21 +604,24 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
           <section style={{ marginBottom: '1.5rem' }}>
             <h3 style={{ fontSize: '0.85rem', margin: '0 0 0.4rem' }}>{t('supervisor.insights_title')}</h3>
             {(() => {
-              const ackedInsights = insights.filter((event) => acknowledged.has(event.event_id))
-              const visible = insights.filter((event) => !acknowledged.has(event.event_id))
-              // Dedup by metric: only the newest insight per metric stays.
+              // Dedup by metric FIRST — the health pass re-publishes the same
+              // anomaly every cycle, so older copies of a metric sit right
+              // behind the newest. The ack closes the METRIC: filtering acked
+              // before dedup would reveal the older duplicate after a skip
+              // and make the dismiss take another click per re-publish.
               const latestByMetric = new Map<string, ObservationEvent>()
-              for (const event of visible) {
+              for (const event of insights) {
                 const metric = String(event.data?.metric ?? event.event_id)
                 if (!latestByMetric.has(metric)) latestByMetric.set(metric, event)
               }
-              const rows = [...latestByMetric.values()]
+              const rows = [...latestByMetric.values()].filter((event) => !acknowledged.has(event.event_id))
+              const ackedInsights = insights.filter((event) => acknowledged.has(event.event_id))
               if (insights.length === 0) {
                 return <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: 0 }}>{t('supervisor.insights_empty')}</p>
               }
               return (
                 <>
-                  {(ackedInsights.length > 0 || visible.length !== insights.length) && (
+                  {(ackedInsights.length > 0 || rows.length !== insights.length) && (
                     <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '0 0 0.35rem' }}>
                       {t('supervisor.insights_hidden_n', { count: String(insights.length - rows.length) })}
                     </p>
@@ -916,13 +913,16 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                             onClick={async () => {
                               setBusyAck(row.key)
                               try {
-                                // Await every acknowledgement before the
-                                // refresh: the queue hides on the optimistic
-                                // set, and the reload must not race the
-                                // outbox delivery of these acks.
-                                for (const id of row.eventIDs) {
-                                  await acknowledge(id)
-                                }
+                                // One batch POST for the row's events; the
+                                // optimistic add hides the row at once, and the
+                                // reload must not race the outbox delivery of
+                                // these acks (the durable set is the truth).
+                                await workspaceApi.ackSupervisorVerdicts(row.eventIDs)
+                                setAcknowledged((prev) => {
+                                  const next = new Set(prev)
+                                  for (const id of row.eventIDs) next.add(id)
+                                  return next
+                                })
                                 await load(true)
                               } finally {
                                 setBusyAck('')
