@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -94,18 +87,12 @@ Keycloak), подключённый рядом как конфигурация, 
 исчезновение из каталога деактивирует учётную запись. Ручное заведение сотен
 записей исчезает как класс.</p>
 <hr>
-<h2 id="2-проблематика-текущего-состояния"><a class="anchor" href="#2-проблематика-текущего-состояния" aria-label="Section link">#</a>2. Проблематика текущего состояния</h2><ul>
-<li><strong>Аутентификация только локальная.</strong> <code>controlplane.Gate</code> принимает
-статические env-токены, токены workspace-пользователей из БД и внутренний
-loopback-токен; <code>POST /v1/auth/login</code> — локальный name-or-email + bcrypt.
-SSO нет вообще.</li>
-<li><strong>Провижининг ручной.</strong> Пользователи создаются по одному через UI/API.
-500 пользователей = 500 ручных записей; при увольнениях и переходах
-актуальность списка никто не поддерживает.</li>
-<li><strong>Список не масштабируется.</strong> <code>ListUsers</code> возвращает всех пользователей
-без пагинации, поиска и фильтров; UI рендерит всё сразу.</li>
-<li><strong>Нет массовых операций.</strong> Ни смены роли группе, ни деактивации списка,
-ни импорта.</li>
+<h2 id="2-проблематика-которую-решала-фаза-1-история"><a class="anchor" href="#2-проблематика-которую-решала-фаза-1-история" aria-label="Section link">#</a>2. Проблематика, которую решала фаза 1 (история)</h2><p>До фазы 1: аутентификация была только локальной (env-токены, токены
+workspace-пользователей, <code>POST /v1/auth/login</code> name-or-email + bcrypt), SSO
+не было, провижининг — ручной, <code>ListUsers</code> без пагинации и массовых
+операций. Фаза 1 закрыла SSO/JIT (см. §4–§5); пагинация/фильтры и массовые
+операции остались на будущее (§8).</p>
+<ul>
 <li><strong>Секреты IdP негде хранить.</strong> Скоро появится client secret — ему место в
 существующем контуре секретов (<code>docs/secrets-management.md</code>), а не в
 конфиг-файле рядом с кодом.</li>
@@ -251,9 +238,10 @@ IdP, повторной проверки нечему проводить.</p>
 <li>Нашли → обновляем имя/email из клеймов (руками их больше не правят),
 проверяем активность.</li>
 </ol>
-<h3 id="62-роли-и-подразделения-маппинг-клеймов"><a class="anchor" href="#62-роли-и-подразделения-маппинг-клеймов" aria-label="Section link">#</a>6.2. Роли и подразделения: маппинг клеймов</h3><p>Таблица <code>auth_claim_mapping</code> (<code>claim</code>, <code>value</code>, <code>install_role</code>,
+<h3 id="62-роли-и-подразделения-маппинг-клеймов-фаза-2-не-реализовано"><a class="anchor" href="#62-роли-и-подразделения-маппинг-клеймов-фаза-2-не-реализовано" aria-label="Section link">#</a>6.2. Роли и подразделения: маппинг клеймов (фаза 2, не реализовано)</h3><p>Таблица <code>auth_claim_mapping</code> (<code>claim</code>, <code>value</code>, <code>install_role</code>,
 <code>org_unit_id</code>): правило «если в клеймах есть значение — дать роль /
-привязать к подразделению».</p>
+привязать к подразделению». Пока реализованы только переименования клеймов
+(<code>username_claim</code>/<code>email_claim</code>/<code>groups_claim</code>).</p>
 <ul>
 <li>Эффективная инсталляционная роль = максимум по всем сработавшим правилам,
 но не ниже <code>default_role</code>; орг-привязка — последнее сработавшее правило
@@ -284,9 +272,9 @@ IdP, повторной проверки нечему проводить.</p>
 полями <code>workspace_user</code>, ключ — <code>external_id</code>. Прямое редактирование
 федеративных полей (имя/email/роль) в UI скрывается.</p>
 <hr>
-<h2 id="7-модель-данных"><a class="anchor" href="#7-модель-данных" aria-label="Section link">#</a>7. Модель данных</h2><p>Миграции (следующие номера: 000067+):</p>
+<h2 id="7-модель-данных"><a class="anchor" href="#7-модель-данных" aria-label="Section link">#</a>7. Модель данных</h2><p>Таблицы <code>auth_*</code> живут в squashed baseline (<code>migrations/workspace/ 0001_baseline_v2026.2.21</code>); номера ниже — исторический план:</p>
 <ul>
-<li><strong>000067 <code>auth_oidc</code></strong>:<ul>
+<li><strong><code>auth_oidc</code></strong>:<ul>
 <li><code>auth_idp_config</code> — см. §5.5, одна строка (<code>id=1</code>).</li>
 <li><code>auth_session</code> — сессии (§5.2).</li>
 <li><code>auth_request</code> — одноразовые state/nonce (TTL-очистка).</li>
@@ -316,7 +304,8 @@ IdP, повторной проверки нечему проводить.</p>
 <li><code>GET /v1/auth/methods</code> — какие способы входа доступны (sso: вкл/выкл,
 display_name; local: вкл/выкл) — для экрана логина.</li>
 <li>Пагинация пользователей: <code>GET /v1/workspace/users</code> получает <code>q</code>, <code>role</code>,
-<code>org_unit</code>, <code>active</code>, <code>limit/offset</code> (+ <code>order</code>), ответ — <code>{users, total}</code>.
+<code>org_unit</code>, <code>active</code>, <code>limit/offset</code>… ответ — <code>{users, total}</code> (фаза 2,
+пока <code>ListUsers</code> возвращает всех без фильтров).
 Массовые операции (admin): <code>POST /v1/workspace/users/bulk</code> —
 <code>{action: activate|deactivate|set_role, ids: […]}</code>.</li>
 </ul>
@@ -401,8 +390,8 @@ Origin на мутирующих запросах; logout Everywhere при де
 local), результат.</li>
 </ul>
 <hr>
-<h2 id="12-фазы"><a class="anchor" href="#12-фазы" aria-label="Section link">#</a>12. Фазы</h2><h3 id="фаза-1-oidc-вход-и-jit-закрывает-sso-блокер"><a class="anchor" href="#фаза-1-oidc-вход-и-jit-закрывает-sso-блокер" aria-label="Section link">#</a>Фаза 1 — OIDC-вход и JIT (закрывает SSO-блокер)</h3><ol>
-<li>Миграции 000067–000069.</li>
+<h2 id="12-фазы"><a class="anchor" href="#12-фазы" aria-label="Section link">#</a>12. Фазы</h2><h3 id="фаза-1-oidc-вход-и-jit-реализовано-закрывает-sso-блокер"><a class="anchor" href="#фаза-1-oidc-вход-и-jit-реализовано-закрывает-sso-блокер" aria-label="Section link">#</a>Фаза 1 — OIDC-вход и JIT (реализовано, закрывает SSO-блокер)</h3><ol>
+<li>Миграции auth-таблиц (см. §7).</li>
 <li><code>coreos/go-oidc</code> (+ <code>golang-jwt</code>): discovery, обмен code, валидация
 id_token, JWKS-кэш.</li>
 <li>Сессии + cookie в <code>Gate.Authenticate</code>; logout.</li>

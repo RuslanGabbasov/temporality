@@ -22,11 +22,12 @@
 
 * **Потеря между запусками.** Воркспейс эфемерен: токен, записанный агентом
   в файл, исчезает вместе с воркспейсом. Агент создаёт новый токен или
-  просит человека — отсюда «постоянно продалбывают свои токены».
+  просит человека — поэтому выдача секретов идёт через ядро с журналом,
+  а не через файлы в воркспейсе.
 * **Утечка в журнал.** `run_command`, выводы инструментов и аргументы
-  попадают в event journal. Токен, однажды попавший в вывод команды,
-  остаётся в журнале навсегда — а журнал ещё и питает knowledge extraction,
-  то есть утечка может «запомниться» как знание.
+  попадают в event journal, и утечка может «запомниться» как знание —
+  поэтому redaction-фильтр журнала вырезает секреты при записи
+  (`observation/redact.go`, `<redacted:kind>`).
 * **Нет идентичности доступа.** Общие статические токены не отвечают на
   вопрос «какой агент каким секретом пользовался и когда».
 * **Нет ротации и отзыва.** Долгоживущие статические токены с широкими
@@ -48,7 +49,7 @@ workspace_secret
     id            TEXT PRIMARY KEY
     org_unit_id   TEXT NULL REFERENCES org_unit(id)   -- NULL = вся инсталляция
     name          TEXT          -- человекочитаемое имя, напр. github-repo-write
-    provider      TEXT          -- где лежит значение: builtin | infisical | vault | aws | gcp | azure | env
+    provider      TEXT          -- где лежит значение: builtin | env (внешние хранилища — фаза 2)
     external_ref  TEXT NULL     -- ссылка на запись во внешнем хранилище (для не-builtin)
     description   TEXT
     created_at / updated_at
@@ -77,9 +78,10 @@ Issue(request, executionContext) -> (reference, lease)   -- для dynamic secre
 Revoke(lease)
 ```
 
-Реализации: `env` и `file` (локальная разработка), `builtin` (Postgres +
-envelope-шифрование), `infisical`, `vault`/`openbao`, `aws-sm`, `gcp-sm`,
-`azure-kv`. Выбор бэкенда — конфигурация инсталляции, не код.
+Реализации: `builtin` (Postgres + envelope-шифрование AES-256-GCM) и `env`.
+Заявлено на фазу 2 (интерфейс бэкендов и lease-модель ниже — план):
+`infisical`, `vault`/`openbao`, `aws-sm`, `gcp-sm`, `azure-kv`. Выбор
+бэкенда — конфигурация инсталляции, не код.
 
 ### 3.4. Credential Lease (аренда креденшела)
 
@@ -176,10 +178,11 @@ envelope-шифрование), `infisical`, `vault`/`openbao`, `aws-sm`, `gcp-s
 
 ```text
 secret.issued    (run_id, secret_id, lease_id, ttl)        -- выдан lease
-secret.accessed  (run_id, secret_id, operation_id)          -- использован в операции
-secret.revoked   (lease_id, reason)
 secret.denied    (run_id, secret_id, policy_violation)      -- отказ с причиной
 ```
+
+Заявлено на фазу 2: `secret.accessed` (использован в операции),
+`secret.revoked` (отзыв lease'ов).
 
 Это даёт ответы на вопросы «кто пользовался скомпрометированным ключом»,
 «какие секреты фактически не используются» (кандидаты на отзыв) — и
@@ -194,9 +197,10 @@ secret.denied    (run_id, secret_id, policy_violation)      -- отказ с п�
 
 * `secret_list` — имена и описания секретов, доступных его execution
   identity (без значений и без external_ref).
-* `secret_request` — запрос привязки нового секрета к агенту/рану. Слабые
-  запросы (секрет существует и доступен по политикам) удовлетворяются
-  автоматически; остальное уходит в approvals — существующий HITL-контур.
+* `secret_request` — запрос привязки нового секрета к агенту/рану (фаза 2,
+  не реализован). Слабые запросы (секрет существует и доступен по политикам)
+  удовлетворяются автоматически; остальное уходит в approvals — существующий
+  HITL-контур.
 
 В системном промпте агента фиксируется контракт: «секреты передаются
 ссылками secret://, значения подставляются системой; не пытайся читать,
@@ -253,12 +257,13 @@ Vault/OpenBao адаптеры, enterprise-клиент подключает т�
   через провайдер; в API не возвращаются никогда).
 * `POST /v1/secrets/{id}/value` — запись значения (туда), без чтения
   обратно для внешних провайдеров.
-* `PUT /v1/secrets/{id}/binding` — привязка к org unit (как у остальных
-  ресурсов).
-* `POST /v1/agents/{id}/secrets` / `DELETE .../{secret_id}` — grants
-  агенту/команде.
-* `POST /v1/secrets/{id}/rotate` — принудительная ротация.
-* `POST /v1/secrets/{id}/revoke` — отзыв lease'ов.
+* Биндинг к org unit — общий механизм ресурсов:
+  `PUT /v1/org/resources/secret/{id}/binding`.
+* Grants агенту — поле `secrets` в определении агента
+  (`Agent.Definition.Secrets []string`).
+* Заявлено на фазу 2: `POST /v1/secrets/{id}/rotate` (принудительная
+  ротация), `POST /v1/secrets/{id}/revoke` (отзыв lease'ов), отдельные
+  эндпоинты грантов.
 
 ---
 
@@ -281,8 +286,8 @@ Vault/OpenBao адаптеры, enterprise-клиент подключает т�
 
 Ресурс `workspace_secret` + миграция; ссылки `secret://` в конфигах
 агентов/MCP/провайдеров; разрешение в ядре на границе инструментов
-(HTTP-заголовки, env песочницы, tmpfs); кэш с TTL; события `secret.*`;
-redaction-фильтр journal; тулы `secret_list`/`secret_request`; UI-раздел.
+(HTTP-заголовки, env песочницы, tmpfs); события `secret.*`;
+redaction-фильтр journal; тул `secret_list`; UI-раздел.
 Внешних зависимостей нет.
 
 ### Фаза 2 — внешние провайдеры
@@ -325,8 +330,10 @@ GitHub Apps-брокер (installation-токены); OIDC/STS-федераци�
 
 ## 15. Открытые вопросы
 
-* Хранение мастер-ключа builtin-провайдера: локальный файл по конвенции
-  `<VAR>_FILE` vs облачный KMS — решить при внедрении фазы 1.
+* Хранение мастер-ключа builtin-провайдера — решено: `KERNEL_SECRET_MASTER_KEY`
+  / `KERNEL_SECRET_MASTER_KEY_FILE`, при отсутствии — автогенерация с
+  сохранением в `workspace_setting` и предупреждением; облачный KMS — на
+  будущее.
 * Нужен ли аудит «кто выдал grant» отдельным журналом или достаточно
   существующих событий изменения ресурсов.
 * Мультиоблачность внутри одной инсталляции (секреты в AWS SM при стеке в

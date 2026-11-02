@@ -849,7 +849,7 @@ new Skill version
 
 Минимальный набор инструментов.
 
-## `skill.inspect`
+## `skill_inspect`
 
 Показывает:
 
@@ -869,7 +869,7 @@ evolution status
 
 ---
 
-## `skill.validate`
+## `skill_validate`
 
 Проверяет:
 
@@ -885,7 +885,7 @@ evolution status
 
 ---
 
-## `skill.diff`
+## `skill_diff`
 
 Показывает различия между версиями:
 
@@ -904,7 +904,7 @@ Memory в Skill diff не включается.
 
 ---
 
-## `skill.history`
+## `skill_history`
 
 Показывает:
 
@@ -921,7 +921,7 @@ new version
 
 ---
 
-## `skill.executions`
+## `skill_executions`
 
 Позволяет анализировать реальные применения Skill:
 
@@ -944,7 +944,7 @@ compare
 
 ---
 
-## `skill.memory`
+## `skill_memory`
 
 Не изменяет Skill.
 
@@ -966,58 +966,46 @@ inspect
 
 ---
 
-## `skill.propose`
+## `skill_propose`
 
 Создаёт Evolution Proposal.
 
 ---
 
-## `skill.evaluate`
+## `skill_evaluate`
 
 Запускает evaluations для Skill или proposal.
 
 ---
 
-## `skill.apply`
+## `skill_apply` — только для человека
 
-Применяет утверждённый proposal.
-
-Поддержать:
-
-```text
-dry-run
-```
-
----
-
-## `skill.rollback`
-
-Создаёт новую версию, эквивалентную указанной предыдущей версии.
-
-История не удаляется.
+Применение утверждённого proposal — не тул агента: версию применяет
+человек через UI, CLI (`temporality skill apply`) или API. Инструментов
+`skill_apply` / `skill_rollback` у агента нет; «откат» — это новая версия,
+созданная proposal-механикой (история не удаляется никогда).
 
 ---
 
 # 25. Memory tools
 
-Memory должна иметь собственные инструменты.
-
-Минимально:
+У Memory нет собственных `memory.*` туллов; фактическая поверхность:
 
 ```text
-memory.search
-memory.inspect
-memory.confirm
-memory.invalidate
-memory.supersede
-memory.history
+remember            — запомнить устойчивый вывод (kind: claim)
+knowledge_lookup    — проверить конкретное знание по id
+knowledge_explore   — исследование базы знаний (поиск, углубление)
 ```
+
+Изменение состояния знаний (confirm/invalidate/supersede) — действия
+человека через UI/HTTP API (`/v1/observations/knowledge/promote|invalidate|
+challenge`); для агента-исполнителя они закрыты.
 
 Важно:
 
-`skill.memory` — это навигация от Skill к Memory.
+`skill_memory` — это навигация от Skill к Memory.
 
-`memory.*` — управление самой Memory.
+`knowledge_*` — работа с самой Memory.
 
 ---
 
@@ -1026,19 +1014,18 @@ memory.history
 Для агента предоставить компактный MCP/tool interface:
 
 ```text
-skill.search
-skill.inspect
-skill.validate
-skill.history
-skill.executions
-skill.memory
-skill.propose
-skill.evaluate
+skill_search
+skill_inspect
+skill_validate
+skill_history
+skill_executions
+skill_memory
+skill_propose
+skill_evaluate
 
-memory.search
-memory.inspect
-memory.confirm
-memory.invalidate
+remember
+knowledge_lookup
+knowledge_explore
 ```
 
 Изменяющие Skill операции разделить:
@@ -1272,47 +1259,23 @@ outputs
 
 # 35. CLI
 
-Добавить CLI:
+Реальный набор (cmd/temporality):
 
 ```bash
 temporality skill list
-
 temporality skill inspect code-review
-
 temporality skill validate code-review
-
 temporality skill history code-review
-
 temporality skill diff code-review 1.1.0 1.2.0
-
 temporality skill executions code-review
-
 temporality skill memory code-review
-
-temporality skill eval code-review
-
-temporality skill propose code-review
-
-temporality skill apply <proposal-id>
-
-temporality skill rollback code-review 1.1.0
+temporality skill evals code-review
+temporality skill apply <version>
+temporality skill reject <version>
 ```
 
-Memory:
-
-```bash
-temporality memory search "health check"
-
-temporality memory inspect <memory-id>
-
-temporality memory history <memory-id>
-
-temporality memory confirm <memory-id>
-
-temporality memory invalidate <memory-id>
-
-temporality memory supersede <memory-id> <new-memory-id>
-```
+`propose` из CLI нет — proposal создаёт агент (`skill_propose`); применение
+и отклонение версии — человек (выше). Memory-подкоманд в CLI нет.
 
 Для каждого read-only command поддержать:
 
@@ -1330,37 +1293,31 @@ temporality skill inspect code-review --json
 
 # 36. API
 
-Предоставить API для runtime и внешних клиентов.
+Реальные префиксы API:
 
-Skill:
-
-```text
-GET  /skills
-GET  /skills/{id}
-GET  /skills/{id}/versions
-GET  /skills/{id}/history
-GET  /skills/{id}/executions
-GET  /skills/{id}/memory
-GET  /skills/{id}/evaluations
-
-POST /skills/{id}/validate
-POST /skills/{id}/evaluate
-POST /skills/{id}/proposals
-POST /skills/{id}/apply
-```
-
-Memory:
+Skill (`/v1/workspace/skills`):
 
 ```text
-GET  /memory
-GET  /memory/{id}
-GET  /memory/{id}/history
-
-POST /memory/{id}/confirm
-POST /memory/{id}/invalidate
-POST /memory/{id}/supersede
+GET    /v1/workspace/skills
+GET    /v1/workspace/skills/{id}
+GET    /v1/workspace/skills/{id}/versions
+POST   /v1/workspace/skills/{id}/versions/{version}/apply     (человек)
+POST   /v1/workspace/skills/{id}/versions/{version}/reject     (человек)
+POST   /v1/workspace/skills/draft                              (NL-билдер)
+POST   /v1/workspace/skills/import
 ```
 
+Memory (`/v1/observations/knowledge`):
+
+```text
+GET    /v1/observations/knowledge                 (список, фасеты, поиск)
+GET    /v1/observations/events/{id}               (досье события)
+POST   /v1/observations/knowledge/promote         (расширение scope)
+POST   /v1/observations/knowledge/invalidate
+POST   /v1/observations/knowledge/challenge
+```
+
+Lifecycle-действия над знаниями — только для человека (operator+).
 API не должен обходить event model.
 
 ---
@@ -1390,34 +1347,37 @@ UI
 
 # 38. Events
 
-Минимальный vocabulary:
+Фактический vocabulary:
 
 ```text
-skill.created
-skill.updated
-skill.version.created
-skill.validated
-skill.evaluated
+skill.proposed
+skill.applied
+skill.rejected
+skill.evaluation.completed
 
-skill.proposal.created
-skill.proposal.approved
-skill.proposal.rejected
-skill.proposal.applied
+eval.case_candidate.proposed
 
-skill.execution.started
-skill.execution.completed
-skill.execution.failed
+eval.case_candidate.accepted
 
-memory.proposed
-memory.confirmed
-memory.used
-memory.invalidated
-memory.superseded
+knowledge.proposed
+knowledge.confirmed
+knowledge.used
+knowledge.challenged
+knowledge.corrected
+knowledge.invalidated
+knowledge.superseded
+knowledge.disproved
 
-evaluation.started
-evaluation.completed
-evaluation.failed
+hint.offered
+hint.used
+hint.ignored
+hint.outcome
+
+memory.read
 ```
+
+Прочие события модели (skill.execution.*, evaluation.*) пока не эмитятся —
+плановая часть словаря.
 
 Каждое событие должно иметь provenance.
 
@@ -1516,6 +1476,9 @@ Skill не получает permission только потому, что permiss
 
 # 43. MVP
 
+Статус: MVP и Phase 2 реализованы (разделы ниже — исторический план,
+выполнен почти полностью; apply — только для человека, см. §24).
+
 Первый этап должен быть минимальным.
 
 ### Обязательно:
@@ -1534,11 +1497,11 @@ Skill не получает permission только потому, что permiss
 12. Memory → execution provenance;
 13. Memory reuse tracking;
 14. event-based evolution;
-15. `skill.inspect`;
-16. `skill.validate`;
-17. `skill.history`;
-18. `skill.executions`;
-19. `skill.memory`;
+15. `skill_inspect`;
+16. `skill_validate`;
+17. `skill_history`;
+18. `skill_executions`;
+19. `skill_memory`;
 20. CLI;
 21. JSON API.
 

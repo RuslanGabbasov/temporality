@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -83,7 +76,7 @@
 <li>создан или обновлён Pull Request;</li>
 <li>изменился сценарий или тест-кейс в MindMap;</li>
 <li>сработал другой системный webhook;</li>
-<li>в будущем — расписание, событие, API-вызов и другие источники.</li>
+<li>в будущем — API-вызов и другие источники (расписание уже реализовано).</li>
 </ul>
 <p>После получения события система должна самостоятельно создать и выполнить операцию агента.</p>
 <p>Если в процессе выполнения агент не может принять решение без дополнительного контекста, он должен уметь адресно запросить человека через настроенный для этого пользователя канал коммуникации — Matrix, Telegram или другой подключённый канал — дождаться ответа и продолжить ту же операцию.</p>
@@ -132,14 +125,15 @@
 <li><code>deduplication</code></li>
 <li><code>retry policy</code></li>
 </ul>
-<h3 id="типы-триггеров"><a class="anchor" href="#типы-триггеров" aria-label="Section link">#</a>Типы триггеров</h3><p>На первом этапе предусмотреть:</p>
+<h3 id="типы-триггеров"><a class="anchor" href="#типы-триггеров" aria-label="Section link">#</a>Типы триггеров</h3><p>Фактически реализовано три типа:</p>
 <ul>
 <li><code>webhook</code>;</li>
 <li><code>event</code> — событие собственного журнала наблюдения (см. ниже);</li>
-<li><code>azure_devops.pull_request</code>;</li>
-<li><code>azure_devops.work_item</code>;</li>
-<li><code>mindmap.test_case</code> / сценарий из MindMap.</li>
+<li><code>schedule</code> — cron-расписание.</li>
 </ul>
+<p>Сценарии поверх webhook: <code>azure_devops.pull_request</code>, <code>azure_devops.work_item</code>,
+<code>mindmap.test_case</code> (prompt_template + HMAC-подпись + per-trigger токен) —
+это конфигурации webhook-триггеров, а не отдельные типы.</p>
 <p>Конкретные интеграции могут реализовываться отдельными адаптерами, но внутри системы они должны приводиться к единому представлению события.</p>
 <h3 id="триггеры-на-события-журнала-typeevent"><a class="anchor" href="#триггеры-на-события-журнала-typeevent" aria-label="Section link">#</a>Триггеры на события журнала (type=event)</h3><p>«Хуки вокруг агентского цикла»: ядро хвостит собственный журнал наблюдения и запускает ран при появлении подходящего события — накопившиеся несогласованные артефакты, попытки побега из песочницы, массовый экспорт документов, события безопасности. Реализовано слушателем в <code>cmd/agent-kernel/eventtriggers.go</code> (интервал 15с).</p>
 <p>Конструктор конфига (<code>workspace.EventConfig</code>):</p>
@@ -492,8 +486,8 @@ run.created
 run.started
 
 human.requested
-human.delivered
-human.response_received
+human.answered
+human.reasked
 run.resumed
 
 run.completed

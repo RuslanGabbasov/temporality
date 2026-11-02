@@ -32,7 +32,10 @@
 модель, скомпилированный системный промт, capabilities, sandbox, MCP-серверы,
 skills. Родитель **не может** ни расширить права ребёнка, ни передать ему свои:
 enforcement жёсткий, на уровне инструментария, а не промта
-(docs/evaluable-agent.md §6, plan §4.1).
+(docs/plan-evaluable-agent.md §4.1).
+Наследуется и security context инициатора: дочерние раны получают его
+орг-позицию и замороженный снимок файловой политики (`policy_version`) —
+вся ветка дерева работает полномочиями человека, запустившего работу.
 
 ### Делегирование — это capability, по умолчанию выключенная
 
@@ -94,7 +97,8 @@ cancellation). Остановка чата останавливает и дел�
 
 ### Бюджеты
 
-`max_turns` дочернего рана: по умолчанию 8, максимум 16 (аргумент инструмента).
+`max_turns` дочернего рана: 24–100 (значения ниже 24 поднимаются до 24);
+без аргумента действует бюджет карточки агента.
 Делегированные запуски не расходуют дневную квоту проекта — они часть
 родительского рана.
 
@@ -111,7 +115,8 @@ delegate(agent_id, prompt, max_turns?)
 * `prompt` — самодостаточная формулировка подзадачи (обязателен). В неё
   передаётся всё, что ребёнку нужно знать: родитель не может «дописать» ему
   права или системный промт.
-* `max_turns` — бюджет ходов ребёнка, 1–16, по умолчанию 8.
+* `max_turns` — бюджет ходов ребёнка, 24–100 (значения ниже 24 поднимаются
+  до 24); без аргумента — бюджет карточки агента.
 
 Результат инструмента — статус, идентификатор дочернего рана и его финальный
 ответ (ограниченный по объёму).
@@ -208,7 +213,7 @@ submit_review(verdict: "accept" | "rework",
 (`RequestCancelExternalWorkflow`), сам ревьюер тоже перезапускается.
 Независимые ветки не трогаются и продолжают работать.
 
-**Ограничители.** `max_rework` на план (0–2, по умолчанию 2): сколько раз
+**Ограничители.** `max_rework` на план (0–4, по умолчанию 2): сколько раз
 задачу можно вернуть. Исчерпание — честный `plan.task.failed` с
 `error_type=rework_exhausted`, зависимые получают `invalidated`/
 `skipped(upstream_rework_exhausted)` — результат отвергнут, а не «как будто
@@ -297,7 +302,8 @@ agent_resolution_failed`, `effect=none`) и честно скипает зави
 | `plan.task.started` | родитель | `task_id`, `child_run_id`, `agent_id`, `depends_on`, `round`, `max_turns` |
 | `plan.task.completed` | родитель | `task_id`, `child_run_id`, `child_status`, `turns` |
 | `plan.task.failed` | родитель | `task_id`, `child_run_id`, `error_type`, `effect` (+ `child_ops_*`) |
-| `plan.task.skipped` | родитель | `task_id`, `reason` (`upstream_failed` / `run_time_limit`), `blocked_by` |
+| `plan.task.skipped` | родитель | `task_id`, `reason` (`upstream_failed` / `upstream_rework_exhausted` / `upstream_incomplete` / `run_time_limit` / `execution_budget` / `plan_stopped`), `blocked_by` |
+| `plan.task.incomplete` | родитель | `task_id`, `child_run_id`, `child_status` — задача завершилась не своим финальным ответом |
 | `plan.completed` | родитель | `statuses`: финальный статус каждой задачи |
 | `run.* / turn.* / model.* / tool.*` | ребёнок | обычная траектория, с `parent_run_id` и `parent_event_id` |
 

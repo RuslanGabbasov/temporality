@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row active" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -717,7 +710,7 @@ new Skill version
 <p>Человек и агент должны работать с <strong>одной моделью данных</strong>.</p>
 <hr>
 <h1 id="24-skill-analysis-tools"><a class="anchor" href="#24-skill-analysis-tools" aria-label="Section link">#</a>24. Skill analysis tools</h1><p>Минимальный набор инструментов.</p>
-<h2 id="skillinspect"><a class="anchor" href="#skillinspect" aria-label="Section link">#</a><code>skill.inspect</code></h2><p>Показывает:</p>
+<h2 id="skillinspect"><a class="anchor" href="#skillinspect" aria-label="Section link">#</a><code>skill_inspect</code></h2><p>Показывает:</p>
 <pre><code class="language-text">identity
 version
 description
@@ -731,7 +724,7 @@ related memory summary
 evolution status
 </code></pre>
 <hr>
-<h2 id="skillvalidate"><a class="anchor" href="#skillvalidate" aria-label="Section link">#</a><code>skill.validate</code></h2><p>Проверяет:</p>
+<h2 id="skillvalidate"><a class="anchor" href="#skillvalidate" aria-label="Section link">#</a><code>skill_validate</code></h2><p>Проверяет:</p>
 <ul>
 <li>manifest;</li>
 <li>schema;</li>
@@ -744,7 +737,7 @@ evolution status
 <li>evidence definitions.</li>
 </ul>
 <hr>
-<h2 id="skilldiff"><a class="anchor" href="#skilldiff" aria-label="Section link">#</a><code>skill.diff</code></h2><p>Показывает различия между версиями:</p>
+<h2 id="skilldiff"><a class="anchor" href="#skilldiff" aria-label="Section link">#</a><code>skill_diff</code></h2><p>Показывает различия между версиями:</p>
 <pre><code class="language-text">instructions
 contract
 capabilities
@@ -755,7 +748,7 @@ evaluations
 <p>Memory в Skill diff не включается.</p>
 <p>Она отображается отдельно как temporal context.</p>
 <hr>
-<h2 id="skillhistory"><a class="anchor" href="#skillhistory" aria-label="Section link">#</a><code>skill.history</code></h2><p>Показывает:</p>
+<h2 id="skillhistory"><a class="anchor" href="#skillhistory" aria-label="Section link">#</a><code>skill_history</code></h2><p>Показывает:</p>
 <pre><code class="language-text">skill created
 version created
 execution
@@ -766,7 +759,7 @@ approval
 new version
 </code></pre>
 <hr>
-<h2 id="skillexecutions"><a class="anchor" href="#skillexecutions" aria-label="Section link">#</a><code>skill.executions</code></h2><p>Позволяет анализировать реальные применения Skill:</p>
+<h2 id="skillexecutions"><a class="anchor" href="#skillexecutions" aria-label="Section link">#</a><code>skill_executions</code></h2><p>Позволяет анализировать реальные применения Skill:</p>
 <pre><code class="language-text">list
 inspect
 filter
@@ -783,7 +776,7 @@ compare
 <li>memory used.</li>
 </ul>
 <hr>
-<h2 id="skillmemory"><a class="anchor" href="#skillmemory" aria-label="Section link">#</a><code>skill.memory</code></h2><p>Не изменяет Skill.</p>
+<h2 id="skillmemory"><a class="anchor" href="#skillmemory" aria-label="Section link">#</a><code>skill_memory</code></h2><p>Не изменяет Skill.</p>
 <p>Показывает Memory, связанные с:</p>
 <ul>
 <li>Skill;</li>
@@ -797,45 +790,39 @@ inspect
 </code></pre>
 <p>Изменение состояния Memory должно выполняться отдельными memory operations.</p>
 <hr>
-<h2 id="skillpropose"><a class="anchor" href="#skillpropose" aria-label="Section link">#</a><code>skill.propose</code></h2><p>Создаёт Evolution Proposal.</p>
+<h2 id="skillpropose"><a class="anchor" href="#skillpropose" aria-label="Section link">#</a><code>skill_propose</code></h2><p>Создаёт Evolution Proposal.</p>
 <hr>
-<h2 id="skillevaluate"><a class="anchor" href="#skillevaluate" aria-label="Section link">#</a><code>skill.evaluate</code></h2><p>Запускает evaluations для Skill или proposal.</p>
+<h2 id="skillevaluate"><a class="anchor" href="#skillevaluate" aria-label="Section link">#</a><code>skill_evaluate</code></h2><p>Запускает evaluations для Skill или proposal.</p>
 <hr>
-<h2 id="skillapply"><a class="anchor" href="#skillapply" aria-label="Section link">#</a><code>skill.apply</code></h2><p>Применяет утверждённый proposal.</p>
-<p>Поддержать:</p>
-<pre><code class="language-text">dry-run
+<h2 id="skillapply-только-для-человека"><a class="anchor" href="#skillapply-только-для-человека" aria-label="Section link">#</a><code>skill_apply</code> — только для человека</h2><p>Применение утверждённого proposal — не тул агента: версию применяет
+человек через UI, CLI (<code>temporality skill apply</code>) или API. Инструментов
+<code>skill_apply</code> / <code>skill_rollback</code> у агента нет; «откат» — это новая версия,
+созданная proposal-механикой (история не удаляется никогда).</p>
+<hr>
+<h1 id="25-memory-tools"><a class="anchor" href="#25-memory-tools" aria-label="Section link">#</a>25. Memory tools</h1><p>У Memory нет собственных <code>memory.*</code> туллов; фактическая поверхность:</p>
+<pre><code class="language-text">remember            — запомнить устойчивый вывод (kind: claim)
+knowledge_lookup    — проверить конкретное знание по id
+knowledge_explore   — исследование базы знаний (поиск, углубление)
 </code></pre>
-<hr>
-<h2 id="skillrollback"><a class="anchor" href="#skillrollback" aria-label="Section link">#</a><code>skill.rollback</code></h2><p>Создаёт новую версию, эквивалентную указанной предыдущей версии.</p>
-<p>История не удаляется.</p>
-<hr>
-<h1 id="25-memory-tools"><a class="anchor" href="#25-memory-tools" aria-label="Section link">#</a>25. Memory tools</h1><p>Memory должна иметь собственные инструменты.</p>
-<p>Минимально:</p>
-<pre><code class="language-text">memory.search
-memory.inspect
-memory.confirm
-memory.invalidate
-memory.supersede
-memory.history
-</code></pre>
+<p>Изменение состояния знаний (confirm/invalidate/supersede) — действия
+человека через UI/HTTP API (<code>/v1/observations/knowledge/promote|invalidate| challenge</code>); для агента-исполнителя они закрыты.</p>
 <p>Важно:</p>
-<p><code>skill.memory</code> — это навигация от Skill к Memory.</p>
-<p><code>memory.*</code> — управление самой Memory.</p>
+<p><code>skill_memory</code> — это навигация от Skill к Memory.</p>
+<p><code>knowledge_*</code> — работа с самой Memory.</p>
 <hr>
 <h1 id="26-agent-tools"><a class="anchor" href="#26-agent-tools" aria-label="Section link">#</a>26. Agent tools</h1><p>Для агента предоставить компактный MCP/tool interface:</p>
-<pre><code class="language-text">skill.search
-skill.inspect
-skill.validate
-skill.history
-skill.executions
-skill.memory
-skill.propose
-skill.evaluate
+<pre><code class="language-text">skill_search
+skill_inspect
+skill_validate
+skill_history
+skill_executions
+skill_memory
+skill_propose
+skill_evaluate
 
-memory.search
-memory.inspect
-memory.confirm
-memory.invalidate
+remember
+knowledge_lookup
+knowledge_explore
 </code></pre>
 <p>Изменяющие Skill операции разделить:</p>
 <pre><code class="language-text">read
@@ -997,42 +984,20 @@ outputs
 <p>Через любое время должно быть возможно понять, почему агент действовал именно так.</p>
 </blockquote>
 <hr>
-<h1 id="35-cli"><a class="anchor" href="#35-cli" aria-label="Section link">#</a>35. CLI</h1><p>Добавить CLI:</p>
+<h1 id="35-cli"><a class="anchor" href="#35-cli" aria-label="Section link">#</a>35. CLI</h1><p>Реальный набор (cmd/temporality):</p>
 <pre><code class="language-bash">temporality skill list
-
 temporality skill inspect code-review
-
 temporality skill validate code-review
-
 temporality skill history code-review
-
 temporality skill diff code-review 1.1.0 1.2.0
-
 temporality skill executions code-review
-
 temporality skill memory code-review
-
-temporality skill eval code-review
-
-temporality skill propose code-review
-
-temporality skill apply &lt;proposal-id&gt;
-
-temporality skill rollback code-review 1.1.0
+temporality skill evals code-review
+temporality skill apply &lt;version&gt;
+temporality skill reject &lt;version&gt;
 </code></pre>
-<p>Memory:</p>
-<pre><code class="language-bash">temporality memory search &quot;health check&quot;
-
-temporality memory inspect &lt;memory-id&gt;
-
-temporality memory history &lt;memory-id&gt;
-
-temporality memory confirm &lt;memory-id&gt;
-
-temporality memory invalidate &lt;memory-id&gt;
-
-temporality memory supersede &lt;memory-id&gt; &lt;new-memory-id&gt;
-</code></pre>
+<p><code>propose</code> из CLI нет — proposal создаёт агент (<code>skill_propose</code>); применение
+и отклонение версии — человек (выше). Memory-подкоманд в CLI нет.</p>
 <p>Для каждого read-only command поддержать:</p>
 <pre><code class="language-bash">--json
 </code></pre>
@@ -1040,31 +1005,25 @@ temporality memory supersede &lt;memory-id&gt; &lt;new-memory-id&gt;
 <pre><code class="language-bash">temporality skill inspect code-review --json
 </code></pre>
 <hr>
-<h1 id="36-api"><a class="anchor" href="#36-api" aria-label="Section link">#</a>36. API</h1><p>Предоставить API для runtime и внешних клиентов.</p>
-<p>Skill:</p>
-<pre><code class="language-text">GET  /skills
-GET  /skills/{id}
-GET  /skills/{id}/versions
-GET  /skills/{id}/history
-GET  /skills/{id}/executions
-GET  /skills/{id}/memory
-GET  /skills/{id}/evaluations
-
-POST /skills/{id}/validate
-POST /skills/{id}/evaluate
-POST /skills/{id}/proposals
-POST /skills/{id}/apply
+<h1 id="36-api"><a class="anchor" href="#36-api" aria-label="Section link">#</a>36. API</h1><p>Реальные префиксы API:</p>
+<p>Skill (<code>/v1/workspace/skills</code>):</p>
+<pre><code class="language-text">GET    /v1/workspace/skills
+GET    /v1/workspace/skills/{id}
+GET    /v1/workspace/skills/{id}/versions
+POST   /v1/workspace/skills/{id}/versions/{version}/apply     (человек)
+POST   /v1/workspace/skills/{id}/versions/{version}/reject     (человек)
+POST   /v1/workspace/skills/draft                              (NL-билдер)
+POST   /v1/workspace/skills/import
 </code></pre>
-<p>Memory:</p>
-<pre><code class="language-text">GET  /memory
-GET  /memory/{id}
-GET  /memory/{id}/history
-
-POST /memory/{id}/confirm
-POST /memory/{id}/invalidate
-POST /memory/{id}/supersede
+<p>Memory (<code>/v1/observations/knowledge</code>):</p>
+<pre><code class="language-text">GET    /v1/observations/knowledge                 (список, фасеты, поиск)
+GET    /v1/observations/events/{id}               (досье события)
+POST   /v1/observations/knowledge/promote         (расширение scope)
+POST   /v1/observations/knowledge/invalidate
+POST   /v1/observations/knowledge/challenge
 </code></pre>
-<p>API не должен обходить event model.</p>
+<p>Lifecycle-действия над знаниями — только для человека (operator+).
+API не должен обходить event model.</p>
 <hr>
 <h1 id="37-event-model"><a class="anchor" href="#37-event-model" aria-label="Section link">#</a>37. Event model</h1><p><strong>Event stream остаётся единственным source of truth.</strong></p>
 <p>Не создавать независимый mutable state, который становится вторым источником истины.</p>
@@ -1079,32 +1038,34 @@ UI
 </code></pre>
 <p>должны восстанавливаться из событий.</p>
 <hr>
-<h1 id="38-events"><a class="anchor" href="#38-events" aria-label="Section link">#</a>38. Events</h1><p>Минимальный vocabulary:</p>
-<pre><code class="language-text">skill.created
-skill.updated
-skill.version.created
-skill.validated
-skill.evaluated
+<h1 id="38-events"><a class="anchor" href="#38-events" aria-label="Section link">#</a>38. Events</h1><p>Фактический vocabulary:</p>
+<pre><code class="language-text">skill.proposed
+skill.applied
+skill.rejected
+skill.evaluation.completed
 
-skill.proposal.created
-skill.proposal.approved
-skill.proposal.rejected
-skill.proposal.applied
+eval.case_candidate.proposed
 
-skill.execution.started
-skill.execution.completed
-skill.execution.failed
+eval.case_candidate.accepted
 
-memory.proposed
-memory.confirmed
-memory.used
-memory.invalidated
-memory.superseded
+knowledge.proposed
+knowledge.confirmed
+knowledge.used
+knowledge.challenged
+knowledge.corrected
+knowledge.invalidated
+knowledge.superseded
+knowledge.disproved
 
-evaluation.started
-evaluation.completed
-evaluation.failed
+hint.offered
+hint.used
+hint.ignored
+hint.outcome
+
+memory.read
 </code></pre>
+<p>Прочие события модели (skill.execution.<em>, evaluation.</em>) пока не эмитятся —
+плановая часть словаря.</p>
 <p>Каждое событие должно иметь provenance.</p>
 <hr>
 <h1 id="39-skill-evolution-не-должна-менять-прошлое"><a class="anchor" href="#39-skill-evolution-не-должна-менять-прошлое" aria-label="Section link">#</a>39. Skill evolution не должна менять прошлое</h1><p>Если:</p>
@@ -1160,7 +1121,9 @@ Skill v1.0
 <p>Skill не получает permission только потому, что permission упомянут в <code>SKILL.md</code>.</p>
 <p><strong>Manifest описывает требуемые capabilities, runtime policy определяет реально предоставленные permissions.</strong></p>
 <hr>
-<h1 id="43-mvp"><a class="anchor" href="#43-mvp" aria-label="Section link">#</a>43. MVP</h1><p>Первый этап должен быть минимальным.</p>
+<h1 id="43-mvp"><a class="anchor" href="#43-mvp" aria-label="Section link">#</a>43. MVP</h1><p>Статус: MVP и Phase 2 реализованы (разделы ниже — исторический план,
+выполнен почти полностью; apply — только для человека, см. §24).</p>
+<p>Первый этап должен быть минимальным.</p>
 <h3 id="обязательно"><a class="anchor" href="#обязательно" aria-label="Section link">#</a>Обязательно:</h3><ol>
 <li><code>skill.yaml</code>;</li>
 <li><code>SKILL.md</code>;</li>
@@ -1176,11 +1139,11 @@ Skill v1.0
 <li>Memory → execution provenance;</li>
 <li>Memory reuse tracking;</li>
 <li>event-based evolution;</li>
-<li><code>skill.inspect</code>;</li>
-<li><code>skill.validate</code>;</li>
-<li><code>skill.history</code>;</li>
-<li><code>skill.executions</code>;</li>
-<li><code>skill.memory</code>;</li>
+<li><code>skill_inspect</code>;</li>
+<li><code>skill_validate</code>;</li>
+<li><code>skill_history</code>;</li>
+<li><code>skill_executions</code>;</li>
+<li><code>skill_memory</code>;</li>
 <li>CLI;</li>
 <li>JSON API.</li>
 </ol>

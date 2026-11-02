@@ -17,11 +17,11 @@ Status: target policy for the first durable run vertical.
 | Failure | Runtime behavior | Event/provenance behavior |
 |---|---|---|
 | Model timeout/provider error | bounded retry for retryable errors; otherwise return failure to workflow, which may request another turn | started + failed events, model metadata; no raw prompt by default |
-| MCP/tool timeout/error | the PoC makes one activity attempt and reports a generic uncertain outcome; do not repeat a consequential call until its effect is reconciled | started + failed, operation ID, error class and `outcome: uncertain`; never store raw tool arguments by default |
+| MCP/tool timeout/error | one activity attempt, then a classified uncertain outcome (`effect: none|uncertain|occurred`); do not repeat a consequential call until its effect is reconciled | started + failed, operation ID, error class and `outcome: uncertain`; never store raw tool arguments by default |
 | Sandbox crash | activity heartbeat/cancellation stops work; create a fresh sandbox only when operation is replay-safe | sandbox lifecycle and failed operation event; preserve log artifact if available |
 | Worker/process crash | Temporal replays workflow decisions and retries incomplete activities according to policy | already committed outbox entries republish; stable event/operation IDs deduplicate |
 | Temporal unavailable | reject new durable run starts; active worker behavior depends on service connectivity and retries | no claim of new durable progress without Temporal acknowledgements |
-| Kernel PostgreSQL/outbox unavailable before read-only call | default fail closed; optional explicitly configured degraded mode may continue and later mark the gap | no event is claimed durable; emit `observability.gap` when storage returns |
+| Kernel PostgreSQL/outbox unavailable before read-only call | default fail closed (a configured degraded mode is not implemented) | no event is claimed durable |
 | Kernel PostgreSQL/outbox unavailable before write | stop before effect | no unrecorded write is allowed |
 | Crash after external write, before effect result saved | do not blindly rerun; reconcile by operation ID or mark uncertain and request repair | intent remains; later result/reconciliation links to same operation |
 | Temporality API/database unavailable | outbox retains events and retries; UI shows ingestion lag | delivery is at least once, not synchronous |

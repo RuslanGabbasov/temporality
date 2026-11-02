@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -355,8 +348,8 @@ relevant Knowledge / Hints
 <p><strong>Knowledge может быть основанием для эволюции Skill, но не каждое Knowledge должно становиться Skill.</strong></p>
 </blockquote>
 <hr>
-<h1 id="10-проверка-текущей-реализации"><a class="anchor" href="#10-проверка-текущей-реализации" aria-label="Section link">#</a>10. Проверка текущей реализации</h1><p>Необходимо провести аудит существующей реализации после изменений вокруг commit:</p>
-<p><code>9117d53842bc479028c047df8c4d8f37ec418e9f</code></p>
+<h1 id="10-проверка-текущей-реализации"><a class="anchor" href="#10-проверка-текущей-реализации" aria-label="Section link">#</a>10. Проверка текущей реализации</h1><p>Необходимо провести аудит существующей реализации после изменений в
+модели событий знаний.</p>
 <p>Особенно проверить:</p>
 <ul>
 <li>Knowledge extraction;</li>
@@ -377,7 +370,7 @@ relevant Knowledge / Hints
 <p>Цель аудита — <strong>не переписать существующую реализацию</strong>, а определить, насколько она уже соответствует описанной модели.</p>
 <p>Если текущая реализация уже соответствует требованиям, изменений в коде не требуется.</p>
 <hr>
-<h1 id="11-отдельно-проверить-защиту-от-помойки-знаний"><a class="anchor" href="#11-отдельно-проверить-защиту-от-помойки-знаний" aria-label="Section link">#</a>11. Отдельно проверить защиту от «помойки знаний»</h1><p>После текущего автоматического extraction необходимо проверить, что система не начинает создавать Knowledge из любого достаточно содержательного run.</p>
+<h1 id="11-отдельно-проверить-защиту-от-деградации-качества-базы-знаний"><a class="anchor" href="#11-отдельно-проверить-защиту-от-деградации-качества-базы-знаний" aria-label="Section link">#</a>11. Отдельно проверить защиту от деградации качества базы знаний</h1><p>После текущего автоматического extraction необходимо проверить, что система не начинает создавать Knowledge из любого достаточно содержательного run.</p>
 <p>Нужно проверить реальные сценарии:</p>
 <h3 id="сценарий-a-одноразовая-задача"><a class="anchor" href="#сценарий-a-одноразовая-задача" aria-label="Section link">#</a>Сценарий A — одноразовая задача</h3><p>Run содержит много технических деталей, но они специфичны только для этой задачи.</p>
 <p>Ожидается:</p>
@@ -518,6 +511,28 @@ outcome
 <p><strong>Temporality не должна помогать агенту помнить всё, что с ним происходило. Она должна помогать агенту превращать накопленный контекстный опыт в устойчивые, проверяемые и эволюционирующие способности.</strong></p>
 </blockquote>
 <p>При этом Experience остаётся богатым историческим слоем, Knowledge — контекстным результатом обобщения, а Skill — компактной исполняемой формой накопленного опыта.</p>
+<h1 id="13-re-verification-часы-вердикты-ранов-и-aging-реализовано"><a class="anchor" href="#13-re-verification-часы-вердикты-ранов-и-aging-реализовано" aria-label="Section link">#</a>13. Re-verification: часы, вердикты ранов и aging (реализовано)</h1><p>Механика «знания стареют без свидетельств» — реализована целиком:</p>
+<ul>
+<li><strong>Часы переподтверждения.</strong> Якорь — <code>LastEvidenceAt</code>: создание, использование
+(<code>knowledge.used</code>/<code>hint.used</code>) и любой judged-вердикт (<code>hint.outcome</code>);
+предложение подсказки (<code>hint.offered</code>) часы НЕ сбрасывает — знание, которое
+всё предлагают, но никогда не применяют, продолжать стареть. Подсказка по
+знанию без подтверждений дольше <code>hintStaleAfterDays</code> (14 дней) выдаётся с
+caution «not re-verified for N days» и уступает свежим равным по совпадению.</li>
+<li><strong>Вердикты ранов двигают состояние</strong> (<code>hint.outcome</code>): <code>helpful</code> подтверждает
+proposal; <code>harmful</code> с причиной немедленно переводит в <code>challenged</code> —
+формулировка агента остаётся в истории и в caution будущих подсказок; два
+независимых вреда без единой поддержки — <code>invalidated</code>; смешанные вердикты
+остаются <code>challenged</code> до решения. Воскрешение — только новым узлом.</li>
+<li><strong>Aging sweep</strong> (<code>aging.v1</code>): proposal без подтверждений и использования
+дольше 14 дней, и confirmed без перепроверки дольше 28 дней — получают
+<code>knowledge.challenged</code> с причиной «unconfirmed/…not re-verified for N days»
+и попадают в триаж гигиены (<code>knowledge_hygiene</code>). Время задаёт вопрос;
+убивают знание только свидетельства.</li>
+</ul>
+<p>Итоговое правило: знание живёт, пока его подтверждают; сомнение накапливается
+от времени и от опыта; смерть — по свидетельствам (два вреда, явное
+опровержение, ручное решение).</p>
 
 
   <nav class="docs-pager">

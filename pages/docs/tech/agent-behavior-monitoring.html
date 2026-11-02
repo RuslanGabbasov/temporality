@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
-<title>Детекция опасного поведения агента (research) — Temporality</title>
+<title>Детекция опасного поведения агента — Temporality</title>
 <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row active" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row active" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -74,9 +67,16 @@
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Инженерные документы</div>
-<h1>Детекция опасного поведения агента (research)</h1>
+<h1>Детекция опасного поведения агента</h1>
 
-<p>Статус: исследование / дизайн-набросок. Не реализовано.</p>
+<p>Статус: <strong>реализовано (этапы 1–3)</strong>. Детерминированные детекторы
+(<code>kernel/agent/behaviorscan.go</code>: утечки секретов, канарейки, опасный контент,
+подозрительные аргументы, правки тестов/CI, скан base64/hex/urlencode),
+корпусный семантический матчер на модели эмбеддингов (слой 2) и
+судья-наблюдатель этапа 3 (<code>supervisorcases.go</code>, <code>monitorSuspicionMin</code>)
+работают в проде. Реализованы и «фантазии» §5: egress-контур
+(<code>cmd/agent-kernel/egress.go</code> + squid-прокси + allowlist, см. §7),
+honeypot-канарейки в воркспейсе (<code>PrepareRun</code>), <code>verification_gap</code>.</p>
 <h2 id="1-постановка"><a class="anchor" href="#1-постановка" aria-label="Section link">#</a>1. Постановка</h2><p>Песочница снимает проблему локальных харнесов (защита машины пользователя):
 внутри контейнера агенту можно творить что угодно — blast radius ограничен
 контейнером и воркспейсом. Остаётся две настоящие оси риска:</p>
@@ -267,7 +267,9 @@ LLM, саботаж-evals) + генерация вариантов судьёй 
 <li>Фидбек: вердикт человека (ложная тревога / подтверждено) обновляет корпус и
 пороги per-project.</li>
 </ul>
-<h2 id="6-приоритезация-внедрения"><a class="anchor" href="#6-приоритезация-внедрения" aria-label="Section link">#</a>6. Приоритезация внедрения</h2><table>
+<h2 id="6-приоритезация-внедрения"><a class="anchor" href="#6-приоритезация-внедрения" aria-label="Section link">#</a>6. Приоритезация внедрения</h2><p>Этапы 1–3 внедрены; таблица ниже — исторический план, порядок совпал с
+реализацией.</p>
+<table>
 <thead>
 <tr>
 <th>Этап</th>
@@ -316,6 +318,19 @@ LLM, саботаж-evals) + генерация вариантов судьёй 
 <td>инфраструктура сети</td>
 </tr>
 </tbody></table>
+<h2 id="7-egress-allowlist"><a class="anchor" href="#7-egress-allowlist" aria-label="Section link">#</a>7. Egress allowlist</h2><p>Сеть песочницы и список разрешённых внешних адресов — независимые оси
+(первое — «может ли вообще ходить наружу», второе — «куда именно»):</p>
+<ul>
+<li>У агента есть переключатель сетевого доступа и список egress-адресов;
+базовый список приходит из org-политики (<code>egress_allowlist</code>) и объединяется
+со списком агента: политика — общий базис, агент добавляет свои исключения.</li>
+<li>Трафик песочницы идёт через внутреннюю сеть <code>temporality-sandbox-internal</code>
+(<code>--internal</code>, прямого маршрута наружу нет) и squid-прокси
+(<code>cmd/agent-kernel/egress.go</code>, сервис <code>squid</code> в compose) с per-agent портом:
+пропускаются ровно адреса из объединённого списка.</li>
+<li>Когда egress-стек не развёрнут, остаётся прежний режим мостовой сети
+(<code>bridge</code>/<code>none</code> по переключателю) — без прокси-фильтрации.</li>
+</ul>
 
 
   <nav class="docs-pager">

@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row active" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -194,10 +187,10 @@ markdown-отчёт; <code>-cleanup</code> удаляет созданные з�
 </ul>
 <blockquote>
 <p><strong>Перед кампанией: проверяйте контракт мока.</strong> Скрипт ассертит профиль
-токенов мока, но не формат его tool-payload: однажды мок молча разошёлся
-с контрактом ядра (<code>run_command</code> строкой вместо массива) — кампании
-продолжали «зелёно» завершаться, а компонента песочницы не исполнялась
-вовсе. Быстрая проверка перед прогоном:</p>
+токенов мока, но не формат его tool-payload: расхождение формата
+(<code>run_command</code> строкой вместо массива) позволяет кампаниям «зелёно»
+завершаться, не исполняя компонент песочницы вовсе. Быстрая проверка
+перед прогоном:</p>
 <pre><code class="language-sh">curl -s http://localhost:8081/v1/chat/completions -H &#39;Content-Type: application/json&#39; \
   -d &#39;{&quot;model&quot;:&quot;loadgen-model&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;start&quot;}],
        &quot;tools&quot;:[{&quot;type&quot;:&quot;function&quot;,&quot;function&quot;:{&quot;name&quot;:&quot;run_command&quot;,&quot;parameters&quot;:{}}}],&quot;stream&quot;:false}&#39;
@@ -254,8 +247,8 @@ scripts/loadrun.sh 100 120 heavy-100.md --heavy --hitl
 сотни событий журнала в секунду, живые стримы во все раны; пики CPU
 несколько ядер — это норма, критерий деградации прежний (p95 не плывёт,
 хвостов нет, 100% завершение).</p>
-<h3 id="измеренный-масштаб-v202623-2026-10-18"><a class="anchor" href="#измеренный-масштаб-v202623-2026-10-18" aria-label="Section link">#</a>Измеренный масштаб (v2026.2.3+, 2026-10-18)</h3><p>Стенд: Hyper-V VM, 12 vCPU (6 физических ядер Xeon E5-2665 2.4 ГГц),
-16 ГБ RAM, диск 843 МБ/с; образы v2026.2.3, мок-провайдер
+<h3 id="измеренный-масштаб-v202623-2026-10-18"><a class="anchor" href="#измеренный-масштаб-v202623-2026-10-18" aria-label="Section link">#</a>Измеренный масштаб (v2026.2.3+, 2026-10-18)</h3><p>Стенд: виртуальная машина Hyper-V (12 vCPU, 16 ГБ RAM); образы v2026.2.3,
+мок-провайдер
 (детерминированный сценарий «2 тула → финал», 200 мс до первого токена).</p>
 <p>Профиль: 100 параллельных ранов (ramp 120с), max_turns 3:</p>
 <table>
@@ -394,7 +387,7 @@ stack) — все завершились; полноценные профили 
 Контракт починен в <code>fix(loadgen)</code>; после мержа — перезамер по той же
 методологии.</p>
 </blockquote>
-<p>Стенд: виртуалка 6 физических ядер (Xeon E5-2665), 32 ГБ, Hyper-V; стек
+<p>Стенд: виртуальная машина Hyper-V (6 ядер, 32 ГБ); стек
 целиком в docker compose (Postgres+pgvector, journal, kernel, debugger,
 Temporal, searxng, lightpanda); провайдер — детерминированный mockllm
 (<code>examples/mockllm</code>), все исходники и скрипты — в репозитории.</p>
@@ -487,9 +480,9 @@ Temporal, searxng, lightpanda); провайдер — детерминиров�
 <code>pg_stat_statements</code>, сэмплер <code>loadrun.sh</code>) — часть методологии: без
 атрибуции «кто ест CPU» цифры плавления бесполезны.</li>
 </ul>
-<p>История итераций (честная цена вопроса): первый прогон сотни (до фиксов)
-дал 0/100 терминальных ранов и 867% CPU журнала. Разбор по слоям нашёл и
-починил: неприменённый профиль мока (compose override + assert&#39;ы),
+<p>История итераций: первый прогон сотни (до фиксов) дал 0/100 терминальных
+ранов и перегруз журнала. Разбор по слоям нашёл и починил: неприменённый
+профиль мока (compose override + assert&#39;ы),
 старт-порядок auth-токена ядро↔журнал (живой резолвер во всех потребителях),
 скан меты знаний по одной странице событий (с пустыми пропозициями в
 вердиктах конфликтов как следствие), вежливый поллинг HITL в драйвере.
@@ -508,7 +501,7 @@ Temporal, searxng, lightpanda); провайдер — детерминиров�
 </ul>
 <p>Две из трёх точек роста закрыты волной оптимизаций горячего пути —
 см. §6.1.</p>
-<h3 id="61-волна-оптимизаций-горячего-пути-ab-light-профиль-2026-10-27"><a class="anchor" href="#61-волна-оптимизаций-горячего-пути-ab-light-профиль-2026-10-27" aria-label="Section link">#</a>6.1. Волна оптимизаций горячего пути (A/B, light-профиль, 2026-10-27)</h3><p>Аудит производительности (<code>docs/perf-audit-plan.md</code>) переработал горячий
+<h3 id="61-волна-оптимизаций-горячего-пути-ab-light-профиль-2026-10-27"><a class="anchor" href="#61-волна-оптимизаций-горячего-пути-ab-light-профиль-2026-10-27" aria-label="Section link">#</a>6.1. Волна оптимизаций горячего пути (A/B, light-профиль, 2026-10-27)</h3><p>Аудит производительности (внутренние материалы) переработал горячий
 путь: события хода — через LocalActivity вместо activity round-trip на
 каждое событие, батч-доставка outbox (до 50 событий одним POST), контейнер
 песочницы на ран (<code>exec</code> вместо <code>run</code>+<code>rm</code> на команду), кэш проекции знаний
@@ -569,8 +562,8 @@ MCP-сессия, шардированный TokenBus, параллельные 
 p95 до 16 s) — налог Temporal round-trip&#39;ов на каждое журнальное событие
 платил именно под конкурентностью. Kernel на ветке занят чуть меньше,
 несмотря на перенос исполнения LocalActivity в свой процесс: исчезают
-ожидания server round-trip&#39;ов. Атрибуция по слоям — в таблицах
-<code>docs/perf-audit-plan.md</code>.</p>
+ожидания server round-trip&#39;ов. Атрибуция по слоям — во внутренних
+материалах аудита.</p>
 <p>Перезамер heavy-профиля на этой ветке (с рабочей песочницей) — следующий
 шаг методологии; ожидание: константа длительности сохранится, а компонента
 песочницы впервые будет измерена честно.</p>
@@ -636,7 +629,7 @@ sudo env TOKEN=&lt;bearer&gt; scripts/loadrun.sh 100 180 run100.md --heavy --hit
 
   <nav class="docs-pager">
     <a class="pager-prev" href="replay-model.html"><small>← Назад</small><strong>Replay model (Phase 2 audit)</strong></a>
-    <a class="pager-next" href="revision-2026-10-16.html"><small>Далее →</small><strong>Ревизия планов: что не реализовано (2026-10-16)</strong></a>
+    <a class="pager-next" href="runbook.html"><small>Далее →</small><strong>Runbook — Temporality</strong></a>
   </nav>
 </article>
 </main>

@@ -11,24 +11,16 @@ Teams, вебхуки — любые новые каналы добавляют�
 драйвера. Всё общее (маршрутизация, получатели, идентификация, события,
 сущности, UI) — в ядре, написано один раз.
 
-## 2. Проблема сегодняшнего кода
+## 2. Проблема, которую решал слой драйверов (история)
 
-Добавление канала сегодня — правки восьми несвязанных мест:
-
-| Место | Что правится |
-|---|---|
-| `kernel/agent/channels.go` | поля `TransportSettings`, `TransportSettingsFromEnv`, `OverlayEnv`, `Configured`, запись в `channelRegistry` |
-| `cmd/agent-kernel/main.go` | DB-оверлей транспортиров (типизированные поля), админ-API чтения/записи, env в docker-compose |
-| `kernel/agent/notify.go` | ветка в `sendToChannel`, свой sender |
-| `kernel/agent/sendfile.go` | ветка в switch файловой доставки |
-| `cmd/agent-kernel/matrixinbound.go` | копия inbound-лупа под протокол нового канала |
-| ядро матчинга | матчинг ответов зашит под матричные комнаты |
-| `debugger/src/*` | формы настроек канала, выбор канала у пользователя, локали |
-| docker-compose / README | переменные окружения |
-
-Модель доставки тоже зашита: matrix — long-poll `/sync`, telegram — нечто
-другое (getUpdates), Slack/Mattermost/Teams — push через webhook. Код
-предполагает поллинг и не умеет push вообще.
+До появления слоя драйверов добавление канала требовало правок восьми
+несвязанных мест (собственный inbound-луп под протокол — его роль играл
+отдельный файл типа `matrixinbound.go`, — свой sender в `notify.go`, ветка в
+доставке файлов, матчинг ответов под матричные комнаты, формы UI, env
+compose), а модель доставки была зашита: long-poll `/sync` для matrix,
+`getUpdates` для telegram и никакого push. Слой драйверов (Фаза 0 ниже)
+закрыл это: общий inbound-конвейер с дедупом, драйвер владеет только
+протоколом.
 
 ## 3. Контракт драйвера
 
@@ -37,25 +29,21 @@ Teams, вебхуки — любые новые каналы добавляют�
 // протокол; ядро зовёт только этот контракт.
 type ChannelDriver interface {
     // Метаданные
-    Type() string            // "matrix", "telegram", "slack", "mattermost", "teams", "webhook"
+    Type() string            // "matrix", "telegram", "slack", "mattermost", "webhook"
     Spec() ChannelSpec       // label, address hint, capabilities, схема настроек
 
     // Настройки
-    // Драйвер получает generic map (JSONB из workspace + env fallback) и сам
-    // валидирует свои поля. Ядро не знает имён полей.
-    Configure(settings map[string]string) error
-    IsConfigured() bool
+    // Generic map (JSONB из workspace + env fallback) приходит аргументами в
+    // вызовы; драйвер сам валидирует свои поля, ядро не знает имён полей.
+    IsConfigured(settings map[string]string) bool
 
-    // Исходящая доставка
-    SendText(ctx context.Context, to ChannelAddress, msg OutboundText) error
-    SendFile(ctx context.Context, to ChannelAddress, file OutboundFile) error // ErrUnsupported по capabilities
+    // Исходящая доставка (настройки и адрес — аргументы вызова)
+    SendText(ctx context.Context, settings map[string]string, to ChannelAddress, msg OutboundText) error
+    SendFile(ctx context.Context, settings map[string]string, to ChannelAddress, file OutboundFile) error // ErrUnsupported по capabilities
 
     // Входящие — драйвер реализует ровно одну модель:
     Poller() ChannelPoller    // pull: matrix /sync, telegram getUpdates, mattermost websocket
-    Webhook() ChannelWebhook  // push: slack events, teams
-
-    // Идентичность отправителя в этом канале (mxid, chat id, member id…)
-    SenderIdentity(user UserChannel) string
+    Webhook() ChannelWebhook  // push: slack events, webhook
 }
 
 // ChannelSpec описывает канал для ядра и UI.
@@ -71,11 +59,14 @@ type Capabilities struct {
     Text       bool // все
     TwoWay     bool // ответ в канале маршрутизируется обратно (подсказка «reply here»)
     FilesOut   bool // отправка файлов агентом
-    FilesIn    bool // приём вложений от пользователя
-    Threads    bool // ответ должен попасть в тред вопроса (slack/teams/mattermost)
-    Interactive bool // кнопки для options (future; MVP рендерит текстом)
-    MaxTextLen int  // 0 = без лимита (telegram 4096)
+    FilesIn    bool // приём вложений от пользователя (скачание — метод поллера)
+    Threads    bool // ответ должен попасть в тред вопроса (slack/mattermost)
 }
+```
+
+Интерактивные кнопки (options как кнопки) и лимиты длины текста — будущее
+расширение контракта (см. `docs/interactive-HITL.md`); настройки канала
+приходят аргументами, скачивание вложений живёт на стороне поллера.
 
 // Pull-модель: курсорное долгое ожидание.
 type ChannelPoller interface {

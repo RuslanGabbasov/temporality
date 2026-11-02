@@ -8,13 +8,13 @@ The implemented universal envelope is `temporality.event/1`: event ID/time, sour
 
 | Query need | Current representation | Audit |
 |---|---|---|
-| What happened? | `type`, `data` | Available, but event payload contracts are not centrally versioned |
+| What happened? | `type`, `data` | Available; event envelope is versioned (`temporality.event/1` + JSON schema), the knowledge/hint families are validated centrally |
 | Who did it? | `context.actor` | Run actor is present; approval events also include approver in data |
 | When? | `occurred_at`, server `received_at` | Available; ordering must use sequence/causality per run |
 | In which execution/frame? | `context.run`, `data.frame_id`, `data.parent_frame_id` | Available for current Kernel emissions; not first-class envelope fields |
-| What operation? | `data.operation_id`, tool name/hash | Approval identity is now hash-bound; no shared operation entity/lifecycle projection yet |
+| What operation? | `data.operation_id`, tool name/hash | Approval identity is hash-bound; operations have a shared lifecycle projection (`GET /v1/agent/operations`, reconcile endpoint, `operation.reconciled`) |
 | What caused it? | `context.parent_event_id`, `data.caused_by` | Immediate chain is emitted; cross-run parent links exist for delegated events |
-| What evidence appeared? | top-level `evidence[]`, `evidence.observed` data | Refs can be carried, but Kernel has no artifact store and tool results are not generally addressable evidence artifacts |
+| What evidence appeared? | top-level `evidence[]`, `evidence.observed` data | Refs are carried and addressable: the artifact registry (`artifact_read`/`artifact_search`, `docs/artifact-registry.md`) stores agent-produced evidence artifacts with versions and reviews |
 | What knowledge changed? | `knowledge.*` event family | Two proposal channels: model `remember` (claims) and the kernel execution-observation heuristic (`kernel-heuristic/execution-observation.v1` proposes kind `observation` after successful verification/build commands; repeats confirm via `execution-reverification.v1`); challenge/correct beyond this is not automatic |
 | Is the narrative a record? | `agent.summary` derived event | Final answers are stored as bounded, redacted `agent.summary` events with `derived_from` frame links, emitted after `run.completed`; they are derived data, never the execution record. Failure events (`model.failed`, `run.failed`) carry a bounded redacted `error` detail |
 | Schema compatibility? | fixed envelope `temporality.event/1` | `data` is extensible; per-event data schema versions are not yet validated |

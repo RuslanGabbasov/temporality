@@ -276,7 +276,7 @@ POST /v1/agent/teams/{team_id}/runs
 ## 11. Наблюдаемость
 
 * Дерево вызовов и DAG — существующие компоненты, работают из коробки.
-* **Rollup уровня команды**: токены, стоимость, длительность, число rework-циклов, споры (RunDisputes). Эндпоинт стоимости расширяется: `/v1/agent/cost/run?include_children=1` или `/v1/agent/cost/team-run`.
+* **Rollup уровня команды**: токены, стоимость, длительность, число rework-циклов, споры (RunDisputes). Эндпоинт стоимости: `GET /v1/agent/cost/team-run`.
 * В панели Runs — группировка по команде: «Code Delivery · 214 запусков за неделю» с подсвеченными паттернами (частые отклонения, дорогие шаги).
 * Точка «где агенты друг друга сбили с толку» — цепочка `plan.task.rejected` → `reopened`: видно, чей вердикт отправил чью работу на доработку и с каким фидбеком.
 
@@ -324,7 +324,9 @@ Evolution proposals — по модели docs/living-skills.md: система 
 * Права дочерних ранов — собственные права их агентов; команда не эскалирует.
 * Policy-подтверждения применяются к каждому слоту как к обычному агенту; командные ворота — не замена policy-гейтам.
 * HITL-запросы уходят по каналам инициатора запуска (docs/triggers-and-escalations.md); командный запуск можно поставить на паузу целиком.
-* Бюджет команды — сумма бюджетов шагов; превышение останавливает запуск честно (status `budget_limit`), а не молча.
+* Бюджет команды — сумма бюджетов шагов (заявлено; сейчас принуждаются
+  per-run бюджеты политик и `parallel_limit`, командный `budget_usd`
+  хранится и показывается, но не останавливает запуск).
 
 ---
 
@@ -334,8 +336,8 @@ Evolution proposals — по модели docs/living-skills.md: система 
 * `GET /v1/workspace/teams/{id}/versions` — история версий;
 * `POST /v1/agent/teams/{id}/runs` — запуск (goal, bindings, version);
 * `GET /v1/agent/teams/{id}/resolve?project=&version=` — предпросмотр привязок для UI (кто будет выбран и почему);
-* `GET /v1/agent/teams/runs/{run_id}` — статус, состав, дерево;
-* `POST /v1/agent/teams/runs/{run_id}/cancel` — отмена;
+* Статус и дерево — через общие run-вью и события `team.*` в журнале;
+* `POST /v1/agent/teams/{teamID}/runs` — запуск, `GET /v1/agent/teams/{teamID}/resolve` — резолв слотов;
 * `GET /v1/agent/cost/team-run?run_id=` — rollup стоимости/токенов;
 * `POST /v1/workspace/teams/builder` — formation (описание → черновик определения).
 

@@ -8,7 +8,7 @@
 
 ## Current state
 
-The FRP subsystem has persisted-frame replay and time-travel APIs. Agent Kernel currently emits stable event IDs, per-run sequence, frame IDs, parent-frame IDs, operation IDs where known, `caused_by`, and parent event links. The observation API can query by project/run/type/time and knowledge projections support historical valid/known-at reads. There is not yet an AgentRun semantic replay endpoint that produces an ordered run state, nor a generic `diff(T1,T2)` for execution plus knowledge. Temporal history remains required to recover the Kernel's final `RunResult`.
+The FRP subsystem (era-1 substrate, frozen) had persisted-frame replay and time-travel APIs. Agent Kernel currently emits stable event IDs, per-run sequence, frame IDs, parent-frame IDs, operation IDs where known, `caused_by`, and parent event links. The observation API can query by project/run/type/time and knowledge projections support historical valid/known-at reads. There is not yet an AgentRun semantic replay endpoint that produces an ordered run state, nor a generic `diff(T1,T2)` for execution plus knowledge. Temporal history remains required to recover the Kernel's final `RunResult`.
 
 ## Target semantics
 

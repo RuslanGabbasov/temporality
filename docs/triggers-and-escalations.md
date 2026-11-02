@@ -10,7 +10,7 @@
 * создан или обновлён Pull Request;
 * изменился сценарий или тест-кейс в MindMap;
 * сработал другой системный webhook;
-* в будущем — расписание, событие, API-вызов и другие источники.
+* в будущем — API-вызов и другие источники (расписание уже реализовано).
 
 После получения события система должна самостоятельно создать и выполнить операцию агента.
 
@@ -74,13 +74,15 @@
 
 ### Типы триггеров
 
-На первом этапе предусмотреть:
+Фактически реализовано три типа:
 
 * `webhook`;
 * `event` — событие собственного журнала наблюдения (см. ниже);
-* `azure_devops.pull_request`;
-* `azure_devops.work_item`;
-* `mindmap.test_case` / сценарий из MindMap.
+* `schedule` — cron-расписание.
+
+Сценарии поверх webhook: `azure_devops.pull_request`, `azure_devops.work_item`,
+`mindmap.test_case` (prompt_template + HMAC-подпись + per-trigger токен) —
+это конфигурации webhook-триггеров, а не отдельные типы.
 
 Конкретные интеграции могут реализовываться отдельными адаптерами, но внутри системы они должны приводиться к единому представлению события.
 
@@ -594,8 +596,8 @@ run.created
 run.started
 
 human.requested
-human.delivered
-human.response_received
+human.answered
+human.reasked
 run.resumed
 
 run.completed

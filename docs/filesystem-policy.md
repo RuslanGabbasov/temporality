@@ -144,10 +144,12 @@ Org Unit:
 
 ### 4.1. Каноническое пространство
 
-Сохранить одну файловую систему проекта:
+Сохранить одну файловую систему проекта (хост: `KERNEL_SANDBOX_ROOT/projects/
+<project-id>`, внутри песочницы монтируется как `/workspace` — пути проекта
+одинаковы для всех агентов и ранов):
 
 ```text
-/workspace/projects/<project-id>/
+/workspace/
     src/
     tests/
     docs/
@@ -274,6 +276,15 @@ Kernel filesystem gateway и Landlock должны получать одну и 
 type FilesystemPolicy struct {
     Read  []string
     Write []string
+    Deny  []string
+}
+
+// Фактический wire-тип слоёный (kernel/sandbox/policy.go): Read/Write —
+// слои AND поверх OR-масок (точное семантическое пересечение областей),
+// Deny — объединение:
+type EffectiveFilesystem struct {
+    Read  [][]string
+    Write [][]string
     Deny  []string
 }
 

@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row active" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -571,21 +564,23 @@ Usage policy
 ├── Roles
 └── Policies
 </code></pre>
-<p>Потенциальные политики:</p>
+<p>Фактический набор политик (<code>workspace.Policy</code>):</p>
 <ul>
-<li>разрешённые модели;</li>
-<li>разрешённые MCP;</li>
-<li>максимальный бюджет;</li>
-<li>лимит токенов;</li>
-<li>timeout;</li>
-<li>network policy;</li>
-<li>sandbox policy;</li>
-<li>human approval;</li>
-<li>retention;</li>
-<li>разрешённые каналы коммуникации.</li>
+<li>разрешённые модели (<code>allowed_models</code>);</li>
+<li>разрешённые MCP (<code>allowed_mcp</code>);</li>
+<li>бюджет и лимиты (<code>max_tokens</code>, <code>max_budget_usd</code>, <code>timeout_seconds</code>);</li>
+<li>network policy (<code>network_mode: deny</code>);</li>
+<li>sandbox policy (<code>sandbox_mode: read_only</code>);</li>
+<li>human approval (<code>approval_mode: tools</code>);</li>
+<li>egress-база (<code>egress_allowlist</code>);</li>
+<li>запрет канальных задач (<code>intake_mode: deny</code>);</li>
+<li>файловые области (<code>filesystem: read/write/deny</code> — см.
+<code>docs/filesystem-policy.md</code>, deny абсолютен, запись всегда внутри чтения).</li>
 </ul>
-<p>Политики наследуются сверху вниз по тем же принципам.</p>
-<p>В первой версии допускается реализовать только необходимый минимум.</p>
+<p>Политики наследуются сверху вниз и сливаются рестриктивно; deny-измерения
+политики (filesystem/network/intake) не отменяются дочерними уровнями.
+Файловая политика фиксируется снимком при старте рана (<code>policy_version</code>) и
+наследуется при делегировании.</p>
 <hr>
 <h1 id="25-human-in-the-loop"><a class="anchor" href="#25-human-in-the-loop" aria-label="Section link">#</a>25. Human-in-the-loop</h1><p>Агент может в процессе Run запросить дополнительный контекст у человека.</p>
 <p>Для этого используется специальный инструмент:</p>
@@ -650,11 +645,12 @@ response
 <p>Статусы:</p>
 <pre><code class="language-text">pending
 delivered
-waiting
 answered
+rejected
 expired
 cancelled
 </code></pre>
+<p>(<code>waiting</code> слит в <code>delivered</code>; <code>rejected</code> — отказ идентичности/получателя.)</p>
 <hr>
 <h1 id="29-приостановка-run"><a class="anchor" href="#29-приостановка-run" aria-label="Section link">#</a>29. Приостановка Run</h1><p>После <code>ask_human</code>:</p>
 <pre><code class="language-text">running
@@ -685,12 +681,14 @@ running
 <li>относится ли пользователь к проекту/Org Unit;</li>
 <li>разрешён ли соответствующий канал.</li>
 </ul>
-<p>В дальнейшем получателем может быть:</p>
-<pre><code class="language-text">user
-role
-org_unit
-project owner
+<p>Получателем может быть:</p>
+<pre><code class="language-text">user:…        (id или имя)
+role:…        (роль)
+org:…         (подразделение)
+project_owner
+title:…       (должность — групповой адрес)
 </code></pre>
+<p>Всё перечисленное реализовано (резолвер получателя в уведомлениях).</p>
 <hr>
 <h1 id="31-контекст-human-request"><a class="anchor" href="#31-контекст-human-request" aria-label="Section link">#</a>31. Контекст Human Request</h1><p>Запрос человеку должен быть самодостаточным.</p>
 <p>Он должен содержать:</p>
@@ -731,8 +729,11 @@ MCPs
 provider
 project
 execution identity
-effective policies
+authorized_by (кто санкционировал)
+effective policies (файловая политика — замороженный снимок + policy_version)
 </code></pre>
+<p>Снимок файловой политики наследуется дочерними ранами при делегировании —
+изменение политик не повышает полномочия уже работающего дерева.</p>
 <p>Это позволяет восстановить контекст, в котором Run был создан.</p>
 <p>При этом критические действия внутри Run могут повторно проверять актуальные права.</p>
 <hr>
@@ -794,8 +795,9 @@ new_value
 <h1 id="37-audit-human-in-the-loop"><a class="anchor" href="#37-audit-human-in-the-loop" aria-label="Section link">#</a>37. Audit Human-in-the-loop</h1><p>Human interaction также является частью траектории Run.</p>
 <p>Фиксировать:</p>
 <pre><code class="language-text">human.requested
-human.delivered
-human.response_received
+human.answered
+cancel/reject/timeout варианты: human.cancelled, human.rejected, human.timed_out,
+human.reasked; факт доставки — notification.sent
 run.resumed
 </code></pre>
 <p>Это позволит анализировать:</p>
@@ -832,15 +834,14 @@ DELETE /v1/org/resources/{kind}/{id}/binding
 </code></pre>
 <p><code>org_unit_id = null</code> означает глобальную доступность.</p>
 <hr>
-<h1 id="40-api-проектов"><a class="anchor" href="#40-api-проектов" aria-label="Section link">#</a>40. API проектов</h1><p>Добавить:</p>
-<pre><code class="language-text">GET    /v1/projects/{id}/org-units
-PUT    /v1/projects/{id}/org-units
-DELETE /v1/projects/{id}/org-units/{unit_id}
-
-GET    /v1/projects/{id}/members
-POST   /v1/projects/{id}/members
-DELETE /v1/projects/{id}/members/{user_id}
+<h1 id="40-api-проектов"><a class="anchor" href="#40-api-проектов" aria-label="Section link">#</a>40. API проектов</h1><p>Фактически реализовано (префикс <code>/v1/workspace</code>):</p>
+<pre><code class="language-text">GET    /v1/workspace/projects/{id}/members
+POST   /v1/workspace/projects/{id}/members/{userID}
+DELETE /v1/workspace/projects/{id}/members/{userID}
 </code></pre>
+<p>Орг-связи проекта меняются replace-семантикой через
+<code>PUT /v1/workspace/projects/{id}</code> с полем <code>org_units</code> — отдельных
+<code>/org-units</code>-эндпоинтов нет.</p>
 <p>Старые:</p>
 <pre><code class="language-text">workspace_project.allowed_users
 workspace_user.projects
@@ -1237,11 +1238,11 @@ agent execution
   ↓
 human.requested
   ↓
-human.delivered
+human.answered
   ↓
 waiting_for_human
   ↓
-human.response_received
+human.reasked
   ↓
 run.resumed
   ↓
@@ -1306,7 +1307,7 @@ Temporality фиксирует контекст и историю этого р�
 
   <nav class="docs-pager">
     <a class="pager-prev" href="living-skills.html"><small>← Назад</small><strong>Living Skills — эволюционирующие capabilities в Temporality</strong></a>
-    <a class="pager-next" href="perf-audit-plan.html"><small>Далее →</small><strong>План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</strong></a>
+    <a class="pager-next" href="plan-evaluable-agent.html"><small>Далее →</small><strong>План работ: Evaluable Agent — определение агента и компиляция системного промта</strong></a>
   </nav>
 </article>
 </main>

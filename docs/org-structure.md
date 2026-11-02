@@ -774,22 +774,23 @@ Org Unit
 └── Policies
 ```
 
-Потенциальные политики:
+Фактический набор политик (`workspace.Policy`):
 
-* разрешённые модели;
-* разрешённые MCP;
-* максимальный бюджет;
-* лимит токенов;
-* timeout;
-* network policy;
-* sandbox policy;
-* human approval;
-* retention;
-* разрешённые каналы коммуникации.
+* разрешённые модели (`allowed_models`);
+* разрешённые MCP (`allowed_mcp`);
+* бюджет и лимиты (`max_tokens`, `max_budget_usd`, `timeout_seconds`);
+* network policy (`network_mode: deny`);
+* sandbox policy (`sandbox_mode: read_only`);
+* human approval (`approval_mode: tools`);
+* egress-база (`egress_allowlist`);
+* запрет канальных задач (`intake_mode: deny`);
+* файловые области (`filesystem: read/write/deny` — см.
+  `docs/filesystem-policy.md`, deny абсолютен, запись всегда внутри чтения).
 
-Политики наследуются сверху вниз по тем же принципам.
-
-В первой версии допускается реализовать только необходимый минимум.
+Политики наследуются сверху вниз и сливаются рестриктивно; deny-измерения
+политики (filesystem/network/intake) не отменяются дочерними уровнями.
+Файловая политика фиксируется снимком при старте рана (`policy_version`) и
+наследуется при делегировании.
 
 ---
 
@@ -896,11 +897,13 @@ response
 ```text
 pending
 delivered
-waiting
 answered
+rejected
 expired
 cancelled
 ```
+
+(`waiting` слит в `delivered`; `rejected` — отказ идентичности/получателя.)
 
 ---
 
@@ -945,14 +948,17 @@ running
 * относится ли пользователь к проекту/Org Unit;
 * разрешён ли соответствующий канал.
 
-В дальнейшем получателем может быть:
+Получателем может быть:
 
 ```text
-user
-role
-org_unit
-project owner
+user:…        (id или имя)
+role:…        (роль)
+org:…         (подразделение)
+project_owner
+title:…       (должность — групповой адрес)
 ```
+
+Всё перечисленное реализовано (резолвер получателя в уведомлениях).
 
 ---
 
@@ -1018,8 +1024,12 @@ MCPs
 provider
 project
 execution identity
-effective policies
+authorized_by (кто санкционировал)
+effective policies (файловая политика — замороженный снимок + policy_version)
 ```
+
+Снимок файловой политики наследуется дочерними ранами при делегировании —
+изменение политик не повышает полномочия уже работающего дерева.
 
 Это позволяет восстановить контекст, в котором Run был создан.
 
@@ -1110,8 +1120,9 @@ Human interaction также является частью траектории 
 
 ```text
 human.requested
-human.delivered
-human.response_received
+human.answered
+cancel/reject/timeout варианты: human.cancelled, human.rejected, human.timed_out,
+human.reasked; факт доставки — notification.sent
 run.resumed
 ```
 
@@ -1167,17 +1178,17 @@ PUT /v1/org/resources/agents/reviewer/binding
 
 # 40. API проектов
 
-Добавить:
+Фактически реализовано (префикс `/v1/workspace`):
 
 ```text
-GET    /v1/projects/{id}/org-units
-PUT    /v1/projects/{id}/org-units
-DELETE /v1/projects/{id}/org-units/{unit_id}
-
-GET    /v1/projects/{id}/members
-POST   /v1/projects/{id}/members
-DELETE /v1/projects/{id}/members/{user_id}
+GET    /v1/workspace/projects/{id}/members
+POST   /v1/workspace/projects/{id}/members/{userID}
+DELETE /v1/workspace/projects/{id}/members/{userID}
 ```
+
+Орг-связи проекта меняются replace-семантикой через
+`PUT /v1/workspace/projects/{id}` с полем `org_units` — отдельных
+`/org-units`-эндпоинтов нет.
 
 Старые:
 
@@ -1785,11 +1796,11 @@ agent execution
   ↓
 human.requested
   ↓
-human.delivered
+human.answered
   ↓
 waiting_for_human
   ↓
-human.response_received
+human.reasked
   ↓
 run.resumed
   ↓

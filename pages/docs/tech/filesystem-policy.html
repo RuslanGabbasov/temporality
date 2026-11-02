@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -185,8 +178,9 @@ Effective:
 <h3 id="35-значения-по-умолчанию"><a class="anchor" href="#35-значения-по-умолчанию" aria-label="Section link">#</a>3.5. Значения по умолчанию</h3><p>Сохранить совместимость с существующими проектами и политиками.</p>
 <p>Отсутствие файловых правил в ранее созданной политике не должно автоматически лишать пользователя доступа к существующим файлам.</p>
 <p>Глобальная политика установки должна иметь возможность ограничить файловые полномочия для всех пользователей.</p>
-<h2 id="4-единая-файловая-система"><a class="anchor" href="#4-единая-файловая-система" aria-label="Section link">#</a>4. Единая файловая система</h2><h3 id="41-каноническое-пространство"><a class="anchor" href="#41-каноническое-пространство" aria-label="Section link">#</a>4.1. Каноническое пространство</h3><p>Сохранить одну файловую систему проекта:</p>
-<pre><code class="language-text">/workspace/projects/&lt;project-id&gt;/
+<h2 id="4-единая-файловая-система"><a class="anchor" href="#4-единая-файловая-система" aria-label="Section link">#</a>4. Единая файловая система</h2><h3 id="41-каноническое-пространство"><a class="anchor" href="#41-каноническое-пространство" aria-label="Section link">#</a>4.1. Каноническое пространство</h3><p>Сохранить одну файловую систему проекта (хост: <code>KERNEL_SANDBOX_ROOT/projects/ &lt;project-id&gt;</code>, внутри песочницы монтируется как <code>/workspace</code> — пути проекта
+одинаковы для всех агентов и ранов):</p>
+<pre><code class="language-text">/workspace/
     src/
     tests/
     docs/
@@ -270,6 +264,15 @@ Effective:
 <pre><code class="language-go">type FilesystemPolicy struct {
     Read  []string
     Write []string
+    Deny  []string
+}
+
+// Фактический wire-тип слоёный (kernel/sandbox/policy.go): Read/Write —
+// слои AND поверх OR-масок (точное семантическое пересечение областей),
+// Deny — объединение:
+type EffectiveFilesystem struct {
+    Read  [][]string
+    Write [][]string
     Deny  []string
 }
 

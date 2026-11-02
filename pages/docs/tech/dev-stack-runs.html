@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -83,7 +76,7 @@
 (<code>tool.started</code> в журнале есть, завершения — нет);</li>
 <li>контейнер <code>temporalio/temporal</code> пересоздаётся — а он работал с
 персистентностью <strong>in-memory</strong> (<code>server start-dev</code> без <code>--db-filename</code>) —
-вся история workflow теряется;</li>
+история workflow не переживает перезапуск контейнера;</li>
 <li><code>workspace_run.status</code> остаётся <code>started</code> навсегда: в UI ход выглядит
 вечно выполняющимся, финального события не будет никогда;</li>
 <li>сверка операции (<code>operation.reconciled</code>) в этой ситуации бессмысленна —
@@ -101,7 +94,7 @@
 <li>живость workflow (<code>temporalLiveness.IsWorkflowRunning</code> — тот же
 Describe-зонд, что у списка неопределённых операций, с R1-deadline).
 Workflow-id вычисляется по source_id из журнала рана
-(<code>RunSourceID</code>): внешние агенты (docs/external-agents.md) живут под своим
+(<code>RunSourceID</code>): внешние агенты живут под своим
 source, зонд с чужим id не делается.</li>
 </ul>
 <p>Ран без живого workflow и без терминального события помечается <code>failed</code>
@@ -116,11 +109,12 @@ source, зонд с чужим id не делается.</li>
 <li>свип собирает ошибки, не останавливается на первой.</li>
 </ul>
 <h2 id="3-эксплуатация"><a class="anchor" href="#3-эксплуатация" aria-label="Section link">#</a>3. Эксплуатация</h2><ul>
-<li>Пересборка стека посреди рана больше не делает ран вечнозомби: история
+<li>Пересборка стека посреди рана больше не оставляет ран незавершённым
+навсегда: история
 workflow живёт в volume, Temporal переигрывает активность на новом воркере,
 ран продолжается. Команды песочницы не идемпотентны — переигранная команда
 выполнится повторно (это дешевле, чем потерянный ход).</li>
-<li>После перехода на volume старые in-memory раны уже потеряны безвозвратно —
+<li>После перехода на volume старые in-memory раны остаются незавершёнными —
 первый свип пометит их failed при следующем старте ядра.</li>
 <li><code>KERNEL_BUILTIN_SKILLS=off</code> — выключение сидирования скилов, если нужно;
 к свипу отношения не имеет.</li>

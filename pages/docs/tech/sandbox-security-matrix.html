@@ -17,7 +17,7 @@
 <a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
 <a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
 <a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
-<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
 <a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
 <a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
 <a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
@@ -47,22 +47,15 @@
 <a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
-<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
-<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
-<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
 <a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
-<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
-<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
 <a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
-<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
 <a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
 <a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
 <a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
 <a class="docs-nav-row active" href="sandbox-security-matrix.html">Sandbox security matrix</a>
 <a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
-<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
 <a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
 <a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
 <a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
@@ -100,12 +93,12 @@
 </tr>
 <tr>
 <td>Credentials</td>
-<td>в контейнер не передаётся <strong>ничего</strong> из окружения хоста: только <code>HOME=/scratch</code>, <code>TMPDIR=/scratch</code> и пути кэшей <code>GOCACHE</code>/<code>GOMODCACHE</code>/<code>GOTMPDIR</code> (пути, не секреты); токены ядра и ключи провайдеров физически не попадают в argv</td>
+<td>в контейнер не передаётся <strong>ничего</strong> из окружения хоста: только <code>HOME=/scratch</code>, <code>TMPDIR=/scratch</code> и переменные кэшей из профиля (<code>CacheEnv</code>, пути, не секреты); секреты агента передаются per-command через <code>docker exec --env</code> только на исполняющую команду; токены ядра и ключи провайдеров физически не попадают в argv</td>
 <td><code>TestEnvironmentCarriesNoCredentials</code></td>
 </tr>
 <tr>
 <td>Файловая система</td>
-<td>корень контейнера <code>--read-only</code>; mount&#39;ы — workspace (<code>:ro</code> для reviewer/qa и read-only агентов, иначе <code>:rw</code>) и per-project кэш <code>/cache</code> (см. ниже); никаких <code>--mount</code>/<code>-v</code> кроме них</td>
+<td>корень контейнера <code>--read-only</code>; mount&#39;ы — workspace (<code>:ro</code> для reviewer/qa и read-only агентов, иначе <code>:rw</code>), per-project кэш <code>/cache</code>, run-scoped <code>/scratch</code>, лаунчер Landlock <code>:ro</code>; опционально docker-сокет (DooD-профиль, явный opt-in)</td>
 <td><code>TestWorkspaceIsTheOnlyVolumeMount</code>, <code>TestProjectCacheMountsPerProjectUnderRoot</code>, <code>TestDockerArgumentsEnforceIsolation</code></td>
 </tr>
 <tr>
@@ -120,8 +113,13 @@
 </tr>
 <tr>
 <td>/scratch</td>
-<td>tmpfs <code>rw,exec,nosuid</code> (по умолчанию 512m, <code>KERNEL_SANDBOX_SCRATCH_SIZE</code>) — единственная исполняемая зона для сборки/тестов; <code>HOME</code>/<code>TMPDIR</code> указывают на неё</td>
+<td>run-scoped bind-mount <code>{KERNEL_SANDBOX_ROOT}/scratch/{project}/{run}</code> → <code>/scratch:rw</code> — единственная исполняемая зона для сборки/тестов, живёт между командами одного рана и убирается по TTL; без ScratchKey — tmpfs <code>rw,exec,nosuid</code> (по умолчанию 512m, <code>KERNEL_SANDBOX_SCRATCH_SIZE</code>) как одноразовый фолбэк; <code>HOME</code>/<code>TMPDIR</code> указывают на неё</td>
 <td><code>TestDockerArgumentsEnforceIsolation</code>, <code>TestScratchSizeMustBeAPositiveByteSize</code></td>
+</tr>
+<tr>
+<td>Файловая политика (Landlock)</td>
+<td>при заданной filesystem-политике каждая команда исполняется через лаунчер <code>temporality-landlock</code>, который применяет ruleset (те же read/write/deny области, что и у нативных туллов) до запуска шелла; fail-closed — без ограничений не запускается; <code>KERNEL_SANDBOX_LANDLOCK=off</code> — явный лабораторный обход</td>
+<td>см. <code>docs/filesystem-policy-implementation.md</code></td>
 </tr>
 <tr>
 <td>Privileges</td>
@@ -157,8 +155,10 @@
 <h2 id="известные-границы"><a class="anchor" href="#известные-границы" aria-label="Section link">#</a>Известные границы</h2><ul>
 <li>Убийство по таймауту действует на прямой дочерний процесс (docker CLI);
 сироты внутри контейнера гаснут вместе с ним благодаря <code>--init</code> и <code>rm --force</code>.</li>
-<li><code>bridge</code>-сеть — это полный egress хоста; гранулярная фильтрация (allowlist
-доменов) не реализована и фиксируется в ROADMAP.</li>
+<li><code>bridge</code>-сеть даёт полный egress хоста и остаётся легаси-режимом; гранулярная
+фильтрация реализована отдельно: внутренняя сеть <code>temporality-sandbox-internal</code>
+(<code>--internal</code>, прямого маршрута наружу нет) + squid-прокси с per-agent
+allowlist (<code>docs/agent-behavior-monitoring.md</code> §7).</li>
 <li>Контейнер с <code>--network=bridge</code> видит локальную сеть хоста — доверяйте
 <code>network_access</code> только проверенным агентам.</li>
 <li>Доступ к Docker-сокету = root на хосте; инсталляция должна держать сокет
@@ -169,9 +169,12 @@
 exit 6 (DNS/сеть недоступны) — egress заблокирован.</li>
 <li><code>--network=bridge</code> (network_access выдан): тот же запрос → HTTP 200.</li>
 </ul>
-<p>Изоляция <code>/scratch</code> между агентами — конструктивная: каждое выполнение команды
-  = новый контейнер с собственным tmpfs, который умирает вместе с контейнером
-  (флаги закреплены в <code>TestDockerArgumentsEnforceIsolation</code>).</p>
+<p>Изоляция <code>/scratch</code> между агентами конструктивная, но не «один контейнер на
+команду»: команда рана исполняется через <code>docker exec</code> в keep-alive контейнере
+рана (реестр запущенных контейнеров с fingerprint и idle-reaper), а
+run-scoped <code>/scratch</code> живёт между командами рана и убирается по TTL; one-shot
+<code>run</code> + <code>rm --force</code> — только фолбэк без ScratchKey (флаги закреплены в
+<code>TestDockerArgumentsEnforceIsolation</code>).</p>
 
 
   <nav class="docs-pager">
