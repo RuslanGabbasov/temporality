@@ -603,10 +603,14 @@ export default function Dashboard({ project, setProject }: Props) {
           ) : busy && (
             <section style={{ marginBottom: '1rem' }}>
               <SkeletonBox width="7rem" height="1rem" style={{ marginBottom: '0.55rem' }} />
+              {/* The real cloud is always sorted biggest-load-first
+                  (topSandboxes), so the placeholder tapers the same way —
+                  diameters come from the real sandboxDiameter curve. */}
               <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.75rem', display: 'flex', alignItems: 'flex-end', gap: '0.9rem' }}>
-                {['2.6rem', '1.7rem', '3rem', '1.4rem', '2.2rem'].map((size, i) => (
-                  <SkeletonBox key={i} width={size} height={size} radius="50%" />
-                ))}
+                {[0.85, 0.6, 0.42, 0.28, 0.16].map((score, i) => {
+                  const size = sandboxDiameter(score)
+                  return <SkeletonBox key={i} width={`${size}px`} height={`${size}px`} radius="50%" />
+                })}
               </div>
             </section>
           )}
