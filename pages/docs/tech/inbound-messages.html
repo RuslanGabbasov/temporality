@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Входящие сообщения: задачи по инициативе пользователя — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/inbound-messages.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row active" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Входящие сообщения: задачи по инициативе пользователя</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Сделать канал коммуникации полноценной точкой входа: пользователь пишет по своей
+инициативе — без открытого вопроса от агента, без выбранного проекта, без UI —
+и это сообщение превращается в задачу, уточняющий диалог или вежливый отказ,
+а не теряется молча.</p>
+<p>Флагманский кейс:</p>
+<blockquote>
+<p>«Подготовь проект документа &quot;Смета на разработку по проекту Название&quot; после
+согласования с Ивановым передай на утверждение в команду Такую-то»</p>
+</blockquote>
+<p>Одно сообщение содержит: задачу подготовки документа, ссылку на проект по
+названию, согласующего человека по фамилии, команду-получателя по названию и
+порядок действий (шаги с человеческими контрольными точками). Ни одна из этих
+ссылок сегодня не разрешается системой.</p>
+<h2 id="2-что-есть-сейчас"><a class="anchor" href="#2-что-есть-сейчас" aria-label="Section link">#</a>2. Что есть сейчас</h2><ul>
+<li><strong>Inbound существует только для ответов.</strong> <code>matrixInboundLoop</code> забирает
+сообщения через <code>/sync</code> и сопоставляет их (<code>MatchMatrixReplies</code>) с открытыми
+human requests. Сообщение, не совпавшее ни с одним вопросом, отбрасывается
+без следа: ни события, ни строки, ни ответа пользователю.</li>
+<li><strong>Ран жёстко привязан к проекту.</strong> <code>POST /v1/agent/runs</code> требует project;
+триггер требует project; чат UI открывается внутри проекта. Понятия «задача
+до определения проекта» нет.</li>
+<li><strong>Идентификация отправителя комнатная.</strong> «Любой в комнате отвечает от имени
+владельца» — допустимо для ответа на вопрос, недопустимо для порождения
+работы: кто угодно из комнаты сможет запускать задачи от имени владельца.</li>
+<li><strong>Руководителя нет.</strong> <code>OrgUnit</code> — id/parent/kind/name/path, без head.
+Эскалация (<code>human_contacts.escalate_for</code>) идёт вверх по дереву до первого
+уровня с активными людьми; <code>org:</code> в <code>ask_human</code> берёт первого активного
+пользователя юнита; <code>project_owner</code> деградирует в админа инсталляции.</li>
+<li><strong>ask_human и команды.</strong> <code>org:&lt;unit-id&gt;</code> доставляется всем активным
+участникам юнита (fan-out через delivery rows); первый ответ закрывает
+вопрос, остальные копии отзываются.</li>
+<li><strong>Telegram и generic webhook — только доставка.</strong> Входящие реплаи
+поддерживают двусторонние каналы: Matrix (поллинг), Mattermost
+(WebSocket, включая личные сообщения) и Slack (Events API).</li>
+</ul>
+<h2 id="3-анатомия-кейса"><a class="anchor" href="#3-анатомия-кейса" aria-label="Section link">#</a>3. Анатомия кейса</h2><p>Разбор флагманского сообщения на требования:</p>
+<table>
+<thead>
+<tr>
+<th>Фрагмент</th>
+<th>Что это</th>
+<th>Чего не хватает</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>«Подготовь проект документа &quot;Смета…&quot;»</td>
+<td>новая задача + тип результата (документ)</td>
+<td>приём инициативных сообщений; выбор агента</td>
+</tr>
+<tr>
+<td>«по проекту Название»</td>
+<td>ссылка на проект по имени</td>
+<td>разрешение проектов по имени + уточнение при неоднозначности</td>
+</tr>
+<tr>
+<td>«после согласования с Ивановым»</td>
+<td>человек по фамилии + контрольная точка</td>
+<td>разрешение пользователей по имени (Ивановых много); HITL-gate уже есть (<code>ask_human</code>)</td>
+</tr>
+<tr>
+<td>«передай на утверждение в команду Такую-то»</td>
+<td>юнит по имени + командная точка</td>
+<td>разрешение юнитов по имени; адресация команды; руководитель как получатель по умолчанию</td>
+</tr>
+<tr>
+<td>(порядок «после… передай»)</td>
+<td>последовательность шагов</td>
+<td>многошаговый план — есть (DAG/команды), точек входа в них из канала нет</td>
+</tr>
+</tbody></table>
+<p>Отдельные классы сообщений, которые обязаны разбираются корректно:</p>
+<ul>
+<li><strong>уточнение</strong> — «а добавь раздел про риски» (дополнение к уже идущей задаче);</li>
+<li><strong>статус-запрос</strong> — «что там со сметой?»;</li>
+<li><strong>отмена</strong> — «отмени»;</li>
+<li><strong>не-задача</strong> — «спасибо», «до связи» — распознать и не порождать ран;</li>
+<li><strong>вложения</strong> — сообщение может начинаться с файла (смета-шаблон в Excel).</li>
+</ul>
+<h2 id="4-основные-понятия"><a class="anchor" href="#4-основные-понятия" aria-label="Section link">#</a>4. Основные понятия</h2><h3 id="41-inbound-message"><a class="anchor" href="#41-inbound-message" aria-label="Section link">#</a>4.1. Inbound Message</h3><p>Долговечная строка — тот же паттерн, что HumanRequest: сущность в workspace,
+события в journal, состояние выводится из сущности.</p>
+<pre><code class="language-text">workspace_inbound_message
+    id              TEXT PRIMARY KEY      = inbound/{channel}/{message_id}
+    channel         TEXT                  -- matrix | telegram | web
+    message_id      TEXT                  -- event_id матрикса / update_id телеги
+    sender_raw      TEXT                  -- mxid / chat id
+    sender_user_id  TEXT NULL             -- разрешённый workspace-пользователь
+    room            TEXT                  -- комната/чат доставки
+    body            TEXT
+    attachments     JSONB                 -- сохранённые файлы (inbox)
+    status          TEXT                  -- received|classified|clarifying|routed|rejected|expired
+    classification  TEXT                  -- task|amendment|status|cancel|chatter|reply
+    intake_run_id   TEXT NULL
+    target_run_id   TEXT NULL             -- ран, порождённый сообщением
+    project_id      TEXT NULL             -- определённый проект
+    created_at / updated_at
+    UNIQUE (channel, message_id)          -- идемпотентность доставки
+</code></pre>
+<p><code>id</code> детерминирован: повторная доставка <code>/sync</code> (реплей истории, рестарт
+кернела) не порождает вторую обработку.</p>
+<h3 id="42-intake-run"><a class="anchor" href="#42-intake-run" aria-label="Section link">#</a>4.2. Intake Run</h3><p>Обработка входящего — это сам агентский ран в <strong>системном проекте <code>intake</code></strong>.
+Такой проект существует один на инсталляцию, не виден в обычных списках и
+содержит только служебные прогоны.</p>
+<p>Почему ран, а не сервисная функция: приём сообщения — это диалог
+(классификация → уточнение → уточнение → запуск), а готовый механизм диалога
+с человеком в канале уже существует — <code>ask_human</code> + доставка в комнату +
+обратная маршрутизация ответа (<code>matrixInboundLoop</code>) + таймауты с политиками.
+Intake-агент переиспользует всё это целиком и не требует нового протокола.</p>
+<p>Инструменты intake-агента (все с авторизацией отправителя, см. §10):</p>
+<ul>
+<li><code>human_contacts</code> — уже есть: люди, эскалации;</li>
+<li><code>search_projects</code> — проекты, видимые <strong>отправителю</strong>, поиск по имени;</li>
+<li><code>search_org_units</code> — юниты по имени/kind (найти «команду Такую-то»);</li>
+<li><code>start_task</code> — создать задачу и запустить ран в целевом проекте
+(ActorID = отправитель, не intake-система);</li>
+<li><code>run_status</code> — статус прогонов, порождённых этим диалогом;</li>
+<li><code>cancel_run</code> — отмена с проверкой прав отправителя.</li>
+</ul>
+<h3 id="43-классификация"><a class="anchor" href="#43-классификация" aria-label="Section link">#</a>4.3. Классификация</h3><p>Двухступенчато, детерминизм насколько возможно:</p>
+<ol>
+<li><strong>Правила.</strong> Сообщение совпало с открытым вопросом → это ответ (существующий
+путь, ничего не меняется). Короткое «отмена/cancel» при активном ране из
+этого диалога → cancel. Активный intake-ран ждёт уточнения → сообщение
+становится ответом на него (существующий механизм ответов).</li>
+<li><strong>Модель.</strong> Остальное классифицирует intake-агент первым ходом:
+task / amendment / status / cancel / chatter. Решение фиксируется в
+<code>classification</code> и событии <code>intake.classified</code> — наблюдаемо и оспоримо.</li>
+</ol>
+<h2 id="5-идентификация-отправителя"><a class="anchor" href="#5-идентификация-отправителя" aria-label="Section link">#</a>5. Идентификация отправителя</h2><p>Сегодняшнее комнатное соответствие «кто в комнате — тот и владелец» для
+порождения работы неприемлемо. Вариант по умолчанию — <strong>закрытый мир</strong>:</p>
+<ul>
+<li>у канала пользователя появляется идентификатор отправителя: <code>mxid</code> для
+Matrix, <code>chat_id</code> для Telegram (там он уже есть — бот видит только свои чаты);</li>
+<li>инициативное сообщение принимается только при точном совпадении
+<code>sender_raw</code> с зарегистрированным идентификатором владельца комнаты;</li>
+<li>несовпадение → <code>intake.rejected</code> (reason: unknown_sender) + вежливый ответ
+в комнату: «напишите из зарегистрированного аккаунта или создайте задачу в
+приложении»;</li>
+<li>для ответов на вопросы действует прежнее комнатное правило (MVP-компромисс
+сохраняется и документирован) — порождение работы строже, чем ответ.</li>
+</ul>
+<h2 id="6-разрешение-сущностей"><a class="anchor" href="#6-разрешение-сущностей" aria-label="Section link">#</a>6. Разрешение сущностей</h2><p>Общий принцип: разрешение — это функция поиска с ранжированием и явным
+уточнением, а не угадывание. Ни одна ссылка не угадывается молча.</p>
+<h3 id="61-проект"><a class="anchor" href="#61-проект" aria-label="Section link">#</a>6.1. Проект</h3><p>Порядок разрешения:</p>
+<ol>
+<li><strong>Явная ссылка.</strong> Нормализованный поиск по именам проектов, видимых из
+позиции отправителя (орг-видимость, org-structure.md §9). Один матч →
+подтверждение одним сообщением; несколько → уточнение списком; ноль →
+сразу уточнение, без попыток «похожих».</li>
+<li><strong>Контекст отправителя.</strong> Ровно один видимый проект → предложить его как
+вариант (не молча подставить). Несколько → уточнение.</li>
+<li><strong>Неопределённый проект</strong> — состояние, а не сущность: intake-ран держит
+задачу, задаёт вопрос списком видимых проектов (+ «создать новый» —
+только если разрешено политикой, по умолчанию нет) и живёт до ответа или
+таймаута. Таймаут уточнения = <code>timeout_policy</code> ask_human; дефолт для
+intake — <code>cancel</code> с вежливым итогом в канал: «не понял, к какому проекту
+относится задача, создайте её в приложении».</li>
+</ol>
+<p>Специальный staging-проект для неопределённых задач не заводим: состояние
+живёт в intake-ране, восстановления после сбоя — через Temporal, история —
+в <code>workspace_inbound_message</code> + событиях.</p>
+<h3 id="62-человек-иванов"><a class="anchor" href="#62-человек-иванов" aria-label="Section link">#</a>6.2. Человек («Иванов»)</h3><p>Поиск по каталогу (регистронезависимый, по фамилии/имени/id); карточки — как
+в <code>human_contacts</code>. Несколько Ивановых → уточнение с вариантами (имя, юнит,
+роль). Имена в естественном языке не обязаны быть уникальными — уникален
+<code>user_id</code>, его агент и подставляет в <code>ask_human</code>/<code>send_file</code>.</p>
+<h3 id="63-команда-команда-такую-то"><a class="anchor" href="#63-команда-команда-такую-то" aria-label="Section link">#</a>6.3. Команда («команда Такую-то»)</h3><p>Поиск по юнитам: имя, kind=team в приоритете, затем department. Несколько
+матчей → уточнение. Ноль → уточнение с списком юнитов отправителя.</p>
+<h2 id="7-руководитель-оргюнита"><a class="anchor" href="#7-руководитель-оргюнита" aria-label="Section link">#</a>7. Руководитель оргюнита</h2><p>Недостающее ребро в дереве:</p>
+<pre><code class="language-text">org_unit.head_user_id  TEXT NULL REFERENCES workspace_user(id)
+</code></pre>
+<p>Семантика — та же, что у видимости ресурсов: <strong>эффективный руководитель
+разрешается снизу вверх</strong>. У юнита без head руководитель — head ближайшего
+предка (обычно у команды — руководитель отдела). NULL по всей цепочке —
+никого (эскалация остаётся на текущем алгоритме близости).</p>
+<p>Использование:</p>
+<ul>
+<li><strong>Эскалация.</strong> <code>human_contacts.escalate_for</code> сначала проверяет head
+ближайшего уровня вверх; близость уровня остаётся фолбэком. Комментарий в
+contacts.go («дерево не кодирует manager edge») перестаёт быть правдой.</li>
+<li><strong>Командные запросы</strong> — получатель по умолчанию (§8).</li>
+<li><strong>project_owner</strong> — остаётся за админом до появления владельца у проекта
+(org-structure.md §14), но при привязке проекта к единственному юниту
+его head — кандидат по умолчанию.</li>
+</ul>
+<p>Миграция: колонка nullable, все NULL, поведение не меняется.</p>
+<h2 id="8-командные-запросы"><a class="anchor" href="#8-командные-запросы" aria-label="Section link">#</a>8. Командные запросы</h2><p><code>ask_human</code> с получателем-юнитом (<code>org:&lt;unit-id&gt;</code>) сегодня берёт первого
+активного пользователя юнита — это не «команда», это случайный человек.</p>
+<p>Новая семантика:</p>
+<ul>
+<li>HumanRequest с <code>recipient = org:&lt;unit-id&gt;</code> доставляется <strong>всем активным
+участникам юнита</strong> (каналы + web inbox каждого);</li>
+<li>ответ принимается от любого участника, <strong>первый ответ закрывает запрос</strong>
+(остальные доставки гасятся как superseded);</li>
+<li>порядок приоритета доставки: head юнита первым в списке, но не авторитетнее
+по ответу — «кто первый ответил, тот и решил» (MVP; кворум-правила для
+«утверждения» — отдельная политика, не MVP);</li>
+<li>карточка в UI показывает, что запрос командный и кто из команды ответил.</li>
+</ul>
+<p>Для «передай на утверждение команде X» агент (после <code>search_org_units</code>) сам
+выбирает форму: адресат — head (строгое утверждение одним лицом) или вся
+команда (первый ответ). Подсказка — в промпте intake-агента: для
+«утверждения» по умолчанию head, для «согласования» — конкретный человек или
+команда целиком.</p>
+<h2 id="9-многошаговые-инструкции"><a class="anchor" href="#9-многошаговые-инструкции" aria-label="Section link">#</a>9. Многошаговые инструкции</h2><p>Кейс «после согласования с Ивановым передай на утверждение» — это не
+механика intake, а содержание задачи. Intake переводит естественную
+инструкцию в структурированную задачу: проект, заголовок, промпт с чек-поинтами.
+Исполняющий агент проходит шаги штатными средствами:</p>
+<ul>
+<li>согласование с Ивановым → <code>ask_human</code> (recipient = разрешённый user_id);</li>
+<li>утверждение командой → <code>ask_human</code> (org: / head, §8);</li>
+<li>передача документа → <code>send_file</code> (вложения и доставка уже есть).</li>
+</ul>
+<p>Профиль агента-исполнителя — дефолтный агент проекта, если intake-агент не
+распознал специализированного (смета → финансовый шаблон — это работа
+skills/шаблонов агентов, не ядра).</p>
+<h2 id="10-авторизация-подотчётность-идемпотентность"><a class="anchor" href="#10-авторизация-подотчётность-идемпотентность" aria-label="Section link">#</a>10. Авторизация, подотчётность, идемпотентность</h2><ul>
+<li><strong>Авторизация.</strong> <code>start_task</code> проходит те же проверки, что
+<code>POST /v1/agent/runs</code>: эффективная writer-роль отправителя в целевом
+проекте, видимость агента/навыков/MCP из позиции отправителя, политика
+проекта/юнита, квоты. Отказ → <code>intake.rejected</code> (reason: forbidden) с
+человеческим объяснением в канал.</li>
+<li><strong>Подотчётность.</strong> Порождённый ран получает <code>ActorID = sender_user_id</code>:
+политика и аудит относятся к человеку, а не к системе. Цепочка прозрачна:
+<code>inbound_message.id → intake_run_id → target_run_id</code> — видна в Runs и
+аудите. Intake-ран сам исполняется под execution identity (как триггеры,
+org-structure.md §20–21).</li>
+<li><strong>Идемпотентность.</strong> Дедуп по <code>(channel, message_id)</code>; intake-ран
+стартует с детерминированным run id; повторный <code>/sync</code>-реплей не порождает
+второй обработки.</li>
+</ul>
+<h2 id="11-наблюдаемость"><a class="anchor" href="#11-наблюдаемость" aria-label="Section link">#</a>11. Наблюдаемость</h2><p>События (journal, scope системного проекта intake, а для routed — дублируются
+в scope целевого проекта):</p>
+<pre><code class="language-text">intake.received     {message_id, channel, sender, room}
+intake.classified   {classification, confidence}
+intake.clarifying   {question, options}         -- прокси ask_human
+intake.routed       {target_run_id, project_id, actor}
+intake.rejected     {reason: unknown_sender|forbidden|unresolved|not_a_task}
+intake.expired      {reason}
+</code></pre>
+<p>UI: страница «Входящие» — список сообщений с классификацией, статусом,
+переходом в intake-ран и в порождённый ран.</p>
+<h2 id="12-фазы-реализации"><a class="anchor" href="#12-фазы-реализации" aria-label="Section link">#</a>12. Фазы реализации</h2><p>Фазы intake строятся поверх слоя каналов (<code>docs/channels.md</code>): общий конвейер
+inbound, дедуп и идентификация — там; здесь — только логика приёма задач.</p>
+<h3 id="фаза-1-intake-mvp-matrix"><a class="anchor" href="#фаза-1-intake-mvp-matrix" aria-label="Section link">#</a>Фаза 1 — Intake MVP (Matrix)</h3><ul>
+<li><code>workspace_inbound_message</code> + дедуп + события;</li>
+<li>mxid в каналах пользователей, закрытый мир отправителя;</li>
+<li>системный проект intake + intake-агент (промпт классификации/уточнения);</li>
+<li>инструменты <code>search_projects</code>, <code>search_org_units</code>, <code>start_task</code>;</li>
+<li>разрешение проекта (§6.1), уточнение через ask_human (маршрутизация ответов
+уже работает);</li>
+<li>страница «Входящие» (минимум: список + статусы).</li>
+</ul>
+<h3 id="фаза-2-руководитель-и-команды"><a class="anchor" href="#фаза-2-руководитель-и-команды" aria-label="Section link">#</a>Фаза 2 — Руководитель и команды</h3><ul>
+<li><code>org_unit.head_user_id</code> + эффективный head;</li>
+<li><code>escalate_for</code> через head; <code>human_contacts</code> — head в карточке юнита;</li>
+<li>командная доставка <code>org:</code> (fan-out, первый ответ), head в UI дерева;</li>
+<li><code>run_status</code>, <code>cancel_run</code> — статус-запросы и отмена из канала.</li>
+</ul>
+<h3 id="фаза-3-диалог-и-telegram"><a class="anchor" href="#фаза-3-диалог-и-telegram" aria-label="Section link">#</a>Фаза 3 — Диалог и Telegram</h3><ul>
+<li>Уточнения задаче (amendment → follow-up ран с контекстом диалога);</li>
+<li>inbound-поллинг Telegram (getUpdates, chat_id = идентификатор) — как
+драйвер поверх слоя каналов, не отдельный луп;</li>
+<li>вложения в инициативных сообщениях (механика inbox уже есть).</li>
+</ul>
+<h3 id="фаза-4-политика-и-эксплуатация"><a class="anchor" href="#фаза-4-политика-и-эксплуатация" aria-label="Section link">#</a>Фаза 4 — Политика и эксплуатация</h3><ul>
+<li>Включение intake по проекту/юниту (по умолчанию выключено);</li>
+<li>лимиты частоты на отправителя; удержание тел сообщений (PII);</li>
+<li>аудиторские отчёты по цепочке сообщений.</li>
+</ul>
+<h2 id="13-критерии-готовности"><a class="anchor" href="#13-критерии-готовности" aria-label="Section link">#</a>13. Критерии готовности</h2><p>Флагманский сценарий, конец-в-конец,_matrix:</p>
+<ol>
+<li>Пользователь пишет кейс из §1 из своей комнаты;</li>
+<li>intake-ран: находит проект «Название» (один матч), Ивановых два — задаёт
+уточнение, пользователь отвечает в канале;</li>
+<li>задача стартует в проекте от имени пользователя (ActorID), агент готовит
+документ, согласовывает с Ивановым (<code>ask_human</code>), команда получает файл
+(<code>send_file</code> + командный запрос);</li>
+<li>Runs показывает дерево: сообщение → intake → задача;</li>
+<li>Повторная доставка того же event_id не порождает дубль;</li>
+<li>Сообщение от постороннего mxid вежливо отвергнуто;</li>
+<li>«что там со сметой?» возвращает статус без нового рана;</li>
+<li>«отмени» останавливает порождённый ран (с проверкой прав).</li>
+</ol>
+<h2 id="14-открытые-вопросы"><a class="anchor" href="#14-открытые-вопросы" aria-label="Section link">#</a>14. Открытые вопросы</h2><ul>
+<li>Где живёт классификационная модель и её стоимость: intake-агент на общей
+модели или дешёвая отдельная для первого хода (замерить на пилоте).</li>
+<li>Настройка intake-агента по юнитам: язык/тон приветствия и правил уточнения.</li>
+<li>Хранение тел сообщений: срок, маскирование, вычистка (PII в journal).</li>
+<li>Создание нового проекта из канала — допускать ли при явном запросе
+(по умолчанию нет, опасная операция).</li>
+<li>Кворумные правила для «утверждения» командой (все должны / большинство /
+head достаточно) — после пилота фазы 2.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="human-knowledge-explorer.html"><small>← Назад</small><strong>ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</strong></a>
+    <a class="pager-next" href="interactive-HITL.html"><small>Далее →</small><strong>HITL: унифицированный контракт для каналов и встроенного чата</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

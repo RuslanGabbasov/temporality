@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Реестр артефактов (Artifact Registry) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/artifact-registry.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row active" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Реестр артефактов (Artifact Registry)</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Ввести <strong>артефакт</strong> как first-class ресурс Temporality: ссылочный документ
+(регламент о качестве кодирования, утверждённая инструкция, чек-лист
+безопасности, список одобренных библиотек), который навыки указывают в
+манифесте, но который <strong>никогда не попадает в промпт неявно</strong> — агент
+загружает его по требованию, когда задача совпала с условием применимости.</p>
+<p>Ключевой принцип документа: <strong>содержимое артефакта раскрывается
+постепенно</strong>. Навык в системном промпте — это digest ≤1500 символов;
+SKILL.md целиком — по <code>skill_inspect</code>; связанный регламент целиком — по
+<code>artifact_read</code>. Третий уровень раскрытия закрывает класс задач «навык
+знает, что существует регламент, но не тащит его в каждый ран».</p>
+<p>Второй принцип: <strong>реестр — это указатель + права, а не обязательно
+хранилище тела</strong>. Для builtin-провайдера документ лежит в Postgres, для
+внешних (СЭД, Confluence, S3) — у нас только ссылка и контракт доступа.
+Выбор бэкенда — конфигурация инсталляции, не код (тот же вывод, что у
+секретов, docs/secrets-management.md §10).</p>
+<hr>
+<h2 id="2-проблематика-текущего-состояния"><a class="anchor" href="#2-проблематика-текущего-состояния" aria-label="Section link">#</a>2. Проблематика текущего состояния</h2><ul>
+<li><strong>SKILL.md — процедура, а не библиотека.</strong> Регламент на 40 страниц не
+влезает ни в digest, ни в разумный SKILL.md; попытка вместить убивает
+бюджет промпта для всех ранов, включая те, где регламент не нужен.</li>
+<li><strong>Копии расползаются.</strong> Один «Регламент качества» нужен пяти навыкам;
+вставка текста в каждый SKILL.md создаёт пять независимо стареющих копий.</li>
+<li><strong>Нет аудита чтений.</strong> Для утверждённых инструкций обычно главный вопрос
+комплаенса — «кто, когда и какую версию документа читал». Сегодня он
+неотвечаем.</li>
+<li><strong>Нет управления доступом.</strong> Документ может относиться к подразделению;
+URL в тексте навыка виден всем, кто видит навык.</li>
+<li><strong>Ссылки гниют.</strong> URL в Confluence/СЭД переезжают при реорганизации
+портала — навык молча теряет опору.</li>
+<li><strong>Внешние хранилища недоступны агенту.</strong> Корпоративный документ живёт в
+СЭД за SSO; песочница агента без сети и без креденшелов человека.</li>
+</ul>
+<hr>
+<h2 id="3-основные-понятия"><a class="anchor" href="#3-основные-понятия" aria-label="Section link">#</a>3. Основные понятия</h2><h3 id="31-artifact-артефакт"><a class="anchor" href="#31-artifact-артефакт" aria-label="Section link">#</a>3.1. Artifact (артефакт)</h3><p>Org-scoped ресурс (как секреты, навыки и агенты):</p>
+<pre><code class="language-text">workspace_artifact
+    id            TEXT PRIMARY KEY
+    title         TEXT          -- человекочитаемое имя
+    description   TEXT          -- КОГДА читать этот документ (условие применимости)
+    provider      TEXT          -- builtin | url (будущее: s3, sed)
+    external_ref  TEXT          -- ссылка во внешней системе (для не-builtin)
+    content       TEXT          -- тело документа (builtin)
+    content_hash  TEXT          -- sha256 тела, пересчитывается на записи
+    size_bytes    BIGINT
+    mime_type     TEXT          -- text/markdown по умолчанию
+    org_unit_id   TEXT NULL REFERENCES org_unit(id)   -- NULL = вся инсталляция
+    created_at / updated_at
+</code></pre>
+<p><code>description</code> — важнейшее поле модели. Это не аннотация содержания, а
+<strong>условие применимости</strong> («читай перед ревью PR, если затронута
+криптография»). Именно по нему агент решает, грузить документ или нет;
+болванка «см. документ» здесь бесполезна так же, как бесполезный заголовок
+группы в прайминге.</p>
+<h3 id="32-artifact-reference-ссылка-из-навыка"><a class="anchor" href="#32-artifact-reference-ссылка-из-навыка" aria-label="Section link">#</a>3.2. Artifact Reference (ссылка из навыка)</h3><p>Поле манифеста skill.yaml:</p>
+<pre><code class="language-yaml">artifacts:
+  - id: coding-standard
+    note: применимо к любому коду на Go в этом репозитории
+</code></pre>
+<p>Ссылка <strong>версионируется вместе с навыком</strong> (манифест иммутабен в рамках
+версии), а тело документа живёт своей жизнью: регламент обновляется
+независимо от процедуры. Воспроизводимость («на какой версии регламента
+основано решение») восстанавливается по <code>content_hash</code> в событиях чтения,
+а не хранением снапшотов в каждом навыке.</p>
+<h3 id="33-artifact-provider-провайдер-хранилища"><a class="anchor" href="#33-artifact-provider-провайдер-хранилища" aria-label="Section link">#</a>3.3. Artifact Provider (провайдер хранилища)</h3><ul>
+<li><code>builtin</code> — тело в Postgres (лимит 2 МиБ на документ). Не добавляет точек
+отказа: та же БД, что реестр навыков.</li>
+<li><code>url</code> — только ссылка; тело в корпоративной системе. <code>artifact_read</code>
+отдаёт метаданные + <code>external_ref</code>; загрузка тела — через web_fetch, если
+он разрешён агенту, или через прокси ядра (фаза 3).</li>
+<li>Будущее: <code>s3</code> (объект в корпоративном бакете, читает ядро), <code>sed</code> / ECM
+(адаптер к СЭД с авторизацией ядра). Все они переиспользуют
+<code>external_ref</code> и не меняют модель ссылок.</li>
+</ul>
+<h3 id="34-прогрессивное-раскрытие"><a class="anchor" href="#34-прогрессивное-раскрытие" aria-label="Section link">#</a>3.4. Прогрессивное раскрытие</h3><pre><code class="language-text">digest навыка      &quot;Artifacts: 2 reference docs (skill_inspect)&quot;   — ~50 симв.
+      ↓ skill_inspect
+список артефактов  title + description (когда читать) + note       — ~200 симв./шт.
+      ↓ artifact_read
+тело документа     чанками по 32 КиБ + checksum                     — по требованию
+</code></pre>
+<hr>
+<h2 id="4-принципы"><a class="anchor" href="#4-принципы" aria-label="Section link">#</a>4. Принципы</h2><ul>
+<li><strong>Неявного попадания в промпт нет.</strong> digest навыка упоминает только
+количество артефактов; тела грузятся исключительным явным вызовом
+<code>artifact_read</code>.</li>
+<li><strong>Реестр — указатель + права.</strong> Хранение тела — деталь провайдера.</li>
+<li><strong>Ссылка стабильна, тело живо.</strong> Навык указывает на id, а не на слепок
+версии; аудит чтений фиксирует <code>content_hash</code>.</li>
+<li><strong>Чтение по совпадению, не превентивно.</strong> Системный промпт фиксирует
+контракт: грузи артефакт, когда задача совпала с <code>description</code>, а не
+«на всякий случай».</li>
+<li><strong>Аудит не блокирует чтение.</strong> Событие <code>artifact.read</code> пишется
+best-effort: сбой журнала не должен лишать агента документа (мутации,
+напротив, аудируются в той же транзакции, где это критично).</li>
+</ul>
+<hr>
+<h2 id="5-модель-доступа"><a class="anchor" href="#5-модель-доступа" aria-label="Section link">#</a>5. Модель доступа</h2><ul>
+<li><strong>Видимость по оргдереву</strong> — тем же правилом, что остальные ресурсы:
+<code>org_unit_id IS NULL</code> или <code>org_unit_id IN path(U)</code>.</li>
+<li><strong>RBAC API</strong>: reader — чтение; writer — создание и изменение; operator —
+удаление.</li>
+<li><strong>Org-привязка не меняется при редактировании</strong> — только через
+администраторский binding-endpoint (тот же контракт, что агенты, секреты
+и MCP-серверы).</li>
+<li><strong>Удаление занятого артефакта запрещено</strong>: если на id ссылается хотя бы
+один манифест навыка, DELETE отвечает 409 со списком навыков. Сначала
+убери ссылку (новой версией навыка), потом удаляй документ.</li>
+<li><strong>Путь агента</strong> идёт через ядро с сервисным токеном kernel-internal; в
+фазе 1 видимость на этом пути инсталляционная (как у skills сегодня),
+org-фильтрация работает на API для людей. Уточнение агентской
+execution-identity — вместе с общей работой по агентским правам.</li>
+</ul>
+<hr>
+<h2 id="6-инструменты-агента"><a class="anchor" href="#6-инструменты-агента" aria-label="Section link">#</a>6. Инструменты агента</h2><ul>
+<li><code>artifact_search(query?)</code> — поиск по реестру: id, title, description,
+provider, size. Ключевые слова матчатся по любому вхождению (как
+skill_search), детерминированный порядок.</li>
+<li><code>artifact_read(artifact_id, offset?)</code> — тело документа чанком 32 КиБ:
+<code>{content, offset, next_offset, truncated, checksum, size_bytes}</code>.
+UTF-8-safe граница чанка. Для <code>provider=url</code> ядро само забирает тело
+(egress только у ядра — как у секретов), кэширует его в памяти с TTL
+15 минут и раздаёт тем же конвертом; при недоступности внешней системы —
+тег «внешний документ недоступен» с указанием артефакта и причины.</li>
+</ul>
+<p><code>skill_inspect</code> показывает разрешённый список артефактов навыка (title,
+description, note) — без отдельного вызова на каждый id.</p>
+<hr>
+<h2 id="7-аудит"><a class="anchor" href="#7-аудит" aria-label="Section link">#</a>7. Аудит</h2><ul>
+<li><code>artifact.read</code> — событие journal: <code>(run_id, artifact_id, checksum, offset, bytes)</code>. Попадает в трейс рана с локализованной подписью,
+агрегируется в таймлайне, экспортируется как остальные события.</li>
+<li>Мутации — access audit: <code>artifact.created</code> / <code>artifact.updated</code> /
+<code>artifact.deleted</code> (кто менял метаданные и тело).</li>
+</ul>
+<p>Разделение то же, что у секретов: чтение — поток наблюдаемости, мутации —
+журнал доступа.</p>
+<hr>
+<h2 id="8-api"><a class="anchor" href="#8-api" aria-label="Section link">#</a>8. API</h2><ul>
+<li><code>GET /v1/workspace/artifacts</code> — список без тел (org-visible).</li>
+<li><code>POST /v1/workspace/artifacts</code> — создание (writer). builtin требует
+content ≤ 2 МиБ; url требует валидный http(s) external_ref.</li>
+<li><code>GET /v1/workspace/artifacts/{id}?offset=&amp;limit=</code> — метаданные + чанк
+тела (limit=0 — целиком). Ядро читает чанками, UI — целиком.</li>
+<li><code>PUT /v1/workspace/artifacts/{id}</code> — обновление; hash пересчитывается.</li>
+<li><code>DELETE /v1/workspace/artifacts/{id}</code> — operator; 409 если занят
+манифестами.</li>
+<li><code>GET /v1/workspace/artifacts/references</code> — карта <code>artifact_id → [skill_id]</code>
+по видимым навыкам (для индикатора «занят N навыками» в UI).</li>
+</ul>
+<hr>
+<h2 id="9-ui-фаза-2"><a class="anchor" href="#9-ui-фаза-2" aria-label="Section link">#</a>9. UI (фаза 2)</h2><ul>
+<li>Раздел «Артефакты»: список с фильтрами по оргединице и провайдеру,
+редактор тела (markdown), индикатор «занят N навыками».</li>
+<li>В редакторе навыка — привязка артефактов к манифесту выбором из реестра.</li>
+<li>В трейсе рана — <code>artifact.read</code> компактной строкой
+(«Артефакт прочитан · coding-standard · 12.4 KiB»).</li>
+</ul>
+<hr>
+<h2 id="10-фазы-реализации"><a class="anchor" href="#10-фазы-реализации" aria-label="Section link">#</a>10. Фазы реализации</h2><h3 id="фаза-1-реестр-builtin-тулы-закрывает-основную-боль"><a class="anchor" href="#фаза-1-реестр-builtin-тулы-закрывает-основную-боль" aria-label="Section link">#</a>Фаза 1 — реестр builtin + тулы (закрывает основную боль)</h3><p>Таблица + миграция; CRUD API с org-видимостью и RBAC; <code>artifacts</code> в
+манифесте навыка + строка в digest; разрешение ссылок в
+<code>GET /skills/{id}</code>; тулы <code>artifact_search</code> / <code>artifact_read</code> с чанками;
+событие <code>artifact.read</code> + подпись в трейсе; guard на удаление занятого.
+Управление — через API. Внешних зависимостей нет.</p>
+<h3 id="фаза-2-ui-и-url-провайдер"><a class="anchor" href="#фаза-2-ui-и-url-провайдер" aria-label="Section link">#</a>Фаза 2 — UI и url-провайдер</h3><p>Раздел UI и привязка в редакторе навыка; честный url-провайдер: прокси
+чтения через ядро (egress только у ядра, как у секретов), кэш с TTL,
+тегging «внешний документ недоступен».</p>
+<h3 id="фаза-3-корпоративные-хранилища-и-зрелость"><a class="anchor" href="#фаза-3-корпоративные-хранилища-и-зрелость" aria-label="Section link">#</a>Фаза 3 — корпоративные хранилища и зрелость</h3><p>Адаптеры S3 и СЭД/ECM (авторизация ядра, маппинг метаданных, выгрузка
+тела в builtin-кэш по требованию); версионирование содержимого (история
+tел + снапшоты для комплаенса); полнотекстовый/семантический поиск по
+содержимому. Предложения артефактов от агентов с человеческим apply и
+жизненный цикл (draft → review → approved) выделены в отдельный документ:
+docs/artifact-lifecycle.md.</p>
+<hr>
+<h2 id="11-критерии-готовности"><a class="anchor" href="#11-критерии-готовности" aria-label="Section link">#</a>11. Критерии готовности</h2><h3 id="фаза-1"><a class="anchor" href="#фаза-1" aria-label="Section link">#</a>Фаза 1</h3><ul>
+<li>Навык с артефактом в манифесте: digest упоминает только количество;
+<code>skill_inspect</code> показывает описания; <code>artifact_read</code> отдаёт тело чанками
+с корректным <code>next_offset</code> на границе UTF-8.</li>
+<li>Чтение артефакта эмитит <code>artifact.read</code> с checksum; в трейсе —
+локализованная строка.</li>
+<li>Артефакт с <code>org_unit_id</code> не виден читателям чужого поддерева через API.</li>
+<li>DELETE занятого манифестом артефакта отвечает 409 со списком навыков.</li>
+<li>Обновление тела меняет <code>content_hash</code> и <code>size_bytes</code>.</li>
+</ul>
+<h3 id="фаза-2"><a class="anchor" href="#фаза-2" aria-label="Section link">#</a>Фаза 2</h3><ul>
+<li>Весь сценарий создания навыка с артефактом проходится из UI без curl.</li>
+<li>url-артефакт читается агентом без прямого egress песочницы.</li>
+</ul>
+<h3 id="фаза-3"><a class="anchor" href="#фаза-3" aria-label="Section link">#</a>Фаза 3</h3><ul>
+<li>Инсталляция с СЭД и с builtin проходит один сценарий без изменений в
+навыках.</li>
+<li>История тел восстанавливает содержимое на любую дату.</li>
+</ul>
+<hr>
+<h2 id="12-открытые-вопросы"><a class="anchor" href="#12-открытые-вопросы" aria-label="Section link">#</a>12. Открытые вопросы</h2><ul>
+<li>Версионирование тел: события с checksum против полноценных снапшотов —
+решить при первом комплаенс-требовании.</li>
+<li>Полнотекстовый поиск по содержимому (сейчас — только метаданные);
+tsvector против внешнего индекса.</li>
+<li>Лимиты (2 МиБ на документ, 32 КиБ чанк) — тюнить по метрикам
+использования, а не заранее.</li>
+<li>Нужна ли агентская execution-identity фильтрация артефактов на пути
+ядра (сейчас инсталляционная видимость, как у skills).</li>
+</ul>
+<hr>
+<h2 id="13-архитектурные-ограничения"><a class="anchor" href="#13-архитектурные-ограничения" aria-label="Section link">#</a>13. Архитектурные ограничения</h2><ul>
+<li>Артефакты не привязываются к проектам: сквозной ресурс оргструктуры
+(тот же принцип, что агенты, навыки, секреты и MCP-серверы).</li>
+<li>Тело builtin-артефакта не шифруется: это не секрет. Конфиденциальные
+материалы не загружаются в артефакты без org-привязки; доступ к
+системам — только через <code>secret://</code>.</li>
+<li>Реестр не становится зависимостью ранов без артефактов: недоступность
+внешнего провайдера касается только тех, кто явно читает его документы.</li>
+<li>Единственный клиент внешних хранилищ — ядро. Песочница не получает ни
+креденшелов СЭД, ни сетевого egress под загрузку документов.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="artifact-lifecycle.html"><small>← Назад</small><strong>Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</strong></a>
+    <a class="pager-next" href="auth-federation.html"><small>Далее →</small><strong>Федеративная аутентификация и провижининг пользователей (Auth Federation)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

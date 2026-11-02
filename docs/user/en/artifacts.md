@@ -19,8 +19,8 @@ random draft: the agent proposes, the human approves.
 
 ![The Artifacts page](../assets/artifacts-page.webp)
 
-The **Artifacts** page (`/artifacts`); details — `docs/artifact-registry.md`
-and `docs/artifact-lifecycle.md`.
+The **Artifacts** page (`/artifacts`); details — [docs/artifact-registry.md](docs/artifact-registry.md)
+and [docs/artifact-lifecycle.md](docs/artifact-lifecycle.md).
 
 ## Types and purpose
 

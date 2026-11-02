@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/temporality-agent-collaboration-implementation.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row active" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</h1>
+
+<p>Сопроводительные заметки к ТЗ: решения, принятые при встраивании в
+существующую кодовую базу, и границы первого этапа. Обновляется по мере
+развития.</p>
+<h2 id="1-что-реализовано"><a class="anchor" href="#1-что-реализовано" aria-label="Section link">#</a>1. Что реализовано</h2><ul>
+<li><strong><code>get_collaborators</code></strong> (тул, activity-side, <code>kernel/agent/collab.go</code>):
+участники саги — агенты (из <code>run.started</code> + терминальных событий задач
+саги, включая все вложенные делегации: дети наследуют <code>task_id</code>, поэтому
+task-фильтр покрывает дерево целиком) и люди (подписанты
+<code>approval.granted</code> / <code>human.answered</code> / авторы <code>run.user_note</code> в скоупе).
+Формат — из ТЗ §3: <code>id</code> (<code>agent:&lt;agent_id&gt;</code> / <code>human:&lt;user_id&gt;</code> / для
+легаси-ранов без <code>agent_id</code> — <code>run:&lt;run_id&gt;</code>), <code>kind</code>, <code>role</code> (из
+<code>data.role</code>), <code>task</code> (title рана, ≤200), <code>status</code>, <code>run_id</code>.</li>
+<li><strong><code>ask_agent</code></strong> (тул, inline-ветка workflow, режимы <code>wait</code>/<code>async</code>,
+дефолт — <strong><code>async</code></strong>): доставка <code>AgentMessage</code> сигналом
+<code>kernel.agent_message</code> в workflow адресата
+(<code>SignalExternalWorkflow(WorkflowID(source, project, run))</code>), ответ
+сигналом <code>kernel.agent_reply</code> назад. <code>wait</code> паркует ход на ответ
+(детерминированный await по образцу <code>awaitApproval</code>); таймаут (дефолт
+300с, потолок 3600с) <strong>не отменяет запрос</strong> — он остаётся у получателя,
+поздний ответ доезжает по асинхронному пути (ТЗ §4).</li>
+<li><strong><code>answer_agent</code></strong> (тул получателя): ответ маршрутируется по
+<code>request_id</code> из числа реально полученных этим ходом запросов; повторный
+ответ на тот же id отказывается (никакого двойного сигнала). Если
+отправитель к моменту ответа завершился — ответ всё равно журналируется
+(<code>agent.replied</code>), а тул сообщает, что доставить некуда.</li>
+<li><strong>Доставка входящих</strong> — на границах хода, по образцу user-note steering:
+входящий запрос/ответ становится user-сообщением с фиксированной
+обвязкой (request_id, отправитель, тип; для <code>wait</code> — явная просьба
+ответить следующим батчем тулов). Никогда не прерывает текущую работу.</li>
+</ul>
+<h2 id="2-ключевые-решения"><a class="anchor" href="#2-ключевые-решения" aria-label="Section link">#</a>2. Ключевые решения</h2><table>
+<thead>
+<tr>
+<th>Решение</th>
+<th>Почему</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Состояние запроса — <strong>только журнал + история workflow</strong> (без новой таблицы)</td>
+<td>Сигналы Temporal живут в event history: переживают рестарт worker/kernel в пределах гарантий инфраструктуры (§5); journal-only — устоявшаяся альтернатива (сага устроена так же). Отдельный стор дал бы вторую истину</td>
+</tr>
+<tr>
+<td><code>request_id</code> = <code>req-</code> + hash(operationID)</td>
+<td>Стабилен при ретраях одного вызова (тот же operationID), уникален для нового вызова</td>
+</tr>
+<tr>
+<td>Адресация: <code>agent:&lt;id&gt;</code> / <code>run:&lt;id&gt;</code> / голый run id</td>
+<td><code>agent:&lt;id&gt;</code> резолвится в ран агента в скоупе саги (последний по времени старта). <strong>Живой</strong> ран получает сообщение сигналом; <strong>завершённый</strong> — релейный follow-up run (см. ниже); новый ран не стартуется только если агент вообще не резолвится</td>
+</tr>
+<tr>
+<td><strong>Релей-ран для завершённых агентов</strong> (<code>&lt;target&gt;/ask/NN</code>)</td>
+<td>Делегированные дети завершаются быстро — без релея задавать вопросы можно было бы только живому лиду. Релей — это дочерний AgentRun того же агента (<code>ActivityResolveAgent</code> + <code>ExecuteChildWorkflow</code>, механика делегирования): короткий бюджет (6 ходов перекрывают floor clamp после резолва), prompt самодостаточен (кто спросил, request_id, payload, указание ответить <code>answer_agent</code> и закончить), <code>ParentRunID</code> = исходный ран (линейность и сага по task), <code>DelegationDepth = MaxDelegationDepth</code> (ask-run не может делегировать), <code>IncomingAsks</code> в RunInput — request_id валиден с первого хода без гонки сигналов, <code>ParentClosePolicy: ABANDON</code> (asker может завершиться раньше). Файловый снапшот наследуется от <strong>инициатора</strong> (как у делегирования — §6: за пределами унаследованной области прав не прибавляется)</td>
+</tr>
+<tr>
+<td>Адресат проверяется <strong>kernel-side</strong> (<code>ResolveCollaborator</code>)</td>
+<td>§6: доверять <code>to</code> от модели нельзя; резолвер ограничен задачами саги просящего run&#39;а — чужой агент не резолвится в принципе</td>
+</tr>
+<tr>
+<td><code>GetVersion(&quot;agent-collaboration&quot;)</code> гейтит drain&#39;ы и рекламу тулов</td>
+<td>Реплей-совместимость: in-flight раны со старой историей не видят ни сигналов, ни тулов (docs/failure-model.md)</td>
+</tr>
+<tr>
+<td><code>ask_agent</code>/<code>answer_agent</code>/<code>get_collaborators</code> в <code>policySafeTools</code></td>
+<td>Approval round-trip на каждый шаг диалога убил бы механизм (§8); deny через карточку агента (ToolAllowlist/DenyTools) остаётся оружием политики</td>
+</tr>
+<tr>
+<td>Ответы «не по адресу» не теряются</td>
+<td><code>awaitAgentReply</code> не выбрасывает чужие ответы (в отличие от <code>awaitApproval</code>): они пере-очередуются и фреймятся на следующей границе хода. В relay-wait селекторе то же: child future ∥ reply-канал ∥ таймер</td>
+</tr>
+</tbody></table>
+<h2 id="3-события-журнала"><a class="anchor" href="#3-события-журнала" aria-label="Section link">#</a>3. События журнала</h2><p><code>agent.asked</code> → <code>agent.message.received</code> (получатель) → <code>agent.replied</code>
+(получатель) → <code>agent.answer.received</code> (отправитель); терминальные:
+<code>agent.ask_expired</code> (таймаут wait-режима), <code>agent.ask_undeliverable</code>
+(адресат не найден / релей не стартовал). В <code>agent.asked</code> при релее
+добавляются <code>relay: true</code> и <code>relay_run</code>. Payload усечён до 4096
+(как user-note). Каталог UI: группа «Межагентное взаимодействие» в
+eventCatalog.</p>
+<h2 id="4-границы-первого-этапа-осознанные"><a class="anchor" href="#4-границы-первого-этапа-осознанные" aria-label="Section link">#</a>4. Границы первого этапа (осознанные)</h2><ul>
+<li><strong>Тулы не пробивают allowlist карточки агента</strong>: агент с непустым
+списком <code>tools</code> не увидит новые тулы — миграцию карточек делает
+оператор (осознанно: allowlist — и есть политика).</li>
+<li><strong>Парковка в <code>ask_human</code> задерживает доставку</strong>: входящий запрос ждёт
+в буфере сигналов до ближайшей границы хода (та же семантика, что у
+user-note в этом состоянии). Не теряется — задерживается.</li>
+<li><strong>Люди в списке — только акторы журнала</strong> (кто согласовывал/отвечал/
+писал note). Проективные роли («assignee задачи») не выводятся — у
+задачи нет поля assignee.</li>
+<li><strong><code>role</code> участника</strong> — из <code>data.role</code> рана; имена агентов не
+обогащаются (доступны через тул <code>agents</code>).</li>
+<li><strong>wait-режим считает wall-clock время</strong> против <code>TimeoutSeconds</code>
+политики рана — как и <code>ask_human</code>; большие таймауты могут привести к
+<code>policy.time_exhausted</code> сразу после ответа.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="system-dashboard.html"><small>← Назад</small><strong>Дашборд здоровья системы (System Dashboard)</strong></a>
+    <a class="pager-next" href="temporality-agent-collaboration-spec.html"><small>Далее →</small><strong>ТЗ: межагентное взаимодействие и обнаружение участников Saga</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

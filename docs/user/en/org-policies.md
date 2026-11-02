@@ -126,4 +126,4 @@ identity's org position.
   every ancestor's contribution.
 
 See also: [Personalization](personalization.md) — how agent knowledge
-accounts for people; internals — `docs/org-structure.md`.
+accounts for people; internals — [docs/org-structure.md](docs/org-structure.md).

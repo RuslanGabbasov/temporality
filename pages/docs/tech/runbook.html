@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Runbook — Temporality — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/runbook.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row active" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Runbook — Temporality</h1>
+
+<p>Операционное руководство для администратора Temporality-стека.</p>
+<hr>
+<h2 id="1-архитектура-развёртывания"><a class="anchor" href="#1-архитектура-развёртывания" aria-label="Section link">#</a>1. Архитектура развёртывания</h2><pre><code>┌─────────────────────────────────────────────────────┐
+│  docker compose                                     │
+│                                                     │
+│  ┌────────────┐  ┌────────────┐  ┌──────────────┐  │
+│  │  postgres   │  │  journal   │  │ agent-kernel │  │
+│  │  :5432      │  │  :8080     │  │  :8090       │  │
+│  └────────────┘  └────────────┘  └──────────────┘  │
+│                                                     │
+│  ┌────────────┐  ┌────────────┐                     │
+│  │  debugger   │  │  temporal  │                     │
+│  │  :3000      │  │  :7233/:8233                    │
+│  └────────────┘  └────────────┘                     │
+└─────────────────────────────────────────────────────┘
+</code></pre>
+<p>Сервисы: postgres (данные), journal (события), agent-kernel (workflow),
+debugger (UI), temporal (durable execution).</p>
+<hr>
+<h2 id="2-backup-restore-postgresql"><a class="anchor" href="#2-backup-restore-postgresql" aria-label="Section link">#</a>2. Backup / Restore PostgreSQL</h2><h3 id="backup"><a class="anchor" href="#backup" aria-label="Section link">#</a>Backup</h3><pre><code class="language-sh"># Пока контейнер работает
+docker compose exec postgres pg_dump -U temporality temporality \
+  | gzip &gt; backup-$(date +%Y%m%d-%H%M%S).sql.gz
+
+# Проверить целостность
+gunzip -t backup-*.sql.gz &amp;&amp; echo &quot;backup OK&quot;
+</code></pre>
+<h3 id="restore"><a class="anchor" href="#restore" aria-label="Section link">#</a>Restore</h3><pre><code class="language-sh"># Остановить всё кроме postgres
+docker compose stop journal agent-kernel debugger
+
+# Восстановить
+gunzip -c backup-YYYYMMDD-HHMMSS.sql.gz \
+  | docker compose exec -T postgres psql -U temporality temporality
+
+# Перезапустить
+docker compose up -d
+</code></pre>
+<h3 id="автоматизация"><a class="anchor" href="#автоматизация" aria-label="Section link">#</a>Автоматизация</h3><p>Добавить в crontab хоста:</p>
+<pre><code>0 3 * * * cd /path/to/temporality &amp;&amp; docker compose exec -T postgres pg_dump -U temporality temporality | gzip &gt; /backups/temporality-$(date +\%Y\%m\%d).sql.gz &amp;&amp; find /backups -name &#39;*.sql.gz&#39; -mtime +30 -delete
+</code></pre>
+<h3 id="проверка-backup"><a class="anchor" href="#проверка-backup" aria-label="Section link">#</a>Проверка backup</h3><p>Раз в месяц восстановить backup в тестовую БД и проверить:</p>
+<pre><code class="language-sh">gunzip -c backup.sql.gz | docker compose exec -T postgres psql -U temporality test_restore
+# Проверить наличие данных
+docker compose exec -T postgres psql -U temporality test_restore -c \
+  &quot;SELECT count(*) FROM observation_events; SELECT count(*) FROM kernel_event_outbox;&quot;
+docker compose exec -T postgres psql -U temporality -c &quot;DROP DATABASE test_restore;&quot;
+</code></pre>
+<hr>
+<h2 id="3-migration-upgrade"><a class="anchor" href="#3-migration-upgrade" aria-label="Section link">#</a>3. Migration / Upgrade</h2><h3 id="порядок-обновления"><a class="anchor" href="#порядок-обновления" aria-label="Section link">#</a>Порядок обновления</h3><ol>
+<li><strong>Backup</strong> (см. §2).</li>
+<li><code>git pull</code> — получить новую версию.</li>
+<li><code>docker compose build</code> — собрать образы.</li>
+<li><code>docker compose up -d</code> — перезапустить. Миграции применяются
+автоматически при старте journal и kernel.</li>
+<li>Проверить health (см. §5).</li>
+</ol>
+<h3 id="миграции"><a class="anchor" href="#миграции" aria-label="Section link">#</a>Миграции</h3><p>Схема живёт в <code>migrations/</code>, каталог = владелец:</p>
+<ul>
+<li><code>migrations/workspace/</code> — kernel применяет всё при каждом старте
+(<code>MigrateAll</code>); baseline <code>0001_baseline_v2026.2.21</code> держит финальную
+схему, файлы <code>0002+</code> — инкременты после него;</li>
+<li><code>migrations/outbox/</code>, <code>migrations/quota/</code> — по одному файлу на стор;</li>
+<li><code>migrations/runtime/</code> не существует: историческая цепочка удалена, схему
+журнала journal несёт встроенной константой.</li>
+</ul>
+<p>Каждая миграция <strong>идемпотентна</strong> — набор перечитывается при каждом
+старте, новая миграция это просто новый файл (подключать её вручную никуда
+не надо). Baseline самодостаточен для апгрейда с любой прошлой версии:
+секция 2 несёт ремонт колонок и data-фиксы всей цепочки, промежуточные
+версии не нужны.</p>
+<p>Ручное применение:</p>
+<pre><code class="language-sh">docker compose exec postgres psql -U temporality temporality \
+  -f /path/to/migration.up.sql
+</code></pre>
+<hr>
+<h2 id="4-token-rotation"><a class="anchor" href="#4-token-rotation" aria-label="Section link">#</a>4. Token Rotation</h2><h3 id="текущие-токены"><a class="anchor" href="#текущие-токены" aria-label="Section link">#</a>Текущие токены</h3><ul>
+<li><code>JOURNAL_AUTH_TOKENS</code> — токены journal API (reader/writer/operator)</li>
+<li><code>KERNEL_AUTH_TOKENS</code> — токены kernel API (reader/writer/operator)</li>
+<li><code>TEMPORALITY_API_TOKEN</code> — токен kernel → journal (writer); может быть не
+задан: тогда ядро на старте автоматически провиженит сервисный принципал
+<code>temporality-kernel</code> в общей БД (writer, все проекты) и использует его токен.
+Деактивация этого пользователя в UI — осознанное действие администратора:
+ядро упадёт на старте с понятной ошибкой, пока его не реактивируют или не
+зададут <code>TEMPORALITY_API_TOKEN</code> вручную.</li>
+</ul>
+<h3 id="добавление-нового-токена-без-простоя"><a class="anchor" href="#добавление-нового-токена-без-простоя" aria-label="Section link">#</a>Добавление нового токена (без простоя)</h3><pre><code class="language-sh"># 1. Сгенерировать новый токен
+NEW_TOKEN=$(openssl rand -hex 32)
+
+# 2. Добавить в .env (не удаляя старый!)
+echo &quot;NEW_USER_TOKEN=${NEW_TOKEN}:newuser:reader:project-a&quot; &gt;&gt; .env
+
+# 3. Обновить JOURNAL_AUTH_TOKENS / KERNEL_AUTH_TOKENS в .env
+#    Формат: token:subject:role:projects;token2:...
+#    Добавить новый токен через ; к существующим
+
+# 4. Перезапустить (старые токены продолжают работать)
+docker compose restart journal agent-kernel
+
+# 5. Проверить новый токен
+curl -H &quot;Authorization: Bearer $NEW_TOKEN&quot; http://localhost:8080/healthz
+
+# 6. Раздать новый токен пользователю
+</code></pre>
+<h3 id="удаление-токена-с-пропаданием-доступа"><a class="anchor" href="#удаление-токена-с-пропаданием-доступа" aria-label="Section link">#</a>Удаление токена (с пропаданием доступа)</h3><pre><code class="language-sh"># 1. Удалить токен из JOURNAL_AUTH_TOKENS / KERNEL_AUTH_TOKENS в .env
+# 2. Перезапустить
+docker compose restart journal agent-kernel
+</code></pre>
+<h3 id="ротация-temporalityapitoken"><a class="anchor" href="#ротация-temporalityapitoken" aria-label="Section link">#</a>Ротация TEMPORALITY_API_TOKEN</h3><pre><code class="language-sh"># 1. Сгенерировать новый
+NEW_API_TOKEN=$(openssl rand -hex 32)
+
+# 2. Добавить как writer в JOURNAL_AUTH_TOKENS
+# 3. Обновить TEMPORALITY_API_TOKEN в .env
+# 4. Перезапустить оба сервиса
+docker compose restart journal agent-kernel
+</code></pre>
+<hr>
+<h2 id="5-health-monitoring"><a class="anchor" href="#5-health-monitoring" aria-label="Section link">#</a>5. Health Monitoring</h2><h3 id="эндпоинты"><a class="anchor" href="#эндпоинты" aria-label="Section link">#</a>Эндпоинты</h3><table>
+<thead>
+<tr>
+<th>Сервис</th>
+<th>URL</th>
+<th>Проверяет</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Journal</td>
+<td><code>GET http://localhost:8080/healthz</code></td>
+<td>DB connection</td>
+</tr>
+<tr>
+<td>Kernel</td>
+<td><code>GET http://localhost:8090/healthz</code></td>
+<td>Liveness</td>
+</tr>
+<tr>
+<td>Temporal UI</td>
+<td><code>http://localhost:8233</code></td>
+<td>Web UI</td>
+</tr>
+</tbody></table>
+<h3 id="проверка-состояния"><a class="anchor" href="#проверка-состояния" aria-label="Section link">#</a>Проверка состояния</h3><pre><code class="language-sh"># Все сервисы запущены?
+docker compose ps
+
+# Journal health
+curl -s http://localhost:8080/healthz
+
+# Kernel health
+curl -s http://localhost:8090/healthz
+
+# Temporal UI доступен?
+curl -s -o /dev/null -w &#39;%{http_code}&#39; http://localhost:8233
+</code></pre>
+<h3 id="автоматический-мониторинг"><a class="anchor" href="#автоматический-мониторинг" aria-label="Section link">#</a>Автоматический мониторинг</h3><p>Docker compose healthcheck уже настроен для postgres, journal, kernel.
+Можно добавить внешний мониторинг через cron:</p>
+<pre><code class="language-sh">*/5 * * * * curl -sf http://localhost:8080/healthz || systemctl restart temporality-journal
+*/5 * * * * curl -sf http://localhost:8090/healthz || systemctl restart temporality-agent-kernel
+</code></pre>
+<hr>
+<h2 id="6-outbox-monitoring"><a class="anchor" href="#6-outbox-monitoring" aria-label="Section link">#</a>6. Outbox Monitoring</h2><p>Outbox — очередь событий kernel → journal. Если outbox растёт, значит
+journal недоступен или не принимает события.</p>
+<h3 id="проверка-состояния"><a class="anchor" href="#проверка-состояния" aria-label="Section link">#</a>Проверка состояния</h3><pre><code class="language-sh"># Требует operator-токен
+curl -s &#39;http://localhost:8090/v1/agent/outbox&#39; \
+  -H &quot;Authorization: Bearer $OPERATOR_TOKEN&quot;
+</code></pre>
+<p>Ответ:</p>
+<pre><code class="language-json">{
+  &quot;pending&quot;: 0,
+  &quot;oldest_pending_age_seconds&quot;: 0,
+  &quot;delivered&quot;: 1542,
+  &quot;last_error&quot;: &quot;&quot;
+}
+</code></pre>
+<h3 id="тревога"><a class="anchor" href="#тревога" aria-label="Section link">#</a>Тревога</h3><ul>
+<li><code>pending &gt; 0</code> дольше 5 минут — journal недоступен.</li>
+<li><code>last_error</code> не пустой — проблема с доставкой.</li>
+</ul>
+<h3 id="действия"><a class="anchor" href="#действия" aria-label="Section link">#</a>Действия</h3><pre><code class="language-sh"># Проверить journal
+curl -s http://localhost:8080/healthz
+
+# Проверить логи
+docker compose logs journal --tail=20
+
+# Если journal упал — перезапустить
+docker compose restart journal
+</code></pre>
+<hr>
+<h2 id="7-quota-monitoring"><a class="anchor" href="#7-quota-monitoring" aria-label="Section link">#</a>7. Quota Monitoring</h2><h3 id="проверка-использования"><a class="anchor" href="#проверка-использования" aria-label="Section link">#</a>Проверка использования</h3><pre><code class="language-sh">curl -s &#39;http://localhost:8090/v1/agent/quotas?project=PROJECT&#39; \
+  -H &quot;Authorization: Bearer $READER_TOKEN&quot;
+</code></pre>
+<p>Ответ:</p>
+<pre><code class="language-json">{
+  &quot;project&quot;: &quot;forge&quot;,
+  &quot;used&quot;: 12,
+  &quot;limit&quot;: 50,
+  &quot;reset_at&quot;: &quot;2026-09-28T00:00:00Z&quot;
+}
+</code></pre>
+<h3 id="настройка-квот"><a class="anchor" href="#настройка-квот" aria-label="Section link">#</a>Настройка квот</h3><p>В <code>.env</code>:</p>
+<pre><code>KERNEL_RUN_QUOTAS=*:50,forge:200,lighthouse:100
+</code></pre>
+<ul>
+<li><code>*:50</code> — дефолт 50 запусков/день на проект</li>
+<li><code>forge:200</code> — конкретный проект</li>
+<li>Пустая строка = без ограничений</li>
+</ul>
+<p>После изменения — <code>docker compose restart agent-kernel</code>.</p>
+<h3 id="превышение-квоты"><a class="anchor" href="#превышение-квоты" aria-label="Section link">#</a>Превышение квоты</h3><p>Агент получает HTTP 429 с <code>Retry-After</code>. Оператор видит:</p>
+<pre><code class="language-json">{
+  &quot;error&quot;: &quot;daily run quota exceeded for project forge&quot;,
+  &quot;quota&quot;: {
+    &quot;allowed&quot;: false,
+    &quot;limit&quot;: 50,
+    &quot;used&quot;: 50,
+    &quot;reset_at&quot;: &quot;2026-09-28T00:00:00Z&quot;
+  }
+}
+</code></pre>
+<hr>
+<h2 id="8-типовые-аварии"><a class="anchor" href="#8-типовые-аварии" aria-label="Section link">#</a>8. Типовые аварии</h2><h3 id="mcp-сервер-не-подключается-eof-на-initialize"><a class="anchor" href="#mcp-сервер-не-подключается-eof-на-initialize" aria-label="Section link">#</a>MCP-сервер не подключается (EOF на initialize)</h3><p><strong>Симптом:</strong> <code>connect MCP server ... connection closed: calling &quot;initialize&quot;: client is closing: EOF</code> при сохранении/проверке удалённого MCP-сервера.</p>
+<p><strong>Причина:</strong> сервер работает по Streamable HTTP, а в настройках выбран тип
+<code>sse</code> (или наоборот). SSE-клиент ждёт от GET-стрима события протокола SSE,
+которых streamable-сервер не присылает, и соединение умирает по EOF/таймауту.
+Сетевая доступность (ping) тут ни при чём — проверять нужно HTTP-ответ.</p>
+<p><strong>Решение:</strong> сменить тип сервера на <code>http</code> (Streamable HTTP) в настройках
+MCP-сервера. Ошибка также содержит подсказку о смене типа. Проверить сервер
+вручную из контейнера:</p>
+<pre><code class="language-sh">docker compose exec -T agent-kernel wget -qO- --server-response \
+  --header=&#39;Content-Type: application/json&#39; \
+  --header=&#39;Accept: application/json, text/event-stream&#39; \
+  --header=&#39;Authorization: Bearer &lt;ТОКЕН&gt;&#39; \
+  --post-data=&#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;initialize&quot;,&quot;params&quot;:{&quot;protocolVersion&quot;:&quot;2025-06-18&quot;,&quot;capabilities&quot;:{},&quot;clientInfo&quot;:{&quot;name&quot;:&quot;probe&quot;,&quot;version&quot;:&quot;0.0.1&quot;}}}&#39; \
+  http://&lt;host&gt;:&lt;port&gt;/mcp
+</code></pre>
+<h3 id="kernel-не-стартует-mcp-connection-error"><a class="anchor" href="#kernel-не-стартует-mcp-connection-error" aria-label="Section link">#</a>Kernel не стартует (MCP connection error)</h3><p><strong>Симптом:</strong> <code>connect MCP server: ... EOF</code> в логах.</p>
+<p><strong>Причина:</strong> KERNEL_MCP_COMMAND указывает на бинарник, который не
+запускается в контейнере.</p>
+<p><strong>Решение:</strong> Отключить MCP (<code>KERNEL_MCP_COMMAND=</code> в <code>.env</code>) или
+проверить бинарник:</p>
+<pre><code class="language-sh">docker compose exec -T agent-kernel /usr/local/bin/test-mcp
+# Должен hang (ждёт stdin), не паниковать
+</code></pre>
+<h3 id="outbox-растёт"><a class="anchor" href="#outbox-растёт" aria-label="Section link">#</a>Outbox растёт</h3><p><strong>Симптом:</strong> <code>pending</code> увеличивается, <code>oldest_pending_age_seconds</code> растёт.</p>
+<p><strong>Причина:</strong> Journal недоступен.</p>
+<p><strong>Решение:</strong></p>
+<pre><code class="language-sh">docker compose logs journal --tail=20
+docker compose restart journal
+</code></pre>
+<h3 id="temporal-workflow-завис"><a class="anchor" href="#temporal-workflow-завис" aria-label="Section link">#</a>Temporal workflow завис</h3><p><strong>Симптом:</strong> Run показывает <code>Running</code> но не завершается.</p>
+<p><strong>Проверка:</strong></p>
+<pre><code class="language-sh"># Temporal UI
+open http://localhost:8233
+
+# Или через kernel
+curl -s &quot;http://localhost:8090/v1/agent/runs/RUN_ID?project=PROJECT&quot; \
+  -H &quot;Authorization: Bearer $READER_TOKEN&quot;
+</code></pre>
+<p><strong>Действия:</strong></p>
+<ul>
+<li>Проверить логи kernel: <code>docker compose logs agent-kernel --tail=50</code></li>
+<li>Если workflow завис в approval — отправить approval через UI</li>
+<li>Если workflow завис в tool — проверить sandbox (docker ps, логи)</li>
+</ul>
+<h3 id="нехватка-памяти-postgresql"><a class="anchor" href="#нехватка-памяти-postgresql" aria-label="Section link">#</a>Нехватка памяти (PostgreSQL)</h3><p><strong>Симптомы:</strong> OOM killer, postgres restarts.</p>
+<p><strong>Решение:</strong></p>
+<pre><code class="language-sh"># Проверить использование
+docker stats postgres
+
+# Очистить старые outbox-записи (доставленные &gt;30 дней назад)
+docker compose exec postgres psql -U temporality temporality -c \
+  &quot;DELETE FROM kernel_event_outbox WHERE delivered_at &lt; now() - interval &#39;30 days&#39;;&quot;
+</code></pre>
+<h3 id="конфликт-workflow-id"><a class="anchor" href="#конфликт-workflow-id" aria-label="Section link">#</a>Конфликт workflow ID</h3><p><strong>Симптом:</strong> <code>409 Conflict</code> при запуске run.</p>
+<p><strong>Причина:</strong> Повторный <code>run_id</code> для того же проекта.</p>
+<p><strong>Решение:</strong> Использовать уникальный <code>run_id</code> (timestamp, UUID).</p>
+<hr>
+<h2 id="9-secrets"><a class="anchor" href="#9-secrets" aria-label="Section link">#</a>9. Secrets</h2><h3 id="через-файлы-docker-secrets-12-factor-file"><a class="anchor" href="#через-файлы-docker-secrets-12-factor-file" aria-label="Section link">#</a>Через файлы (docker secrets / 12-factor _FILE)</h3><p>Kernel и journal поддерживают конвенцию <code>&lt;VAR&gt;_FILE</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Переменная</th>
+<th><code>_FILE</code> аналог</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>DATABASE_URL</code></td>
+<td><code>DATABASE_URL_FILE</code></td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_API_KEY</code></td>
+<td><code>TEMPORALITY_MODEL_API_KEY_FILE</code></td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_API_TOKEN</code></td>
+<td><code>TEMPORALITY_API_TOKEN_FILE</code></td>
+</tr>
+<tr>
+<td><code>KERNEL_AUTH_TOKENS</code></td>
+<td><code>KERNEL_AUTH_TOKENS_FILE</code></td>
+</tr>
+<tr>
+<td><code>JOURNAL_AUTH_TOKENS</code></td>
+<td><code>JOURNAL_AUTH_TOKENS_FILE</code></td>
+</tr>
+</tbody></table>
+<p>Если <code>VAR</code> не задан, а <code>VAR_FILE</code> указывает на файл — значение берётся
+из файла (trimmed). Прямое значение всегда побеждает.</p>
+<h3 id="пример-docker-compose-secrets"><a class="anchor" href="#пример-docker-compose-secrets" aria-label="Section link">#</a>Пример docker-compose secrets</h3><pre><code class="language-yaml">secrets:
+  model_api_key:
+    file: ./secrets/model_api_key.txt
+
+services:
+  agent-kernel:
+    secrets:
+      - source: model_api_key
+        target: temporality_model_api_key
+    environment:
+      TEMPORALITY_MODEL_API_KEY_FILE: /run/secrets/temporality_model_api_key
+</code></pre>
+<hr>
+<h2 id="10-полезные-команды"><a class="anchor" href="#10-полезные-команды" aria-label="Section link">#</a>10. Полезные команды</h2><pre><code class="language-sh"># Логи в реальном времени
+docker compose logs -f agent-kernel
+
+# Пересобрать и перезапустить один сервис
+docker compose up -d --build agent-kernel
+
+# Запустить shell в контейнере
+docker compose exec agent-kernel sh
+
+# Проверить версию Go в контейнере
+docker compose exec agent-kernel go version  # только build stage
+
+# Полный перезапуск
+docker compose down &amp;&amp; docker compose up -d
+
+# Очистить неиспользуемые образы
+docker system prune
+</code></pre>
+<hr>
+<h2 id="11-модель-доступа-оргструктура"><a class="anchor" href="#11-модель-доступа-оргструктура" aria-label="Section link">#</a>11. Модель доступа (оргструктура)</h2><p>Спека: <code>docs/org-structure.md</code>; план волн: <code>docs/plan-org-structure.md</code>. Эта секция — практическая выжимка для администратора.</p>
+<h3 id="как-вычисляется-видимость"><a class="anchor" href="#как-вычисляется-видимость" aria-label="Section link">#</a>Как вычисляется видимость</h3><pre><code>ресурс (agent/skill/mcp-server/provider/trigger):  org_unit_id
+  NULL  → глобальный, виден всем
+  узел  → виден на узле и во всём его поддереве (materialized path `org_unit.path`)
+
+проект:  workspace_project_org_unit (m2m)
+  нет строк → org-нейтральный, виден всем
+  иначе     → виден пользователям, чья цепочка предков пересекается с узлами проекта
+             ∪ явные участники (workspace_project_member, доступ вне оргобласти)
+
+пользователь:  org_unit_id (основной узел)
+  NULL → видит всё (унаследованная супер-видимость, переходный режим)
+  роль admin на установке → обходит все проверки видимости
+</code></pre>
+<p>Видимость ≠ полномочия: право использования/изменения определяется эффективной ролью (роль установки, membership-роль, гранты <code>org_unit_role</code> на узел и его предков — максимум). Живые Run&#39;ы не зависят от последующих изменений оргструктуры: контекст фиксируется в <code>workspace_run.exec_context</code> при старте.</p>
+<h3 id="как-перепривязать-ресурс"><a class="anchor" href="#как-перепривязать-ресурс" aria-label="Section link">#</a>Как перепривязать ресурс</h3><p>Привязка меняется только admin-эндпоинтом (обычный PUT ресурса привязку не трогает):</p>
+<pre><code class="language-sh"># привязать / перепривязать (пустой id = сделать глобальным)
+PUT /v1/org/resources/{kind}/{id}/binding   {&quot;org_unit_id&quot;: &quot;rd&quot;}
+# kind: agent | skill | mcp-server | provider | trigger
+
+# убрать привязку (ресурс станет глобальным)
+DELETE /v1/org/resources/{kind}/{id}/binding
+
+# проекты: replace-семантика через обычный PUT проекта с полем org_units
+PUT /v1/workspace/projects/{id}   {&quot;name&quot;: &quot;…&quot;, &quot;org_units&quot;: [&quot;rd&quot;, &quot;core&quot;]}
+</code></pre>
+<p>После мутаций области ядро само пересчитывает скоупы токенов (refreshUserTokens); аудит: <code>resource.bound/unbound</code>, <code>org_unit.*</code> — смотри <code>GET /v1/org/audit?limit=</code>.</p>
+<h3 id="отчёт-о-расхождении-моделей-волна-g"><a class="anchor" href="#отчёт-о-расхождении-моделей-волна-g" aria-label="Section link">#</a>Отчёт о расхождении моделей (волна G)</h3><p><code>scripts/access_divergence.sh</code> (SQL: <code>scripts/access-divergence.sql</code>) — read-only отчёт, сравнивающий унаследованные JSONB-списки (<code>workspace_user.projects</code>, <code>workspace_project.allowed_users</code>) с эффективной видимостью новой модели:</p>
+<ul>
+<li><strong>A</strong> — пользователи, у которых старый список проектов ≠ новой эффективной видимости (<code>only_in_old</code> / <code>only_in_new</code> — что пропало/добавилось);</li>
+<li><strong>B</strong> — проекты, у которых <code>allowed_users</code> ≠ новой аудитории;</li>
+<li><strong>C</strong> — сводка (сколько расхождений, сколько пользователей без узла и т.п.).</li>
+</ul>
+<p>Отчёт имеет смысл только ДО применения миграции 000043 (колонки удалены) — на стенде она уже применена, скрипт оставлен как шаблон/документацию этапа 4 спеки §48. Семантика NULL: ресурс NULL = глобальный; пользователь NULL = видит всё.</p>
+<h3 id="что-удалила-волна-g-миграция-000043"><a class="anchor" href="#что-удалила-волна-g-миграция-000043" aria-label="Section link">#</a>Что удалила волна G (миграция 000043)</h3><ul>
+<li>колонка <code>workspace_project.allowed_users</code> — чтение для решений доступа отключено ещё в волне B (доступ = org ∪ membership);</li>
+<li>колонка <code>workspace_user.projects</code> — скоупы проектов пользователя считаются через <code>VisibleProjectIDs</code> (волна C);</li>
+<li>поля убраны из API: <code>allowed_users</code> в ответах/запросах проектов и <code>projects</code> в пользователях больше не приходят и не принимаются (клиентские SDK/скрипты, отправлявшие эти поля, продолжат работать — неизвестные поля игнорируются).</li>
+</ul>
+<p>Обратно колонки не восстановить (down-миграция создаёт их заново со значениями по умолчанию <code>&quot;*&quot;</code> / <code>[]</code>).</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="revision-2026-10-16.html"><small>← Назад</small><strong>Ревизия планов: что не реализовано (2026-10-16)</strong></a>
+    <a class="pager-next" href="sagas.html"><small>Далее →</small><strong>Саги: явная регистрация долгой работы (Sagas)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

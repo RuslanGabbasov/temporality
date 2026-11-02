@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>План работ: Оргструктура и модель доступа — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/plan-org-structure.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row active" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>План работ: Оргструктура и модель доступа</h1>
+
+<p>Source spec: <code>docs/org-structure.md</code> (расширенная версия, 55 разделов / 8 фаз).
+Статус: <strong>Волны A–G завершены</strong> (A — UI организации и доступности; B — явное членство в проектах + аудит доступа; C — роли на узлах, авторизация ранов, execution identity, snapshot контекста; D — триггеры на узлах и запуск под identity; E — human_request как сущность, резолюция получателя, timeout-политики; F — org-политики с рестриктивным merge и enforcement; G — отчёт расхождения, удаление legacy-колонок, документация модели доступа). Отложенные хвосты: UI ролей на узлах и execution identities, внешние пользователи, provider credentials. Порядок волн согласован с фазами спеки; UI организации был вынесен вперёд (волна A), потому что бэкенд фаз 1–2 уже существовал и без UI неюзабелен.</p>
+<p>Размеры задач: S / M / L — относительно одной волны работы.</p>
+<h2 id="0-текущее-состояние-baseline-после-0e1ec70"><a class="anchor" href="#0-текущее-состояние-baseline-после-0e1ec70" aria-label="Section link">#</a>0. Текущее состояние (baseline после 0e1ec70)</h2><p>Готово (Фаза 1 спеки + часть Фазы 2):</p>
+<ul>
+<li>миграция 000034: <code>org_unit</code> (дерево, materialized path), <code>org_unit_id</code> на agent/skill/mcp-server/provider/user, <code>workspace_project_org_unit</code> (со стороны проекта — CASCADE, со стороны узла — RESTRICT за проверкой «пустого узла»);</li>
+<li>стор <code>workspace/org.go</code>: CRUD дерева, move с пересчётом путей поддерева, запрет циклов, удаление только пустых узлов, привязка ресурсов, инспекция узла;</li>
+<li><code>Principal.VisibleUnits</code> (цепочка предков) + фильтрация списков и одиночных GET: агенты, навыки, MCP, провайдеры, проекты; admin и kernel-internal токены — без фильтра;</li>
+<li>переходное правило проектов: <code>org-видимость AND legacy allowed_users</code>;</li>
+<li>API: <code>/v1/org/units</code> CRUD (мутации — admin), <code>/v1/org/units/{id}/resources</code>, <code>PUT /v1/org/resources/{kind}/{id}/binding</code>;</li>
+<li>обычные PUT ресурсов не сбрасывают привязку (сменить скоуп может только admin через binding); whoami отдаёт <code>org_unit_id</code>.</li>
+</ul>
+<p>Уже существовало в системе до оргструктуры (релевантно фазам 4–5):</p>
+<ul>
+<li>каналы пользователей + preferred channel (<code>workspace_user.channels</code>, <code>PUT /users/{id}/channels</code>), notify-адаптеры; web-канал — inbox в UI;</li>
+<li><code>ask_human</code> / <code>request_approval</code>: приостановка Run (<code>waiting</code>), структурированные опции, timeout, события траектории (<code>human.requested</code> и т.д.), возобновление Run;</li>
+<li>триггеры <code>workspace_trigger</code> (project-scoped: schedule/webhook/event), инструменты агента <code>create/update/delete_trigger</code>;</li>
+<li>Run фиксирует версию агента (миграция 000031).</li>
+</ul>
+<p>Известные пробелы против расширенной спеки:</p>
+<ul>
+<li>видимость ≠ право использования: <code>POST /v1/agent/runs</code> проверяет роль+проект, но не доступ к агенту/скиллам/MCP/провайдеру (§22);</li>
+<li>нет <code>workspace_project_member</code> (explicit membership, §16), нет ролей на узлах (§13), нет execution identity (§20), нет аудита (§36), у триггеров нет <code>org_unit_id</code> (§18);</li>
+<li>получатель <code>ask_human</code> — конкретный <code>user:xxx</code>, нет резолюции role/org_unit/project_owner (§26).</li>
+</ul>
+<h2 id="1-карта-фаз-спеки-волны-плана"><a class="anchor" href="#1-карта-фаз-спеки-волны-плана" aria-label="Section link">#</a>1. Карта фаз спеки → волны плана</h2><table>
+<thead>
+<tr>
+<th>Фаза спеки</th>
+<th>Содержание</th>
+<th>Состояние</th>
+<th>Волна</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1 Org Model</td>
+<td>дерево, path, CRUD, привязки, visibility-тесты</td>
+<td>✅ готово</td>
+<td>—</td>
+</tr>
+<tr>
+<td>2 Project Model</td>
+<td>project↔units, members, project roles, миграция</td>
+<td>✅ готово (units + members + аудит)</td>
+<td>B</td>
+</tr>
+<tr>
+<td>3 Authorization</td>
+<td>visibility/use/manage/administer, проверки на операциях, execution identity</td>
+<td>✅ готово (provider credentials отложены до secret store)</td>
+<td>C</td>
+</tr>
+<tr>
+<td>4 Triggers</td>
+<td>scope триггеров, авторизация, запуск под identity, аудит</td>
+<td>✅ готово (org_unit_id + авторизация + re-auth + запуск под identity + аудит + UI)</td>
+<td>D</td>
+</tr>
+<tr>
+<td>5 HITL</td>
+<td>human_request, recipient resolution, каналы, timeout-политики</td>
+<td>✅ готово (сущность + резолюция + политики + аудит + UI-инбокс)</td>
+<td>E</td>
+</tr>
+<tr>
+<td>6 Policies</td>
+<td>наследуемые политики выполнения</td>
+<td>✅ готово (сущность + рестриктивный merge + enforcement в workflow и kernel + UI)</td>
+<td>F</td>
+</tr>
+<tr>
+<td>7 UI</td>
+<td>Org Tree, доступность, membership, identity, политики</td>
+<td>Org Tree/доступность/membership/политики готово; identity — select в форме триггера, полный UI отложен</td>
+<td>A + B + F (готово); хвосты — ниже</td>
+</tr>
+<tr>
+<td>8 Migration &amp; Cleanup</td>
+<td>расхождение моделей, удаление legacy</td>
+<td>✅ готово (отчёт <code>scripts/access-divergence.sql</code>, миграция 000043, runbook §11)</td>
+<td>G</td>
+</tr>
+</tbody></table>
+<h2 id="2-волны-работ"><a class="anchor" href="#2-волны-работ" aria-label="Section link">#</a>2. Волны работ</h2><h3 id="волна-a-ui-организации-и-доступности-m-фаза-7-частично"><a class="anchor" href="#волна-a-ui-организации-и-доступности-m-фаза-7-частично" aria-label="Section link">#</a>Волна A. UI организации и доступности — M — фаза 7 (частично)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>Org.tsx</code>: дерево со сворачиванием; инспекция узла (ресурсы по видам, пользователи, проекты); создание/переименование; перемещение выбором родителя с подтверждением («меняет видимость»); удаление пустого узла через наш confirm-диалог.</li>
+<li><input checked="" disabled="" type="checkbox"> <code>Layout.tsx</code>: раздел «Организация» (admin; остальным по ролям на узлах — после волны C).</li>
+<li><input checked="" disabled="" type="checkbox"> Поле «Доступность» (селект узла, дефолт «Вся организация»; для admin — эффективная область «Development └── 14 дочерних») в формах Agents/Skills/Mcp/Providers.</li>
+<li><input checked="" disabled="" type="checkbox"> Проект: мультивыбор узлов («Организационные области»); участники — в волне B; legacy <code>allowed_users</code> скрыт и заморожен на чтение.</li>
+<li><input checked="" disabled="" type="checkbox"> Пользователь: выбор основного подразделения вместо списка проектов.</li>
+<li><input checked="" disabled="" type="checkbox"> Карточки списков: бейдж узла / «глобально».</li>
+<li><input checked="" disabled="" type="checkbox"> Мастер корня: если <code>org_unit</code> пуст — создание организации (онбординг/страница «Организация»).</li>
+<li><input checked="" disabled="" type="checkbox"> <code>workspaceApi.ts</code>: <code>orgApi</code>; i18n ru/en; обе темы; <code>ListFilter</code>.</li>
+</ul>
+<h3 id="волна-b-project-model-m-фаза-2"><a class="anchor" href="#волна-b-project-model-m-фаза-2" aria-label="Section link">#</a>Волна B. Project Model — M — фаза 2</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>workspace_project_member (project_id, user_id, role, created_at, created_by, PK(project_id,user_id))</code> — миграция 000035 (в ней же <code>access_audit_log</code>).</li>
+<li><input checked="" disabled="" type="checkbox"> Доступ к проекту = <code>org-unit access OR explicit membership</code> (заменяет переходное AND-правило; <code>allowed_users</code> заморожен на чтение и больше не учитывается; PUT без поля сохраняет колонку как есть).</li>
+<li><input checked="" disabled="" type="checkbox"> API: <code>GET/POST /v1/workspace/projects/{id}/members</code>, <code>DELETE /v1/workspace/projects/{id}/members/{userID}</code>; <code>DELETE /v1/org/resources/{kind}/{id}/binding</code> (алиас PUT с &quot;&quot;); <code>GET /v1/org/audit?limit=</code>. Отдельные <code>…/org-units/{unit_id}</code> эндпоинты не делались — replace-семантика через <code>PUT /v1/workspace/projects/{id}</code> с <code>org_units</code> покрывает сценарий.</li>
+<li><input checked="" disabled="" type="checkbox"> Аудит-минимум: события <code>project.member_added/removed</code>, <code>resource.bound/unbound</code>, <code>org_unit.created/updated/moved/deleted</code> (§36).</li>
+<li><input checked="" disabled="" type="checkbox"> UI: участники проекта в диалоге проекта (мультивыбор пользователей с ролью, синхронизация diff-ом при сохранении).</li>
+<li><input disabled="" type="checkbox"> Внешние пользователи MVP: <code>user_type</code> и <code>expires_at</code> — опционально, отложено до потребности (сама модель explicit membership готова).</li>
+</ul>
+<h3 id="волна-c-authorization-l-фаза-3"><a class="anchor" href="#волна-c-authorization-l-фаза-3" aria-label="Section link">#</a>Волна C. Authorization — L — фаза 3</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Модель эффективной роли в controlplane: <code>Principal.OrgRoles</code> (гранты с self-path узла) + <code>MaxRoleAt(unitID, unitPath)</code> — максимум из роли установки, membership-роли и грантов на сам узел и его предков; глобальные ресурсы — только роль установки. Unit-тесты на дерево (грант на предка/сам узел/сиблинга/потомка/глобальный ресурс).</li>
+<li><input checked="" disabled="" type="checkbox"> Роли на узлах: миграция 000036 <code>org_unit_role</code>; стор <code>ListOrgUnitRoles/SetOrgUnitRole/RemoveOrgUnitRole/ListAllOrgUnitRoleGrants</code>; API <code>GET/PUT/DELETE /v1/org/units/{id}/roles/{userID}</code> (мутации — admin, ParseRole-валидация); аудит <code>role.granted/revoked</code>; <code>refreshUserTokens</code> подхватывает гранты без рестарта; роли в инспекции узла (join имён); узел с грантами не удаляется.</li>
+<li><input checked="" disabled="" type="checkbox"> Project scope из орг-модели: <code>VisibleProjectIDs</code> — для назначенных в узел не-админов токен получает конкретный список проектов (org-пересечение ∪ membership) вместо legacy <code>user.projects</code>; admin и непривязанные — <code>*</code> (переходный режим). <code>refreshUserTokens</code> вызывается после мутаций проектов/участников/грантов.</li>
+<li><input checked="" disabled="" type="checkbox"> Проверки на операциях (§22): <code>authorizeRunUse</code> в <code>POST /v1/agent/runs</code> и <code>POST /v1/workspace/tasks/{id}/runs</code> (гейт ослаблен до reader, авторизация — 403 с точной причиной): видимость проекта (org ∪ membership) + эффективная роль ≥ writer; агент — OrgVisible + writer на его узле; скиллы/MCP рана — OrgVisible; «висячие» ссылки пропускаются молча, как в рантайме. PUT агента проверяет OrgVisible скиллов/MCP (иначе 403).</li>
+<li><input checked="" disabled="" type="checkbox"> Snapshot execution context (§34–35): миграция 000037 <code>workspace_run.exec_context</code>; заполняется при старте рана (tasks/trigger/schedule): agent_id/agent_version/skill_ids/mcp_ids/model/project_id/actor/execution_identity_id/authorized_by{user_id, role(эффективная), org_unit_id}; изменение оргструктуры не затрагивает живые раны; читается всеми рановыми запросами.</li>
+<li><input checked="" disabled="" type="checkbox"> Execution Identity — сущность для автоматических запусков (§20): миграция 000038; CRUD <code>GET/POST/PUT/DELETE /v1/workspace/execution-identities</code> + аудит <code>execution_identity.created/updated/deleted</code>; отсутствующие allowed-списки дефолтятся к <code>[&quot;*&quot;]</code> (не «ничего»); wiring в триггеры — волна D, UI — фаза 7.</li>
+<li><input checked="" disabled="" type="checkbox"> Аудит <code>user.org_unit_changed</code> (from/to) при смене узла пользователя.</li>
+<li><input disabled="" type="checkbox"> Provider credentials (§23) — отложено: <code>api_key_ref</code> — ссылка на env/secret, не значение; ужесточение после появления реального хранилища секретов. CRUD ресурсов остаётся на installation-role, org-гранты пока дают запуск ранов.</li>
+<li><input checked="" disabled="" type="checkbox"> UI ролей на узлах и execution identities — фаза 7 (спека §42, §47): секция «Роли на узле» в инспекторе Org (гранты reader/writer/operator/admin, бейдж «admin (installation)», revoke-диалог) и секция «Идентификаторы исполнения» с CRUD-диалогом (allowed-списки, орг-узел); ListFilter, i18n ru/en.</li>
+</ul>
+<h3 id="волна-d-triggers-m-фаза-4"><a class="anchor" href="#волна-d-triggers-m-фаза-4" aria-label="Section link">#</a>Волна D. Triggers — M — фаза 4</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>org_unit_id</code> у триггеров — миграция 000039 (+ <code>execution_identity_id</code>, FK RESTRICT, индекс); видимость в списках: скрытые триггеры отвечают 404 на GET/PUT/DELETE, list фильтруется по OrgVisible.</li>
+<li><input checked="" disabled="" type="checkbox"> Авторизация триггера (§21): <code>authorizeTriggerUse</code> при создании (право на unit/проект/агента/identity — 403/404 с точной причиной) + re-auth при PUT; <code>org_unit_id</code> в PUT игнорируется (перепривязка — админ-эндпоинт binding).</li>
+<li><input checked="" disabled="" type="checkbox"> Запуск Run под execution identity: <code>authorizeTriggerRun</code> при каждом fire (webhook и scheduler) — identity существует, IdentityAllows (агент/проект/MCP/провайдер), OrgVisible агента и MCP в UnitChain(identity.OrgUnitID); отказ — <code>trigger.rejected</code> + 403 без создания задачи/run; <code>exec_context.execution_identity_id</code> в снапшоте. Merge-семантика PUT: <code>{enabled}</code> не затирает name/agent_id/config/identity (баг UI-тоггла).</li>
+<li><input checked="" disabled="" type="checkbox"> Аудит <code>trigger.created/updated/deleted</code> (details: name/agent/enabled/identity/unit).</li>
+<li><input checked="" disabled="" type="checkbox"> UI триггера (§46): выбор unit (OrgUnitSelect, edit — только админ), выбор execution identity с подсказкой, бейджи unit/identity на карточках; policy/human-правила — волны E/F.</li>
+</ul>
+<h3 id="волна-e-hitl-m-фаза-5"><a class="anchor" href="#волна-e-hitl-m-фаза-5" aria-label="Section link">#</a>Волна E. HITL — M — фаза 5</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>human_request</code> как отдельная сущность (§28) — миграция 000040, стор <code>workspace/humanrequest.go</code>; статусы pending/delivered/answered/expired/cancelled/rejected (waiting слит в delivered); список — <code>GET /v1/workspace/human-requests</code> c lazy-экспирацией, UI-инбокс: бейдж в Layout + метка «спрашивает вас» на запусках в Runs (события — fallback для старых ядер).</li>
+<li><input checked="" disabled="" type="checkbox"> Recipient resolution (§26): <code>user:</code> / имя / <code>role:</code> / <code>org:</code> / <code>project_owner</code> (первый активный admin — owner-колонки у проекта нет) / пусто → actor; проверка права обращения (§30) — fail-closed по <code>human_targets</code> execution identity (пустой список/<code>*</code> = все), отказ → событие <code>human.rejected</code> без паузы.</li>
+<li><input checked="" disabled="" type="checkbox"> Адаптеры Matrix/Telegram + fallback по preferred channel — уже были в <code>kernel/agent/notify.go</code>; волна E добавила туда резолюцию получателя и запись сущности.</li>
+<li><input checked="" disabled="" type="checkbox"> Timeout-политики (§33): fail/retry/fallback/escalate/cancel — в модели выполнения (workflow), не в транспорте; retry/escalate — ровно один доп. раунд (escalate → <code>project_owner</code>); cancel останавливает run без <code>run.completed</code>.</li>
+<li><input checked="" disabled="" type="checkbox"> Аудит HITL (§37): <code>access_audit_log</code> (<code>human_request.created/delivered/answered/cancelled/expired/rejected</code>) на всех путях — activity, approval-endpoint, lazy sweep.</li>
+</ul>
+<h3 id="волна-f-policies-ml-фаза-6"><a class="anchor" href="#волна-f-policies-ml-фаза-6" aria-label="Section link">#</a>Волна F. Policies — M/L — фаза 6</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Сущность Policy (§24) — миграция 000041 (<code>org_policy</code>, JSONB-списки, CHECK на режимах, идемпотентна), стор <code>workspace/policy.go</code>: CRUD + <code>EffectivePolicy(unitIDs...)</code> — каждый юнит разворачивается в цепочку предков, глобальные строки всегда применяются, merge рестриктивный (allowlist&#39;ы пересекаются, капы — min, deny/read_only/tools выигрывают, голый <code>*</code> не сужает).</li>
+<li><input checked="" disabled="" type="checkbox"> Минимум ограничений: allowed_models (403 на старте рана; пустая модель резолвится в дефолт <code>TEMPORALITY_MODEL_ID</code>), allowed_mcp (неразрешённые серверы выкидываются из рана), max_tokens/max_budget_usd (USD-бюджет деградирует в токен-кап без цены в <code>KERNEL_MODEL_PRICES</code>), timeout_seconds, network deny, sandbox read_only, approval tools. Enforcement: workflow (<code>policy.limit</code>, forced finale со статусами <code>time_limit</code>/<code>token_limit</code>/<code>budget_limit</code>, approval для не-безопасных тулов) + 4 точки применения в kernel (run-config с <code>actor_id</code> для делегированных, POST /runs, webhook, scheduler — срабатывание политики = rejection как §21). Аудит <code>policy.created/updated/deleted</code>.</li>
+<li><input checked="" disabled="" type="checkbox"> UI политик + визуализация эффективного доступа: секция Policies в Org (список с бейджем узла и тегами ограничений, create/edit/delete, фильтр), панель «Действующая политика» в инспекторе узла (merge + источники); i18n ru/en; новые статусы ранов в Workspace.</li>
+</ul>
+<h3 id="волна-g-migration-amp-cleanup-s-фаза-8"><a class="anchor" href="#волна-g-migration-amp-cleanup-s-фаза-8" aria-label="Section link">#</a>Волна G. Migration &amp; Cleanup — S — фаза 8</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Отчёт расхождения old/new модели на стенде (этап 4 спеки §48): <code>scripts/access_divergence.sh</code> + <code>scripts/access-divergence.sql</code> (read-only; A — пользователи, B — проекты, C — сводка; проверен на стенде и на синтетических расхождениях в rollback-транзакции).</li>
+<li><input checked="" disabled="" type="checkbox"> Удаление колонок <code>allowed_users</code> / <code>workspace_user.projects</code> миграцией 000043. Чтение для решений доступа отключено волнами B/C; вычищена круглота через CRUD (поля убраны из структур/хендлеров/ответов и UI-форм), колонка больше не упоминается в SQL стора.</li>
+<li><input checked="" disabled="" type="checkbox"> Документация модели доступа: <code>docs/runbook.md</code> §11 (видимость, перепривязка, чтение отчёта, что удалено).</li>
+</ul>
+<h2 id="3-тестирование-и-приёмка-по-51-спеки"><a class="anchor" href="#3-тестирование-и-приёмка-по-51-спеки" aria-label="Section link">#</a>3. Тестирование и приёмка (по §51 спеки)</h2><ul>
+<li>Иерархия: ресурс A виден A/B/C; ресурс C виден только C.</li>
+<li>Глобальный ресурс (<code>NULL</code>) виден всем.</li>
+<li>Кросс-функциональный проект: пользователи всех связанных узлов видят; несвязанные — нет.</li>
+<li>Explicit membership: доступ вне орг-области после добавления.</li>
+<li>Роли: installation admin / org-unit admin / project writer / project reader / обычный пользователь.</li>
+<li>Trigger: разрешённый триггер создаётся; с недоступным агентом — нет; права создателя не наследуются; identity имеет собственные права.</li>
+<li>Run: недоступные агент/MCP/провайдер отклоняются на POST /runs и внутри выполнения.</li>
+<li>HITL: полный цикл ask_human → delivery → waiting → answer → resume.</li>
+<li>Изменение узла пользователя: новый Run по новым правам; живой Run не исчезает; критическое действие перепроверяется.</li>
+</ul>
+<h2 id="4-принятые-решения"><a class="anchor" href="#4-принятые-решения" aria-label="Section link">#</a>4. Принятые решения</h2><ol>
+<li><strong>Переходная видимость = org AND legacy</strong> (до волны B): обе модели должны пропустить; без настройки структуры поведение не меняется. В волне B заменяется на <code>org OR explicit membership</code>, legacy замораживается.</li>
+<li><strong>Пересчёт <code>path</code> — в приложении</strong>, одной транзакцией <code>MoveOrgUnit</code>, без PL/pgSQL-триггеров.</li>
+<li><strong>Мутации дерева и привязок — только admin</strong> (изменение видимости для всех); writer создаёт ресурсы с доступностью «вся организация».</li>
+<li><strong><code>VisibleUnits = nil</code> у служебных токенов</strong> — рантайм не зависит от прав пользователя; privileged API не используется для обхода авторизаций пользовательского API (§41).</li>
+<li><strong>Только аддитивная модель</strong> (§7): без deny/override/исключений поддеревьев — зафиксировано как ограничение первой версии.</li>
+<li><strong>Видимость ≠ полномочия</strong> (§10): фильтрация списков — это visibility; use/manage/administer появляются в волне C на уровне операций.</li>
+<li><strong>Trigger ≠ пользователь</strong> (§19): автоматические Run — под execution identity с собственными правами.</li>
+<li><strong>Org Unit у пользователя один</strong> (primary, §11–12): таблица дополнительных memberships — будущее расширение без переделки модели.</li>
+</ol>
+<h2 id="5-не-цели-первой-версии-54-спеки"><a class="anchor" href="#5-не-цели-первой-версии-54-спеки" aria-label="Section link">#</a>5. Не-цели (первой версии, §54 спеки)</h2><ul>
+<li>Deny rules, сложные ACL, произвольные permission sets.</li>
+<li>Матричная оргструктура (несколько узлов пользователя).</li>
+<li>HR sync / SCIM / федерация организаций.</li>
+<li>Выбор получателя LLM-ом, workflow согласований.</li>
+<li>ltree вместо materialized path.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="plan-evaluable-agent.html"><small>← Назад</small><strong>План работ: Evaluable Agent — определение агента и компиляция системного промта</strong></a>
+    <a class="pager-next" href="plan-priming-relevance.html"><small>Далее →</small><strong>Priming v2: от каталога знаний к полезным рекомендациям</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

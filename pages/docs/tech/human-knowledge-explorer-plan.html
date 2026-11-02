@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Knowledge Explorer — этап 1: аудит и технический план — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/human-knowledge-explorer-plan.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row active" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Knowledge Explorer — этап 1: аудит и технический план</h1>
+
+<p>Статус: этап 1 ТЗ <code>docs/human-knowledge-explorer.md</code> (аудит и прототипирование).
+Документ фиксирует фактическое состояние кода, доступность данных для всех
+сценариев ТЗ, пробелы и предлагаемый минимальный объём первой версии.
+Утверждение объёма v1 — точка согласования с пользователем (ТЗ §19, этап 1).</p>
+<h2 id="1-аудит-текущего-интерфейса-знаний"><a class="anchor" href="#1-аудит-текущего-интерфейса-знаний" aria-label="Section link">#</a>1. Аудит текущего интерфейса знаний</h2><p>Вкладка «Знания» живёт в <code>debugger/src/Observability.tsx</code> (не отдельный
+компонент) и на сегодня даёт:</p>
+<ul>
+<li>список с пагинацией (<code>KNOWLEDGE_PAGE_SIZE</code>, курсор), свободный поиск <code>q</code>
+(debounce 350 мс) — серверный <code>GET /v1/observations/knowledge</code>;</li>
+<li>фильтры: состояние (<code>STATE_FILTERS</code>: all/alive/at_risk/proposed/confirmed/
+challenged/corrected/superseded/invalidated) и scope (all/project/org_unit/
+organization);</li>
+<li>фасеты <code>states</code> + <code>scopes</code> (счётчики) — только два измерения;</li>
+<li>битемпоральную навигацию <code>as_of</code> / <code>known_at</code> + режим сравнения двух срезов
+(<code>knowledge/diff</code>), с пресетами час/день/неделя;</li>
+<li>карточку детали: propositions, topics/entities, история переходов
+(<code>history</code>), телеметрия подсказок, жизненный цикл (challenge/invalidate/
+promote) и цепочка (<code>knowledge/chain</code>);</li>
+<li>предпросмотр подсказок (<code>POST /v1/observations/hints</code>).</li>
+</ul>
+<p>Ограничения против ТЗ (совпадают с жалобами пользователя):</p>
+<table>
+<thead>
+<tr>
+<th>Требование ТЗ</th>
+<th>Текущее состояние</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§4 Карта тематических областей</td>
+<td>нет — только плоский список</td>
+</tr>
+<tr>
+<td>§5 Исследовательский поиск с объяснением релевантности</td>
+<td>поиск есть, <code>matched_by</code>/score не показываются</td>
+</tr>
+<tr>
+<td>§6 Фасеты: темы, сущности, проекты, тип, риск</td>
+<td>только states/scopes</td>
+</tr>
+<tr>
+<td>§7 Граф связей</td>
+<td>нет (relationships в карточке не визуализируются)</td>
+</tr>
+<tr>
+<td>§8 Досье с происхождением и переходами</td>
+<td>частично (history без переходов к первоисточникам)</td>
+</tr>
+<tr>
+<td>§9 Битемпоральная история</td>
+<td>есть (as_of/known_at/сравнение)</td>
+</tr>
+<tr>
+<td>§10 Сравнение противоречий</td>
+<td>нет (только бейдж at_risk)</td>
+</tr>
+<tr>
+<td>§11 Исследовательские сессии</td>
+<td>нет</td>
+</tr>
+<tr>
+<td>§12 Результаты исследования агента</td>
+<td>нет (агентский explore не выводится в UI)</td>
+</tr>
+<tr>
+<td>Сохранение контекста переходов</td>
+<td>нет (URL-параметры tab/state/scope/qselected есть, контекста нет)</td>
+</tr>
+</tbody></table>
+<h2 id="2-общий-исследовательский-слой-готовность-данных"><a class="anchor" href="#2-общий-исследовательский-слой-готовность-данных" aria-label="Section link">#</a>2. Общий исследовательский слой: готовность данных</h2><p>Движок <code>observation/explore.go</code> + <code>POST /v1/observations/knowledge/explore</code>
+(доступен UI через базу <code>/api</code>) закрывает почти все потребности ТЗ без нового
+бэкенда:</p>
+<table>
+<thead>
+<tr>
+<th>Сценарий ТЗ</th>
+<th>Операция</th>
+<th>Структуры</th>
+<th>Готовность</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§4 Карта областей</td>
+<td><code>orient</code></td>
+<td><code>ExploreArea</code> (topic/entity, счётчики, состояния, противоречия, представители)</td>
+<td>готово</td>
+</tr>
+<tr>
+<td>§5 Поиск + объяснение</td>
+<td><code>search</code></td>
+<td><code>ExploreKnowledgeCard</code> (matched_by, score)</td>
+<td>готово</td>
+</tr>
+<tr>
+<td>§7 Граф связей</td>
+<td><code>expand</code> (+<code>IncludeCandidates</code>)</td>
+<td><code>ExploreRelation</code> (explicit/candidate, depth, via, event_id)</td>
+<td>готово</td>
+</tr>
+<tr>
+<td>§8 Досье</td>
+<td><code>trace</code></td>
+<td><code>ExploreHistory</code> (steps, usage, evidence)</td>
+<td>готово</td>
+</tr>
+<tr>
+<td>§9 Временная история</td>
+<td><code>trace</code> + <code>knowledge/diff</code></td>
+<td>steps + битемпоральные срезы</td>
+<td>готово</td>
+</tr>
+<tr>
+<td>§10 Противоречия</td>
+<td><code>compare</code></td>
+<td><code>ExploreConflict</code> (basis, context_differences, resolution)</td>
+<td>готово</td>
+</tr>
+<tr>
+<td>§12 Синтез/результаты агента</td>
+<td><code>synthesize</code></td>
+<td><code>ExploreSynthesis</code> (established/disputed/retired, gaps)</td>
+<td>готово</td>
+</tr>
+<tr>
+<td>Ограничения и честность</td>
+<td>все</td>
+<td><code>Limits</code>, <code>completeness</code>, <code>Notes</code> («нет данных» ≠ «нет результатов»)</td>
+<td>готово</td>
+</tr>
+</tbody></table>
+<p>Виды связей (<code>supports/contradicts/derived_from/depends_on/supersedes/related_to</code>)
+совпадают со словарём <code>knowledge.linked</code> — граф не требует отдельных данных.</p>
+<h2 id="3-пробелы-и-решения"><a class="anchor" href="#3-пробелы-и-решения" aria-label="Section link">#</a>3. Пробелы и решения</h2><ol>
+<li><strong>Фасеты бедны (ТЗ §6).</strong> <code>GET /v1/observations/knowledge</code> возвращает
+<code>facets: {states, scopes}</code>. Нужно расширить сервер (<code>observation/ knowledge_query.go</code>): <code>topics</code>, <code>entities</code>, <code>projects</code>, <code>kinds</code>,
+<code>at_risk</code> — счётчики по видимым знаниям с учётом тех же фильтров.
+Объём: S. Без UI-изменений обратно совместимо.</li>
+<li><strong>Первоисточники (ТЗ §8.3).</strong> <code>Evidence.Ref</code> — id события журнала вида
+<code>r/event/000001</code>; событие несёт <code>context.run</code>. Переход «доказательство →
+событие → трейс рана» собирается на клиенте из <code>GET /v1/observations/ events?...</code> (поиск по event_id) + существующих ссылок на трейс рана.
+Эндпоинта «событие по id» нет — добавлять не обязательно: события уже
+доступны листингом с фильтром, но прямой <code>GET /v1/observations/events/ {id}</code> (S) упростит и ускорит досье. Рекомендуется.</li>
+<li><strong>Карта знаний (ТЗ §4).</strong> Данные есть (<code>orient</code>), визуализации нет.
+Решение: SVG-облако областей без внешних библиотек (размер ∝
+knowledge_count, цвет — доминирующее состояние, бейдж противоречий),
+рядом — альтернативный список областей (ТЗ §4.5). Объём: M.</li>
+<li><strong>Исследовательские сессии (ТЗ §11).</strong> Хранилища нет. Варианты:
+а) localStorage (быстро, не переносимо между устройствами) — v1;
+б) workspace-таблица <code>research_sessions</code> (переносимо, видимо другим) —
+этап 4. Предлагаем: v1 localStorage, этап 4 — серверное хранилище с
+экспортом/импортом.</li>
+<li><strong>Точка входа и маршрут.</strong> Новый пункт главного меню «Знания» →
+<code>/knowledge</code> (страница <code>KnowledgeExplorer.tsx</code>). Вкладка «Знания» в
+Observability остаётся до этапа 4 как операционная (быстрые
+lifecycle-действия над свежими предложениями), затем её lifecycle-панель
+переезжает в Explorer и вкладка удаляется. Это отражено в плане этапа 4.</li>
+<li><strong>Контекст переходов (ТЗ §3.3, этап 2).</strong> Каждая навигация в Explorer
+пишет запись (откуда → куда → чем инициировано) в стек сессии (в памяти +
+localStorage). URL продолжает нести состояние (как сейчас: q/state/
+selected/…), добавляются <code>area</code>, <code>entity</code>, <code>tab</code> Explorer&#39;а.</li>
+</ol>
+<h2 id="4-архитектура-ui"><a class="anchor" href="#4-архитектура-ui" aria-label="Section link">#</a>4. Архитектура UI</h2><pre><code>debugger/src/KnowledgeExplorer.tsx   — страница Explorer (этап 2+)
+debugger/src/explorer/
+  AreaMap.tsx        — SVG-карта областей (orient)
+  Dossier.tsx        — досье знания (trace + chain + lifecycle)
+  RelationGraph.tsx  — локальный граф (expand), SVG без зависимостей
+  ConflictPanel.tsx  — сравнение противоречий (compare)
+  HistoryTimeline.tsx— временная история (trace + diff)
+  session.ts         — стек переходов + сохранение сессии
+debugger/src/observationApi.ts       + explore(), facets (расширенные)
+observation/knowledge_query.go       + facets topics/entities/projects/kinds/risk
+observation/httpapi/server.go        + GET /v1/observations/events/{id} (опц.)
+</code></pre>
+<p>Правила: вся выборка — через существующий API журнала; UI не считает связи
+сам (только отображает <code>ExploreRelation</code>); права — как у вкладки знаний
+(чтение reader, lifecycle-действия writer); никаких параллельных хранилищ.</p>
+<h2 id="5-предлагаемый-минимальный-объём-v1-этап-2"><a class="anchor" href="#5-предлагаемый-минимальный-объём-v1-этап-2" aria-label="Section link">#</a>5. Предлагаемый минимальный объём v1 (этап 2)</h2><ol>
+<li>Страница <code>/knowledge</code>: заголовок с поиском, карта областей (orient по
+видимым знаниям проекта), список областей справа.</li>
+<li>Клик по области → поиск по ней (<code>search</code> с вопросом-областью) → список
+карточек с <code>matched_by</code> и score; клик по карточке → раскрытие досье-кратко
+(proposition, состояние, evidence-счётчик, риск) с действиями lifecycle.</li>
+<li>Фасетная панель: состояние, scope, тема, проект (после расширения
+фасетов), мультивыбор, счётчики.</li>
+<li>Стек переходов в памяти + URL-синхронизация (назад/вперёд браузера
+работают).</li>
+</ol>
+<p>Не входит в v1 (этапы 3–4): граф связей, досье-полное, временная история
+внутри Explorer, сравнение противоречий, сессии, просмотр результатов
+агента (кратко доступен через существующий hints-предпросмотр).</p>
+<h2 id="6-план-этапов"><a class="anchor" href="#6-план-этапов" aria-label="Section link">#</a>6. План этапов</h2><ul>
+<li><strong>Этап 2 (M):</strong> фасеты на сервере; <code>KnowledgeExplorer.tsx</code> + <code>AreaMap</code> +
+поиск + фасеты + стек переходов; пункт меню и маршрут; i18n ru/en; тесты
+(фасеты, API-клиент, компоненты карты).</li>
+<li><strong>Этап 3 (M):</strong> <code>RelationGraph</code> (expand, кандидаты отдельно), <code>Dossier</code>
+(trace, первоисточники, lifecycle), <code>HistoryTimeline</code> (битемпоральные
+срезы), <code>ConflictPanel</code> (compare, разрешение через существующие
+challenge/correct).</li>
+<li><strong>Этап 4 (M):</strong> сессии (localStorage → серверное хранилище), просмотр
+результатов исследования агента (synthesize + переход к исходным
+evidence), перенос lifecycle-панели из Observability, удаление старой
+вкладки.</li>
+</ul>
+<p>Оценки: этапы 2–4 сопоставимы с волнами E–G команд агентов.</p>
+<h2 id="7-открытые-вопросы-решения-2026-10-16"><a class="anchor" href="#7-открытые-вопросы-решения-2026-10-16" aria-label="Section link">#</a>7. Открытые вопросы — решения (2026-10-16)</h2><ol>
+<li>Минимальный объём v1 (§5) утверждён без графа связей — граф в этапе 3.</li>
+<li><code>GET /v1/observations/events/{id}</code> — добавлен (этап 2).</li>
+<li>Сессии: localStorage/память в v1, серверное хранилище в этапе 4 — ок.</li>
+<li>Вкладка «Знания» в Observability: перенос lifecycle в Explorer и удаление
+старой вкладки на этапе 4 — ок.</li>
+</ol>
+<h2 id="8-статус-этапа-2-реализовано"><a class="anchor" href="#8-статус-этапа-2-реализовано" aria-label="Section link">#</a>8. Статус этапа 2 (реализовано)</h2><ul>
+<li>Сервер: фасеты <code>topics</code>/<code>entities</code>/<code>projects</code>/<code>kinds</code> + фильтры
+<code>topic</code>/<code>entity</code>/<code>origin</code>/<code>kind</code> (одиночное значение на измерение, как
+state/scope); открытые размерности ограничены топ-40 по частоте;
+<code>GET /v1/observations/events/{id}</code> (+<code>source_id</code>/<code>project</code> для уточнения);
+<code>orient</code> без вопроса — валидная операция (полная карта областей,
+ранжирование по размеру).</li>
+<li>UI: страница <code>/knowledge</code> («Знания»), карта областей (SVG, размер ∝
+количеству, цвет — преобладающее состояние, бейдж противоречий) и
+альтернативный список областей (поиск/сортировка/клавиатура); фасетная
+панель; исследовательский поиск с аннотациями <code>matched_by</code>/score из
+<code>explore search</code>; карточки с кратким досье и lifecycle-действиями; стек
+переходов в памяти + URL-синхронизация (back/forward работают).</li>
+<li>Меню: «Знания» → <code>/knowledge</code>; Observability переименован в
+«Наблюдаемость» (до переноса lifecycle-панели на этапе 4).</li>
+<li>Не входит (этапы 3–4): граф связей, полное досье с первоисточниками,
+битемпоральная история, сравнение противоречий, сессии-хранилище.</li>
+</ul>
+<h2 id="9-статус-этапа-3-реализовано"><a class="anchor" href="#9-статус-этапа-3-реализовано" aria-label="Section link">#</a>9. Статус этапа 3 (реализовано)</h2><p>UI-only поверх существующего движка explore (сервер не менялся, кроме
+клиентской типизации):</p>
+<ul>
+<li><code>Dossier.tsx</code> — полное досье с вкладками Обзор / История / Связи /
+Противоречия: trace + активационная цепочка (<code>/workspace/knowledge/{id}/chain</code>),
+первоисточники (evidence → <code>GET /v1/observations/events/{id}</code>, раскрытие
+данных события и контекста), замена (replacement_id → переход в досье
+приемника), исследование от утверждения; пустые блоки не показываются.</li>
+<li><code>RelationGraph.tsx</code> — SVG-граф окружения (expand): детерминированная
+концентрическая укладка по глубине (корень в центре), цвет ребра — тип
+связи, пунктир — кандидатные рёбра (+ отдельный пунктирный ореол у
+кандидатных узлов), легенда двух независимых каналов; контролы: глубина
+1–3, кандидаты вкл/выкл, фильтр типов связей, фильтр узлов, центрирование
+на выбранном узле, переход в досье; чистые функции вынесены для тестов.</li>
+<li><code>HistoryTimeline.tsx</code> — вертикальная история жизненного цикла (иконки/
+метки из каталога событий) + битемпоральные срезы as_of/known_at: срез
+применяется на сервере (повторный trace), локальный хелпер <code>stateAsOf</code>
+показывает состояние на момент среза; телеметрия использования.</li>
+<li><code>ConflictPanel.tsx</code> — обнаружение противоречий (compare без targets по
+всей видимой базе) и режим досье (conflicts по contradicts-рёбрам);
+формулировки/состояния/контекстные различия рядом, разрешение только
+через существующие механизмы: оспорить сторону или заменить её в пользу
+другой (invalidate + replacement_id); резолвнутые конфликты показывают
+решение.</li>
+<li><code>LifecycleBar.tsx</code> — общие lifecycle-действия (challenge / invalidate /
+promote / correct с указанием приемника) для карточки поиска и досье.</li>
+<li>Интеграция: вкладки «Поиск» / «Противоречия», досье занимает правую
+колонку (кнопка назад), записи стека переходов и URL-параметры
+<code>view</code>/<code>dossier</code>; <code>observationApi</code> — типизация relations/traces/conflicts +
+фильтр <code>knowledge_id</code>; i18n ru/en; тесты (укладка графа, stateAsOf, базы
+конфликтов).</li>
+</ul>
+<h2 id="10-статус-этапа-4-реализовано"><a class="anchor" href="#10-статус-этапа-4-реализовано" aria-label="Section link">#</a>10. Статус этапа 4 (реализовано)</h2><ul>
+<li>Серверное хранилище сессий: миграция 000066
+(<code>workspace_research_session</code>: project, title, created_by, payload jsonb,
+updated_at), Store-методы (<code>workspace/researchsession.go</code>, список — без
+payload), маршруты <code>/v1/workspace/research-sessions</code> (GET-список/GET-одна —
+reader; POST/PUT/DELETE — writer) с аудитом
+research.session.created/updated/deleted; валидация title ≤ 200, payload
+≤ 128 КБ; handler-тесты (RBAC, 422/404/400, аудиты).</li>
+<li>Сессии в UI: панель «Сессии» в исследователе — сохранить текущее
+положение (вопрос, фильтры, область, view, досье, стек переходов) с
+заметками и выводом исследователя, открыть (позиция восстанавливается,
+знания ре-резолвятся из текущей проекции — §11.3), «Сохранить как новую»
+(§11.4), удалить; заметки/вывод помечены как слова исследователя, не
+знание (§11.2). Payload v1 — только ссылки; толерантный парсинг
+(<code>applySessionPayload</code>) переживает поля будущих версий, тесты на
+roundtrip/устойчивость.</li>
+<li>Исследование агента (§12): вкладка «Исследование агента» — выбор рана
+(ввод + недавние), извлечение вызовов <code>knowledge_explore</code> из журнала
+(tool.started + аргументы как JSON-строка), «Повторить сейчас» —
+воспроизведение через explore по текущей базе с пометкой времени и
+полноты; для synthesize — секции established/disputed/retired/conflicts/
+gaps/next_actions/references с дисклеймером интерпретации и переходами в
+досье; чистый парсер вызовов вынесен и покрыт тестами; <code>synthesis</code>
+типизирован в клиенте (ExploreSynthesis).</li>
+<li>Перенос из Observability: панель «Подбор подсказок (прайминг)»
+(query/tool/tool_result → /hints) — сворачиваемый блок во вкладке поиска;
+вкладка «Знания» удалена (overview + patterns остались), плитки здоровья
+ведут в исследователь <code>/knowledge?state=…</code> (включая alive/at_risk);
+lifecycle-действия и активационная цепочка давно в Explorer (этапы 2–3),
+URL-синхронизация Observability почищена.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="filesystem-policy.html"><small>← Назад</small><strong>ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</strong></a>
+    <a class="pager-next" href="human-knowledge-explorer.html"><small>Далее →</small><strong>ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

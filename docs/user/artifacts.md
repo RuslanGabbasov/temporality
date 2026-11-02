@@ -19,8 +19,8 @@ description: Реестр документов с согласованием л�
 
 ![Страница артефактов](../assets/artifacts-page.webp)
 
-Страница **Артефакты** (`/artifacts`), детали — `docs/artifact-registry.md`
-и `docs/artifact-lifecycle.md`.
+Страница **Артефакты** (`/artifacts`), детали — [docs/artifact-registry.md](docs/artifact-registry.md)
+и [docs/artifact-lifecycle.md](docs/artifact-lifecycle.md).
 
 ## Типы и назначение
 

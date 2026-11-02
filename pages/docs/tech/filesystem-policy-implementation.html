@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/filesystem-policy-implementation.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row active" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</h1>
+
+<p>Сопроводительные заметки к ТЗ <a href="filesystem-policy.html"><code>docs/filesystem-policy.md</code></a>:
+решения, принятые при встраивании в существующую кодовую базу, влияние на
+уже развёрнутые инсталляции и известные риски. Обновляется по мере этапов
+(P0 → P1 → P2).</p>
+<h2 id="0-что-уже-есть-в-кодовой-базе-корреляция-с-тз"><a class="anchor" href="#0-что-уже-есть-в-кодовой-базе-корреляция-с-тз" aria-label="Section link">#</a>0. Что уже есть в кодовой базе (корреляция с ТЗ)</h2><table>
+<thead>
+<tr>
+<th>ТЗ</th>
+<th>Существующий механизм</th>
+<th>Что делаем</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§3.3 структура правил</td>
+<td><code>workspace.Policy</code> (org_policy), измерения моделей/MCP/бюджетов/mode-ов</td>
+<td>Добавляем <code>Filesystem *FilesystemRules</code> (read/write/deny)</td>
+</tr>
+<tr>
+<td>§3.4 наследование</td>
+<td><code>EffectivePolicy(unitIDs...)</code> → <code>MergePolicies</code> (рестриктивное слияние)</td>
+<td>Файловые правила сливаются тем же проходом</td>
+</tr>
+<tr>
+<td>§6.1 security context</td>
+<td><code>agent.RunInput</code> несёт policy-констрейнты (<code>RequireToolApproval</code>, <code>ReadOnly</code>, бюджеты); <code>applyRunPolicy</code> в <code>cmd/agent-kernel/main.go</code> решает политику один раз при старте</td>
+<td>Туда же морозим <code>Filesystem</code> + <code>PolicyVersion</code></td>
+</tr>
+<tr>
+<td>§6.2 делегирование</td>
+<td><code>kernel.resolve_agent</code> → run-config с <code>actor_id</code>; 4 точки спавна детей (<code>workflow.go</code> plan×2 + delegate, <code>teamrun.go</code>)</td>
+<td>Ребёнок НАСЛЕДУЕТ снимок родителя (<code>ResolveAgentRequest</code>), не пересчитывает</td>
+</tr>
+<tr>
+<td>§5.2 gateway</td>
+<td><code>kernel/agent/filetools.go</code>: <code>resolveWorkspacePath</code> уже держит containment + symlink-resolve</td>
+<td>Перед операцией — проверка <code>AllowRead/AllowWrite</code></td>
+</tr>
+<tr>
+<td>§5.3 sandbox</td>
+<td><code>kernel/sandbox/docker.go</code>: <code>/workspace</code> bind (:ro для read-only), <code>/scratch</code> run-scoped, <code>/tmp</code> tmpfs, cap-drop</td>
+<td>Landlock-обёртка поверх команды (этап P1)</td>
+</tr>
+<tr>
+<td>§4.1 каноническое пространство</td>
+<td><code>$KERNEL_SANDBOX_ROOT/projects/&lt;project-id&gt;</code> → <code>/workspace</code> (uploads, артефакты, файлы агентов)</td>
+<td><strong>Не меняем</strong> — пространство уже каноническое</td>
+</tr>
+<tr>
+<td>§7 claims/worktree</td>
+<td><code>PlanTask</code> (plan DAG)</td>
+<td>P2: <code>workspace_claims</code></td>
+</tr>
+</tbody></table>
+<h2 id="1-семантика-зафиксированная-в-p0"><a class="anchor" href="#1-семантика-зафиксированная-в-p0" aria-label="Section link">#</a>1. Семантика, зафиксированная в P0</h2><ul>
+<li><strong><code>nil</code>/отсутствующее измерение = без ограничений</strong> (§3.5). Ряд политики без
+<code>filesystem</code> не сужает ничего; поведение инсталляции без файловых правил
+байт-в-байт прежнее.</li>
+<li><strong>Пустой непустой список (<code>[]</code>) = ничего не разрешено</strong> — та же развилка
+<code>nil</code> vs <code>[]</code>, что уже используется в <code>PolicyAllowsList</code>. Нормализация при
+записи: отправленный пустой список читается как <code>nil</code> («не задано»).</li>
+<li><strong><code>deny</code> — абсолютный приоритет</strong>, объединяется ОБЪЕДИНЕНИЕМ по уровням:
+запрет предка не отменяется дочерней политикой.</li>
+<li><strong><code>read</code>/<code>write</code> — семантическое ПЕРЕСЕЧЕНИЕ областей путей</strong> (§3.4). Вместо
+алгебры glob-масок (не замкнуты относительно пересечения) эффективная
+политика хранит слои: слой = OR-набор масок одной политики, между слоями —
+AND. Путь разрешён, если попадает во ВСЕ слои. Это точное пересечение
+без преобразования масок; пример из ТЗ (Global <code>**</code> ∩ Unit <code>src/**</code> ∩
+Project <code>src/backend/**</code> = <code>src/backend/**</code>) работает именно так.</li>
+<li><strong>Матчер</strong>: нормализованные относительные пути, <code>/</code> как разделитель,
+<code>**</code> (включая переход через <code>/</code>), <code>*</code>, <code>?</code>, <code>[...]</code>. Регистр значим.
+<code>..</code>, абсолютные пути и пустые маски отвергаются на валидации.</li>
+<li><strong><code>write</code> без <code>read</code> не бывает</strong> (решение на ревью): область записи —
+ПЕРЕСЕЧЕНИЕ write- и read-областей; путь, исключённый read-правилами,
+никогда не бывает доступен на запись, как бы ни читались write-маски.
+Противоречие между измерениями СУЖАЕТ до пустоты, а не расширяет чтение
+(fail-closed).</li>
+<li><strong><code>PolicyVersion</code></strong> — стабильный отпечаток (sha256/12 hex) нормализованной
+эффективной политики; пишется в <code>RunInput</code>, в <code>run.started</code> и в аудит.</li>
+</ul>
+<h2 id="2-наследование-при-делегировании-6263"><a class="anchor" href="#2-наследование-при-делегировании-6263" aria-label="Section link">#</a>2. Наследование при делегировании (§6.2–6.3)</h2><p>Сейчас дети получают конфиг через run-config, который ПЕРЕСЧИТЫВАЕТ политику
+по org-позиции. Это может ослабить доступ, если политику изменили между
+стартом родителя и ребёнка. В P0:</p>
+<ul>
+<li><code>applyRunPolicy</code> морозит <code>Filesystem</code>+<code>PolicyVersion</code> в <code>RunInput</code>;</li>
+<li><code>ResolveAgentRequest</code> несёт снимок родителя; <code>ResolveAgent</code> переопределяет
+им ребёнка (снимок побеждает свежий пересчёт);</li>
+<li>продолжение после turn-limit (<code>TurnLimitRestarts</code>) и team-слоты идут через
+тот же <code>resolve_agent</code> → тот же механизм.</li>
+</ul>
+<p>Так «изменения политики не повышают полномочия уже запущенного процесса» —
+всё дерево делегирования работает на снимке инициатора.</p>
+<h2 id="3-влияние-на-существующие-инсталляции"><a class="anchor" href="#3-влияние-на-существующие-инсталляции" aria-label="Section link">#</a>3. Влияние на существующие инсталляции</h2><p><strong>Файлы.</strong> Каноническое пространство не меняется (<code>/workspace</code> проекта),
+поэтому накопленные файлы, uploads, артефакты и ссылки на них в чате
+сохраняют смысл. Миграция файлов не нужна.</p>
+<p><strong>Знания и опыт агентов.</strong> Knowledge/hints ссылаются на пути и содержимое —
+пути стабильны (§4.2), ничего не инвалидируется. Единственное изменение
+поведения: если оператор задаст deny-область, а знания агента ведут в неё —
+агент получит отказ на операцию (и это ожидаемая семантика, отказ должен
+сопровождаться внятным сообщением и аудитом, чтобы не выглядеть как поломка).</p>
+<p><strong>Политики.</strong> Колонка <code>filesystem</code> добавляется аддитивно (JSONB, NULL).
+<code>MergePolicies</code> для строк без правил не меняет результат. Существующие
+инсталляции после апгрейда ведут себя одинаково до первого файлового правила.</p>
+<p><strong>Бегущие workflow (Temporal).</strong> <code>RunInput</code>/<code>ToolRequest</code> — JSON-пейлоады;
+новые поля с <code>omitempty</code> реплеятся без ошибок, старые run-ы получают
+<code>nil</code> = без ограничений. Совместимость в обе стороны сохраняется.</p>
+<p><strong>Роль-ограничения (reviewer/qa/read-only).</strong> Действующее поведение
+(<code>requireWritableWorkspace</code>, <code>:ro</code> маунт) сохраняется как КОНСЕРВАТИВНОЕ
+наложение: роль может только СУЗИТЬ (запретить запись), никогда — выдать.
+ТЗ запрещает роль как основание выдачи полномочий — сужение этому не
+противоречит и защищает старые инсталляции, где роль-ограничения
+рассчитываются.</p>
+<h2 id="4-landlock-результаты-экспериментов-этап-p1"><a class="anchor" href="#4-landlock-результаты-экспериментов-этап-p1" aria-label="Section link">#</a>4. Landlock: результаты экспериментов (этап P1)</h2><p>Проба: <code>scripts/landlock-probe</code> (самодостаточная, raw-сисвызовы 444–446 —
+номера едины на всех архитектурах Linux). Лаунчер: <code>cmd/landlock-launcher</code>
+(компилятор правил — <code>kernel/sandbox/landlock</code>).</p>
+<p><strong>Проверено на стенде (OrbStack, ядро 7.2.12, Landlock ABI 10, образ
+песочницы):</strong></p>
+<ul>
+<li>enforcement: чтение/запись/создание внутри разрешённых областей проходят,
+всё вне — EACCES; deny-зона недоступна и для чтения и для записи;</li>
+<li>наследование: ребёнок, exec&#39;d после <code>restrict_self</code>, работает под теми же
+правилами;</li>
+<li>изоляционный контур песочницы (<code>--read-only --cap-drop=ALL --security-opt=no-new-privileges --user</code>, без сети) — Landlock работает;</li>
+<li>сисвызовы Landlock не блокируются seccomp-профилем Docker;</li>
+<li>rename/unlink внутри write-области работают (REFER/TRUNCATE включаются по
+ABI ≥ 2/3, на старых ядрах просто не обрабатываются — без E2BIG);</li>
+<li>WSL2 и современные дистрибутивы Linux Landlock поддерживают (проверено
+по документации ядра — 5.13+, включая ядра WSL2).</li>
+</ul>
+<p><strong>Находки, определившие дизайн:</strong></p>
+<ol>
+<li><code>execve</code> ЧИТАЕТ бинарник — read-правила должны покрывать системные
+каталоги, иначе не запустится ни один инструмент. Лаунчер выдаёт
+<code>/bin /sbin /usr /lib* /etc /opt</code> на чтение, <code>/dev /proc /sys /run /tmp /scratch /var</code> — полностью (технические каталоги, §5.3).</li>
+<li>Landlock-правила — чистые allow&#39;ы, вычитание невозможно: deny-подобласть
+внутри дерева неизбежно лишает предков прав на СОЗДАНИЕ (иначе создание в
+предке покрыло бы и запрет). Компилятор отдаёт creation-права только
+subtree-однородным записываемым каталогам — это максимум выразимости
+механизма, а не упрощение.</li>
+<li>Name-маски (<code>src/*.go</code>) на уровне ОС: существующие файлы — точно
+(per-file правила), СОЗДАНИЕ новых имён — консервативный отказ. Gateway
+ядра при этом точен. Расхождение лаунчер пишет в stderr («policy
+approximation») — без незаметных упрощений.</li>
+<li>Харнесс exec-пламбинга сам упирается в правила (<code>/dev/null</code> для stdin) —
+при диагностике учитывать, что это enforcement работает.</li>
+<li>Fail-closed: лаунчер при любой невозможности применить правила отказывается
+запускать команду (exit 125); явный лабораторный обход — только
+<code>KERNEL_SANDBOX_LANDLOCK=off</code> на стороне ядра (обёртка не ставится вовсе).</li>
+</ol>
+<p><strong>Швы интеграции:</strong> снимок политики доезжает через <code>sandbox.Request</code>
+(<code>kernel/sandbox/policy.go</code> — wire-зеркало без зависимости runner&#39;а от
+storage-пакета), лаунчер стейджится в <code>$KERNEL_SANDBOX_ROOT/.bin/</code> (единственное
+host==container дерево) и монтируется в контейнер; отпечаток политики входит
+в fingerprint переиспользуемого контейнера. Легаси-запросы без политики дают
+байт-в-байт прежний argv (тест <code>landlock_wrap_test</code>).</p>
+<p>Осталось в P1: аудит-события отказов в Journal (§8) и паритетный прогон
+«запрет в read_file == запрет в shell» в CI-матрице (Linux amd64/arm64,
+WSL2).</p>
+<h2 id="5-план-этапов-соответствие-тз-10"><a class="anchor" href="#5-план-этапов-соответствие-тз-10" aria-label="Section link">#</a>5. План этапов (соответствие ТЗ §10)</h2><ul>
+<li><strong>P0 (эта ветка):</strong> модель правил + матчер + рестриктивное слияние,
+снимок политики в <code>RunInput</code>/<code>ToolRequest</code>, наследование при делегировании,
+<code>PolicyVersion</code> в журнале, тесты идентичности и совместимости.</li>
+<li><strong>P1 (в работе, эта ветка):</strong> enforcement — ✅ файловые инструменты ядра
+(gateway + тип отказа <code>FilesystemDenied</code>), ✅ Landlock-исследование и
+лаунчер (fail-closed), ✅ обвязка песочницы (стейджинг, mount, env,
+fingerprint); осталось: аудит в Journal и CI-матрица паритета.</li>
+<li><strong>P2:</strong> workspace_claims в <code>PlanTask</code>, детекция пересечений, git worktree,
+интеграция с проверками и журналированием.</li>
+<li><strong>P3:</strong> не-Git изоляция, UI правил и эффективных полномочий, диагностика
+конфликтов.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="failure-reconciliation.html"><small>← Назад</small><strong>Side-effect and event reconciliation (Phase 2 audit)</strong></a>
+    <a class="pager-next" href="filesystem-policy.html"><small>Далее →</small><strong>ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

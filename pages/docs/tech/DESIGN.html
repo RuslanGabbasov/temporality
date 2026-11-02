@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Temporality — visual design specification — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/DESIGN.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row active" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Temporality — visual design specification</h1>
+
+<blockquote>
+<p>Brand and UI design specification<br>Status: initial production baseline<br>Product: Temporality</p>
+</blockquote>
+<h2 id="1-brand-idea"><a class="anchor" href="#1-brand-idea" aria-label="Section link">#</a>1. Brand idea</h2><p>Temporality is a system for observing how agent knowledge appears, changes, is confirmed, becomes invalid, and is reused in later operations.</p>
+<p>The visual language should communicate:</p>
+<ul>
+<li><strong>time</strong> — events and states have a temporal position;</li>
+<li><strong>knowledge</strong> — information accumulates and changes state;</li>
+<li><strong>trajectory</strong> — an agent is observed through a sequence of operations, not only by its final output;</li>
+<li><strong>reuse</strong> — previously acquired knowledge can become useful again in a new context;</li>
+<li><strong>engineering precision</strong> — this is an infrastructure/developer product, not a generic AI assistant.</li>
+</ul>
+<h3 id="what-the-identity-should-avoid"><a class="anchor" href="#what-the-identity-should-avoid" aria-label="Section link">#</a>What the identity should avoid</h3><p>Do not use:</p>
+<ul>
+<li>clocks, watch faces, hourglasses;</li>
+<li>brain / neural-network clichés;</li>
+<li>generic connected-node graphs;</li>
+<li>excessive gradients;</li>
+<li>neon cyan + violet &quot;AI SaaS&quot; palettes;</li>
+<li>excessive glassmorphism;</li>
+<li>decorative 3D;</li>
+<li>noisy icons containing many semantic elements.</li>
+</ul>
+<p>The identity should feel <strong>quiet, technical and distinctive</strong>.</p>
+<hr>
+<h1 id="2-logo"><a class="anchor" href="#2-logo" aria-label="Section link">#</a>2. Logo</h1><h2 id="primary-mark"><a class="anchor" href="#primary-mark" aria-label="Section link">#</a>Primary mark</h2><p>The primary symbol consists of <strong>three vertical, slightly curved temporal strands</strong>.</p>
+<p>The symbol intentionally has two simultaneous readings:</p>
+<ol>
+<li>three time/world lines — a subtle reference to physics and temporal trajectories;</li>
+<li>three bars — a subtle reference to measurements, state and observed data.</li>
+</ol>
+<p>The mark must remain abstract. Do not add arrows, nodes, clocks or explicit timeline markers.</p>
+<h3 id="geometry"><a class="anchor" href="#geometry" aria-label="Section link">#</a>Geometry</h3><ul>
+<li>Three parallel rounded strands.</li>
+<li>Equal visual weight.</li>
+<li>Small horizontal displacement between strands.</li>
+<li>Different vertical extents.</li>
+<li>Rounded caps.</li>
+<li>The middle/third strand may carry the accent color.</li>
+<li>No enclosing circle.</li>
+<li>No connecting nodes.</li>
+<li>No text inside the mark.</li>
+</ul>
+<h3 id="clear-space"><a class="anchor" href="#clear-space" aria-label="Section link">#</a>Clear space</h3><p>Minimum clear space around the mark:</p>
+<p><code>0.5 × mark width</code></p>
+<p>No UI element, text or border may enter this area.</p>
+<h3 id="minimum-size"><a class="anchor" href="#minimum-size" aria-label="Section link">#</a>Minimum size</h3><ul>
+<li>Digital favicon: 16×16 — monochrome version preferred.</li>
+<li>App icon: 32×32 and above — full-color version.</li>
+<li>UI navigation: 20–24 px — monochrome or restrained two-tone version.</li>
+<li>Marketing: use the full wordmark whenever there is enough space.</li>
+</ul>
+<h2 id="wordmark"><a class="anchor" href="#wordmark" aria-label="Section link">#</a>Wordmark</h2><p>Use:</p>
+<p><strong>Temporality</strong></p>
+<p>Typography should be clean, neutral and slightly human rather than futuristic.</p>
+<p>Recommended primary font:</p>
+<ul>
+<li>Inter</li>
+</ul>
+<p>Fallback:</p>
+<ul>
+<li>system-ui, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif</li>
+</ul>
+<p>Recommended wordmark weight:</p>
+<p><code>500</code></p>
+<p>Avoid:</p>
+<ul>
+<li>bold geometric display fonts;</li>
+<li>sci-fi fonts;</li>
+<li>all caps;</li>
+<li>excessive letter spacing.</li>
+</ul>
+<hr>
+<h1 id="3-color-system"><a class="anchor" href="#3-color-system" aria-label="Section link">#</a>3. Color system</h1><p>The palette deliberately avoids the common electric-blue/purple AI aesthetic.</p>
+<h2 id="core-colors"><a class="anchor" href="#core-colors" aria-label="Section link">#</a>Core colors</h2><table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Hex</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--tm-ink</code></td>
+<td><code>#0F1F1D</code></td>
+<td>primary dark / logo</td>
+</tr>
+<tr>
+<td><code>--tm-forest</code></td>
+<td><code>#1F3B37</code></td>
+<td>deep green surfaces</td>
+</tr>
+<tr>
+<td><code>--tm-teal</code></td>
+<td><code>#2A6B63</code></td>
+<td>secondary brand accent</td>
+</tr>
+<tr>
+<td><code>--tm-amber</code></td>
+<td><code>#E09B5A</code></td>
+<td>primary semantic accent</td>
+</tr>
+<tr>
+<td><code>--tm-cream</code></td>
+<td><code>#EDE8DF</code></td>
+<td>warm light background</td>
+</tr>
+<tr>
+<td><code>--tm-white</code></td>
+<td><code>#F7F5F0</code></td>
+<td>primary light surface</td>
+</tr>
+<tr>
+<td><code>--tm-muted</code></td>
+<td><code>#8A96A3</code></td>
+<td>secondary text / inactive</td>
+</tr>
+<tr>
+<td><code>--tm-dark</code></td>
+<td><code>#121B20</code></td>
+<td>dark application background</td>
+</tr>
+</tbody></table>
+<h3 id="brand-principle"><a class="anchor" href="#brand-principle" aria-label="Section link">#</a>Brand principle</h3><p><strong>Green carries the system. Amber carries the event.</strong></p>
+<p>Green is structural:</p>
+<ul>
+<li>navigation;</li>
+<li>persistent states;</li>
+<li>knowledge;</li>
+<li>secondary controls;</li>
+<li>active system surfaces.</li>
+</ul>
+<p>Amber is temporal/salient:</p>
+<ul>
+<li>newly observed event;</li>
+<li>transition;</li>
+<li>attention;</li>
+<li>important state change;</li>
+<li>selected temporal point.</li>
+</ul>
+<p>Amber should be used sparingly.</p>
+<hr>
+<h1 id="4-semantic-colors"><a class="anchor" href="#4-semantic-colors" aria-label="Section link">#</a>4. Semantic colors</h1><p>Brand colors and semantic colors are separate concepts.</p>
+<pre><code class="language-css">:root {
+  --tm-success: #5E887A;
+  --tm-warning: #E09B5A;
+  --tm-danger: #B96B61;
+  --tm-info: #5C7F7A;
+  --tm-neutral: #8A96A3;
+}
+</code></pre>
+<p>Do not make the whole interface green/orange merely because they are brand colors.</p>
+<p>Semantic state should remain visually subordinate to the content.</p>
+<hr>
+<h1 id="5-surfaces"><a class="anchor" href="#5-surfaces" aria-label="Section link">#</a>5. Surfaces</h1><h2 id="light-theme"><a class="anchor" href="#light-theme" aria-label="Section link">#</a>Light theme</h2><pre><code class="language-css">--tm-bg:       #F7F5F0;
+--tm-surface:  #EDE8DF;
+--tm-elevated: #FFFFFF;
+--tm-border:   #D8D5CD;
+--tm-text:     #0F1F1D;
+--tm-text-2:   #56635F;
+--tm-text-3:   #8A928F;
+</code></pre>
+<h2 id="dark-theme"><a class="anchor" href="#dark-theme" aria-label="Section link">#</a>Dark theme</h2><pre><code class="language-css">--tm-bg:       #0F1F1D;
+--tm-surface:  #162825;
+--tm-elevated: #1C302C;
+--tm-border:   #2A403B;
+--tm-text:     #F1EEE7;
+--tm-text-2:   #AAB5B0;
+--tm-text-3:   #71817B;
+</code></pre>
+<p>Dark mode should not be pure black.</p>
+<hr>
+<h1 id="6-typography"><a class="anchor" href="#6-typography" aria-label="Section link">#</a>6. Typography</h1><h2 id="font-stack"><a class="anchor" href="#font-stack" aria-label="Section link">#</a>Font stack</h2><pre><code class="language-css">font-family:
+  Inter,
+  ui-sans-serif,
+  system-ui,
+  -apple-system,
+  BlinkMacSystemFont,
+  &quot;Segoe UI&quot;,
+  sans-serif;
+</code></pre>
+<h2 id="scale"><a class="anchor" href="#scale" aria-label="Section link">#</a>Scale</h2><pre><code class="language-css">--tm-text-xs:   11px;
+--tm-text-sm:   13px;
+--tm-text-md:   14px;
+--tm-text-lg:   16px;
+--tm-text-xl:   20px;
+--tm-text-2xl:  24px;
+--tm-text-3xl:  32px;
+--tm-text-4xl:  40px;
+</code></pre>
+<p>Recommended weights:</p>
+<pre><code class="language-css">--tm-weight-regular: 400;
+--tm-weight-medium: 500;
+--tm-weight-semibold: 600;
+</code></pre>
+<p>Avoid 700+ except for very rare marketing headings.</p>
+<hr>
+<h1 id="7-layout"><a class="anchor" href="#7-layout" aria-label="Section link">#</a>7. Layout</h1><p>Temporality should feel like an engineering instrument.</p>
+<p>Use:</p>
+<ul>
+<li>generous whitespace;</li>
+<li>strong alignment;</li>
+<li>restrained borders;</li>
+<li>compact data density inside operational screens;</li>
+<li>larger whitespace in explanatory/marketing surfaces.</li>
+</ul>
+<p>Base spacing unit:</p>
+<p><code>4px</code></p>
+<pre><code class="language-css">--tm-space-1: 4px;
+--tm-space-2: 8px;
+--tm-space-3: 12px;
+--tm-space-4: 16px;
+--tm-space-5: 20px;
+--tm-space-6: 24px;
+--tm-space-8: 32px;
+--tm-space-10: 40px;
+--tm-space-12: 48px;
+--tm-space-16: 64px;
+</code></pre>
+<p>Recommended radius:</p>
+<pre><code class="language-css">--tm-radius-sm: 6px;
+--tm-radius-md: 10px;
+--tm-radius-lg: 14px;
+</code></pre>
+<p>Avoid excessive rounded cards. A card should communicate grouping, not decoration.</p>
+<hr>
+<h1 id="8-iconography"><a class="anchor" href="#8-iconography" aria-label="Section link">#</a>8. Iconography</h1><p>Icons should be:</p>
+<ul>
+<li>linear;</li>
+<li>geometric;</li>
+<li>1.5–2 px stroke;</li>
+<li>rounded caps;</li>
+<li>minimal;</li>
+<li>visually quiet.</li>
+</ul>
+<p>The logo is <strong>not</strong> an icon template.</p>
+<p>For product concepts use simple primitives:</p>
+<ul>
+<li>time → line / point / vertical progression;</li>
+<li>knowledge → layered planes;</li>
+<li>trajectory → curved path;</li>
+<li>reuse → returning path;</li>
+<li>operation → small event marker.</li>
+</ul>
+<p>Do not turn every concept into a literal pictogram.</p>
+<hr>
+<h1 id="9-timeline-visual-language"><a class="anchor" href="#9-timeline-visual-language" aria-label="Section link">#</a>9. Timeline visual language</h1><p>The timeline is the strongest product-specific visual language.</p>
+<p>Use:</p>
+<ul>
+<li>a thin vertical temporal axis;</li>
+<li>sparse event points;</li>
+<li>short horizontal branches;</li>
+<li>compact event cards;</li>
+<li>state transitions represented by position and restrained color.</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-text">       ●  knowledge observed
+       │
+       │
+       ●  knowledge confirmed
+       │
+       ├──── operation reused knowledge
+       │
+       ●  knowledge invalidated
+</code></pre>
+<p>The temporal axis should remain visually dominant over individual cards.</p>
+<hr>
+<h1 id="10-knowledge-states"><a class="anchor" href="#10-knowledge-states" aria-label="Section link">#</a>10. Knowledge states</h1><p>Suggested visual treatment:</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Visual treatment</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>proposed</td>
+<td>muted outline</td>
+</tr>
+<tr>
+<td>confirmed</td>
+<td>green accent</td>
+</tr>
+<tr>
+<td>used</td>
+<td>amber event marker</td>
+</tr>
+<tr>
+<td>invalidated</td>
+<td>muted / crossed or faded</td>
+</tr>
+<tr>
+<td>superseded</td>
+<td>muted with continuation</td>
+</tr>
+<tr>
+<td>unknown</td>
+<td>neutral gray</td>
+</tr>
+</tbody></table>
+<p>Do not rely on color alone. Every state must also have a textual/iconographic representation.</p>
+<hr>
+<h1 id="11-motion"><a class="anchor" href="#11-motion" aria-label="Section link">#</a>11. Motion</h1><p>Animation should reinforce temporal meaning.</p>
+<p>Preferred:</p>
+<ul>
+<li>short fade/translate;</li>
+<li>timeline point appearing along an axis;</li>
+<li>state transition;</li>
+<li>subtle path movement.</li>
+</ul>
+<p>Avoid:</p>
+<ul>
+<li>bouncing;</li>
+<li>elastic animations;</li>
+<li>perpetual ambient motion;</li>
+<li>animated gradients;</li>
+<li>decorative particle systems.</li>
+</ul>
+<p>Suggested durations:</p>
+<pre><code class="language-css">--tm-duration-fast: 120ms;
+--tm-duration-normal: 180ms;
+--tm-duration-slow: 280ms;
+</code></pre>
+<p>Use <code>ease-out</code> for entering content and <code>ease-in-out</code> for state transitions.</p>
+<hr>
+<h1 id="12-buttons-and-controls"><a class="anchor" href="#12-buttons-and-controls" aria-label="Section link">#</a>12. Buttons and controls</h1><p>Primary button:</p>
+<ul>
+<li>dark green / forest background;</li>
+<li>warm light text;</li>
+<li>8–10 px radius;</li>
+<li>medium weight.</li>
+</ul>
+<p>Accent action:</p>
+<ul>
+<li>amber;</li>
+<li>only for genuinely salient temporal actions.</li>
+</ul>
+<p>Do not make every CTA amber.</p>
+<p>Secondary controls:</p>
+<ul>
+<li>transparent;</li>
+<li>subtle border;</li>
+<li>neutral text.</li>
+</ul>
+<hr>
+<h1 id="13-cards"><a class="anchor" href="#13-cards" aria-label="Section link">#</a>13. Cards</h1><p>Cards should be closer to <strong>instrument panels</strong> than marketing tiles.</p>
+<p>Preferred:</p>
+<pre><code class="language-css">background: var(--tm-elevated);
+border: 1px solid var(--tm-border);
+border-radius: var(--tm-radius-md);
+</code></pre>
+<p>Avoid:</p>
+<pre><code class="language-css">box-shadow: 0 20px 60px ...;
+backdrop-filter: blur(...);
+</code></pre>
+<p>unless there is a specific interaction reason.</p>
+<hr>
+<h1 id="14-data-visualization"><a class="anchor" href="#14-data-visualization" aria-label="Section link">#</a>14. Data visualization</h1><p>Charts should use the brand palette sparingly.</p>
+<p>Recommended hierarchy:</p>
+<ol>
+<li>dark ink / forest — baseline;</li>
+<li>muted teal — supporting series;</li>
+<li>amber — selected event or significant transition;</li>
+<li>muted gray — historical/inactive information.</li>
+</ol>
+<p>Do not use rainbow categorical palettes.</p>
+<p>For temporal charts, the x-axis should remain visually important. Prefer a continuous temporal line over decorative chart effects.</p>
+<hr>
+<h1 id="15-product-shell"><a class="anchor" href="#15-product-shell" aria-label="Section link">#</a>15. Product shell</h1><p>A typical Temporality screen should feel like:</p>
+<pre><code class="language-text">┌──────────────────────────────────────────────────────────────┐
+│  logo   Temporality                         search   profile │
+├───────────────┬──────────────────────────────────────────────┤
+│               │                                              │
+│  Timeline     │  Operation / trajectory                      │
+│  Knowledge    │                                              │
+│  Agents       │       ●─────── knowledge                     │
+│  Analytics    │       │                                      │
+│               │       ●─────── confirmed                     │
+│               │       │                                      │
+│               │       ├─────── reused                        │
+│               │       │                                      │
+│               │       ●─────── invalidated                   │
+│               │                                              │
+└───────────────┴──────────────────────────────────────────────┘
+</code></pre>
+<p>Navigation should be calm and secondary to the temporal content.</p>
+<hr>
+<h1 id="16-logo-svg-usage"><a class="anchor" href="#16-logo-svg-usage" aria-label="Section link">#</a>16. Logo SVG usage</h1><p>The canonical source is:</p>
+<p><code>temporality-mark.svg</code></p>
+<p>The SVG is deliberately self-contained and uses no external fonts, images or CSS.</p>
+<p>For monochrome use, replace the fills with:</p>
+<pre><code class="language-css">currentColor
+</code></pre>
+<p>For small sizes, use the simplified monochrome form.</p>
+<hr>
+<h1 id="17-css-design-tokens"><a class="anchor" href="#17-css-design-tokens" aria-label="Section link">#</a>17. CSS design tokens</h1><pre><code class="language-css">:root {
+  /* Brand */
+  --tm-ink: #0F1F1D;
+  --tm-forest: #1F3B37;
+  --tm-teal: #2A6B63;
+  --tm-amber: #E09B5A;
+  --tm-cream: #EDE8DF;
+  --tm-white: #F7F5F0;
+  --tm-muted: #8A96A3;
+  --tm-dark: #121B20;
+
+  /* Light surfaces */
+  --tm-bg: #F7F5F0;
+  --tm-surface: #EDE8DF;
+  --tm-elevated: #FFFFFF;
+  --tm-border: #D8D5CD;
+  --tm-text: #0F1F1D;
+  --tm-text-2: #56635F;
+  --tm-text-3: #8A928F;
+
+  /* Semantic */
+  --tm-success: #5E887A;
+  --tm-warning: #E09B5A;
+  --tm-danger: #B96B61;
+  --tm-info: #5C7F7A;
+  --tm-neutral: #8A96A3;
+
+  /* Spacing */
+  --tm-space-1: 4px;
+  --tm-space-2: 8px;
+  --tm-space-3: 12px;
+  --tm-space-4: 16px;
+  --tm-space-5: 20px;
+  --tm-space-6: 24px;
+  --tm-space-8: 32px;
+  --tm-space-10: 40px;
+  --tm-space-12: 48px;
+  --tm-space-16: 64px;
+
+  /* Radius */
+  --tm-radius-sm: 6px;
+  --tm-radius-md: 10px;
+  --tm-radius-lg: 14px;
+
+  /* Typography */
+  --tm-font:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    &quot;Segoe UI&quot;,
+    sans-serif;
+
+  --tm-text-xs: 11px;
+  --tm-text-sm: 13px;
+  --tm-text-md: 14px;
+  --tm-text-lg: 16px;
+  --tm-text-xl: 20px;
+  --tm-text-2xl: 24px;
+  --tm-text-3xl: 32px;
+  --tm-text-4xl: 40px;
+
+  --tm-weight-regular: 400;
+  --tm-weight-medium: 500;
+  --tm-weight-semibold: 600;
+
+  /* Motion */
+  --tm-duration-fast: 120ms;
+  --tm-duration-normal: 180ms;
+  --tm-duration-slow: 280ms;
+}
+</code></pre>
+<hr>
+<h1 id="18-brand-usage-summary"><a class="anchor" href="#18-brand-usage-summary" aria-label="Section link">#</a>18. Brand usage summary</h1><h3 id="do"><a class="anchor" href="#do" aria-label="Section link">#</a>Do</h3><ul>
+<li>use the three-strand mark consistently;</li>
+<li>preserve generous clear space;</li>
+<li>use forest/teal as structural colors;</li>
+<li>reserve amber for temporal salience;</li>
+<li>keep visualizations restrained;</li>
+<li>let timelines and state transitions become part of the identity;</li>
+<li>use the mark without explanatory symbolism.</li>
+</ul>
+<h3 id="don39t"><a class="anchor" href="#don39t" aria-label="Section link">#</a>Don&#39;t</h3><ul>
+<li>redraw the mark as a graph;</li>
+<li>add nodes or arrows;</li>
+<li>put the mark inside a clock;</li>
+<li>use cyan/violet neon gradients;</li>
+<li>add glow effects;</li>
+<li>use multiple accent colors at once;</li>
+<li>make every UI element rounded and floating.</li>
+</ul>
+<hr>
+<h1 id="19-brand-character"><a class="anchor" href="#19-brand-character" aria-label="Section link">#</a>19. Brand character</h1><p><strong>Quietly technical.</strong></p>
+<p>Temporality should look like a serious system that happens to have a distinctive visual identity — not like a marketing layer placed on top of an AI product.</p>
+<p>The visual metaphor is:</p>
+<blockquote>
+<p><strong>time leaves structure behind.</strong></p>
+</blockquote>
+
+
+  <nav class="docs-pager">
+    <span></span>
+    <a class="pager-next" href="ROADMAP.html"><small>Далее →</small><strong>Temporality Roadmap</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

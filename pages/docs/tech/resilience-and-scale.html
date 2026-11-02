@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Отказоустойчивость и масштабируемость — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/resilience-and-scale.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row active" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Отказоустойчивость и масштабируемость</h1>
+
+<p>Статус: принято. Связанные документы: <code>failure-model.md</code> (семантика сбоев и
+доставки событий), <code>failure-reconciliation.md</code> (реконсиляция неопределённых
+операций), <code>supervisor-model.md</code> (триаж и человеческий фактор).</p>
+<p>Этот документ фиксирует, как ядро ведёт себя при сбоях инфраструктуры,
+какими ресурсами ограничен воркфлоу рана и почему приняты ключевые
+архитектурные решения вокруг Temporal — включая те, от которых осознанно
+отказались.</p>
+<h2 id="1-temporal-как-слой-долговечности-replay-коротко"><a class="anchor" href="#1-temporal-как-слой-долговечности-replay-коротко" aria-label="Section link">#</a>1. Temporal как слой долговечности: replay коротко</h2><p>Воркфлоу рана — event-sourced: каждый шаг (вызов модели, инструмента,
+запись события журнала) — отдельная активность, результат которой
+неизменяемо записан в историю воркфлоу. При падении воркера, деплое или
+перезапуске Temporal поднимает код воркфлоу заново и <strong>переигрывает</strong>
+историю: уже выполненные активности не запускаются повторно (ни LLM-токены,
+ни команды песочницы), их результаты подставляются из истории. Ран
+переживает рестарты воркера и деплои без потери прогресса — это фундамент
+отказоустойчивости, а не её нарушение.</p>
+<p>Следствия, зафиксированные в коде:</p>
+<ul>
+<li><strong>Детерминизм — дисциплина, а не пожелание.</strong> Любое поведенческое
+изменение детерминированных путей <code>AgentRun</code> гейтится
+<code>workflow.GetVersion</code> (<code>delegation-note-steering</code>,
+<code>model-schedule-to-start</code>): старые истории переигрываются тем кодом,
+против которого они записаны. Нарушение этого правила = воркфлоу-таска
+вечно падает на проверке детерминизма, ран выглядит замершим
+(реальный инцидент, см. git history).</li>
+<li><strong>Активности идемпотентны или под политикой.</strong> Модельные вызовы чистые
+(промпт-кэш по <code>PromptCacheKey</code>); инструменты с внешними эффектами
+несут operation id и reconciliation (<code>failure-model.md</code>,
+<code>failure-reconciliation.md</code>).</li>
+<li><strong>Отмена доходит через heartbeat</strong>: <code>kernel.call_model</code> бьётся
+heartbeat&#39;ом, поэтому nudge/cancellation останавливает живой HTTP-стрим,
+а не оставляет зомби.</li>
+<li><strong>Тяжёлые payload&#39;ы — в журнал, не в историю Temporal.</strong> Полные ответы
+модели, выводы инструментов и события опыта пишутся <code>RecordEvent</code>
+активностью в observation-БД. История воркфлоу держит компактные
+структуры — это осознанная дисциплина, от которой зависит и размер
+истории, и скорость replay (§2).</li>
+</ul>
+<h2 id="2-история-воркфлоу-границы-и-математика"><a class="anchor" href="#2-история-воркфлоу-границы-и-математика" aria-label="Section link">#</a>2. История воркфлоу: границы и математика</h2><p>Критика «кодинг-петля раздует Event History до гигантов и уложит харнес
+в лимит 50 000 событий» проверена против конфигурации и отвергнута —
+история рана ограничена конструкцией:</p>
+<table>
+<thead>
+<tr>
+<th>Ограничитель</th>
+<th>Значение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Бюджет ходов</td>
+<td><code>DefaultMaxTurns = 8</code>, потолок <code>MaxTurnsCeiling = 100</code></td>
+</tr>
+<tr>
+<td>Событий Temporal на ход</td>
+<td>~20–60 (call_model + run_tool ×N + RecordEvent ×M)</td>
+</tr>
+<tr>
+<td>История одного рана при 100 ходах</td>
+<td>~2–6 тыс. событий — в 8–25 раз ниже лимита</td>
+</tr>
+<tr>
+<td>Делегации</td>
+<td>Дочерние раны — <strong>отдельные воркфлоу</strong>: их история не раздувает родительскую</td>
+</tr>
+<tr>
+<td>Глубина/ширина делегаций</td>
+<td><code>MaxDelegationDepth</code>, <code>MaxDelegationWidth</code></td>
+</tr>
+<tr>
+<td>Повторные сбои</td>
+<td>квоты ранов (<code>KERNEL_RUN_QUOTAS</code>), кластеризация супервайзером (A2)</td>
+</tr>
+</tbody></table>
+<p>Replay-цена при этих размерах — миллисекунды на workflow-task. «Секунды и
+минуты на промотку» начинаются на десятках тысяч событий с тяжёлыми
+payload&#39;ами — куда мы их сознательно не кладём (§1, последний пункт).</p>
+<h3 id="21-continue-as-new-осознанно-отложено"><a class="anchor" href="#21-continue-as-new-осознанно-отложено" aria-label="Section link">#</a>2.1. Continue-As-New: осознанно отложено</h3><p>CAN (атомарный перезапуск воркфлоу с чистой историей) — стандартное
+лекарство Temporal, но в текущей конфигурации не нужен (границы выше) и
+дорог: воркфлоу держит append-only разговор (байт-стабильный
+промпт-кэш), steering-каналы заметок, привязки к задаче/саге/родителю.
+Перенос всего этого в новый воркфлоу — отдельный проектированный релиз с
+версионированием.</p>
+<p><strong>Триггеры возврата к теме</strong>: подъём <code>MaxTurnsCeiling</code> к сотням ходов;
+появление ранов, у которых <code>history_size_bytes</code> устойчиво превышает
+~10 МБ; прямой запрос на суточные автономные прогоны без делегаций.</p>
+<h3 id="22-петлю-отладки-внутрь-одной-активности-отвергнуто"><a class="anchor" href="#22-петлю-отладки-внутрь-одной-активности-отвергнуто" aria-label="Section link">#</a>2.2. «Петлю отладки — внутрь одной активности»: отвергнуто</h3><p>Упаковка «напиши код → прогони тесты» в одну долгоживущую активность
+сжала бы историю Temporal, но уничтожила бы продукт: пошаговую трассу,
+подтверждения посреди работы, nudge и steering-дополнения, триаж
+супервайзером по шагам — и добавила бы потерю 40-минутной работы при
+падении воркера (checkpoint&#39;ов внутри активности нет). Пошаговость +
+replay — фича, а не накладные расходы. Отказ зафиксирован; пересмотр
+только вместе с §2.1.</p>
+<h2 id="3-наблюдаемость-границ"><a class="anchor" href="#3-наблюдаемость-границ" aria-label="Section link">#</a>3. Наблюдаемость границ</h2><ul>
+<li>Живой статус рана — <code>DescribeWorkflowExecution</code> (статус воркфлоу в
+Temporal, обогащение результата).</li>
+<li>История подбирается к лимиту → предупреждающий бейдж на бюджетной
+вкладке рана (<code>history_size_bytes</code> из describe) — ранний сигнал к
+завершению/разбиению задачи до принудительного terminate.</li>
+<li>Сбои поставки событий в журнал видны как лаг/пропуски
+(<code>failure-model.md</code>, инвариант 5), а не как успешная тишина.</li>
+</ul>
+<h2 id="31-нагрузочное-тестирование-пошаговая-инструкция"><a class="anchor" href="#31-нагрузочное-тестирование-пошаговая-инструкция" aria-label="Section link">#</a>3.1. Нагрузочное тестирование: пошаговая инструкция</h2><p>Инструменты в репозитории; провайдеры не задействованы, всё локально и
+воспроизводимо:</p>
+<ul>
+<li><strong><code>examples/mockllm</code></strong> — детерминированный OpenAI-совместимый провайдер:
+стрим/блок, сценарий «2 тула → вопрос → финальный ответ», флаги первого
+токена, межтокенного интервала, инжекции 429 (<code>-fail-every N</code>),
+гистограмма первого токена в <code>/metrics</code>. В compose — под профилем
+<code>loadtest</code>.</li>
+<li><strong><code>examples/loadgen</code></strong> — драйвер сценария: создаёт проект/агента/задачи,
+стартует N ранов с ramp&#39;ом, доводит каждый до терминального статуса
+(включая ответы на HITL-паузы), печатает p50/p95/p99 и пишет
+markdown-отчёт; <code>-cleanup</code> удаляет созданные задачи после отчёта.</li>
+<li><strong><code>scripts/loadrun.sh</code></strong> — оркестратор одной команды: preflight
+(сборка песочницы через setup API, доступность мока), сэмплер ресурсов
+(docker stats каждые 2с), прогон, сводка пиков CPU/памяти.</li>
+</ul>
+<blockquote>
+<p><strong>Перед кампанией: проверяйте контракт мока.</strong> Скрипт ассертит профиль
+токенов мока, но не формат его tool-payload: однажды мок молча разошёлся
+с контрактом ядра (<code>run_command</code> строкой вместо массива) — кампании
+продолжали «зелёно» завершаться, а компонента песочницы не исполнялась
+вовсе. Быстрая проверка перед прогоном:</p>
+<pre><code class="language-sh">curl -s http://localhost:8081/v1/chat/completions -H &#39;Content-Type: application/json&#39; \
+  -d &#39;{&quot;model&quot;:&quot;loadgen-model&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;start&quot;}],
+       &quot;tools&quot;:[{&quot;type&quot;:&quot;function&quot;,&quot;function&quot;:{&quot;name&quot;:&quot;run_command&quot;,&quot;parameters&quot;:{}}}],&quot;stream&quot;:false}&#39;
+</code></pre>
+<p>Аргументы должны быть <code>{&quot;command&quot;:[&quot;sh&quot;,&quot;-c&quot;,&quot;…&quot;]}</code> (см. <code>fix(loadgen)</code>).</p>
+</blockquote>
+<h3 id="подготовка-стенда-однократно"><a class="anchor" href="#подготовка-стенда-однократно" aria-label="Section link">#</a>Подготовка стенда (однократно)</h3><ol>
+<li>Требования: Linux + Docker, Go (для сборки драйвера), свободный диск
+50+ ГБ. Hyper-V/виртуалка: фиксированная память (не dynamic), swap 8 ГБ.</li>
+<li>Исходники и env:</li>
+</ol>
+<pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
+cp .env.example .env
+</code></pre>
+<ol start="3">
+<li>В <code>.env</code> на время кампании:</li>
+</ol>
+<pre><code class="language-dotenv">TEMPORALITY_MODEL_BASE_URL=http://mockllm:8081/v1
+TEMPORALITY_MODEL_ID=loadgen-model
+# KERNEL_AUTH_TOKENS — закомментирован (иначе онбординг-режим недоступен)
+# KERNEL_SANDBOX_IMAGE — закомментирован (иначе шаг сборки песочницы 409)
+</code></pre>
+<ol start="4">
+<li>Поднять стек с моком:</li>
+</ol>
+<pre><code class="language-sh">docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile loadtest up -d
+</code></pre>
+<ol start="5">
+<li>Снапшот виртуалки — страховка и точка сравнения.</li>
+</ol>
+<h3 id="кампания"><a class="anchor" href="#кампания" aria-label="Section link">#</a>Кампания</h3><pre><code class="language-sh">scripts/loadrun.sh 5   5   smoke-5.md        # смоук
+scripts/loadrun.sh 50  60  report-50.md      # устойчивая нагрузка
+scripts/loadrun.sh 100 120 report-100.md     # расширенный (по памяти)
+scripts/loadrun.sh 100 120 hitl-100.md --hitl   # HITL: паузы по 30с у каждого рана
+</code></pre>
+<p>Preflight скрипта сам соберёт песочницу через setup API, проверит мок и
+выпадет с ошибкой, если что-то не так. После отчёта задачи удаляются
+(<code>-cleanup</code> по умолчанию); журнал остаётся append-only архивом профиля.</p>
+<p>Профили и критерии: 50 / 100 / 200 параллельных ранов, каждый профиль —
+дважды (второй прогон ловит деградацию после первого); критерий приёмки —
+p95 длительности рана не деградирует между профилями более чем на шум,
+ошибок старта нет. Разброс p95 между повторами &gt; 20% — стенд «шумит»,
+выводы делать нельзя.</p>
+<h3 id="тяжёлый-профиль---heavy"><a class="anchor" href="#тяжёлый-профиль---heavy" aria-label="Section link">#</a>Тяжёлый профиль (--heavy)</h3><p>Лёгкий профиль меряет оркестрацию; тяжёлый — рабочую нагрузку: команды
+песочницы по 10с (десятки параллельных контейнеров), стримы по 1.5 с на
+токен (длинные живые стримы), ask_human-пауза в середине, 300 токенов на
+ответ. Запуск:</p>
+<pre><code class="language-sh"># env мока (compose loadtest-профиль пробрасывает их в контейнер):
+export MOCKLLM_FIRST_TOKEN=1s MOCKLLM_TOKEN_GAP=1500ms MOCKLLM_TOKENS=300
+export MOCKLLM_TOOL_COMMAND=&#39;sleep 10 &amp;&amp; echo heavy&#39; MOCKLLM_ASK_AFTER_TOOLS=2
+scripts/loadrun.sh 100 120 heavy-100.md --heavy --hitl
+</code></pre>
+<p>Ожидания от тяжёлого профиля: одновременно 30–60 живых песочниц,
+сотни событий журнала в секунду, живые стримы во все раны; пики CPU
+несколько ядер — это норма, критерий деградации прежний (p95 не плывёт,
+хвостов нет, 100% завершение).</p>
+<h3 id="измеренный-масштаб-v202623-2026-10-18"><a class="anchor" href="#измеренный-масштаб-v202623-2026-10-18" aria-label="Section link">#</a>Измеренный масштаб (v2026.2.3+, 2026-10-18)</h3><p>Стенд: Hyper-V VM, 12 vCPU (6 физических ядер Xeon E5-2665 2.4 ГГц),
+16 ГБ RAM, диск 843 МБ/с; образы v2026.2.3, мок-провайдер
+(детерминированный сценарий «2 тула → финал», 200 мс до первого токена).</p>
+<p>Профиль: 100 параллельных ранов (ramp 120с), max_turns 3:</p>
+<table>
+<thead>
+<tr>
+<th>Метрика</th>
+<th>Значение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Завершение</td>
+<td>100/100 completed, 0 сбоев старта</td>
+</tr>
+<tr>
+<td>Длительность рана</td>
+<td>p50 5057ms · p95 5070ms · p99 5076ms</td>
+</tr>
+<tr>
+<td>Разброс p50→p99</td>
+<td>0.3% — хвостов нет</td>
+</tr>
+<tr>
+<td>Латентность старта (API)</td>
+<td>p50 3ms · p95 5ms · p99 9ms</td>
+</tr>
+<tr>
+<td>Пик CPU</td>
+<td>ядро 107% (~1 ядро из 12) · postgres 67% · journal 60%</td>
+</tr>
+<tr>
+<td>Пик памяти</td>
+<td>ядро 987 MiB · postgres 89 MiB · journal 19 MiB</td>
+</tr>
+</tbody></table>
+<p>Выводы: 100 параллельных ранов занимают ~1 ядро и ~1 ГБ памяти ядра;
+хвосты латентности отсутствуют. Типичный пик команды из 10 человек
+(10–30 параллельных ранов) — в 3–10 раз ниже протестированной точки.
+Масштабирование до сотен параллельных ранов подтверждено измерением.</p>
+<h3 id="hitl-профиль"><a class="anchor" href="#hitl-профиль" aria-label="Section link">#</a>HITL-профиль</h3><p>Паузы «человек в контуре» меняют характер нагрузки: воркфлоу висит в
+ожидании, копятся approval-wait и HWT. С <code>--hitl</code> мок отвечает
+ask_human после двух тулов, драйвер играет человека (<code>-human-delay 30s</code>),
+находит <code>human.requested</code> в журнале и отвечает approval-сигналом с
+operation id + arguments hash. В отчёт попадают доля ранов с паузами,
+число отвеченных вопросов и средняя пауза (HWT) — первые измеренные
+цифры для канбан-метрик из §5. Гипотеза профиля: сотни висящих ожиданий
+не деградируют ни Temporal, ни память воркера, ни UI-очередь вопросов.</p>
+<h3 id="отчёт-кампании"><a class="anchor" href="#отчёт-кампании" aria-label="Section link">#</a>Отчёт кампании</h3><p>Каждый прогон фиксирует: конфигурацию стенда (vCPU/RAM/диск/версию
+образов), профиль (раны/ramp/режим), таблицу перцентилей, статусы, пики
+CPU/памяти по сервисам, сбои. Итоговая сводка кампании — раздел «Измеренный
+масштаб» этого документа: заполняется по мере прогонов на стандартизированных
+стендах.
+события), учитывая <code>-human-delay</code> как эмуляцию реакции. В отчёт попадают
+доля ранов с паузами, число отвеченных вопросов и средняя пауза (HWT) —
+первые осмысленные цифры для канбан-метрик из §5. Профиль проверяет
+именно масштабную гипотезу: сотни висящих ожиданий не должны деградировать
+ни Temporal, ни память воркера, ни UI-очередь вопросов.</p>
+<p>Смоук-прогон 5 ранов (мок 200ms до первого токена, 2 тула, local
+stack) — все завершились; полноценные профили гоняются на стенде с
+докером и фиксируются в этом разделе по мере накопления.</p>
+<h2 id="4-отказоустойчивость-деплоя-и-эксплуатации"><a class="anchor" href="#4-отказоустойчивость-деплоя-и-эксплуатации" aria-label="Section link">#</a>4. Отказоустойчивость деплоя и эксплуатации</h2><ul>
+<li><strong>Деплой на живом стенде</strong>: воркфлоу и активности переживают рестарт
+воркера; новые попытки активностей подхватываются новым бинарем;
+<code>ScheduleToStartTimeout</code> (5 мин) делает видимым случай, когда активности
+нечем выполняться, вместо молчаливого ожидания.</li>
+<li><strong>Зависший ран</strong>: мягкая отмена (cancel) обрабатывается воркфлоу;
+принудительный terminate (<code>POST /v1/agent/runs/{id}/terminate</code>)
+срабатывает всегда и журналирует терминальное <code>run.cancelled</code> сам —
+используется, когда воркфлоу неспособен обработать сигналы.</li>
+<li><strong>Свежая установка</strong>: до создания первого пользователя гейт аутентификации
+выключен (анонимный admin для онбординга); сервисный принципал ядра
+(<code>usr-temporality-kernel</code>) — внутренний credential, не субъект гейта;
+<code>KERNEL_AUTH_TOKENS</code> включает аутентификацию явно (вход настроенными
+токенами вместо анонимного онбординга).</li>
+<li><strong>Образы</strong>: мультиарх (linux/amd64 + linux/arm64), digest-pinned;
+деплой = pull закреплённой версии, миграции применяются ядром на старте.</li>
+</ul>
+<h2 id="5-сводная-таблица-что-ограничивает-что"><a class="anchor" href="#5-сводная-таблица-что-ограничивает-что" aria-label="Section link">#</a>5. Сводная таблица: что ограничивает что</h2><table>
+<thead>
+<tr>
+<th>Ресурс</th>
+<th>Ограничитель</th>
+<th>Где настроено</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Ходы одного рана</td>
+<td>8 по умолчанию / 100 потолок</td>
+<td><code>RunInput.MaxTurns</code>, <code>MaxTurnsCeiling</code></td>
+</tr>
+<tr>
+<td>История Temporal</td>
+<td>~2–6 тыс. событий при потолке; лимит Temporal 50 тыс.</td>
+<td>конструкция воркфлоу, §2</td>
+</tr>
+<tr>
+<td>Токены/стоимость рана</td>
+<td><code>KERNEL_RUN_QUOTAS</code>, модельные бюджеты</td>
+<td>миграция 000020, <code>RunInput</code></td>
+</tr>
+<tr>
+<td>Дерево делегаций</td>
+<td>глубина <code>MaxDelegationDepth</code>, ширина <code>MaxDelegationWidth</code></td>
+<td><code>workflow.go</code></td>
+</tr>
+<tr>
+<td>Ожидание человека</td>
+<td>таймауты approvals/ask_human</td>
+<td><code>RunInput.ApprovalTimeoutSeconds</code></td>
+</tr>
+<tr>
+<td>Событийный журнал</td>
+<td>outbox + dedup по (source, event_id)</td>
+<td><code>failure-model.md</code></td>
+</tr>
+<tr>
+<td>Повторяющиеся сбои</td>
+<td>кластеризация + предложения эволюции</td>
+<td>supervisor A2/B2</td>
+</tr>
+<tr>
+<td>Безнадёжно зависший ран</td>
+<td>terminate из UI</td>
+<td><code>runs.stop</code></td>
+</tr>
+</tbody></table>
+<h2 id="6-измеренные-результаты-heavy-профиль-на-6-ядрах"><a class="anchor" href="#6-измеренные-результаты-heavy-профиль-на-6-ядрах" aria-label="Section link">#</a>6. Измеренные результаты: heavy-профиль на 6 ядрах</h2><blockquote>
+<p><strong>Поправка (2026-10-27).</strong> Эта кампания гонялась с моком, чей payload
+<code>run_command</code> (<code>{&quot;command&quot;:&quot;…&quot;}</code> — строка) не соответствовал контракту
+ядра, ужесточённому фичей песочницы (массив строк). Команды песочницы
+падали с <code>InvalidToolArguments</code> до исполнения — компонента «два
+выполнения sleep 10 в песочнице» в цифрах ниже не исполнялась: ран
+держали стрим (375 × 1.5 с) и HITL-паузы (~46 с), а «песочниц
+одновременно 8» отражало контейнеры стенда, а не песочницы. Длительность
+рана и выводы о ёмкости оркестрации остаются честными, но тяжёлый
+профиль с реально работающей песочницей требует перезамера.
+Контракт починен в <code>fix(loadgen)</code>; после мержа — перезамер по той же
+методологии.</p>
+</blockquote>
+<p>Стенд: виртуалка 6 физических ядер (Xeon E5-2665), 32 ГБ, Hyper-V; стек
+целиком в docker compose (Postgres+pgvector, journal, kernel, debugger,
+Temporal, searxng, lightpanda); провайдер — детерминированный mockllm
+(<code>examples/mockllm</code>), все исходники и скрипты — в репозитории.</p>
+<p>Профиль heavy (<code>scripts/loadrun.sh --heavy --hitl</code>): каждый ран — 4 модельных
+хода, два выполнения <code>sleep 10</code> в песочнице, пауза <code>ask_human</code> (~45 s
+«раздумий» симулированного человека), финальный ответ — стрим 375 токенов
+с паузой 1.5 s/токен (~9.4 мин непрерывного стрима). Итого ~10.2 мин
+жизни рана, 9–10 обращений к провайдеру, 2 песочницы.</p>
+<table>
+<thead>
+<tr>
+<th>Метрика</th>
+<th>25 ранов</th>
+<th>50 ранов</th>
+<th>100 ранов</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Завершившихся</td>
+<td>25/25</td>
+<td>50/50</td>
+<td><strong>100/100</strong></td>
+</tr>
+<tr>
+<td>Длительность рана p50</td>
+<td>614.9 s</td>
+<td>614.9 s</td>
+<td><strong>615.0 s</strong></td>
+</tr>
+<tr>
+<td>p95 / p99</td>
+<td>615.0 / 615.0 s</td>
+<td>619.9 / 620.1 s</td>
+<td>620.1 / 620.2 s</td>
+</tr>
+<tr>
+<td>Старт-API p50 / p95</td>
+<td>4 / 9 ms</td>
+<td>3 / 4 ms</td>
+<td>3 / 6 ms</td>
+</tr>
+<tr>
+<td>HITL пауз отвечено</td>
+<td>25 (HWT 45.8 s)</td>
+<td>50 (47.3 s)</td>
+<td>100 (47.6 s)</td>
+</tr>
+<tr>
+<td>Пик CPU kernel</td>
+<td>97%</td>
+<td>97%</td>
+<td>119%</td>
+</tr>
+<tr>
+<td>Пик CPU journal</td>
+<td>147%</td>
+<td>223%</td>
+<td>316%</td>
+</tr>
+<tr>
+<td>Пик CPU postgres</td>
+<td>93%</td>
+<td>80%</td>
+<td>113%</td>
+</tr>
+<tr>
+<td>Пик RAM journal</td>
+<td>131 MB</td>
+<td>209 MB</td>
+<td>305 MB</td>
+</tr>
+<tr>
+<td>Песочниц одновременно</td>
+<td>8</td>
+<td>8</td>
+<td>8</td>
+</tr>
+</tbody></table>
+<p>Ключевые выводы:</p>
+<ul>
+<li><strong>Длительность рана константа</strong> (614.9 → 614.9 → 615.0 s): четырёхкратный
+рост параллелизма не стоил агентам ни миллисекунды — конвейер
+(Temporal → kernel → провайдер → журнал) не деградирует до сотни
+параллельных десяти-минутных сессий.</li>
+<li><strong>Рост journal сублинейный</strong> (×2 ранов = ×1.4 CPU на переходе 50→100):
+события батчатся через durable outbox, поллинг потребителей ограничен.</li>
+<li><strong>Суммарный пик ~5 ядер на сотне</strong> — 6-ядерный стенд в кондексе, но с
+запасом; memory-профиль плоский (сотни мегабайт на сервис).</li>
+<li>Инструментация (пер-роутные счётчики journal <code>JOURNAL_DEBUG_ADDR</code>,
+<code>pg_stat_statements</code>, сэмплер <code>loadrun.sh</code>) — часть методологии: без
+атрибуции «кто ест CPU» цифры плавления бесполезны.</li>
+</ul>
+<p>История итераций (честная цена вопроса): первый прогон сотни (до фиксов)
+дал 0/100 терминальных ранов и 867% CPU журнала. Разбор по слоям нашёл и
+починил: неприменённый профиль мока (compose override + assert&#39;ы),
+старт-порядок auth-токена ядро↔журнал (живой резолвер во всех потребителях),
+скан меты знаний по одной странице событий (с пустыми пропозициями в
+вердиктах конфликтов как следствие), вежливый поллинг HITL в драйвере.
+Повтор сотни на исправленном стеке — таблица выше. Нагрузочное
+тестирование как процесс находки → фиксы → доказательство починки.</p>
+<p>Известные точки роста (за пределами сотни на 6 ядрах):</p>
+<ul>
+<li><code>GET /v1/observations/knowledge</code> с <code>knowledge_id</code> (фолбэк карточек
+сравнения supervisor) перепроектирует всю историю знаний проекта —
+~600 ms на вызов; для больших инсталляций нужен точечный эндпоинт.</li>
+<li><code>POST /v1/observations/hints</code> (~750 ms, семантический тир на CPU):
+старт-бёрст сотни ранов — сотня вызовов за минуты; инференс эмбеддингов
+масштабируется воркерами <code>KERNEL_EMBEDDING_WORKERS</code>.</li>
+<li>Рост параллелизма за ~150–200 ранов на такой VM упрётся в CPU —
+горизонтальное масштабирование воркеров ядра и journal.</li>
+</ul>
+<p>Две из трёх точек роста закрыты волной оптимизаций горячего пути —
+см. §6.1.</p>
+<h3 id="61-волна-оптимизаций-горячего-пути-ab-light-профиль-2026-10-27"><a class="anchor" href="#61-волна-оптимизаций-горячего-пути-ab-light-профиль-2026-10-27" aria-label="Section link">#</a>6.1. Волна оптимизаций горячего пути (A/B, light-профиль, 2026-10-27)</h3><p>Аудит производительности (<code>docs/perf-audit-plan.md</code>) переработал горячий
+путь: события хода — через LocalActivity вместо activity round-trip на
+каждое событие, батч-доставка outbox (до 50 событий одним POST), контейнер
+песочницы на ран (<code>exec</code> вместо <code>run</code>+<code>rm</code> на команду), кэш проекции знаний
+для hints/explore, LISTEN/NOTIFY-будильник SSE-стримов, персистентная
+MCP-сессия, шардированный TokenBus, параллельные title+hints на старте.</p>
+<p>A/B на одном хосте и одной БД (macOS, Docker Desktop; kernel/journal/Temporal
+в контейнерах): light-профиль, 25 параллельных ранов, ramp 30 с, рабочая
+песочница (после фикса контракта мока). Абсолютные числа light-профиля не
+сравнимы с heavy-лестницей выше — сравнивается только разница сторон.</p>
+<table>
+<thead>
+<tr>
+<th>Метрика</th>
+<th>main</th>
+<th>ветка оптимизаций</th>
+<th>Δ</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Длительность рана p50</td>
+<td>15 424 ms</td>
+<td><strong>4 087 ms</strong></td>
+<td><strong>−74% (3.8×)</strong></td>
+</tr>
+<tr>
+<td>Длительность рана p95</td>
+<td>18 817 ms</td>
+<td><strong>5 702 ms</strong></td>
+<td>−70%</td>
+</tr>
+<tr>
+<td>Старт-API p95</td>
+<td>11 ms</td>
+<td>11 ms</td>
+<td>=</td>
+</tr>
+<tr>
+<td><code>run_command</code> p50 (2 команды на ран)</td>
+<td>497–640 ms</td>
+<td><strong>98 ms</strong></td>
+<td><strong>5.2×</strong></td>
+</tr>
+<tr>
+<td>Пик CPU postgres</td>
+<td>23–130%</td>
+<td><strong>13–34%</strong></td>
+<td>≈ −60%</td>
+</tr>
+<tr>
+<td>Пик CPU kernel / journal</td>
+<td>67% / 31–58%</td>
+<td><strong>46% / 24–32%</strong></td>
+<td>−32% / −30%</td>
+</tr>
+</tbody></table>
+<p>Ключевое: на ветке медиана рана — константа при росте 5 → 25 параллельных
+(4 095 → 4 087 ms), тогда как <code>main</code> деградирует (5.3 s → 9.3–10.2 s,
+p95 до 16 s) — налог Temporal round-trip&#39;ов на каждое журнальное событие
+платил именно под конкурентностью. Kernel на ветке занят чуть меньше,
+несмотря на перенос исполнения LocalActivity в свой процесс: исчезают
+ожидания server round-trip&#39;ов. Атрибуция по слоям — в таблицах
+<code>docs/perf-audit-plan.md</code>.</p>
+<p>Перезамер heavy-профиля на этой ветке (с рабочей песочницей) — следующий
+шаг методологии; ожидание: константа длительности сохранится, а компонента
+песочницы впервые будет измерена честно.</p>
+<h3 id="сколько-это-пользователей-математика-ёмкости"><a class="anchor" href="#сколько-это-пользователей-математика-ёмкости" aria-label="Section link">#</a>Сколько это «пользователей»: математика ёмкости</h3><p>Ран ≈ одна агентская сессия (диалог с задачей). Пользователь <strong>активно
+работает</strong> с агентом не непрерывно: за час работы у него набегает 3–6
+сессий, но одновременно выполняется обычно 0–2. Для ёмкости считаем
+<strong>одновременные раны</strong>, а не учётки:</p>
+<pre><code class="language-text">одновременные раны ≈ активные пользователи × среднее число
+                     параллельных сессий на пользователя (0.3–1.5)
+</code></pre>
+<p>Для heavy-профиля (самый жёсткий: длинные стримы + песочницы + HITL)
+измеренный бюджет — ~20 одновременных ранов на ядро (пик ~5.3 ядра на
+сотне). Лёгкие сессии (короткие ответы, без песочниц) легче в 5–20 раз.</p>
+<table>
+<thead>
+<tr>
+<th>Железо (только под Temporality)</th>
+<th>Тяжёлые сессии одновременно</th>
+<th>Оценка пользователей (типичный день)*</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>4 ядра / 16 ГБ</td>
+<td>~70</td>
+<td>~200–400</td>
+</tr>
+<tr>
+<td>6 ядер / 32 ГБ (тестовый стенд)</td>
+<td>~100+</td>
+<td>~300–600</td>
+</tr>
+<tr>
+<td>16 ядер / 64 ГБ</td>
+<td>~250–300</td>
+<td>~800–1 500</td>
+</tr>
+<tr>
+<td>32 ядра / 128 ГБ</td>
+<td>~500–600</td>
+<td>~1 500–3 000</td>
+</tr>
+</tbody></table>
+<p>*Пользователи ≠ одновременные сессии: при 3–6 сессиях на час и средней
+сессии в 2–5 минут коэффициент одновременности ≈ 0.05–0.15 на
+«дневного» пользователя. Числа — для планирования, не SLA: реальный
+профиль нагрузки стоит измерить по §3.1 на своём железе (моки дают
+детерминированную базу, далее — калибровка на реальном провайдере).</p>
+<p>RAM почти не ограничивает (сотня ранов — сотни мегабайт на сервис);
+первый ограничитель — CPU журнала и Postgres, второй — параллельные
+песочницы (8 на стенде — это лимит docker, поднимается конфигурацией).
+Провайдер модели — внешний: его рейт-лимиты в ёмкость не входят, для
+честного НТ используется мок.</p>
+<h3 id="как-повторить"><a class="anchor" href="#как-повторить" aria-label="Section link">#</a>Как повторить</h3><p>§3.1 — пошаговая инструкция; коротко:</p>
+<pre><code class="language-bash">git pull &amp;&amp; docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+  --profile loadtest up -d
+cd /srv/temporality  # или где репозиторий
+sudo env TOKEN=&lt;bearer&gt; scripts/loadrun.sh 100 180 run100.md --heavy --hitl
+</code></pre>
+<p>Скрипт сам: соберёт драйвер, применит профиль к моку (compose override,
+литералами, с assert&#39;ами env и boot-строки), проверит токен и песочницу,
+запустит сэмплер ресурсов и напишет markdown-отчёт с метриками мока.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="replay-model.html"><small>← Назад</small><strong>Replay model (Phase 2 audit)</strong></a>
+    <a class="pager-next" href="revision-2026-10-16.html"><small>Далее →</small><strong>Ревизия планов: что не реализовано (2026-10-16)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

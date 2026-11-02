@@ -10,7 +10,7 @@ description: Living skills — reusable agent procedures with a contract, versio
 A living skill is a reusable agent procedure: what it does, when it applies,
 which tools it needs, how to verify the result. Unlike a prompt, a skill is
 versioned, has a contract and a suite of quality evaluations. The **Skills**
-page (`/skills`); details — `docs/living-skills.md`.
+page (`/skills`); details — [docs/living-skills.md](docs/living-skills.md).
 
 ## The skill contract
 

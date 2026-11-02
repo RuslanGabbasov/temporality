@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Триггеры запуска операций и обращение агента к человеку — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/triggers-and-escalations.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row active" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Триггеры запуска операций и обращение агента к человеку</h1>
+
+<h2 id="цель"><a class="anchor" href="#цель" aria-label="Section link">#</a>Цель</h2><p>Сделать запуск агентских операций независимым от пользовательского чата.</p>
+<p>В реальной эксплуатации задача обычно возникает во внешней системе:</p>
+<ul>
+<li>создан Work Item;</li>
+<li>создан или обновлён Pull Request;</li>
+<li>изменился сценарий или тест-кейс в MindMap;</li>
+<li>сработал другой системный webhook;</li>
+<li>в будущем — расписание, событие, API-вызов и другие источники.</li>
+</ul>
+<p>После получения события система должна самостоятельно создать и выполнить операцию агента.</p>
+<p>Если в процессе выполнения агент не может принять решение без дополнительного контекста, он должен уметь адресно запросить человека через настроенный для этого пользователя канал коммуникации — Matrix, Telegram или другой подключённый канал — дождаться ответа и продолжить ту же операцию.</p>
+<h2 id="основной-принцип"><a class="anchor" href="#основной-принцип" aria-label="Section link">#</a>Основной принцип</h2><p><strong>Чат не запускает операцию. Чат является одним из каналов взаимодействия с уже выполняющейся операцией.</strong></p>
+<p>Источником запуска является событие.</p>
+<pre><code class="language-text">Внешняя система
+      │
+      │ webhook / event
+      ▼
+   Trigger
+      │
+      ▼
+  Agent Run
+      │
+      ├── autonomous work
+      │
+      ├── достаточно контекста
+      │       │
+      │       ▼
+      │    завершение
+      │
+      └── недостаточно контекста
+              │
+              ▼
+        запрос человеку
+              │
+       Matrix / Telegram / ...
+              │
+              ▼
+           ответ
+              │
+              ▼
+       продолжение Run
+</code></pre>
+<hr>
+<h1 id="1-триггеры"><a class="anchor" href="#1-триггеры" aria-label="Section link">#</a>1. Триггеры</h1><p>Необходимо ввести сущность <strong>Trigger</strong> — декларативное описание того, какое внешнее событие должно запускать какую агентскую операцию.</p>
+<h3 id="минимальные-свойства"><a class="anchor" href="#минимальные-свойства" aria-label="Section link">#</a>Минимальные свойства</h3><ul>
+<li><code>id</code></li>
+<li><code>name</code></li>
+<li><code>type</code></li>
+<li><code>enabled</code></li>
+<li><code>agent</code></li>
+<li><code>input mapping</code></li>
+<li><code>context</code></li>
+<li><code>authorization</code></li>
+<li><code>deduplication</code></li>
+<li><code>retry policy</code></li>
+</ul>
+<h3 id="типы-триггеров"><a class="anchor" href="#типы-триггеров" aria-label="Section link">#</a>Типы триггеров</h3><p>На первом этапе предусмотреть:</p>
+<ul>
+<li><code>webhook</code>;</li>
+<li><code>event</code> — событие собственного журнала наблюдения (см. ниже);</li>
+<li><code>azure_devops.pull_request</code>;</li>
+<li><code>azure_devops.work_item</code>;</li>
+<li><code>mindmap.test_case</code> / сценарий из MindMap.</li>
+</ul>
+<p>Конкретные интеграции могут реализовываться отдельными адаптерами, но внутри системы они должны приводиться к единому представлению события.</p>
+<h3 id="триггеры-на-события-журнала-typeevent"><a class="anchor" href="#триггеры-на-события-журнала-typeevent" aria-label="Section link">#</a>Триггеры на события журнала (type=event)</h3><p>«Хуки вокруг агентского цикла»: ядро хвостит собственный журнал наблюдения и запускает ран при появлении подходящего события — накопившиеся несогласованные артефакты, попытки побега из песочницы, массовый экспорт документов, события безопасности. Реализовано слушателем в <code>cmd/agent-kernel/eventtriggers.go</code> (интервал 15с).</p>
+<p>Конструктор конфига (<code>workspace.EventConfig</code>):</p>
+<pre><code class="language-json">{
+  &quot;event_type&quot;: &quot;artifact.review.requested&quot;,
+  &quot;filter&quot;: {&quot;actor_id&quot;: &quot;kernel-internal&quot;, &quot;project&quot;: &quot;omni&quot;, &quot;data.status&quot;: &quot;draft&quot;},
+  &quot;prompt&quot;: &quot;Проследить согласование…&quot;
+}
+</code></pre>
+<ul>
+<li><code>event_type</code> — точный тип события журнала (<code>artifact.review.requested</code>,
+<code>tool.failed</code>, <code>secret.issued</code>, <code>run.completed</code>, …);</li>
+<li><code>filter</code> — все записи должны сойтись: <code>actor_id</code> / <code>actor_type</code> / <code>project</code>
+по контексту события, <code>data.&lt;поле&gt;</code> — точное строковое совпадение по payload
+(числа сравниваются в строковой форме). Пустой фильтр — все события типа;
+неизвестные ключи отклоняются на сохранении (422), а не молча не совпадают;</li>
+<li><code>prompt</code> — задача рана; совпавшее событие (id, актор, проект, payload)
+прикладывается к промпту как контекст.</li>
+</ul>
+<p>Семантика срабатывания:</p>
+<ul>
+<li><strong>Только пост-активационные события.</strong> Свежий слушатель (или первая
+активация event-триггера на установке) доходит до хвоста журнала без
+срабатываний — история не переигрывается, иначе каждый исторический
+матч породил бы ран. Курсор — <code>workspace_channel_cursor</code> с ключом
+<code>journal:events</code>.</li>
+<li><strong>Идемпотентность.</strong> task id детерминирован по (trigger id, event id):
+повторная доставка того же события журнала (рестарт до сохранения курсора)
+не создаёт второй ран; REJECT_DUPLICATE на workflow id — вторая линия.</li>
+<li><strong>Анти-цикл.</strong> События ранов, запущенных триггерами (run id с префиксом
+<code>trigger-</code>), никогда не срабатывают триггеры — иначе триггер на «свои» же
+события закольцуется.</li>
+<li><strong>Без триггеров — нет хвоста.</strong> Цикл сначала перечисляет включённые
+event-триггеры; когда их нет, журнал не читается вовсе.</li>
+<li>Путь запуска повторяет расписание: resolve агента → конфиг → политика →
+fire-time авторизация (§21) → task → workflow → run; исходы — в журнале
+(<code>trigger.accepted</code> / <code>trigger.rejected</code>, видимы в карточке доставок).</li>
+</ul>
+<p>Открытые ограничения: срабатывание поштучно (нет агрегации «N событий за
+окно» — пороговые сценарии типа массового экспорта выражаются фильтром по
+payload либо ждут агрегатор); оргпринадлежность проверяется по привязке
+самого триггера (§18), события журнала оргединицу не несут.</p>
+<h3 id="нормализованное-событие"><a class="anchor" href="#нормализованное-событие" aria-label="Section link">#</a>Нормализованное событие</h3><p>Любой источник должен преобразовываться во внутреннее событие примерно следующего вида:</p>
+<pre><code class="language-text">Event
+├── id
+├── type
+├── source
+├── timestamp
+├── actor
+├── tenant
+├── payload
+└── metadata
+</code></pre>
+<p>Агент не должен зависеть от формата исходного webhook.</p>
+<hr>
+<h1 id="2-создание-операции"><a class="anchor" href="#2-создание-операции" aria-label="Section link">#</a>2. Создание операции</h1><p>После успешного прохождения триггера система создаёт обычную агентскую операцию (<code>Agent Run</code>).</p>
+<p>Важно, чтобы операция, запущенная webhook&#39;ом, <strong>ничем принципиально не отличалась от операции, запущенной другим способом</strong>.</p>
+<p>У операции должны быть доступны:</p>
+<ul>
+<li>источник запуска;</li>
+<li>исходное событие;</li>
+<li>агент;</li>
+<li>системный промпт;</li>
+<li>навыки;</li>
+<li>MCP;</li>
+<li>sandbox;</li>
+<li>доступные инструменты;</li>
+<li>лимиты;</li>
+<li>контекст запуска;</li>
+<li>история всех последующих взаимодействий.</li>
+</ul>
+<p>Например:</p>
+<pre><code class="language-text">Run
+├── trigger
+│   ├── type: azure_devops.pull_request
+│   └── event_id: ...
+├── agent: reviewer
+├── input
+│   ├── repository
+│   ├── pull_request
+│   └── ...
+└── execution
+</code></pre>
+<hr>
+<h1 id="3-маппинг-события-в-задачу-агента"><a class="anchor" href="#3-маппинг-события-в-задачу-агента" aria-label="Section link">#</a>3. Маппинг события в задачу агента</h1><p>Для каждого триггера необходимо определить, какие данные события передаются агенту.</p>
+<p>Например:</p>
+<pre><code class="language-text">Azure Pull Request
+        │
+        ├── repository
+        ├── pull request
+        ├── source branch
+        ├── target branch
+        ├── author
+        └── changes
+                │
+                ▼
+          Reviewer Agent
+</code></pre>
+<p>Триггер не должен содержать готовый системный промпт агента.</p>
+<p>Он определяет:</p>
+<blockquote>
+<p>какое событие произошло и какую агентскую операцию необходимо запустить.</p>
+</blockquote>
+<p>Конкретная логика поведения должна находиться в конфигурации агента и его навыках.</p>
+<hr>
+<h1 id="4-идемпотентность-и-повторная-доставка"><a class="anchor" href="#4-идемпотентность-и-повторная-доставка" aria-label="Section link">#</a>4. Идемпотентность и повторная доставка</h1><p>Webhook-системы могут доставлять одно событие несколько раз.</p>
+<p>Поэтому повторное получение одного и того же события не должно создавать несколько одинаковых операций.</p>
+<p>Для каждого входящего события необходимо поддержать:</p>
+<ul>
+<li><code>event_id</code>;</li>
+<li>источник события;</li>
+<li>ключ идемпотентности;</li>
+<li>состояние обработки;</li>
+<li>повторную обработку после временной ошибки.</li>
+</ul>
+<p>Минимальное требование:</p>
+<pre><code class="language-text">same source + same event_id
+        ↓
+same logical trigger
+        ↓
+не создавать второй Run
+</code></pre>
+<hr>
+<h1 id="5-обращение-агента-к-человеку"><a class="anchor" href="#5-обращение-агента-к-человеку" aria-label="Section link">#</a>5. Обращение агента к человеку</h1><p>Агент должен получить специальный инструмент для ситуации, когда самостоятельное принятие решения невозможно.</p>
+<p>Условно:</p>
+<pre><code class="language-text">ask_human(...)
+</code></pre>
+<p>Это <strong>не обычное сообщение в чат</strong>.</p>
+<p>Вызов создаёт ожидающее взаимодействие, связанное с конкретной операцией.</p>
+<p>Минимальные параметры:</p>
+<pre><code class="language-text">recipient
+question
+context
+options
+timeout
+</code></pre>
+<h3 id="пример"><a class="anchor" href="#пример" aria-label="Section link">#</a>Пример</h3><p>Агент обнаружил два возможных варианта:</p>
+<blockquote>
+<p>В PR изменён контракт API. Нужно выбрать, считать ли изменение совместимым с текущей версией клиента. В коде недостаточно информации.</p>
+</blockquote>
+<p>Агент вызывает:</p>
+<pre><code class="language-text">ask_human(
+    recipient = user:123,
+    question = &quot;...&quot;,
+    options = [
+        &quot;Считать совместимым&quot;,
+        &quot;Считать несовместимым&quot;
+    ]
+)
+</code></pre>
+<p>После этого выполнение операции приостанавливается.</p>
+<hr>
+<h1 id="6-выбор-получателя"><a class="anchor" href="#6-выбор-получателя" aria-label="Section link">#</a>6. Выбор получателя</h1><p>Агент не должен сам выбирать канал коммуникации.</p>
+<p>Система должна определить:</p>
+<ol>
+<li>кому необходимо задать вопрос;</li>
+<li>какие каналы у этого пользователя доступны;</li>
+<li>какой канал является предпочтительным;</li>
+<li>каким образом доставить запрос.</li>
+</ol>
+<p>Например:</p>
+<pre><code class="language-text">User
+├── Matrix       preferred
+├── Telegram     enabled
+└── Email        enabled
+</code></pre>
+<p>При этом настройки каналов должны быть частью пользовательского профиля, а не конфигурации конкретного агента.</p>
+<h3 id="приоритет"><a class="anchor" href="#приоритет" aria-label="Section link">#</a>Приоритет</h3><p>Если пользователь настроил:</p>
+<pre><code class="language-text">preferred channel = Matrix
+</code></pre>
+<p>запрос отправляется через Matrix.</p>
+<p>Если канал недоступен, система может использовать следующий разрешённый канал согласно политике fallback.</p>
+<p>Агенту не нужно знать детали Matrix, Telegram и других транспортов.</p>
+<hr>
+<h1 id="7-единый-слой-коммуникации"><a class="anchor" href="#7-единый-слой-коммуникации" aria-label="Section link">#</a>7. Единый слой коммуникации</h1><p>Необходимо отделить агентскую операцию от конкретного транспорта.</p>
+<p>Ввести абстракцию:</p>
+<pre><code class="language-text">Notification / Human Interaction
+        │
+        ├── Matrix adapter
+        ├── Telegram adapter
+        ├── ...
+        └── future adapters
+</code></pre>
+<p>Таким образом, <code>ask_human</code> работает с пользователем, а не с Matrix или Telegram.</p>
+<p>Это позволит впоследствии добавлять новые каналы без изменения агентов и их навыков.</p>
+<hr>
+<h1 id="8-ответ-человека"><a class="anchor" href="#8-ответ-человека" aria-label="Section link">#</a>8. Ответ человека</h1><p>Ответ должен быть связан не просто с пользователем, а с конкретным ожидающим запросом.</p>
+<pre><code class="language-text">Human Request
+├── id
+├── run_id
+├── recipient
+├── question
+├── status
+│   ├── pending
+│   ├── answered
+│   ├── expired
+│   └── cancelled
+├── channel
+├── created_at
+├── expires_at
+└── response
+</code></pre>
+<p>При получении ответа система должна:</p>
+<ol>
+<li>определить <code>Human Request</code>;</li>
+<li>сохранить ответ;</li>
+<li>добавить его в историю операции;</li>
+<li>возобновить выполнение Run;</li>
+<li>передать ответ агенту как результат <code>ask_human</code>.</li>
+</ol>
+<p>Для агента это должно выглядеть так, как будто инструмент вернул результат:</p>
+<pre><code class="language-text">ask_human → human response
+</code></pre>
+<hr>
+<h1 id="9-приостановка-и-возобновление"><a class="anchor" href="#9-приостановка-и-возобновление" aria-label="Section link">#</a>9. Приостановка и возобновление</h1><p>Операция должна поддерживать состояние:</p>
+<pre><code class="language-text">waiting_for_human
+</code></pre>
+<p>В этом состоянии:</p>
+<ul>
+<li>агентский процесс не должен бессмысленно расходовать токены;</li>
+<li>обычный timeout Run не должен уничтожать ожидающую операцию;</li>
+<li>состояние должно переживать перезапуск сервиса;</li>
+<li>операция должна корректно возобновляться после ответа.</li>
+</ul>
+<p>После ответа:</p>
+<pre><code class="language-text">waiting_for_human
+        ↓
+resuming
+        ↓
+running
+</code></pre>
+<hr>
+<h1 id="10-контекст-вопроса"><a class="anchor" href="#10-контекст-вопроса" aria-label="Section link">#</a>10. Контекст вопроса</h1><p>Запрос человеку должен быть самодостаточным.</p>
+<p>Нельзя отправлять:</p>
+<blockquote>
+<p>«Что делать с этим?»</p>
+</blockquote>
+<p>Человек должен понимать:</p>
+<ul>
+<li>какая задача выполняется;</li>
+<li>почему возник вопрос;</li>
+<li>что уже установил агент;</li>
+<li>какой именно информации не хватает;</li>
+<li>какие варианты существуют;</li>
+<li>к чему приведёт выбор.</li>
+</ul>
+<p>При этом человеку не следует отправлять весь технический контекст Run.</p>
+<p>Система должна формировать <strong>компактный human-facing context</strong>.</p>
+<p>Пример:</p>
+<pre><code class="language-text">PR #1842
+
+Я проверяю изменение контракта API.
+В коде обнаружены два возможных варианта поведения.
+
+Какой вариант считать правильным?
+
+[Сохранить совместимость]
+[Разрешить изменение контракта]
+
+Основание: текущий клиент Directum Omni использует старую
+сигнатуру метода.
+</code></pre>
+<hr>
+<h1 id="11-структурированные-ответы"><a class="anchor" href="#11-структурированные-ответы" aria-label="Section link">#</a>11. Структурированные ответы</h1><p>Если вопрос допускает варианты, предпочтительно использовать структурированный ответ:</p>
+<pre><code class="language-text">options:
+  - id: compatible
+    label: Сохранить совместимость
+  - id: breaking
+    label: Разрешить изменение
+</code></pre>
+<p>Ответ человека должен сохранять машинно-обрабатываемое значение.</p>
+<p>Свободный текст также должен поддерживаться:</p>
+<pre><code class="language-text">response:
+  type: text
+  value: &quot;Считаем изменение допустимым...&quot;
+</code></pre>
+<hr>
+<h1 id="12-несколько-вопросов"><a class="anchor" href="#12-несколько-вопросов" aria-label="Section link">#</a>12. Несколько вопросов</h1><p>Операция может последовательно или параллельно ожидать несколько человеческих решений.</p>
+<p>Необходимо предусмотреть:</p>
+<pre><code class="language-text">Run
+├── Human Request #1
+├── Human Request #2
+└── ...
+</code></pre>
+<p>При этом:</p>
+<ul>
+<li>каждый запрос имеет собственный идентификатор;</li>
+<li>ответ однозначно привязывается к запросу;</li>
+<li>Run может ожидать несколько ответов;</li>
+<li>политика продолжения должна быть определена явно.</li>
+</ul>
+<p>На первом этапе достаточно поддержать последовательный сценарий:</p>
+<pre><code class="language-text">ask_human
+   ↓
+wait
+   ↓
+answer
+   ↓
+continue
+   ↓
+ask_human
+</code></pre>
+<hr>
+<h1 id="13-таймаут-и-отсутствие-ответа"><a class="anchor" href="#13-таймаут-и-отсутствие-ответа" aria-label="Section link">#</a>13. Таймаут и отсутствие ответа</h1><p>У запроса должен быть <code>timeout</code>.</p>
+<p>После истечения времени система должна выполнить заданную политику:</p>
+<ul>
+<li>завершить Run с ошибкой;</li>
+<li>продолжить с безопасным значением по умолчанию;</li>
+<li>повторно уведомить человека;</li>
+<li>передать запрос другому пользователю;</li>
+<li>отменить операцию.</li>
+</ul>
+<p>Важно: политика должна быть частью конфигурации операции, а не захардкожена в транспортном адаптере.</p>
+<hr>
+<h1 id="14-уведомления"><a class="anchor" href="#14-уведомления" aria-label="Section link">#</a>14. Уведомления</h1><p>Необходимо разделить:</p>
+<h3 id="human-interaction"><a class="anchor" href="#human-interaction" aria-label="Section link">#</a>Human Interaction</h3><p>Ожидается ответ, без которого операция не может продолжиться.</p>
+<h3 id="notification"><a class="anchor" href="#notification" aria-label="Section link">#</a>Notification</h3><p>Информационное сообщение, которое не блокирует операцию.</p>
+<p>Например:</p>
+<pre><code class="language-text">Agent Run
+   │
+   ├── ask_human → blocking
+   │
+   └── notify → non-blocking
+</code></pre>
+<p>Это позволит агентам сообщать о важных промежуточных результатах, не превращая каждый комментарий в обязательное взаимодействие.</p>
+<hr>
+<h1 id="15-безопасность"><a class="anchor" href="#15-безопасность" aria-label="Section link">#</a>15. Безопасность</h1><p>Нельзя позволять webhook напрямую указывать произвольного пользователя для обращения.</p>
+<p>Необходимо контролировать:</p>
+<ul>
+<li>кто может создавать триггеры;</li>
+<li>какой агент может запускаться;</li>
+<li>от имени какого пользователя может выполняться операция;</li>
+<li>кому агент имеет право задавать вопросы;</li>
+<li>какие данные можно отправлять через внешний канал;</li>
+<li>какие действия может разрешить ответ человека.</li>
+</ul>
+<p>Особенно важно не допустить ситуацию:</p>
+<pre><code class="language-text">malicious webhook
+      ↓
+arbitrary recipient
+      ↓
+agent sends sensitive context
+</code></pre>
+<hr>
+<h1 id="16-наблюдаемость-в-temporality"><a class="anchor" href="#16-наблюдаемость-в-temporality" aria-label="Section link">#</a>16. Наблюдаемость в Temporality</h1><p>Все взаимодействия должны становиться частью единого event stream операции.</p>
+<p>Минимально фиксировать события:</p>
+<pre><code class="language-text">trigger.received
+trigger.accepted
+run.created
+run.started
+
+human.requested
+human.delivered
+human.response_received
+run.resumed
+
+run.completed
+run.failed
+run.cancelled
+</code></pre>
+<p>Для <code>human.requested</code> желательно сохранять:</p>
+<ul>
+<li>причину обращения;</li>
+<li>получателя;</li>
+<li>канал;</li>
+<li>ссылку на Run;</li>
+<li>время ожидания;</li>
+<li>результат.</li>
+</ul>
+<p>Это позволит в дальнейшем анализировать:</p>
+<ul>
+<li>как часто агенты не справляются самостоятельно;</li>
+<li>на каких этапах требуется человек;</li>
+<li>сколько времени операции проводят в ожидании;</li>
+<li>какие решения чаще всего делегируются человеку;</li>
+<li>каких знаний или навыков агентам систематически не хватает.</li>
+</ul>
+<p>Особенно важно, чтобы обращение человека было частью <strong>траектории операции</strong>, а не отдельной системой уведомлений.</p>
+<hr>
+<h1 id="17-пользовательский-интерфейс"><a class="anchor" href="#17-пользовательский-интерфейс" aria-label="Section link">#</a>17. Пользовательский интерфейс</h1><p>В интерфейсе Temporality должна быть видна вся цепочка:</p>
+<pre><code class="language-text">Trigger
+  ↓
+Run started
+  ↓
+Agent reasoning / tool calls
+  ↓
+Human request
+  ↓
+Waiting 14 min
+  ↓
+Human response
+  ↓
+Run resumed
+  ↓
+Completed
+</code></pre>
+<p>Для ожидающей операции необходимо показывать:</p>
+<ul>
+<li>кого ожидаем;</li>
+<li>через какой канал отправлен запрос;</li>
+<li>какой вопрос задан;</li>
+<li>сколько времени ожидаем;</li>
+<li>текущий статус.</li>
+</ul>
+<p>Человек должен иметь возможность открыть Run и увидеть причину ожидания.</p>
+<hr>
+<h1 id="18-управление-триггерами"><a class="anchor" href="#18-управление-триггерами" aria-label="Section link">#</a>18. Управление триггерами</h1><p>Добавить раздел управления триггерами.</p>
+<p>Для каждого триггера отображать:</p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Значение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Название</td>
+<td>Review Pull Request</td>
+</tr>
+<tr>
+<td>Источник</td>
+<td>Azure DevOps</td>
+</tr>
+<tr>
+<td>Событие</td>
+<td>Pull Request created</td>
+</tr>
+<tr>
+<td>Агент</td>
+<td>Reviewer</td>
+</tr>
+<tr>
+<td>Состояние</td>
+<td>Включён</td>
+</tr>
+<tr>
+<td>Последний запуск</td>
+<td>...</td>
+</tr>
+<tr>
+<td>Успешных запусков</td>
+<td>...</td>
+</tr>
+<tr>
+<td>Требовался человек</td>
+<td>...</td>
+</tr>
+</tbody></table>
+<p>Создание триггера должно быть ориентировано на пользователя и не требовать ручного написания большого YAML.</p>
+<p>Предпочтительно использовать форму/мастер:</p>
+<pre><code class="language-text">1. Откуда приходит событие?
+2. Какое событие?
+3. Какого агента запустить?
+4. Какие данные передать?
+5. Кто может быть привлечён к решению?
+6. Что делать при отсутствии ответа?
+</code></pre>
+<p>Система сама формирует внутреннюю конфигурацию.</p>
+<hr>
+<h1 id="19-mvp"><a class="anchor" href="#19-mvp" aria-label="Section link">#</a>19. MVP</h1><p>В первую реализацию включить:</p>
+<h3 id="запуск"><a class="anchor" href="#запуск" aria-label="Section link">#</a>Запуск</h3><ul>
+<li>webhook endpoint;</li>
+<li>нормализацию входящего события;</li>
+<li>создание Agent Run;</li>
+<li>идемпотентность;</li>
+<li>привязку события к Run.</li>
+</ul>
+<h3 id="интеграции"><a class="anchor" href="#интеграции" aria-label="Section link">#</a>Интеграции</h3><ul>
+<li>Azure DevOps Pull Request;</li>
+<li>Azure DevOps Work Item;</li>
+<li>MindMap test scenario.</li>
+</ul>
+<h3 id="взаимодействие"><a class="anchor" href="#взаимодействие" aria-label="Section link">#</a>Взаимодействие</h3><ul>
+<li><code>ask_human</code>;</li>
+<li>Matrix;</li>
+<li>Telegram;</li>
+<li>пользовательский preferred channel;</li>
+<li>ожидание ответа;</li>
+<li>возобновление Run.</li>
+</ul>
+<h3 id="состояния"><a class="anchor" href="#состояния" aria-label="Section link">#</a>Состояния</h3><pre><code class="language-text">pending
+running
+waiting_for_human
+resuming
+completed
+failed
+cancelled
+</code></pre>
+<h3 id="temporality"><a class="anchor" href="#temporality" aria-label="Section link">#</a>Temporality</h3><ul>
+<li>события триггера;</li>
+<li>события человеческого взаимодействия;</li>
+<li>ожидание и возобновление в траектории;</li>
+<li>отображение в истории Run.</li>
+</ul>
+<hr>
+<h1 id="20-критерии-готовности"><a class="anchor" href="#20-критерии-готовности" aria-label="Section link">#</a>20. Критерии готовности</h1><p>Функциональность считается реализованной, если можно выполнить следующий сценарий end-to-end:</p>
+<ol>
+<li>В Azure DevOps создаётся Pull Request.</li>
+<li>Azure DevOps отправляет webhook.</li>
+<li>Temporality принимает событие.</li>
+<li>Создаётся Agent Run для Reviewer.</li>
+<li>Reviewer получает контекст PR и выполняет анализ.</li>
+<li>Агент обнаруживает неоднозначность, которую не может разрешить самостоятельно.</li>
+<li>Агент вызывает <code>ask_human</code>.</li>
+<li>Temporality определяет пользователя и его preferred channel.</li>
+<li>В Matrix или Telegram приходит понятный запрос.</li>
+<li>Операция переходит в <code>waiting_for_human</code>.</li>
+<li>Пользователь отвечает.</li>
+<li>Ответ привязывается к исходному Human Request.</li>
+<li>Run автоматически возобновляется.</li>
+<li>Агент получает ответ как результат <code>ask_human</code>.</li>
+<li>Агент завершает проверку.</li>
+<li>В Temporality видна полная траектория от webhook до завершения, включая ожидание человека.</li>
+<li>Повторная доставка исходного webhook не создаёт второй Run.</li>
+</ol>
+<h2 id="главное-архитектурное-требование"><a class="anchor" href="#главное-архитектурное-требование" aria-label="Section link">#</a>Главное архитектурное требование</h2><p>Не реализовывать это как «бот, который пишет агенту в чат».</p>
+<p>Нужна единая модель:</p>
+<p><strong>Event → Agent Run → Tools → Human Interaction → Agent Run</strong></p>
+<p>Канал коммуникации является транспортом. Источником истины остаётся состояние и event stream операции в Temporality.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="temporality-contract.html"><small>← Назад</small><strong>Temporality event contract</strong></a>
+    <a class="pager-next" href="web-research.html"><small>Далее →</small><strong>Веб-исследования агентов (Web Research)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

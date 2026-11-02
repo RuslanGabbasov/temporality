@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Experiment 9 — corpus of experience evolution comprehension — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/experiment-9-corpus.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row active" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Experiment 9 — corpus of experience evolution comprehension</h1>
+
+<p>Назначение: проверить, что <strong>человек-оператор</strong> понимает эволюцию опыта агента по
+одному только UI (Experience Timeline), без чтения событий и внутреннего
+состояния. В отличие от экспериментов 4–8, проверяется не событийная модель, а
+читаемость жизненного цикла знаний.</p>
+<p>Корпус зафиксирован как acceptance-фикстура
+<code>debugger/src/fixtures/experiment9-webconfig.json</code> (генерируется
+детерминированно из описанных ниже seed-последовательностей) и сворачивается
+фолдом <code>debugger/src/experience.ts</code>; утверждения — в
+<code>debugger/src/experience.fixtures.test.ts</code>.</p>
+<h2 id="сценарий"><a class="anchor" href="#сценарий" aria-label="Section link">#</a>Сценарий</h2><p>Проект <code>exp9-webconfig</code>: приложение <code>webconfig</code> с тремя конкурирующими
+гипотезами конфигурации базы данных:</p>
+<ul>
+<li><strong>Гипотеза A</strong> — переменная окружения <code>DATABASE_URL</code> (проверяется через
+<code>webconfig migrate</code>, lane <code>migrate</code>);</li>
+<li><strong>Гипотеза B</strong> — файл <code>config.yaml</code> (проверяется через <code>webconfig serve</code>,
+lane <code>serve</code>);</li>
+<li><strong>Гипотеза C</strong> — флаг <code>--db-url</code>, перекрывающий обе (lane <code>serve</code>).</li>
+</ul>
+<p>Окружение меняется между запусками: v1 (работают все три механизма) → v2
+(переменные окружения вырезаны, флаг удалён — работает только файл) → v3
+(механизм окружения возвращён, флага по-прежнему нет).</p>
+<h2 id="seed-последовательности"><a class="anchor" href="#seed-последовательности" aria-label="Section link">#</a>Seed-последовательности</h2><p>Восемь запусков <code>webconfig-20261007-01…08</code>, 161 событие, 8 узлов знаний.</p>
+<table>
+<thead>
+<tr>
+<th>Run</th>
+<th>Что происходит</th>
+<th>Жизненный цикл</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>01</td>
+<td>Разобран README, <code>go build</code>, <code>migrate</code> с <code>DATABASE_URL</code> → exit 0, <code>go test</code> → exit 0</td>
+<td>A1 proposed; auto-узлы <code>go build</code>/<code>go test</code> proposed (kernel-heuristic)</td>
+</tr>
+<tr>
+<td>02</td>
+<td>Повторная проверка env (exit 0), проверка config.yaml (exit 0)</td>
+<td>A1 <strong>confirmed</strong> (extraction-reverification.v1); B1 proposed; <code>go test</code> confirmed</td>
+</tr>
+<tr>
+<td>03</td>
+<td>Флаг перекрывает env и файл</td>
+<td>C1 proposed; A1 и B1 <strong>challenged</strong> (extraction-contradiction.v1); B1 использован как hint в этом же run</td>
+</tr>
+<tr>
+<td>04</td>
+<td>Флип на v2: env → exit 1, флаг → exit 2, файл → exit 0</td>
+<td>A1 (challenged) <strong>предложен и использован</strong> — stale use; B1 rescued → confirmed; C1 <strong>invalidated</strong> оператором без преемника; E1 (end-to-end) proposed; <code>go test</code> reused</td>
+</tr>
+<tr>
+<td>05</td>
+<td>Ночной прогон</td>
+<td>A1 предложен, но <strong>проигнорирован</strong>; B1 confirmed повторно (repeated confirmation); <code>go build</code> confirmed</td>
+</tr>
+<tr>
+<td>06</td>
+<td>Флип на v3: env снова работает</td>
+<td>A2 proposed — <strong>ресуррекция</strong> утверждения A1; оператор инвалидирует A1 с указанием на A2 (lineage A1→A2)</td>
+</tr>
+<tr>
+<td>07</td>
+<td>Аудит «что сейчас валидно»</td>
+<td>A2/B1/E1/<code>go test</code> отозваны и использованы; AUDIT proposed (никогда не отзывается)</td>
+</tr>
+<tr>
+<td>08</td>
+<td>Release checks</td>
+<td>Отзываются только живые узлы: A2, B1, E1, <code>go test</code>, <code>go build</code></td>
+</tr>
+</tbody></table>
+<p>Каждое событие фиксирует правдоподобные поля реального журнала: kernel-потоки
+<code>&lt;hash&gt;/event/NNNNNN</code>, hint-события от <code>temporality-activation</code>, ручные
+инвалидации от <code>human-operator</code> (source <code>temporality-manual</code>, <code>run: null</code>),
+approval-события с argv для словаря механизмов.</p>
+<h2 id="вопросы-оператору-acceptance"><a class="anchor" href="#вопросы-оператору-acceptance" aria-label="Section link">#</a>Вопросы оператору (acceptance)</h2><p>Ответ должен читаться из UI без консоли:</p>
+<ol>
+<li>Какая гипотеза появилась первой? (A1, run 01)</li>
+<li>Какие подтверждены и чем? (A1 — повторное сведение в run 02; B1 — дважды,
+runs 04–05; правило видно в точках <code>validated</code>)</li>
+<li>Что противоречило старым гипотезам? (C1, run 03; причины в <code>contradicted</code>)</li>
+<li>Какое знание использовано устаревшим? (A1 использован в run 04 в состоянии
+challenged; предложен-но-проигнорирован в run 05)</li>
+<li>Что умерло и почему? (C1 — v2 удалил флаг, преемника нет; A1 — superseded)</li>
+<li>Что воскресло? (A2 восстанавливает утверждение A1 в run 06; lineage A1→A2)</li>
+<li>Что валидно сейчас? (A2, B1, E1, auto-узлы; run 08 отзывает только их)</li>
+<li>Что реально использовалось? (hint.used / execution-reuse.v1 по каждому узлу)</li>
+</ol>
+<h2 id="покрытие-сценариев-roadmap"><a class="anchor" href="#покрытие-сценариев-roadmap" aria-label="Section link">#</a>Покрытие сценариев ROADMAP</h2><ul>
+<li><strong>competing hypotheses</strong> — B1 и C1 в одной lane <code>serve</code>, C1 появляется при
+живом B1;</li>
+<li><strong>repeated confirmation</strong> — A1 validated (run 02), B1 validated дважды
+(runs 04, 05);</li>
+<li><strong>contradiction</strong> — extraction-contradiction.v1 к A1 и B1 в run 03;</li>
+<li><strong>resurrection</strong> — A2 повторяет утверждение A1 в новом живом узле;</li>
+<li><strong>stale knowledge</strong> — использование challenged-узла (run 04) и
+offered-but-ignored (run 05);</li>
+<li><strong>supersession</strong> — инвалидация A1 с указанием преемника A2 (lineage);</li>
+<li><strong>different scopes</strong> — пять lane: <code>build</code>, <code>end-to-end</code>, <code>migrate</code>, <code>serve</code>,
+<code>test</code>; end-to-end-утверждение получает вторичные scope.</li>
+</ul>
+<h2 id="замечания-по-модели"><a class="anchor" href="#замечания-по-модели" aria-label="Section link">#</a>Замечания по модели</h2><ul>
+<li>Терминальные состояния (<code>invalidated</code> и др.) не допускают переходов, поэтому
+«ресуррекция» — всегда новый узел; связь с прошлым выражается lineage и
+кластеризацией по содержанию.</li>
+<li>Lineage-рёбра выводятся из текста причины инвалидации (id вида
+<code>…/knowledge/…</code>), поэтому наследование scope работает и для ручных
+инвалидаций оператора.</li>
+<li>Наследник наследует lane предшественника (приоритет: execution scope &gt;
+lineage &gt; собственный scope утверждения) — поэтому E1 не является
+преемником C1 по lineage: его end-to-end scope обязан быть собственным.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="event-model.html"><small>← Назад</small><strong>Event model audit (Phase 2)</strong></a>
+    <a class="pager-next" href="failure-model.html"><small>Далее →</small><strong>Agent Kernel failure and delivery model</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

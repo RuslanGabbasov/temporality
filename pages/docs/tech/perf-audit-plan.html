@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/perf-audit-plan.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row active" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</h1>
+
+<p>База аудита: полное чтение ядра (<code>kernel/agent/workflow.go</code>, <code>kernel/llm/client.go</code>,
+<code>kernel/agent/activities.go</code>) + четыре параллельных аудита периферии (storage/outbox,
+знания/активация, инструменты/MCP/sandbox, controlplane/каналы). Ключевые находки
+перепроверены по коду. Оценки задержек — порядковые, не замеры.</p>
+<p>Исходная точка: <code>main</code> = <code>924d873</code>, полный <code>go test ./...</code> зелёный
+(эталон прогона зафиксирован перед началом работ).</p>
+<h2 id="правила-безопасности"><a class="anchor" href="#правила-безопасности" aria-label="Section link">#</a>Правила безопасности</h2><ol>
+<li>Базовая линия зелёная — после каждой фазы прогоняются целевые пакеты, в конце —
+полный <code>go test ./...</code> + <code>go vet</code> + <code>go test -race</code> по <code>kernel/llm</code>, <code>kernel/agent</code>,
+<code>kernel/mcpclient</code>.</li>
+<li>Любое изменение порядка команд Temporal-воркфлоу (что ждём, что шедулим) — только
+под <code>workflow.GetVersion</code> (прецедент: <code>delegation-note-steering</code>, <code>model-schedule-to-start</code>).</li>
+<li>Продакшн-данные: миграции только аддитивные (новые индексы), без изменения
+существующих колонок; append-only триггер <code>observation_events</code> не трогаем.</li>
+<li>Что НЕ входит в эту ветку (отдельные ветки после стабилизации этой):
+контейнер на ран для sandbox (<code>docker exec</code> вместо <code>docker run</code>),
+партиционирование/retention <code>observation_events</code>, асинхронный ack вебхуков каналов,
+push вместо поллинга в UI-стримах, шардирование TokenBus, LocalActivity для emit.</li>
+</ol>
+<h2 id="фаза-1-kernelllm-низкий-риск-каждый-ход"><a class="anchor" href="#фаза-1-kernelllm-низкий-риск-каждый-ход" aria-label="Section link">#</a>Фаза 1 — kernel/llm (низкий риск, каждый ход)</h2><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Правка</th>
+<th>Файлы</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1.1</td>
+<td>Гонка данных: <code>Client.jitter (*rand.Rand)</code> не потокобезопасен при конкурентных <code>Complete</code> из общих клиентов — заменить на потокобезопасный источник</td>
+<td><code>kernel/llm/client.go</code></td>
+</tr>
+<tr>
+<td>1.2</td>
+<td>Порядок tool calls из стрима: копились в <code>map[int]*ToolCall</code>, обход без сортировки — сортировать по индексу</td>
+<td><code>kernel/llm/client.go</code></td>
+</tr>
+<tr>
+<td>1.3</td>
+<td><code>bufio.Scanner</code> max token 64 КиБ: большой SSE-чанк роняет стрим и переигрывает весь ход — поднять потолок до 1 МиБ</td>
+<td><code>kernel/llm/client.go</code></td>
+</tr>
+<tr>
+<td>1.4</td>
+<td>429: honor <code>Retry-After</code> (секунды или HTTP-date), cap существующим backoff-потолком</td>
+<td><code>kernel/llm/client.go</code></td>
+</tr>
+<tr>
+<td>1.5</td>
+<td>Деградационные ретраи (strip <code>response_format</code>, strip-ladder из WIP) без sleep: срезание поля — не провайдерский ретрай, backoff не нужен</td>
+<td><code>kernel/llm/client.go</code></td>
+</tr>
+<tr>
+<td>1.6</td>
+<td>Довести WIP «400-degradation ladder» до рабочего состояния: тест исправлен под реальность (<code>Complete</code> с <code>tools</code> даёт 3 срезаемых поля; <code>stream_options</code> в blocking-запросе отсутствует по определению; сервер должен возвращать валидный chat completion) + дублированный комментарий <code>compatSanitize</code> убран</td>
+<td><code>kernel/llm/client.go</code>, <code>client_test.go</code></td>
+</tr>
+<tr>
+<td>1.7</td>
+<td>Тесты: конкурентный <code>Complete</code> под <code>-race</code>, порядок tool calls, длинная SSE-строка &gt;64 КиБ, <code>Retry-After</code></td>
+<td><code>kernel/llm/*_test.go</code></td>
+</tr>
+</tbody></table>
+<h2 id="фаза-2-горячий-путь-инструментов-latency-каждого-tool-call"><a class="anchor" href="#фаза-2-горячий-путь-инструментов-latency-каждого-tool-call" aria-label="Section link">#</a>Фаза 2 — горячий путь инструментов (latency каждого tool call)</h2><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Правка</th>
+<th>Файлы</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2.1</td>
+<td><code>web_fetch</code>/<code>fetch_image</code>: один общий <code>http.Client</code> с SSRF-транспортом вместо нового транспорта на вызов (keep-alive, HTTP/2)</td>
+<td><code>kernel/agent/webtools.go</code>, <code>images.go</code></td>
+</tr>
+<tr>
+<td>2.2</td>
+<td>Кэши URL/поиска: вытеснение протухших записей вместо полного сброса map после 64 записей</td>
+<td><code>kernel/agent/webtools.go</code></td>
+</tr>
+<tr>
+<td>2.3</td>
+<td>Browser: убрать безусловный <code>sleep(300ms)</code> после клика (готовность ждёт <code>browserWaitReady</code>), один <code>currentTabURL</code> вместо двух, action-ctx вместо <code>context.Background()</code></td>
+<td><code>kernel/agent/browser.go</code></td>
+</tr>
+<tr>
+<td>2.4</td>
+<td><code>read_file</code>: читать через <code>os.Open</code> + <code>io.LimitReader</code> (cap+1), бинарность по первым 8 КиБ — не грузить гигабайтные файлы целиком</td>
+<td><code>kernel/agent/filetools.go</code></td>
+</tr>
+<tr>
+<td>2.5</td>
+<td>Sandbox: мемоизация <code>ensureNetwork</code> (кэш с сбросом при ошибке запуска)</td>
+<td><code>kernel/sandbox/docker.go</code></td>
+</tr>
+</tbody></table>
+<h2 id="фаза-3-журнал-событий-и-знания-throughput-старт-рана"><a class="anchor" href="#фаза-3-журнал-событий-и-знания-throughput-старт-рана" aria-label="Section link">#</a>Фаза 3 — журнал событий и знания (throughput + старт рана)</h2><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Правка</th>
+<th>Файлы</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>3.1</td>
+<td>Outbox: батч-клейм (<code>LIMIT 50</code>, один CTE) → один POST пачки (ingest принимает до 100) → <code>markDelivered</code> одним <code>UPDATE ... = ANY</code>. Публикация чанками ≤100</td>
+<td><code>kernel/outbox/store.go</code></td>
+</tr>
+<tr>
+<td>3.2</td>
+<td>Outbox: <code>CleanupDelivered(ctx, olderThan)</code> для фоновой чистки delivered-строк (проводка в main — фаза 5)</td>
+<td><code>kernel/outbox/store.go</code></td>
+</tr>
+<tr>
+<td>3.3</td>
+<td>Hints/explore: использовать существующий кэш проекции (<code>cachedKnowledge</code>, TTL 15c) вместо полной перезагрузки истории проекта; инвалидация только на <code>knowledge.*</code>-событиях</td>
+<td><code>observation/httpapi/server.go</code></td>
+</tr>
+<tr>
+<td>3.4</td>
+<td>Эмбеддинги: фильтр по проекту в <code>ListKnowledgeEmbeddings</code> (сейчас грузятся все векторы всех проектов на каждый вызов hints)</td>
+<td><code>observation/postgres/store.go</code>, <code>observation/httpapi/server.go</code></td>
+</tr>
+<tr>
+<td>3.5</td>
+<td>Гонка: <code>sortKnowledgeList</code> мутирует общий кэшированный слайс — сортировать один раз при заполнении кэша</td>
+<td><code>observation/httpapi/server.go</code></td>
+</tr>
+<tr>
+<td>3.6</td>
+<td>Телеметрия активации: батч-вставка <code>hint.query</code>/<code>hint.offered</code> (pgx Batch), 500 на частичной записи не ронять весь вызов</td>
+<td><code>observation/httpapi/server.go</code>, <code>observation/postgres/store.go</code></td>
+</tr>
+<tr>
+<td>3.7</td>
+<td>Индексы: <code>observation_events(event_id)</code>, <code>(run_id, occurred_at)</code>, <code>(occurred_at, received_at, source_id, event_id)</code> — аддитивная миграция</td>
+<td><code>observation/postgres/migrations/</code></td>
+</tr>
+</tbody></table>
+<h2 id="фаза-4-агентский-цикл-replay-безопасно-gated"><a class="anchor" href="#фаза-4-агентский-цикл-replay-безопасно-gated" aria-label="Section link">#</a>Фаза 4 — агентский цикл (replay-безопасно, gated)</h2><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Правка</th>
+<th>Файлы</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>4.1</td>
+<td><code>advertisedTools(&amp;input)</code> вычислить один раз перед циклом ходов (input в цикле неизменен)</td>
+<td><code>kernel/agent/workflow.go</code></td>
+</tr>
+<tr>
+<td>4.2</td>
+<td>Генерация title параллельно с knowledge hints (обе — activities) под <code>GetVersion(&quot;run-title-parallel&quot;)</code>; на реплеях старых историй — прежняя последовательность</td>
+<td><code>kernel/agent/workflow.go</code></td>
+</tr>
+</tbody></table>
+<h2 id="фаза-5-проводка-и-настройки-воркера"><a class="anchor" href="#фаза-5-проводка-и-настройки-воркера" aria-label="Section link">#</a>Фаза 5 — проводка и настройки воркера</h2><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Правка</th>
+<th>Файлы</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>5.1</td>
+<td>Worker options из env: <code>MaxConcurrentActivityTaskPollers</code>/<code>MaxConcurrentWorkflowTaskPollers</code> (дефолт SDK — 2)</td>
+<td><code>cmd/agent-kernel/main.go</code></td>
+</tr>
+<tr>
+<td>5.2</td>
+<td>Проводка <code>CleanupDelivered</code> (раз в час, батчами)</td>
+<td><code>cmd/agent-kernel/main.go</code></td>
+</tr>
+<tr>
+<td>5.3</td>
+<td>SSE-курсор стрима рана: полный кортеж <code>(occurred_at, event_id)</code> вместо подзапроса по <code>event_id</code> (seq-scan на каждый полл 1.5 c)</td>
+<td><code>workspace/store.go</code>, <code>cmd/agent-kernel/main.go</code></td>
+</tr>
+</tbody></table>
+<h2 id="волна-2-реализована-в-этой-же-ветке"><a class="anchor" href="#волна-2-реализована-в-этой-же-ветке" aria-label="Section link">#</a>Волна 2 (реализована в этой же ветке)</h2><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Правка</th>
+<th>Файлы</th>
+<th>Примечания</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>W1</td>
+<td>Sandbox: контейнер на ран — первый вызов делает <code>docker run -d</code> (keep-alive <code>sleep infinity</code>), дальше <code>docker exec</code>; fingerprint профиля отсекает exec в чужой контур; таймаут = <code>rm --force</code> + evict; reaper по idle (<code>KERNEL_SANDBOX_CONTAINER_IDLE</code>, дефолт 15м) + явный <code>TeardownRun</code> из <code>SweepRunScratch</code></td>
+<td><code>kernel/sandbox/docker.go</code>, <code>swappable.go</code>, <code>kernel/agent/activities.go</code></td>
+<td>Пустой <code>ScratchKey</code> → прежний one-shot путь</td>
+</tr>
+<tr>
+<td>W2</td>
+<td>MCP: персистентная сессия с lazy-redial (ровно один реконнект при сломанном транспорте), один http.Client на инстанс, <code>connectFn</code>-шов для тестов; реестр закрывает вытесняемые клиенты (иначе утечка stdio-процессов)</td>
+<td><code>kernel/mcpclient/client.go</code>, <code>registry.go</code></td>
+<td><code>ClientSession.CallTool</code> в go-sdk v1.8.0 concurrent-safe — вызовы вне мьютекса</td>
+</tr>
+<tr>
+<td>W3</td>
+<td>Вебхуки каналов: ack сразу после подписи/дедуп-вставки (at-least-once через durable-строку), пайплайн — в ограниченный пул (<code>KERNEL_WEBHOOK_WORKERS</code>=8, <code>KERNEL_WEBHOOK_QUEUE</code>=256); переполнение → 503; pre-ack-строка «усыновляется» воркером</td>
+<td><code>cmd/agent-kernel/channelwebhook.go</code></td>
+<td>Плата: потеря строгого порядка сообщений чата (как и было между каналами)</td>
+</tr>
+<tr>
+<td>W4</td>
+<td>События воркфлоу — через LocalActivity под гейтом <code>record-event-local</code> (v1): N событий ≈ 1 workflow-task вместо N server round-trips; DefaultVersion реплеит прежний ExecuteActivity; хук <code>agent.SetRecordEventLocal(activities.RecordEvent)</code> в main.go — обязателен в каждом бинаре, реплеящем такие истории</td>
+<td><code>kernel/agent/workflow.go</code>, <code>cmd/agent-kernel/main.go</code></td>
+<td>Батчинг событий сознательно не делался (потеря на return-путях); <code>emitKnowledgeEvent</code> — кандидат на ту же замену следующей итерацией</td>
+</tr>
+<tr>
+<td>W5</td>
+<td>Retention журнала: GUC <code>temporality.retention_sweep=&#39;on&#39;</code> приподнимает append-only триггер ТОЛЬКО для DELETE на одном соединении (RESET перед возвратом в пул); <code>RetentionSweep</code> батчами по ctid; свипер в journal (<code>TEMPORALITY_JOURNAL_RETENTION_INTERVAL</code>=6h, <code>TEMPORALITY_JOURNAL_RETENTION_AGE</code>=90d, «off»)</td>
+<td><code>observation/postgres/*</code>, <code>cmd/temporality-journal/*</code></td>
+<td>Рантайм-поведение триггера проверить на стенде с PG (список в отчёте аудита)</td>
+</tr>
+<tr>
+<td>W6</td>
+<td>Wake SSE через LISTEN/NOTIFY: ingest шлёт <code>pg_notify(&#39;observation_events_changed&#39;, &lt;project&gt;)</code> (best-effort, по одному на проект на батч); kernel слушает (<code>postgres.Open</code> на общий DATABASE_URL) и будит <code>eventWake</code>; SSE-полл 1.5с становится фолбэком</td>
+<td><code>observation/postgres/notify.go</code>, <code>cmd/agent-kernel/eventwake.go</code>, <code>main.go</code></td>
+<td>Корректность не зависит от NOTIFY</td>
+</tr>
+<tr>
+<td>W7</td>
+<td>TokenBus: 16 шардов по FNV-1a(runID) — мьютекс на дельту шардово-локальный; sweep обходит шарды по очереди</td>
+<td><code>kernel/agent/tokenbus.go</code></td>
+<td>Публичный API без изменений</td>
+</tr>
+</tbody></table>
+<h2 id="отложено-вне-этой-ветки"><a class="anchor" href="#отложено-вне-этой-ветки" aria-label="Section link">#</a>Отложено (вне этой ветки)</h2><ul>
+<li>Партиционирование <code>observation_events</code> по времени (перенос таблицы — отдельная
+миграционная история; retention-свитч уже решает острый рост).</li>
+<li>Полный push-стриминг UI (LISTEN/NOTIFY-wake уже убирает холостые поллы;
+остаток — дедупликация соединений и backpressure для очень большого числа
+зрителей).</li>
+<li>Перевод <code>emitKnowledgeEvent</code> на LocalActivity (тот же паттерн, что W4,
+следующей итерацией).</li>
+</ul>
+<h2 id="критерии-приёмки"><a class="anchor" href="#критерии-приёмки" aria-label="Section link">#</a>Критерии приёмки</h2><ol>
+<li><code>go build ./...</code>, <code>go vet ./...</code> — чисто.</li>
+<li>Полный <code>go test ./... -count=1</code> — зелёный (не хуже базовой линии).</li>
+<li><code>go test -race ./kernel/llm ./kernel/agent ./kernel/mcpclient</code> — чисто.</li>
+<li>Новые тесты: strip-ladder (исправленный), race на <code>Complete</code>, порядок tool calls,
+длинная SSE-строка, <code>Retry-After</code>, батч-фрейминг outbox, eviction кэшей web,
+<code>read_file</code> на большом файле, мемоизация <code>ensureNetwork</code>, курсор SSE.</li>
+<li>Ни одного изменения семантики ожиданий воркфлоу без <code>GetVersion</code>.</li>
+</ol>
+<h2 id="измеренный-эффект-нагрузочная-кампания-2026-10-27"><a class="anchor" href="#измеренный-эффект-нагрузочная-кампания-2026-10-27" aria-label="Section link">#</a>Измеренный эффект (нагрузочная кампания, 2026-10-27)</h2><p>Методология репо (<code>scripts/loadrun.sh</code>, light-профиль): 25 параллельных
+ранов, ramp 30с, mockllm, рабочая песочница; A/B — <code>main</code> против этой ветки
+на одном хосте и одной БД. Попутно починен контракт мока (<code>fix(loadgen)</code>):
+до фикса команды песочницы молча падали валидацией, и нагрузочные кампании
+не гоняли песочницу вовсе (включая опубликованную heavy-лестницу — см.
+поправку в <code>docs/resilience-and-scale.md §6</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Метрика</th>
+<th>main</th>
+<th>ветка</th>
+<th>Δ</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Длительность рана p50</td>
+<td>15 424 ms</td>
+<td><strong>4 087 ms</strong></td>
+<td>−74% (3.8×)</td>
+</tr>
+<tr>
+<td>Длительность рана p95</td>
+<td>18 817 ms</td>
+<td><strong>5 702 ms</strong></td>
+<td>−70%</td>
+</tr>
+<tr>
+<td>Старт-API p95</td>
+<td>11 ms</td>
+<td>11 ms</td>
+<td>=</td>
+</tr>
+<tr>
+<td><code>run_command</code> p50</td>
+<td>497–640 ms</td>
+<td><strong>98 ms</strong></td>
+<td>5.2×</td>
+</tr>
+<tr>
+<td>Пик CPU postgres</td>
+<td>23–130%</td>
+<td>13–34%</td>
+<td>≈ −60%</td>
+</tr>
+<tr>
+<td>Пик CPU kernel / journal</td>
+<td>67% / 31–58%</td>
+<td>46% / 24–32%</td>
+<td>−32% / −30%</td>
+</tr>
+</tbody></table>
+<p>Медиана на ветке — константа при росте 5 → 25 параллельных
+(4 095 → 4 087 ms); <code>main</code> деградирует (5.3 s → 9.3–10.2 s). Атрибуция:
+W4 (LocalActivity) — снятие налога Temporal round-trip&#39;ов на каждое
+событие; W1 — 5.2× на команду песочницы; W2 (outbox-батчи, волна 1) —
+−30% CPU journal. Не нагружались этим профилем: MCP (W2 волны 2),
+SSE-wake без зрителей (W6), TokenBus под сотнями дельт/с (W7).</p>
+<p>Следующий шаг методологии: перезамер heavy-профиля на этой ветке — впервые
+с реально исполняющимися 10-секундными командами песочницы.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="org-structure.html"><small>← Назад</small><strong>Организационная структура и модель доступа Temporality</strong></a>
+    <a class="pager-next" href="plan-agent-teams.html"><small>Далее →</small><strong>План работ: Команды агентов</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

@@ -61,7 +61,7 @@ message in the conversation.
   `KERNEL_BG_TOOL_MAX_SECONDS`); ordinary commands stay at 300/900
   (`KERNEL_TOOL_MAX_SECONDS`).
 
-Details and delivery guarantees — `docs/agent-async-operations.md`.
+Details and delivery guarantees — [docs/agent-async-operations.md](docs/agent-async-operations.md).
 
 ## Agent evolution
 
@@ -74,7 +74,7 @@ effect. The proposal lands in the agent's card as a draft.
 Applying it goes through the **quality loop**: a proposal is applied only on
 top of a fresh green evaluation run (golden cases from real runs, optionally a
 calibrated LLM judge). A human decides; a proposal can never widen the agent's
-powers. Details — `docs/agent-quality-loop.md`.
+powers. Details — [docs/agent-quality-loop.md](docs/agent-quality-loop.md).
 
 ## Teams
 
@@ -84,7 +84,7 @@ budget. Built from a description ("A team with quality control: Developer
 implements, Security and QA review, Reviewer accepts") and versioned.
 
 Launching a team from chat or a trigger starts a DAG execution with review
-gates — see `docs/agent-teams.md`.
+gates — see [docs/agent-teams.md](docs/agent-teams.md).
 
 ## Proposals and versions
 

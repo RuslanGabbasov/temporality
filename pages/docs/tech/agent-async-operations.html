@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Асинхронные операции агента (background run_command) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/agent-async-operations.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row active" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Асинхронные операции агента (background run_command)</h1>
+
+<p>Долгие команды (<code>yarn install</code>, <code>docker build</code>, большой тест-сьют) больше не
+связывают агенту руки: команда уходит в фон, агент продолжает работать, а
+результат приходит автоматически — как дополнение в разговор.</p>
+<h2 id="как-это-работает"><a class="anchor" href="#как-это-работает" aria-label="Section link">#</a>Как это работает</h2><h3 id="запуск-runcommand-с-background-true"><a class="anchor" href="#запуск-runcommand-с-background-true" aria-label="Section link">#</a>Запуск: <code>run_command</code> с <code>background: true</code></h3><pre><code class="language-json">{&quot;command&quot;: [&quot;bash&quot;, &quot;-lc&quot;, &quot;yarn install&quot;], &quot;background&quot;: true, &quot;timeout_sec&quot;: 900}
+</code></pre>
+<p>Модель мгновенно получает ответ вида:</p>
+<pre><code>Started in background as operation &lt;operation_id&gt;. Do not wait idle: continue
+with other work, and the result (exit code + output tail) will arrive
+automatically as a follow-up message. The operation times out after 900 s.
+Use kill_operation to cancel it.
+</code></pre>
+<p>Команда исполняется в том же run-контейнере песочницы, вывод стримится в
+живую консоль операции (в трейсе строка <code>run_command</code> остаётся открытой — с
+шейдером текущего вывода, как у обычной команды во время исполнения).</p>
+<h3 id="ожидание-и-уведомление"><a class="anchor" href="#ожидание-и-уведомление" aria-label="Section link">#</a>Ожидание и уведомление</h3><p>Когда модель завершает ход без вызовов тулов, а в фоне что-то ещё работает,
+ран <strong>не завершается</strong>: workflow ждёт первое разрешение фоновой операции
+(завершение, падение, таймаут) или заметку человека. Разрешившиеся операции
+дренируются пачкой, и в разговор вставляется <strong>один</strong> батч-отчёт:</p>
+<pre><code>[Background operations report]
+- &lt;operation_id&gt; finished: exit_code=0 (4m12s)
+  output tail:
+  exit_code=0
+  added 1284 packages in 42s
+
+Still running in the background:
+- &lt;operation_id&gt; `docker build -t app .` (running 2m10s, timeout 900s)
+
+Incorporate these results and continue.
+</code></pre>
+<p>Модель получает новый ход, обрабатывает результат и продолжает. Цикл
+повторяется, пока фон не опустеет и модель не даст финальный ответ.</p>
+<p>Если модель уже закончила работу, а фон работает — ран живёт, пока операции
+не завершатся или не упрутся в свой <code>timeout_sec</code>; исходы журналируются
+(<code>tool.completed</code> с <code>background: true</code>), но лишних ходов модель не тратит
+(форс-финал ждёт фоновые операции перед завершением рана).</p>
+<h3 id="отмена-killoperation"><a class="anchor" href="#отмена-killoperation" aria-label="Section link">#</a>Отмена: <code>kill_operation</code></h3><pre><code class="language-json">{&quot;operation_id&quot;: &quot;&lt;operation_id&gt;&quot;}
+</code></pre>
+<p>Убивает дерево процессов команды внутри контейнера (TERM, пауза, KILL).
+Идентичность процесса проверяется по маркеру <code>__TEMPORALITY_OP</code> в его
+окружении — переиспользованный pid не может привести к убийству постороннего
+процесса. Финальное состояние отменённой операции приходит обычным
+уведомлением (<code>exit_code=137</code> или 143).</p>
+<h2 id="механика-и-надёжность"><a class="anchor" href="#механика-и-надёжность" aria-label="Section link">#</a>Механика и надёжность</h2><ul>
+<li><strong>Обёртка</strong>: команда запускается через <code>sh -c &#39;echo $$ &gt; /scratch/.ops/&lt;id&gt;.pid; &quot;$@&quot;; code=$?; echo $code &gt; /scratch/.ops/&lt;id&gt;.code; exit $code&#39;</code> — pid и код выхода пишутся в run-scoped scratch. Файлы лежат на хост-монтировании scratch и потому переживают и перезапуск воркера, и перезапуск kernel.</li>
+<li><strong>Heartbeat</strong>: активность фоновой команды бьётся сердцебиением — Nudge и Stop доставляются в долгую команду.</li>
+<li><strong>Перезапуск воркера</strong>: фоновая активность повторяется (до трёх попыток), и повтор — это восстановление наблюдения, а не перезапуск: первая попытка исполняет команду, каждая следующая цепляется к уже запущенному процессу через pid/code-файлы и возвращает его результат (вывод теряется — в тексте результата это помечено). Повторное исполнение исходной команды исключено маршрутизацией попыток. Консоль операции при этом пересоздаётся: в поток пишется пометка «вывод потерян вместе со старым воркером», а по завершении поток закрывается с кодом выхода — подписчик SSE видит done вместо вечного ожидания.</li>
+<li><strong>Перезапуск kernel</strong>: контейнер помечен durable-лейблами (<code>temporality.scratch_key</code>, <code>temporality.run_fingerprint</code>), а in-memory реестр восстанавливается из них — восстановленный kernel заново получает доступ к операции через <code>OperationState</code> и <code>KillOperation</code>. Контейнер, чью принадлежность или идентичность нельзя достоверно подтвердить, не переиспользуется.</li>
+<li><strong>Записанный результат главнее контейнера</strong>: завершённая операция возвращает сохранённый exit code, даже если контейнер уже удалён. <code>kill_operation</code> записывает 137 — намеренная отмена везде читается как завершённая (137), а не как потеря.</li>
+<li><strong>Потеря — явное состояние</strong>: процесс исчез без записи результата либо контейнер/демон недоступны дольше grace-окна — активность завершается типизированной ошибкой <code>BackgroundOpLost</code>; выход за бюджет (отмеренный от старта операции по pid-файлу) — <code>BackgroundOpTimeout</code> с добивом остатков. Workflow пишет <code>tool.failed</code> с <code>effect=uncertain</code> — судьба операции уходит в reconciliation, никогда — в ложный <code>exit_code=0</code>.</li>
+<li><strong>Orphan reaper</strong>: отсутствие контейнера в in-memory реестре — не признак orphan. Возраст лишь открывает кандидата; решение принимают маркеры операций и таблица процессов (<code>.ops</code>-файлы + <code>docker top</code>), а неопределённость сохраняет контейнер. Действительно заброшенные удаляются по-прежнему.</li>
+<li><strong>Живая консоль и трейс</strong>: поток вывода (console://) монтируется на строке <code>tool.started</code>; окно трейса ограничено (~50 событий), и для долгого рана строка уезжает из окна, хотя команда ещё работает — вверху трейса появляется закреплённая панель «Живые фоновые операции» со стримом каждой такой команды (исчезает, когда прилетает <code>tool.completed</code>).</li>
+<li><strong>Таймаут</strong>: свой бюджет фона — по умолчанию 900 с (если модель не передала <code>timeout_sec</code>), потолок 3600 с (1 час, <code>KERNEL_BG_TOOL_MAX_SECONDS</code>); обычные команды остались на 300/900 (<code>KERNEL_TOOL_MAX_SECONDS</code>). Бюджет отмеряется от старта самой операции — attach после перезапуска не растягивает таймаут. Модель видит эти лимиты в описании <code>run_command</code> и передаёт <code>timeout_sec</code> до 3600 для долгих установок/сборок/сюитов. StartToClose активности = таймаут + запас (10/15 мин).</li>
+<li><strong>Дедупликация</strong>: результат каждой операции доставляется ровно один раз — future удаляется из реестра после дренирования.</li>
+<li><strong>Заметки людей</strong>: заметка (steer) будит ожидание так же, как завершение операции — комментарий не ждёт фона.</li>
+</ul>
+<h2 id="ограничения-v1"><a class="anchor" href="#ограничения-v1" aria-label="Section link">#</a>Ограничения v1</h2><ul>
+<li>Фоновые команды требуют run-контейнера (ScratchKey) — прямой one-shot путь
+(<code>docker run</code> без ключа рана) фон не поддерживает.</li>
+<li>Вывод при перезапуске воркера не восстанавливается (код и pid — да).</li>
+<li>При нескольких контейнерах с одинаковым scratch-ключом (смена профиля
+посреди фоновой операции) восстановление отказывается подключаться —
+операция честно уходит в lost/unknown, а не цепляется к чужому контейнеру.</li>
+<li>Форс-финал ждёт операции, но не порождает новых ходов модели.</li>
+<li>Reviewer-раны (<code>submit_review</code>) завершаются сразу, не дожидаясь фона — у
+ревьюера фоновые команды не ожидаемый сценарий.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="activity-scoping.html"><small>← Назад</small><strong>Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</strong></a>
+    <a class="pager-next" href="agent-behavior-monitoring.html"><small>Далее →</small><strong>Детекция опасного поведения агента (research)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

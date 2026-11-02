@@ -26,6 +26,7 @@ const LANGS = [
     outDir: join(ROOT, 'pages', 'docs'),
     rootPrefix: '..', // landing and assets, relative to outDir
     cssHref: '__CSS__',
+    techPrefix: 'tech', // engineering docs live under docs/tech/ on the site
     other: 'en', // the mirrored tree (slug-to-slug)
     toggleLabel: 'EN',
     editBase: 'docs/user',
@@ -47,6 +48,7 @@ const LANGS = [
     outDir: join(ROOT, 'pages', 'docs', 'en'),
     rootPrefix: '../..',
     cssHref: '../__CSS__',
+    techPrefix: '../tech',
     other: 'ru',
     toggleLabel: 'RU',
     editBase: 'docs/user/en',
@@ -60,6 +62,31 @@ const LANGS = [
       docsLead: 'Temporality observes how an AI agent works: what it knew and did, where its knowledge came from, what held up — and returns verified experience to later runs. This section is a practical guide, from installation to everyday work.',
       startLabel: 'Get started',
       htmlLang: 'en',
+    },
+  },
+  {
+    // Engineering docs: the repository's top-level `docs/*.md`, published as
+    // one monolingual reference tree. No front matter there — titles come
+    // from the leading `# ` heading.
+    code: 'tech',
+    srcDir: join(ROOT, 'docs'),
+    outDir: join(ROOT, 'pages', 'docs', 'tech'),
+    rootPrefix: '../..',
+    cssHref: '../__CSS__',
+    techPrefix: '.', // docs/x.md references are siblings in this tree
+    other: null, // no mirror — the toggle is omitted
+    editBase: 'docs',
+    sectionOverride: 'Инженерные документы',
+    strings: {
+      docsLabel: 'Инженерные документы',
+      editLabel: 'Изменить страницу',
+      backLabel: '← На сайт',
+      pagerPrev: '← Назад',
+      pagerNext: 'Далее →',
+      docsTitle: 'Temporality — Инженерные документы',
+      docsLead: 'Внутренние документы разработки: архитектура, модели событий и знаний, контракты подсистем, планы и разборы. Рабочие материалы инженеров — точность важнее полировки.',
+      startLabel: '',
+      htmlLang: 'ru',
     },
   },
 ]
@@ -80,7 +107,7 @@ function parseFrontMatter(source) {
 
 // ── markdown → html ─────────────────────────────────────────────────────────
 
-function makeRenderer() {
+function makeRenderer(techPrefix) {
   const renderer = new marked.Renderer({ gfm: true })
   renderer.heading = function ({ tokens, depth }) {
     const text = this.parser.parseInline(tokens)
@@ -96,8 +123,13 @@ function makeRenderer() {
     const external = /^[a-z]+:/i.test(href)
     // Internal cross-references stay written as .md in the sources (natural
     // in the repo), but the site serves .html slugs — rewrite so no generated
-    // page ever links at a markdown file.
-    const target = external ? href : href.replace(/\.md(?=($|[?#]))/, '.html')
+    // page ever links at a markdown file. References to the engineering docs
+    // (docs/xxx.md) land on the tech tree's pages.
+    let target = href
+    if (!external) {
+      target = target.replace(/^docs\/([A-Za-z0-9-]+)\.md(?=($|[?#]))/, `${techPrefix}/$1.html`)
+      target = target.replace(/\.md(?=($|[?#]))/, '.html')
+    }
     return `<a href="${target}"${external ? ' target="_blank" rel="noreferrer"' : ''}>${text}${external ? '&nbsp;<span class="ext">↗</span>' : ''}</a>`
   }
   return renderer
@@ -111,19 +143,22 @@ function buildLang(lang) {
     console.error(`docs sources not found: ${srcDir}`)
     process.exit(1)
   }
-  const renderer = makeRenderer()
+  const renderer = makeRenderer(lang.techPrefix ?? 'tech')
   marked.use({ renderer, gfm: true, breaks: false })
 
   const files = readdirSync(srcDir).filter((f) => f.endsWith('.md')).sort()
   const pages = files.map((file) => {
     const { meta, body } = parseFrontMatter(readFileSync(join(srcDir, file), 'utf8'))
-    // The leading `# Title` duplicates front-matter title and the page h1.
+    // The leading `# Title` duplicates front-matter title and the page h1 —
+    // but for sources without front matter (the engineering docs) it IS the
+    // title.
+    const h1 = body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? ''
     const stripped = body.replace(/^#\s+.+\n+/, '')
     return {
       slug: basename(file, '.md'),
       order: Number(meta.order ?? 999),
-      section: meta.section ?? '—',
-      title: meta.title ?? basename(file),
+      section: meta.section ?? lang.sectionOverride ?? '—',
+      title: meta.title ?? h1 ?? basename(file),
       description: meta.description ?? '',
       body: stripped,
     }
@@ -140,10 +175,11 @@ function buildLang(lang) {
   const topbar = (slug) => {
     const github = `https://github.com/RuslanGabbasov/temporality`
     const toggleHref = lang.other === 'en' ? `en/${slug}.html` : `../${slug}.html`
-    const nav = lang.code === 'ru'
-      ? `<a href="${rootPrefix}/#product">Продукт</a><a href="${rootPrefix}/#guide">Руководство</a><a href="${rootPrefix}/#architecture">Архитектура</a>`
-      : `<a href="${rootPrefix}/#product">Product</a><a href="${rootPrefix}/#guide">Get started</a><a href="${rootPrefix}/#architecture">Architecture</a>`
-    return `<header class="topbar"><a class="brand" href="${brandHref}" aria-label="Temporality home"><img src="${rootPrefix}/assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">${strings.docsLabel}</a>${nav}</nav><div class="top-actions"><a class="lang-toggle" href="${toggleHref}" aria-label="Switch language">${lang.toggleLabel}</a><a class="github-link" href="${github}/blob/main/${lang.editBase}/${slug}.md" target="_blank" rel="noreferrer"><span>${strings.editLabel}</span><span class="arrow">↗</span></a></div></header>`
+    const nav = lang.code === 'en'
+      ? `<a href="${rootPrefix}/#product">Product</a><a href="${rootPrefix}/#guide">Get started</a><a href="${rootPrefix}/#architecture">Architecture</a>`
+      : `<a href="${rootPrefix}/#product">Продукт</a><a href="${rootPrefix}/#guide">Руководство</a><a href="${rootPrefix}/#architecture">Архитектура</a>`
+    const toggle = lang.other ? `<a class="lang-toggle" href="${toggleHref}" aria-label="Switch language">${lang.toggleLabel}</a>` : ''
+    return `<header class="topbar"><a class="brand" href="${brandHref}" aria-label="Temporality home"><img src="${rootPrefix}/assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">${strings.docsLabel}</a>${nav}</nav><div class="top-actions">${toggle}<a class="github-link" href="${github}/blob/main/${lang.editBase}/${slug}.md" target="_blank" rel="noreferrer"><span>${strings.editLabel}</span><span class="arrow">↗</span></a></div></header>`
   }
 
   const sidebar = (activeSlug) => {
@@ -212,7 +248,7 @@ ${sidebar('index')}
 <div class="docs-eyebrow">${strings.docsLabel}</div>
 <h1>${strings.docsTitle.replace('Temporality — ', '')}</h1>
 <p class="docs-lead">${strings.docsLead}</p>
-<p><a class="btn btn-primary" style="color:#1b211f" href="intro.html"><span>${strings.startLabel}</span><span>→</span></a></p>
+${strings.startLabel ? `<p><a class="btn btn-primary" style="color:#1b211f" href="intro.html"><span>${strings.startLabel}</span><span>→</span></a></p>` : ''}
 <div class="docs-cards">
 ${cards}
 </div>

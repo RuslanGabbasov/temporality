@@ -153,7 +153,7 @@ daemon ядру нужен только для этой изоляции — с�
 
 ## Аутентификация внешняя
 
-Поддерживается OIDC-федерация (Keycloak, authentik и другие): `docs/auth-federation.md`.
+Поддерживается OIDC-федерация (Keycloak, authentik и другие): [docs/auth-federation.md](docs/auth-federation.md).
 Схема: discovery + JWKS-кэш (ротация ключей без рестарта), серверные сессии
 (`KERNEL_SESSION_TTL` 12h / `KERNEL_SESSION_ABSOLUTE_TTL` 7d), JIT-провижининг
 с ролью по умолчанию и ролью `deny` («вход успешен, доступ запрещён» до ручного

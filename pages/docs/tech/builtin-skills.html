@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Предустановленные скилы: офисный пакет (builtin skills) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/builtin-skills.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row active" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Предустановленные скилы: офисный пакет (builtin skills)</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Каждая инсталляция Temporality с первого старта имеет набор скилов,
+нужных практически в любой компании: работа с PDF, DOCX, XLSX/CSV,
+презентациями, ревью и генерацией документов. Пакет следует паттерну
+builtin sandbox profiles (docs/sandbox-profiles.md §5): каталог в коде +
+идемпотентный seed в реестр при старте ядра.</p>
+<p>Скилы живут в реестре workspace (<code>workspace_skill</code> + версия с
+<code>origin: initial</code>, docs/living-skills.md §4), а не на диске: они видны в
+Skills UI, находятся через <code>skill_search</code>, инспектируются <code>skill_inspect</code>,
+привязываются к агентам и эволюционируют через <code>skill_propose</code> как любые
+другие.</p>
+<h2 id="2-состав-пакета"><a class="anchor" href="#2-состав-пакета" aria-label="Section link">#</a>2. Состав пакета</h2><table>
+<thead>
+<tr>
+<th>Скил</th>
+<th>Capabilities</th>
+<th>Ключевое правило процедуры</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pdf-processing</code></td>
+<td>extract_text, extract_tables, split_merge_pages, fill_forms, ocr</td>
+<td>Сначала проба toolchain (pdfplumber → pypdf → fitz); скан без текстового слоя = OCR, а не «нет содержимого»</td>
+</tr>
+<tr>
+<td><code>word-processing</code></td>
+<td>read_docx, edit_docx, edit_tables, edit_headers, apply_styles</td>
+<td>Правки на уровне runs (<code>paragraph.text = …</code> уничтожает форматирование); сохранение в новый файл</td>
+</tr>
+<tr>
+<td><code>spreadsheet-analysis</code></td>
+<td>read_xlsx, read_csv, audit_formulas, aggregate_data, write_results</td>
+<td><code>data_only=True</code> для значений vs формул; каждая цифра с кросс-проверкой; источник не трогаем</td>
+</tr>
+<tr>
+<td><code>presentation-authoring</code></td>
+<td>create_pptx, edit_slides, add_tables_charts, write_speaker_notes, render_check</td>
+<td>Заполнять placeholder&#39;ы шаблона, не рисовать текстовые боксы сверху; render-check через soffice+view_image</td>
+</tr>
+<tr>
+<td><code>document-review</code></td>
+<td>diff_versions, find_contradictions, check_structure, classify_findings</td>
+<td>Только чтение; каждое замечание = локация + цитата + severity; вердикт обязан следовать из findings</td>
+</tr>
+<tr>
+<td><code>document-generation</code></td>
+<td>fill_template, render_pdf, verify_output, deliver_document</td>
+<td>Замена placeholder&#39;ов на уровне runs; обязательная верификация (не осталось <code>{{…}}</code>, открытие, render); внешние документы — через <code>request_approval</code></td>
+</tr>
+<tr>
+<td><code>archive-management</code></td>
+<td>inspect_archives, extract_archives, create_archives, password_protected, split_volumes, verify_integrity</td>
+<td>Шифрование → немедленный <code>ask_human</code> за паролем (порядок действий §2.1.1); инспекция ДО извлечения (zip-slip, zip-бомбы, вложенные архивы); извлечение в новую директорию; пароли — через env, не в логи; обязательный integrity-тест</td>
+</tr>
+</tbody></table>
+<p>Каждый скил объявляет <code>inputs/outputs</code>, <code>preconditions/postconditions</code>,
+<code>evidence.required</code> (страницы/подсчёты/файлы — то, что можно проверить
+после исполнения) и <code>runtime</code> (sandbox: required, network: restricted).</p>
+<h2 id="21-готовые-скрипты-bundled-tooling"><a class="anchor" href="#21-готовые-скрипты-bundled-tooling" aria-label="Section link">#</a>2.1. Готовые скрипты (bundled tooling)</h2><p>С версии 1.1.0 каждый скил пакета несёт рабочий скрипт в приложении
+«## Bundled files» — том же формате, что производит импорт (cmd/
+skillimport.go): <code>### scripts/…</code> + код-блок. Поэтому скрипты видны во
+вкладке «Файлы скила» с подсветкой и сканером рисков, доставляются агенту
+через <code>skill_inspect</code> и проходят review как импортированные файлы.</p>
+<table>
+<thead>
+<tr>
+<th>Скил</th>
+<th>Скрипт</th>
+<th>Подкоманды</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>pdf-processing</td>
+<td><code>scripts/pdf_tool.py</code></td>
+<td>info · extract · tables · split · merge · fill · ocr</td>
+</tr>
+<tr>
+<td>word-processing</td>
+<td><code>scripts/docx_tool.py</code></td>
+<td>extract · replace (run-level) · tables</td>
+</tr>
+<tr>
+<td>spreadsheet-analysis</td>
+<td><code>scripts/xlsx_tool.py</code></td>
+<td>inventory · analyze (с кросс-проверкой сумм) · to-csv</td>
+</tr>
+<tr>
+<td>presentation-authoring</td>
+<td><code>scripts/pptx_tool.py</code></td>
+<td>inventory · build (по JSON-наброску, с проверкой placeholder&#39;ов)</td>
+</tr>
+<tr>
+<td>document-review</td>
+<td><code>scripts/doc_diff.py</code></td>
+<td>извлечение текста (docx/pdf/txt) + unified diff со статистикой</td>
+</tr>
+<tr>
+<td>document-generation</td>
+<td><code>scripts/fill_template.py</code></td>
+<td>заполнение <code>{{placeholder}}</code> на уровне runs + отчёт о незаполненных</td>
+</tr>
+<tr>
+<td>archive-management</td>
+<td><code>scripts/archive_tool.sh</code></td>
+<td>inspect (traversal/бомба) · extract · create · verify</td>
+</tr>
+</tbody></table>
+<p>Модель исполнения: агент записывает файл в песочницу (<code>write_file</code>) и
+запускает; при отсутствии библиотеки скрипт печатает подсказку
+<code>pip install …</code> и выходит с кодом 3; ошибки — честный JSON с кодом 4.
+Скрипты не пишут в исходные файлы и проверяют собственный вывод (пересчёт
+страниц, остатки placeholder&#39;ов, целостность архива). Пайплайн редактора
+скилов проверяет их тем же сканером рисков, что и импортированные файлы.</p>
+<h3 id="211-требования-к-образу-песочницы"><a class="anchor" href="#211-требования-к-образу-песочницы" aria-label="Section link">#</a>2.1.1. Требования к образу песочницы</h3><p>Офисному пакету нужен python3/pip и архивная тройка. Базовые alpine-образы
+песочницы (<code>kernel/sandbox.ProfileDefinitions</code>, слой <code>apkTools</code>) с
+26.10.2026 несут <code>unzip tar p7zip python3 py3-pip</code> — вместе с прежними
+git/curl/jq/bash/ripgrep. Образы собираются администратором через
+<code>POST /v1/workspace/sandbox-profiles/{id}/build</code>; профиль, собранный раньше,
+продолжает жить на старом дайджесте — пересоберите, чтобы офисный пакет
+работал полностью (инцидент 26.10: в node-образе не было ни python3, ни 7z,
+и агент 8 ходов искал инструментацию вместо того, чтобы сразу спросить
+пароль от шифрованного архива — порядок действий скила теперь требует
+спрашивать первым).</p>
+<p>Порядок действий при шифрованном архиве (archive-management, шаг 0):
+обнаружили шифрование → немедленный <code>ask_human</code> за паролем; проверка
+инструментария — параллельно или после. Пароль передаётся через переменную
+окружения ARCHIVE_PASSWORD (не argv, не логи); неверный пароль → повторный
+вопрос, не перебор.</p>
+<h2 id="3-механика-сидирования"><a class="anchor" href="#3-механика-сидирования" aria-label="Section link">#</a>3. Механика сидирования</h2><ul>
+<li><code>workspace.SeedBuiltinSkills(ctx)</code> вызывается на старте ядра рядом с
+<code>SeedSandboxProfiles</code>; <code>KERNEL_BUILTIN_SKILLS=off</code> отключает.</li>
+<li>Свежая инсталляция получает пакет сразу. Существующая строка <strong>обновляется
+до версии каталога</strong>, только пока её текущая ревизия — нетронутый builtin
+(в version-строке <code>origin: initial</code>): правка человека или применённая
+эволюция агента (<code>origin: human-edit / agent-proposal</code>) закрепляют скил —
+каталог никогда не перезаписывает авторский контент. Так стенд с сидом
+1.0.0 поднимется до 1.1.0 (скрипты) без ручных действий.</li>
+<li>Следствие: удалённый админом builtin-скил вернётся при рестарте. Вместо
+удаления — отвязать от агентов (скил без привязок не попадает в промпты).</li>
+<li>Манифесты хранятся тем же JSON-путём, что и у всех скилов; тест
+<code>TestBuiltinSkillsCatalogSanity</code> парсит их через <code>skills.ParseManifest</code> —
+тот же путь, что и <code>resolveAgentSkills</code> на старте рана.</li>
+</ul>
+<h2 id="4-инструменты-в-манифестах"><a class="anchor" href="#4-инструменты-в-манифестах" aria-label="Section link">#</a>4. Инструменты в манифестах</h2><p>Только реально существующие тулы агента: <code>run_command</code>, <code>read_file</code>,
+<code>write_file</code>, <code>edit_file</code>, <code>view_image</code>, <code>send_file</code>, <code>ask_human</code>,
+<code>request_approval</code>, <code>artifact_create/submit</code>, <code>remember</code>. Тест каталога
+держит белый список — манифест с фантомным тулом падает на CI.</p>
+<p>Особый случай: <code>document-review</code> объявлен без <code>write_file</code>/<code>edit_file</code> —
+ревью не редактирует проверяемые документы (тест
+<code>TestDocumentReviewDeclaresNoWriteTools</code>).</p>
+<h2 id="5-runtime-ограничения-контента"><a class="anchor" href="#5-runtime-ограничения-контента" aria-label="Section link">#</a>5. Runtime-ограничения контента</h2><p>Процедуры написаны под честное поведение в песочнице:</p>
+<ul>
+<li>проверка наличия python-библиотек перед использованием (pdfplumber,
+pypdf, fitz, python-docx, openpyxl, pandas — опционально, python-pptx,
+pytesseract);</li>
+<li><code>pip install</code> только если сеть песочницы позволяет; офлайн → деградация к
+установленному + честная пометка в отчёте, не молчаливое ухудшение;</li>
+<li>тяжёлые визуальные проверки (рендер PPTX/DOCX через <code>soffice --headless</code>)
+отмечаются как «выполнено/пропущено» — скил не заявляет проверку, которой
+не было.</li>
+</ul>
+<h2 id="6-как-добавить-новый-builtin"><a class="anchor" href="#6-как-добавить-новый-builtin" aria-label="Section link">#</a>6. Как добавить новый builtin</h2><p>Один вызов-конструктор в <code>workspace/builtinskills.go</code>
+(<code>builtinXxx() BuiltinSkill</code>) + строка в <code>BuiltinSkills()</code>. Тесты каталога
+подхватят его автоматически: уникальность id, валидность манифеста,
+секции SKILL.md, белый список тулов, обязательные evidence.</p>
+<p>Правила контента:</p>
+<ol>
+<li>SKILL.md: <code>## Purpose</code>, <code>## When to use</code> (+ When NOT), <code>## Procedure</code>
+(шаги с верификацией), <code>## Constraints</code>, <code>## Common mistakes</code>,
+<code>## Verification</code>.</li>
+<li>Процедура учитывает офлайн-деградацию и границы песочницы.</li>
+<li>Манифест ссылается только на существующие тулы; evidence проверяем.</li>
+<li>Ни один скил не пишет в исходные файлы пользователя.</li>
+</ol>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="auth-federation.html"><small>← Назад</small><strong>Федеративная аутентификация и провижининг пользователей (Auth Federation)</strong></a>
+    <a class="pager-next" href="channels.html"><small>Далее →</small><strong>Каналы коммуникации: единая абстракция (Channel Drivers)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

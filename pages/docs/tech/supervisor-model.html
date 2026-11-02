@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Модель-супервайзер: роль, кейсы и метрики человеческого фактора — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/supervisor-model.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row active" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Модель-супервайзер: роль, кейсы и метрики человеческого фактора</h1>
+
+<p>Статус: принято (фаза 1 реализована). Связанные документы:
+<code>agent-quality-loop.md</code>, <code>system-dashboard.md</code>, <code>human-knowledge-explorer.md</code>.</p>
+<h2 id="1-роль"><a class="anchor" href="#1-роль" aria-label="Section link">#</a>1. Роль</h2><p><strong>Супервайзер</strong> — installation-wide модель, которая работает <strong>для
+администратора</strong>, а не над задачами пользователей. Она не выполняет работу
+пользователей и не пишет в их артефакты; её продукция — суждения: оценки,
+диагнозы, предложения, предупреждения. Каждое суждение имеет доказательную
+базу (id ранов и событий) и остаётся предложением, пока человек не примет.</p>
+<p>Сегодня супервайзер (= судья) уже: оценивает скиллы и изменения агентов
+(golden-кейсы + калибровка согласия), упорядочивает области знаний. Настройка
+— Агенты → «Настройки качества» (<code>/v1/workspace/supervisor</code>).</p>
+<h2 id="2-настройки-фаза-1-реализовано"><a class="anchor" href="#2-настройки-фаза-1-реализовано" aria-label="Section link">#</a>2. Настройки (фаза 1, реализовано)</h2><table>
+<thead>
+<tr>
+<th>Параметр</th>
+<th>Ключ</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Модель-супервайзер</td>
+<td><code>eval.judge.model</code></td>
+<td>роль судьи: оценки качества, упорядочивание областей знаний</td>
+</tr>
+<tr>
+<td>Модель зрения</td>
+<td><code>supervisor.vision.model</code></td>
+<td>fallback для вызовов с изображениями, если основная модель не мультимодальная (роутинг в <code>CallModel</code>)</td>
+</tr>
+<tr>
+<td>HAB-коэффициенты</td>
+<td><code>supervisor.hab.*</code></td>
+<td>оценка внимания человека (§5)</td>
+</tr>
+<tr>
+<td>Расписание качества</td>
+<td><code>eval.schedule.interval</code></td>
+<td>периодичность оценочных прогонов</td>
+</tr>
+</tbody></table>
+<h2 id="3-каталог-кейсов-супервайзера-дорожная-карта"><a class="anchor" href="#3-каталог-кейсов-супервайзера-дорожная-карта" aria-label="Section link">#</a>3. Каталог кейсов супервайзера (дорожная карта)</h2><h3 id="волна-a-мониторинг-проблем-наблюдатель-реализована-целиком"><a class="anchor" href="#волна-a-мониторинг-проблем-наблюдатель-реализована-целиком" aria-label="Section link">#</a>Волна A — мониторинг проблем (наблюдатель) — реализована целиком</h3><ul>
+<li><strong>A1. Триаж упавших ранов (реализовано).</strong> После <code>run.failed</code> супервайзер читает трассу и
+пишет структурный диагноз: класс причины (ошибка модели / лимит песочницы /
+дефект харнеса / промпт агента / ошибка пользователя), доказательства,
+предложение. Пополняет очередь проблем администратора.</li>
+<li><strong>A2. Кластеризация повторяющихся сбоев (реализовано).</strong> Каждый вердикт
+несёт детерминированный <code>cluster_key</code> (класс причины + нормализованный
+текст ошибки: цифры → #, пути → ~) и короткую модельную метку паттерна
+(«cpu range», «provider 429»). Очередь проблем сворачивает раны с одним
+ключом в один тикет со счётчиком ×N и списком ранов; группировка не
+зависит от стабильности формулировок модели.</li>
+<li><strong>A3. Аномалии здоровья (реализовано).</strong> Детектор в <code>kernel/agent</code>
+сравнивает текущий час с предыдущим (health-агрегат с <code>until</code>-окном):
+рост доли ошибок модели, шторм ретраев (≥3×), всплеск упавших ранов
+(≥2× при ≥3), очередь подтверждений, кратный рост p95. Находка
+журналируется как <code>supervisor.insight</code>: объяснение от супервайзера, при
+выключенной модели — детерминированный шаблон с теми же числами; дедуп
+по метрике 6 часов.</li>
+</ul>
+<h3 id="волна-b-качество-и-развитие-реализована"><a class="anchor" href="#волна-b-качество-и-развитие-реализована" aria-label="Section link">#</a>Волна B — качество и развитие (реализована)</h3><ul>
+<li><strong>B1. Триаж противоречий знаний (реализовано).</strong> Каждому
+<code>knowledge.challenged</code> (rule contradiction) — вердикт-черновик решения
+(<code>action</code>: invalidate_old / supersede_old / keep_both_scoped / confirm_new,
+закрытый словарь, деградация к безопасному) с <code>subject</code>=knowledge id;
+человек применяет в UI знаний.</li>
+<li><strong>B2. Контрактные предложения (реализовано).</strong> Кластер A2 с классом
+<code>agent_prompt</code> по одному агенту при ≥3 ранах превращается в черновик
+эволюции (<code>agent.DraftContractProposal</code>) и подаётся в реестр
+предложений (<code>CreateAgentProposal</code>, author=supervisor) — дальше обычный
+человеческий ревью.</li>
+<li><strong>B3. Наблюдение за развитием (реализовано).</strong> Когда у агента две
+последние оценки накрывают разные версии определения, супервайзер пишет
+нарратив «что улучшилось/что деградировало» (subject=<code>agent:vN</code>).</li>
+<li><strong>B4. Гигиена знаний (реализовано).</strong> <code>knowledge.challenged</code> с
+правилом aging → рекомендация confirm/update/retire (subject=knowledge
+id).</li>
+</ul>
+<h3 id="волна-c-пользовательские-ошибки-и-трение-реализована"><a class="anchor" href="#волна-c-пользовательские-ошибки-и-трение-реализована" aria-label="Section link">#</a>Волна C — пользовательские ошибки и трение (реализована)</h3><ul>
+<li><strong>C1. Ошибки пользователей (реализовано).</strong> Два детерминированных
+паттерна: один и тот же нормализованный запрос ≥3× от одного актора и
+дважды отклонённая операция в одном ране → суждение case=user_friction.</li>
+<li><strong>C2. Проверка intake-классификации (реализовано).</strong> Выборочный аудит
+<code>intake.classified</code> (task/amendment): супервайзер сверяет метку с
+текстом сообщения и тем, что стартовалось после; молчание при
+согласии — шум только на расхождениях.</li>
+<li><strong>C3. Валидация цели поправки (реализовано).</strong> Перед стартом поправки
+(<code>start_task</code> с amend_run_id) супервайзер сверяет текст поправки с
+целью (тайтл + дайджест ответа); явное несовпадение — 422 с
+рекомендацией, сбой супервайзера не блокирует поправку.</li>
+<li><strong>C4. Майнинг кандидатов в навыки (реализовано).</strong> 3-граммы тулов,
+повторяющиеся в ≥3 разных ранах и не покрытые существующими навыками:
+сперва дешёвый детерминированный фильтр шума (подряд идущие повторы
+одного тула — пагинация/ретраи, сплошь read-only последовательности —
+навигация), затем судья решает, стоит ли повторение процедуры
+(worth_skill), и только для «да» публикуется черновик навыка
+(name/description/steps) кейсом skill_candidate.</li>
+<li><strong>C5. Прогноз конфликтов знаний (реализовано).</strong> Backfill эмбеддингов
+проверяет соседей свежевстроенной пропозиции: косинус в полосе
+[0.85, 0.97) — вердикт knowledge_conflict до того, как противоречие
+дойдёт до рана. Эндпоинт
+<code>GET /v1/observations/knowledge/embeddings/neighbors</code>.</li>
+</ul>
+<p>Все кейсы работают на одной и той же поверхности: журнальные события →
+структурное суждение супервайзера → очередь администратора. Ни одно суждение
+не исполняется автоматически.</p>
+<h2 id="4-vision-роутинг-фаза-1-реализовано"><a class="anchor" href="#4-vision-роутинг-фаза-1-реализовано" aria-label="Section link">#</a>4. Vision-роутинг (фаза 1, реализовано)</h2><p>Вызов модели, несущий изображения, направляется на модель из
+<code>supervisor.vision.model</code>, если задана и отличается от модели запроса;
+маршрутизация провайдера — общая с обычными вызовами. Без настройки
+изображения идут в основную модель (прежнее поведение).</p>
+<h2 id="5-человеческий-фактор-hab-hwt-и-flow-efficiency-фаза-1-реализовано"><a class="anchor" href="#5-человеческий-фактор-hab-hwt-и-flow-efficiency-фаза-1-реализовано" aria-label="Section link">#</a>5. Человеческий фактор: HAB, HWT и Flow Efficiency (фаза 1, реализовано)</h2><p>Метрики разделяют два разных явления, которые раньше смешивались в
+«human approval budget»:</p>
+<table>
+<thead>
+<tr>
+<th>Метрика</th>
+<th>Канбанский аналог</th>
+<th>Определение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>HAB — Human Attention Spend</strong> («внимание»)</td>
+<td>touch time</td>
+<td>Оценка времени внимания: чтение итоговых и промежуточных заключений, принятие подтверждений, обдумывание и написание ответов</td>
+</tr>
+<tr>
+<td><strong>HWT — Human Wait Time</strong> («простой»)</td>
+<td>queue wait time</td>
+<td>wall-clock время, которое работа простояла в ожидании человека (вопрос поднят → решён), вне зависимости от того, сколько внимания это заняло</td>
+</tr>
+<tr>
+<td><strong>Flow Efficiency</strong></td>
+<td>flow efficiency</td>
+<td><code>HAB / (HAB + HWT)</code> — доля человеческой шкалы времени, которая ушла на реальное внимание, а не на простой</td>
+</tr>
+</tbody></table>
+<h3 id="как-считается-hab-оценка-коэффициенты-настраиваются"><a class="anchor" href="#как-считается-hab-оценка-коэффициенты-настраиваются" aria-label="Section link">#</a>Как считается HAB (оценка, коэффициенты настраиваются)</h3><ul>
+<li>решение по подтверждению/сверке: <code>supervisor.hab.approval_seconds</code> (45с);</li>
+<li>ответ на <code>ask_human</code>: база <code>answer_base_seconds</code> (20с) + набор текста
+(длина ответа / 5 символов на слово / <code>reading_wpm</code>);</li>
+<li>чтение сгенерированного: <strong>финальный ответ читается целиком</strong>
+(слова <code>agent.summary.answer</code>), остальная выдача (completion-токены без
+ответа) — с коэффициентом беглого просмотра <strong>10%</strong>; промпт-токены не
+читаются никогда (это контекст, который человек не видит).
+words ≈ tokens × 0.75; секунды = слова / <code>reading_wpm</code> × 60.</li>
+</ul>
+<h3 id="как-считается-hwt"><a class="anchor" href="#как-считается-hwt" aria-label="Section link">#</a>Как считается HWT</h3><p>Σ (момент решения − момент постановки вопроса) по разрешённым
+подтверждениям/вопросам в окне. Это чистая задержка потока — канбан-очередь.</p>
+<h3 id="где-смотреть"><a class="anchor" href="#где-смотреть" aria-label="Section link">#</a>Где смотреть</h3><p>Два слоя одних и тех же метрик:</p>
+<ul>
+<li><strong>Окно</strong> (существующее): дашборд → обзор → карточка «Человеческий
+фактор» — HAB, HWT, Flow Efficiency и счётчики решений/ответов за час.</li>
+<li><strong>Персистентно, по скоупам</strong> (реализовано): агрегаты <code>kernel/cost</code>
+несут <code>human</code> в каждом rollup — ран/задача (<code>/cost/task</code>), сага и
+проект (<code>/cost/budget</code>), team-run (<code>/cost/team-run</code>). HAB копится из
+решений, ответов и чтения заключений за всю жизнь скоупа, HWT — из
+ожиданий approvals (зеркало <code>wait_ms</code>); коэффициенты читаются из
+настроек супервайзера при старте ядра. В UI — подсказка у ячейки
+approvals в обзоре проекта и строка «внимание/простой» в бюджете
+задачи на странице рана. Появление HWT ≫ HAB — сигнал: вопросы
+зависают, поток блокируется на людях.</li>
+</ul>
+<h2 id="6-семантический-слой-знаний-фаза-2-реализовано"><a class="anchor" href="#6-семантический-слой-знаний-фаза-2-реализовано" aria-label="Section link">#</a>6. Семантический слой знаний (фаза 2, реализовано)</h2><p>Модель эмбеддингов — <strong>локальная и фиксированная</strong>, работает <strong>в процессе
+ядра</strong> через pure-Go движок rembed (<code>intfloat/multilingual-e5-small</code>,
+384-мерные векторы, 100+ языков, weight-only int8): ни отдельного сервиса,
+ни провайдеров, ни ключей. Провайдерские эмбеддинги выпилены: облачные
+каталоги не отдают эмбеддинг-модели, а качество локального e5 для наших
+коротких пропозиций выше (multilingual-e5 специально обучен на 100+ языках).
+Модель лениво загружается с HF Hub при старте ядра в персистентный кэш
+(<code>/var/cache/rembed</code>, volume <code>rembed_cache</code>; вне контейнера — кэш ОС,
+путь переопределяется <code>REMBED_CACHE</code>); до готовности подсказки
+работают в лексическом режиме.</p>
+<p>Матчер подсказок сегодня лексический (тиры: точные попадания тем/сущностей →
+IDF-термины). Семантический слой добавит тир «по смыслу» на эмбеддингах —
+найденное будет помечаться <code>semantic:&lt;score&gt;</code> в <code>matched_by</code>.</p>
+<h3 id="что-нужно"><a class="anchor" href="#что-нужно" aria-label="Section link">#</a>Что нужно</h3><ol>
+<li><strong>Движок инференса</strong> — pure-Go библиотека rembed в процессе ядра
+(<code>KERNEL_EMBEDDINGS_MODEL</code>, по умолчанию e5-small; <code>KERNEL_EMBEDDING_WORKERS</code>
+ограничивает CPU), без HTTP-хопа и внешних зависимостей.</li>
+<li><strong>Хранение</strong> — журнал-БД уже на pgvector: миграция добавляет к знанию
+вектор (размерность — под выбранную модель) и штамп версии модели
+эмбеддингов. Смена модели ⇒ фоновый пересчёт.</li>
+<li><strong>Наполнение</strong> — ingest-хук на <code>knowledge.proposed/corrected</code> + фоновый
+проход по записям без вектора/с чужим штампом.</li>
+<li><strong>Запрос</strong> — слот подсказки эмбеддит текст задачи; косинусная близость
+даёт новый тир в <code>hintCandidate</code> (между точными сущностями и IDF-лексикой),
+существующие механизмы (понижение за novelty B5, бюджеты, исходы) — без изменений.
+e5-префиксы: kernel добавляет <code>query: </code> к тексту слота и <code>passage: </code> к
+пропозициям знаний (rembed отдаёт текст как есть — без префиксов e5
+молча теряет качество).</li>
+<li><strong>Деградация</strong> — модель не настроена/недоступна ⇒ ровно текущее
+лексическое поведение + счётчик пропусков в health.</li>
+<li><strong>Оценка эффекта</strong> — A/B по существующим исходам подсказок
+(helpful/harmful) до/после включения; золотые запросы в оценку.</li>
+</ol>
+<p>Оценка объёма: миграция + клиент провайдера + ingest-хук + тир в матчере +
+бейдж в UI — один сосредоточенный релиз.</p>
+<h2 id="7-дальше-фаза-2"><a class="anchor" href="#7-дальше-фаза-2" aria-label="Section link">#</a>7. Дальше (фаза 2+)</h2><ul>
+<li>Отдельная страница супервайзера (реализовано, <code>/supervisor</code> и вкладка
+«Супервайзер» на дашборде): очередь проблем с кластерами (A1+A2),
+пояснения аномалий (A3), здоровье семантического слоя и эффективность
+тиров подсказок. Вкладка — только мониторинг: коэффициенты HAB и модели
+редактируются в Агентах → «Настройки качества» (одна поверхность правки,
+дашборд не второй редактор), вердикты закрываются кнопкой «Разобрано»
+(журналируется, ничего не применяет).</li>
+<li>Волны B и C из §3 по одной за релиз, каждая — с флагом выключения
+(волны A, B и C целиком реализованы: триаж —
+<code>KERNEL_SUPERVISOR_TRIAGE_INTERVAL</code>, по умолчанию 2 минуты; инсайты и
+кейсы B/C едут в том же цикле, дедуп по субъекту; всё отключается
+<code>KERNEL_SUPERVISOR_CASES=off</code>).</li>
+<li>Расширение capabilities: <code>web</code> (веб-исследования без raw-сети песочницы),
+<code>ask_human</code> (лимит человеческого внимания), <code>mcp</code>, <code>artifacts</code>, <code>vision</code> —
+точки принуждения: <code>workspace/models.go</code> (канонические имена),
+<code>kernel/agent</code> <code>PrepareRun</code>/<code>advertisedTools</code>, <code>workspace</code> run-config.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="secrets-management.html"><small>← Назад</small><strong>Управление секретами агентов (Secrets Management)</strong></a>
+    <a class="pager-next" href="system-dashboard.html"><small>Далее →</small><strong>Дашборд здоровья системы (System Dashboard)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

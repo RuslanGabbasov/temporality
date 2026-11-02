@@ -158,7 +158,7 @@ Applying agent and skill proposals is gated on a green evaluation run — see
 
 ## External authentication
 
-OIDC federation is supported (Keycloak, authentik and others): `docs/auth-federation.md`.
+OIDC federation is supported (Keycloak, authentik and others): [docs/auth-federation.md](docs/auth-federation.md).
 The scheme: discovery + a JWKS cache (key rotation without restart),
 server-side sessions (`KERNEL_SESSION_TTL` 12h / `KERNEL_SESSION_ABSOLUTE_TTL`
 7d), JIT provisioning with a default role and the `deny` role ("login

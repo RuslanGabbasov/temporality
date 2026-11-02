@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Knowledge Extraction из агентских траекторий — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/knowledge-extraction.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row active" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Knowledge Extraction из агентских траекторий</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Реализовать механизм автоматического выделения кандидатов в знания из реальной работы агентов в Temporality.</p>
+<p>Сейчас Temporality умеет:</p>
+<ul>
+<li>фиксировать события агентской деятельности;</li>
+<li>формировать <code>knowledge.*</code> события;</li>
+<li>проектировать знания;</li>
+<li>подтверждать, использовать, оспаривать и инвалидировать знания;</li>
+<li>выдавать знания в виде hints.</li>
+</ul>
+<p>При этом большая часть содержательной работы агента — исследование, обсуждение, принятие решений, обнаружение причин, формирование выводов — <strong>не приводит к появлению knowledge</strong>.</p>
+<p>В результате реальный агентский run может содержать большое количество полезной информации, но после его завершения в Knowledge Layer не появляется ни одного кандидата.</p>
+<p>Необходимо добавить отдельный механизм:</p>
+<pre><code class="language-text">Agent trajectory
+       ↓
+Knowledge Extraction
+       ↓
+0..N knowledge candidates
+       ↓
+knowledge.proposed
+       ↓
+confirmation / rejection / correction
+       ↓
+persistent knowledge
+</code></pre>
+<h3 id="основной-принцип"><a class="anchor" href="#основной-принцип" aria-label="Section link">#</a>Основной принцип</h3><p><strong>Не каждое событие является знанием. Но содержательная агентская работа должна иметь механизм выделения потенциально полезных знаний.</strong></p>
+<hr>
+<h1 id="2-что-не-является-целью"><a class="anchor" href="#2-что-не-является-целью" aria-label="Section link">#</a>2. Что не является целью</h1><p>В рамках задачи не требуется:</p>
+<ul>
+<li>превращать каждый <code>tool.completed</code> в knowledge;</li>
+<li>автоматически сохранять весь текст переписки;</li>
+<li>делать из Temporality очередной RAG-контур;</li>
+<li>заставлять агента вручную вызывать <code>remember</code> после каждого значимого вывода;</li>
+<li>требовать от модели заполнения сложной структуры <code>topics/entities/...</code>;</li>
+<li>автоматически считать любое утверждение истинным;</li>
+<li>менять event log как source of truth;</li>
+<li>заменять существующий lifecycle <code>proposed → confirmed → used → challenged/corrected → invalidated</code>.</li>
+</ul>
+<p>Knowledge Extraction должен <strong>порождать кандидатов</strong>, а не самостоятельно объявлять их истиной.</p>
+<hr>
+<h1 id="3-целевая-модель"><a class="anchor" href="#3-целевая-модель" aria-label="Section link">#</a>3. Целевая модель</h1><p>Источником данных остаётся event stream.</p>
+<p>Knowledge является производным представлением, построенным на основании событий.</p>
+<pre><code class="language-text">                         Event Stream
+                              │
+             ┌────────────────┴────────────────┐
+             │                                 │
+        Runtime events                  Knowledge events
+             │                                 │
+             │                         ProjectKnowledge
+             │
+             ▼
+       Agent trajectory
+             │
+             ▼
+    Knowledge Extraction
+             │
+             ▼
+    knowledge.proposed
+             │
+      ┌──────┼────────┐
+      ▼      ▼        ▼
+ confirmed rejected challenged
+      │
+      ▼
+   Knowledge
+</code></pre>
+<p>Extraction <strong>не должен становиться вторым source of truth</strong>.</p>
+<p>Все результаты extraction должны выражаться через существующую событийную модель Temporality.</p>
+<hr>
+<h1 id="4-основной-сценарий"><a class="anchor" href="#4-основной-сценарий" aria-label="Section link">#</a>4. Основной сценарий</h1><p>После завершения содержательной работы агента система должна иметь возможность проанализировать trajectory и определить:</p>
+<ol>
+<li>что было установлено;</li>
+<li>какие гипотезы были подтверждены или опровергнуты;</li>
+<li>какие решения были приняты;</li>
+<li>какие причины проблем были обнаружены;</li>
+<li>какие ограничения или закономерности были выявлены;</li>
+<li>какие результаты могут быть полезны будущему агенту.</li>
+</ol>
+<p>Пример.</p>
+<p>Агент исследовал проблему:</p>
+<pre><code class="language-text">Почему WebAuthn не работает в Tauri WebView на macOS?
+</code></pre>
+<p>В ходе run:</p>
+<pre><code class="language-text">исследование
+→ проверка Safari
+→ проверка Firefox
+→ проверка Tauri WebView
+→ эксперимент
+→ анализ результата
+→ вывод
+</code></pre>
+<p>После завершения extraction может предложить:</p>
+<pre><code class="language-text">knowledge.proposed
+
+kind: claim
+
+proposition:
+&quot;WebAuthn работает в Safari/Firefox, но не работает
+в текущем macOS WebView runtime Tauri.&quot;
+
+evidence:
+[
+  event-123,
+  event-127,
+  event-131
+]
+</code></pre>
+<p>Это не означает автоматического подтверждения знания.</p>
+<p>Оно становится кандидатом:</p>
+<pre><code class="language-text">proposed
+</code></pre>
+<p>и далее проходит существующий lifecycle.</p>
+<hr>
+<h1 id="5-два-типа-знания"><a class="anchor" href="#5-два-типа-знания" aria-label="Section link">#</a>5. Два типа знания</h1><p>Extraction должен различать как минимум два типа.</p>
+<h2 id="51-observation"><a class="anchor" href="#51-observation" aria-label="Section link">#</a>5.1 Observation</h2><p>Объективный результат действия.</p>
+<p>Примеры:</p>
+<pre><code class="language-text">pytest завершился с exit code 0
+</code></pre>
+<pre><code class="language-text">HTTP endpoint вернул status 200
+</code></pre>
+<pre><code class="language-text">файл X существует
+</code></pre>
+<pre><code class="language-text">конфигурация содержит параметр Y
+</code></pre>
+<p>Observation желательно формировать автоматически там, где результат непосредственно следует из события.</p>
+<hr>
+<h2 id="52-claim"><a class="anchor" href="#52-claim" aria-label="Section link">#</a>5.2 Claim</h2><p>Вывод, сделанный на основании нескольких событий.</p>
+<p>Примеры:</p>
+<pre><code class="language-text">Проблема возникает только в WebView.
+</code></pre>
+<pre><code class="language-text">Причиной ошибки является несовместимость X и Y.
+</code></pre>
+<pre><code class="language-text">Для этого проекта нельзя использовать механизм Z.
+</code></pre>
+<pre><code class="language-text">Изменение A необходимо делать до B.
+</code></pre>
+<p>Claim обязательно должен иметь evidence, на основании которого он был сформирован.</p>
+<hr>
+<h1 id="6-источники-extraction"><a class="anchor" href="#6-источники-extraction" aria-label="Section link">#</a>6. Источники extraction</h1><p>На первом этапе extraction должен работать с завершёнными run.</p>
+<pre><code class="language-text">run.completed
+      ↓
+Knowledge Extraction
+</code></pre>
+<p>Это является обязательным MVP.</p>
+<p>В будущем extraction может запускаться и на промежуточных этапах содержательной работы, но это не является обязательным требованием первой реализации.</p>
+<hr>
+<h1 id="7-extraction-должен-анализировать-trajectory-а-не-только-chat"><a class="anchor" href="#7-extraction-должен-анализировать-trajectory-а-не-только-chat" aria-label="Section link">#</a>7. Extraction должен анализировать trajectory, а не только chat</h1><p>В extraction необходимо передавать релевантный контекст run:</p>
+<ul>
+<li>пользовательскую задачу;</li>
+<li>сообщения агента;</li>
+<li>сообщения пользователя, если они являются частью run;</li>
+<li>tool calls;</li>
+<li>результаты инструментов;</li>
+<li>MCP calls/results;</li>
+<li>результаты команд;</li>
+<li>изменения состояния, если они представлены событиями;</li>
+<li>результаты проверок;</li>
+<li>ошибки и последующие действия;</li>
+<li>финальный результат run.</li>
+</ul>
+<p>Необходимо избегать передачи модели полного необработанного event log без необходимости.</p>
+<p>Должен существовать механизм формирования компактного extraction context.</p>
+<hr>
+<h1 id="8-контракт-extractor"><a class="anchor" href="#8-контракт-extractor" aria-label="Section link">#</a>8. Контракт extractor</h1><p>Extractor должен возвращать <code>0..N</code> кандидатов.</p>
+<p>Минимальная структура кандидата:</p>
+<pre><code class="language-yaml">kind: observation | claim
+proposition: &quot;...&quot;
+evidence:
+  - event_id
+</code></pre>
+<p>Дополнительно extractor может возвращать:</p>
+<pre><code class="language-yaml">confidence: ...
+</code></pre>
+<p>если такое поле поддерживается моделью knowledge.</p>
+<h3 id="важное-требование"><a class="anchor" href="#важное-требование" aria-label="Section link">#</a>Важное требование</h3><p>Не вводить на первом этапе обязательное заполнение:</p>
+<pre><code class="language-text">topics
+entities
+tags
+categories
+</code></pre>
+<p>агентом или extractor-моделью.</p>
+<p>Эти данные не должны становиться обязательной частью knowledge creation.</p>
+<p>Если они необходимы для retrieval, их следует получать отдельным этапом enrichment либо вычислять из самого knowledge.</p>
+<hr>
+<h1 id="9-evidence"><a class="anchor" href="#9-evidence" aria-label="Section link">#</a>9. Evidence</h1><p>Каждый автоматически созданный claim должен иметь ссылки на исходные события.</p>
+<p>Например:</p>
+<pre><code class="language-text">knowledge.proposed
+    proposition:
+      &quot;X вызывает Y&quot;
+    evidence:
+      - event-123
+      - event-127
+      - event-131
+</code></pre>
+<p>Evidence должен позволять:</p>
+<ul>
+<li>открыть исходное событие;</li>
+<li>понять происхождение знания;</li>
+<li>проверить корректность вывода;</li>
+<li>диагностировать ошибочное знание;</li>
+<li>впоследствии определить, почему знание было подтверждено или опровергнуто.</li>
+</ul>
+<p><strong>Knowledge без понятного происхождения не должен считаться полноценным результатом extraction.</strong></p>
+<hr>
+<h1 id="10-не-создавать-knowledge-из-каждого-run"><a class="anchor" href="#10-не-создавать-knowledge-из-каждого-run" aria-label="Section link">#</a>10. Не создавать knowledge из каждого run</h1><p>Extractor должен уметь вернуть:</p>
+<pre><code class="language-text">[]
+</code></pre>
+<p>если в run не было знаний, которые имеют ценность за пределами текущей задачи.</p>
+<p>Это нормальный результат.</p>
+<p>Например:</p>
+<pre><code class="language-text">прочитал файл
+→ поменял переменную
+→ запустил тест
+→ всё прошло
+</code></pre>
+<p>не обязательно должно создавать отдельный claim.</p>
+<p>В то же время:</p>
+<pre><code class="language-text">исследовал проблему
+→ проверил несколько гипотез
+→ обнаружил систематическую причину
+→ сформировал решение
+</code></pre>
+<p>должно иметь возможность породить knowledge candidate.</p>
+<hr>
+<h1 id="11-критерий-полезности"><a class="anchor" href="#11-критерий-полезности" aria-label="Section link">#</a>11. Критерий полезности</h1><p>Extractor должен ориентироваться не на вопрос:</p>
+<blockquote>
+<p>Что произошло в этом run?</p>
+</blockquote>
+<p>а на вопрос:</p>
+<blockquote>
+<p>Что из произошедшего может быть полезно будущему агенту при похожей работе?</p>
+</blockquote>
+<p>Особенно ценны:</p>
+<ul>
+<li>устойчивые ограничения;</li>
+<li>проектные особенности;</li>
+<li>найденные причины проблем;</li>
+<li>проверенные способы решения;</li>
+<li>важные технические решения;</li>
+<li>подтверждённые закономерности;</li>
+<li>известные несовместимости;</li>
+<li>результаты экспериментов;</li>
+<li>отрицательные результаты, если они предотвращают повторение ошибки.</li>
+</ul>
+<hr>
+<h1 id="12-связь-с-remember"><a class="anchor" href="#12-связь-с-remember" aria-label="Section link">#</a>12. Связь с <code>remember</code></h1><p>Существующий <code>remember</code> сохранить.</p>
+<p>Он должен рассматриваться как <strong>явный канал утверждения знания агентом</strong>:</p>
+<pre><code class="language-text">Agent
+  ↓
+remember
+  ↓
+knowledge.proposed
+</code></pre>
+<p>Но <code>remember</code> не должен быть единственным способом создания knowledge.</p>
+<p>Целевая модель:</p>
+<pre><code class="language-text">             ┌── remember ───────────────┐
+             │                           │
+Agent work ──┼── successful observations ┤
+             │                           │
+             └── Knowledge Extraction ──┘
+                                         ↓
+                                knowledge.proposed
+</code></pre>
+<p>При этом существующее правило:</p>
+<blockquote>
+<p>успешные тесты не нужно повторно записывать через <code>remember</code></p>
+</blockquote>
+<p>сохранить.</p>
+<hr>
+<h1 id="13-автоматические-observations"><a class="anchor" href="#13-автоматические-observations" aria-label="Section link">#</a>13. Автоматические observations</h1><p>Существующую эвристику успешных test/build/lint команд сохранить.</p>
+<p>Она является специализированным быстрым producer&#39;ом:</p>
+<pre><code class="language-text">successful verification
+        ↓
+knowledge.proposed
+kind: observation
+</code></pre>
+<p>Knowledge Extraction не должен дублировать уже существующие observations.</p>
+<p>Extractor должен видеть их как evidence/контекст и избегать создания второго knowledge с тем же смыслом.</p>
+<hr>
+<h1 id="14-deduplication"><a class="anchor" href="#14-deduplication" aria-label="Section link">#</a>14. Deduplication</h1><p>Необходимо предусмотреть защиту от повторного создания одного и того же знания.</p>
+<p>Например:</p>
+<pre><code class="language-text">Run 1:
+&quot;pytest tests/foo passes&quot;
+
+Run 2:
+&quot;pytest tests/foo passes&quot;
+
+Run 3:
+&quot;pytest tests/foo passes&quot;
+</code></pre>
+<p>не должны создавать бесконечное количество одинаковых knowledge nodes.</p>
+<p>Для этого необходимо использовать существующий механизм identity/deduplication knowledge либо добавить минимальный deterministic fingerprint.</p>
+<p>Особенно важно различать:</p>
+<pre><code class="language-text">новое знание
+</code></pre>
+<p>и:</p>
+<pre><code class="language-text">повторное подтверждение существующего знания
+</code></pre>
+<p>Повторное подтверждение должно по возможности усиливать evidence существующего knowledge, а не создавать новый узел.</p>
+<hr>
+<h1 id="15-связывание-знаний"><a class="anchor" href="#15-связывание-знаний" aria-label="Section link">#</a>15. Связывание знаний</h1><p>Если extraction выявляет несколько связанных выводов, необходимо иметь возможность создавать связи:</p>
+<pre><code class="language-text">knowledge.linked
+</code></pre>
+<p>Например:</p>
+<pre><code class="language-text">knowledge A:
+&quot;WebAuthn не работает в текущем WebView&quot;
+
+knowledge B:
+&quot;Safari использует другой browser runtime&quot;
+
+knowledge A
+    └── related_to ──&gt; knowledge B
+</code></pre>
+<p>При этом создание связей не должно быть обязательным для каждого knowledge candidate.</p>
+<p>Минимальный MVP может начать только с:</p>
+<pre><code class="language-text">knowledge.proposed
+    + evidence
+</code></pre>
+<p>а linking реализовать отдельным этапом.</p>
+<hr>
+<h1 id="16-confirmation"><a class="anchor" href="#16-confirmation" aria-label="Section link">#</a>16. Confirmation</h1><p>Extraction <strong>не подтверждает knowledge автоматически только потому, что его предложила LLM</strong>.</p>
+<p>После:</p>
+<pre><code class="language-text">knowledge.proposed
+</code></pre>
+<p>должен использоваться существующий механизм подтверждения.</p>
+<p>Подтверждение может происходить:</p>
+<ul>
+<li>повторной проверкой;</li>
+<li>новым агентским run;</li>
+<li>явным human approval;</li>
+<li>существующими verification-механизмами Temporality.</li>
+</ul>
+<hr>
+<h1 id="17-human-in-the-loop"><a class="anchor" href="#17-human-in-the-loop" aria-label="Section link">#</a>17. Human-in-the-loop</h1><p>Для MVP желательно предусмотреть возможность просмотра кандидатов человеком.</p>
+<p>Интерфейс должен позволять:</p>
+<pre><code class="language-text">┌──────────────────────────────────────────┐
+│ Новый кандидат в знания                  │
+│                                          │
+│ WebView macOS не поддерживает ...        │
+│                                          │
+│ Evidence: 3 события                      │
+│                                          │
+│ [ Подтвердить ] [ Отклонить ] [ Изменить ]│
+└──────────────────────────────────────────┘
+</code></pre>
+<p>При этом пользователь не должен редактировать YAML/JSON.</p>
+<p>Редактирование knowledge должно происходить через обычный UI.</p>
+<hr>
+<h1 id="18-extraction-prompt"><a class="anchor" href="#18-extraction-prompt" aria-label="Section link">#</a>18. Extraction prompt</h1><p>Для extractor должен быть отдельный системный prompt.</p>
+<p>Он должен явно задавать:</p>
+<h3 id="нужно"><a class="anchor" href="#нужно" aria-label="Section link">#</a>Нужно</h3><ul>
+<li>искать знания, полезные за пределами текущего run;</li>
+<li>отличать факт/наблюдение от вывода;</li>
+<li>опираться только на evidence;</li>
+<li>возвращать несколько кандидатов, если они независимы;</li>
+<li>возвращать пустой результат, если полезного знания нет;</li>
+<li>избегать дублирования существующих knowledge;</li>
+<li>фиксировать отрицательные результаты, если они полезны для будущих задач.</li>
+</ul>
+<h3 id="нельзя"><a class="anchor" href="#нельзя" aria-label="Section link">#</a>Нельзя</h3><ul>
+<li>превращать каждое действие в knowledge;</li>
+<li>придумывать факты;</li>
+<li>делать вывод без evidence;</li>
+<li>сохранять обычный ход рассуждений;</li>
+<li>сохранять временные детали run;</li>
+<li>дублировать результаты существующих observations;</li>
+<li>считать собственную уверенность доказательством.</li>
+</ul>
+<hr>
+<h1 id="19-контекст-существующих-знаний"><a class="anchor" href="#19-контекст-существующих-знаний" aria-label="Section link">#</a>19. Контекст существующих знаний</h1><p>Extractor желательно должен видеть релевантные существующие knowledge.</p>
+<p>Это необходимо для определения:</p>
+<pre><code class="language-text">новое знание
+</code></pre>
+<p>против:</p>
+<pre><code class="language-text">подтверждение существующего знания
+</code></pre>
+<p>против:</p>
+<pre><code class="language-textисправление"></code></pre>
+<p>Например:</p>
+<pre><code class="language-text">Existing:
+&quot;X работает через Y&quot;
+
+Current run:
+&quot;X работает через Z&quot;
+</code></pre>
+<p>Это должно потенциально приводить не к новому независимому knowledge, а к:</p>
+<pre><code class="language-text">knowledge.challenged
+</code></pre>
+<p>или соответствующему механизму correction.</p>
+<hr>
+<h1 id="20-retrieval-для-extractor"><a class="anchor" href="#20-retrieval-для-extractor" aria-label="Section link">#</a>20. Retrieval для extractor</h1><p>Не нужно передавать extractor всю базу знаний.</p>
+<p>Передавать следует только релевантные существующие knowledge:</p>
+<pre><code class="language-text">trajectory
+    ↓
+candidate concepts / terms
+    ↓
+existing relevant knowledge
+    ↓
+extractor
+</code></pre>
+<p>Это одновременно:</p>
+<ul>
+<li>уменьшает context;</li>
+<li>помогает deduplication;</li>
+<li>позволяет обнаруживать противоречия;</li>
+<li>повышает качество extraction.</li>
+</ul>
+<hr>
+<h1 id="21-пилот-на-реальных-задачах"><a class="anchor" href="#21-пилот-на-реальных-задачах" aria-label="Section link">#</a>21. Пилот на реальных задачах</h1><p>До реализации сложной схемы необходимо проверить гипотезу на уже выполненных реальных run.</p>
+<p>Взять несколько существующих задач Temporality, в которых:</p>
+<ul>
+<li>была содержательная работа;</li>
+<li>были обсуждения;</li>
+<li>были исследования;</li>
+<li>принимались решения;</li>
+<li>knowledge в текущей реализации не сформировалось.</li>
+</ul>
+<p>Для каждого run:</p>
+<pre><code class="language-text">existing trajectory
+        ↓
+prototype extractor
+        ↓
+candidate knowledge
+        ↓
+human review
+</code></pre>
+<p>Необходимо оценить:</p>
+<ol>
+<li>сколько кандидатов создаётся на run;</li>
+<li>сколько кандидатов действительно полезны;</li>
+<li>сколько являются дубликатами;</li>
+<li>сколько являются обычным шумом;</li>
+<li>достаточно ли evidence;</li>
+<li>какие типы knowledge реально встречаются;</li>
+<li>какие знания стоит сохранять;</li>
+<li>какие знания следует отклонять.</li>
+</ol>
+<hr>
+<h1 id="22-критерии-успешности-пилота"><a class="anchor" href="#22-критерии-успешности-пилота" aria-label="Section link">#</a>22. Критерии успешности пилота</h1><p>Пилот считается успешным, если на реальных задачах extractor способен:</p>
+<ul>
+<li>находить содержательные выводы, которые сейчас теряются;</li>
+<li>привязывать их к конкретным evidence;</li>
+<li>не превращать каждый run в поток мусора;</li>
+<li>отличать observations от claims;</li>
+<li>находить знания, полезные за пределами текущего run;</li>
+<li>обнаруживать повторение уже существующих knowledge;</li>
+<li>возвращать <code>0</code> кандидатов там, где сохранять нечего.</li>
+</ul>
+<p>Количественные пороги определить после первого пилота, а не задавать заранее.</p>
+<hr>
+<h1 id="23-что-делать-с-topics-и-entities"><a class="anchor" href="#23-что-делать-с-topics-и-entities" aria-label="Section link">#</a>23. Что делать с <code>topics</code> и <code>entities</code></h1><p>Не делать их обязательными входными параметрами <code>remember</code> или extractor на первом этапе.</p>
+<p>После пилота определить:</p>
+<ul>
+<li>нужны ли они вообще в текущем виде;</li>
+<li>какие поля действительно помогают retrieval;</li>
+<li>можно ли получать их автоматически;</li>
+<li>достаточно ли term/phrase matching;</li>
+<li>какие сущности реально встречаются в knowledge.</li>
+</ul>
+<p>Если они нужны, предпочтительный вариант:</p>
+<pre><code class="language-text">knowledge
+    ↓
+enrichment
+    ↓
+topics/entities
+</code></pre>
+<p>а не:</p>
+<pre><code class="language-text">agent
+    ↓
+обязательное заполнение topics/entities
+</code></pre>
+<hr>
+<h1 id="24-наблюдаемость-extraction"><a class="anchor" href="#24-наблюдаемость-extraction" aria-label="Section link">#</a>24. Наблюдаемость extraction</h1><p>Сам extraction должен быть наблюдаемым через Temporality.</p>
+<p>Необходимо фиксировать как минимум:</p>
+<pre><code class="language-text">knowledge.extraction.started
+knowledge.extraction.completed
+</code></pre>
+<p>и результат:</p>
+<pre><code class="language-text">candidates_count
+accepted_count
+rejected_count
+</code></pre>
+<p>При необходимости:</p>
+<pre><code class="language-text">extraction.duration
+model
+token usage
+trajectory size
+</code></pre>
+<p>Extraction не должен быть «магией», которую невозможно диагностировать.</p>
+<hr>
+<h1 id="25-failure-handling"><a class="anchor" href="#25-failure-handling" aria-label="Section link">#</a>25. Failure handling</h1><p>Ошибка extraction не должна ломать основной run.</p>
+<pre><code class="language-text">agent run
+    │
+    ├── completed
+    │
+    └── extraction failed
+             │
+             └── logged / observable
+</code></pre>
+<p>Run считается завершённым независимо от результата extraction.</p>
+<p>Повторный extraction должен быть возможен.</p>
+<hr>
+<h1 id="26-idempotency"><a class="anchor" href="#26-idempotency" aria-label="Section link">#</a>26. Idempotency</h1><p>Повторный запуск extraction для одной и той же trajectory не должен порождать бесконечные дубликаты.</p>
+<p>Необходимо определить стабильный идентификатор extraction:</p>
+<pre><code class="language-text">extraction_id =
+hash(
+    trajectory_id,
+    extraction_version
+)
+</code></pre>
+<p>При изменении prompt/schema допускается новая версия extraction.</p>
+<p>Например:</p>
+<pre><code class="language-text">trajectory-123 / extraction-v1
+trajectory-123 / extraction-v2
+</code></pre>
+<p>Это позволит эволюционировать extractor без потери истории.</p>
+<hr>
+<h1 id="27-версионирование"><a class="anchor" href="#27-версионирование" aria-label="Section link">#</a>27. Версионирование</h1><p>Extractor должен иметь версию.</p>
+<p>Например:</p>
+<pre><code class="language-text">knowledge-extractor.v1
+</code></pre>
+<p>В knowledge event желательно сохранять информацию о producer/version.</p>
+<p>Это необходимо для последующего анализа:</p>
+<ul>
+<li>какие знания были созданы какой версией;</li>
+<li>как менялось качество extraction;</li>
+<li>можно ли безопасно переобработать старые trajectories.</li>
+</ul>
+<hr>
+<h1 id="28-минимальный-mvp"><a class="anchor" href="#28-минимальный-mvp" aria-label="Section link">#</a>28. Минимальный MVP</h1><p>В первый этап включить только:</p>
+<h3 id="producer"><a class="anchor" href="#producer" aria-label="Section link">#</a>Producer</h3><pre><code class="language-text">run.completed
+    ↓
+Knowledge Extraction
+</code></pre>
+<h3 id="output"><a class="anchor" href="#output" aria-label="Section link">#</a>Output</h3><pre><code class="language-text">knowledge.proposed
+</code></pre>
+<p>с:</p>
+<pre><code class="language-text">kind
+proposition
+evidence
+</code></pre>
+<h3 id="поддержать"><a class="anchor" href="#поддержать" aria-label="Section link">#</a>Поддержать</h3><ul>
+<li><code>observation</code>;</li>
+<li><code>claim</code>;</li>
+<li>0..N candidates;</li>
+<li>deduplication;</li>
+<li>idempotency;</li>
+<li>extraction version;</li>
+<li>наблюдаемость extraction;</li>
+<li>ошибки без влияния на run.</li>
+</ul>
+<h3 id="не-включать-в-mvp"><a class="anchor" href="#не-включать-в-mvp" aria-label="Section link">#</a>Не включать в MVP</h3><ul>
+<li>сложную автоматическую taxonomy;</li>
+<li>обязательные <code>topics/entities</code>;</li>
+<li>сложный graph linking;</li>
+<li>автоматическое подтверждение claims;</li>
+<li>extraction после каждого turn;</li>
+<li>сложный human-review workflow, если существующий UI пока не готов.</li>
+</ul>
+<hr>
+<h1 id="29-следующий-этап"><a class="anchor" href="#29-следующий-этап" aria-label="Section link">#</a>29. Следующий этап</h1><p>После успешного MVP:</p>
+<ol>
+<li>промежуточный extraction после содержательных блоков работы;</li>
+<li>enrichment <code>topics/entities</code>;</li>
+<li>automatic linking;</li>
+<li>challenge/correction существующих знаний;</li>
+<li>human review;</li>
+<li>автоматическое подтверждение некоторых observations;</li>
+<li>knowledge quality metrics;</li>
+<li>анализ evolution знаний между run.</li>
+</ol>
+<hr>
+<h1 id="30-ожидаемый-результат"><a class="anchor" href="#30-ожидаемый-результат" aria-label="Section link">#</a>30. Ожидаемый результат</h1><p>После реализации реальный run должен выглядеть примерно так:</p>
+<pre><code class="language-text">User task
+   ↓
+Agent work
+   │
+   ├── tool events
+   ├── observations
+   ├── decisions
+   ├── experiments
+   └── conclusions
+          │
+          ▼
+      run.completed
+          │
+          ▼
+   Knowledge Extraction
+          │
+          ├── candidate A
+          ├── candidate B
+          └── candidate C
+                  │
+                  ▼
+        knowledge.proposed
+                  │
+          ┌───────┴────────┐
+          ▼                ▼
+     verification       rejection
+          │
+          ▼
+   knowledge.confirmed
+          │
+          ▼
+      future run
+          │
+          ▼
+      knowledge.used
+</code></pre>
+<p>Главный результат задачи:</p>
+<blockquote>
+<p><strong>Temporality начинает фиксировать не только то, что делал агент, но и то, что агентская работа позволила узнать.</strong></p>
+</blockquote>
+<p>При этом event stream остаётся источником истины, а knowledge остаётся производным, проверяемым и эволюционирующим представлением.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="knowledge-evolution.html"><small>← Назад</small><strong>Разделение Experience, Knowledge, Skills и контекстной эволюции агента</strong></a>
+    <a class="pager-next" href="knowledge-model.html"><small>Далее →</small><strong>Knowledge model</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Архитектура Temporality — инвентаризация и расчистка (2026-09-25) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/product-architecture.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row active" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</h1>
+
+<p>Этот документ — честная карта того, что находится в репозитории сейчас:
+какие подсистемы образуют доказанный продукт, какие остались от прошлых
+гипотез, и что предлагается с этим делать. Отправная точка — не планы, а
+фактический код и фактические результаты экспериментов 4–8.</p>
+<h2 id="1-что-сегодня-является-продуктом"><a class="anchor" href="#1-что-сегодня-является-продуктом" aria-label="Section link">#</a>1. Что сегодня является продуктом</h2><p>Продукт Temporality — это замкнутый контур <strong>agent memory loop</strong> с полной
+наблюдаемостью эволюции опыта. Он доказан пятью acceptance-корпусами
+(эксперименты 4–8) и выглядит так:</p>
+<pre><code class="language-mermaid">flowchart LR
+    subgraph kernel[&quot;Agent Kernel (kernel/, :8090)&quot;]
+        A[Temporal workflow&lt;br/&gt;Lead/Coder/Reviewer/QA] --&gt; B[Model calls]
+        B --&gt; C[MCP tools + Docker sandbox]
+        C --&gt; D[Human approval]
+    end
+    subgraph runtime[&quot;Temporality Runtime (observation/)&quot;]
+        E[(observation_events&lt;br/&gt;append-only journal)]
+        F[Knowledge projection&lt;br/&gt;state + kind + reuse]
+        G[Hint retrieval&lt;br/&gt;match/kind/state ranking]
+    end
+    subgraph ui[&quot;Debugger (:3000)&quot;]
+        H[Experience Timeline&lt;br/&gt;fold из событий]
+        I[Forensic view&lt;br/&gt;formed/activations/death]
+        J[Agent runs]
+    end
+    D -- &quot;observation events&lt;br/&gt;(temporality.event/1)&quot; --&gt; E
+    E --&gt; F
+    F --&gt; G
+    G -- &quot;hints в контекст&quot; --&gt; B
+    E --&gt; H
+    H --&gt; I
+    K[Operator&lt;br/&gt;challenge / invalidate] --&gt; E
+</code></pre>
+<p>Доказанные свойства контура (по корпусам exp4–exp8):</p>
+<ul>
+<li>формирование опыта, кросс-рановый recall и reuse;</li>
+<li>селективная смерть, supersession-цепи и рёбра, resurrection (полный круг
+<code>LH_TOKEN → .lh-token → LH_TOKEN</code>), staleness, конкуренция заметок;</li>
+<li>составная смерть (одна заметка — два преемника, два lineage-ребра из
+одного reason);</li>
+<li>гигиена retrieval после invalidation (мёртвое не возвращается);</li>
+<li>масштаб: 20 строк знаний / 110 активаций (forge), длинный горизонт:
+3 версии CLI / 11 ранов (lighthouse);</li>
+<li>kernel-дедупликация canonical-команд и claim-first hint budget.</li>
+</ul>
+<p>Слоган, подтверждённый этим кодом, прежний:</p>
+<blockquote>
+<p>Основная сущность визуализации — опыт. Основное измерение — время.
+Траектория агента и память — два слоя одного временного пространства.</p>
+</blockquote>
+<h2 id="2-три-эпохи-гипотез-наслоившиеся-в-одном-репозитории"><a class="anchor" href="#2-три-эпохи-гипотез-наслоившиеся-в-одном-репозитории" aria-label="Section link">#</a>2. Три эпохи гипотез, наслоившиеся в одном репозитории</h2><p><strong>Эпоха 1 — FRP v0.3, «новый runtime эффективнее классического harness».</strong>
+Milestones M0–M15: event log, replay, claims, frames, attention, render,
+execution, planner, procedures, time travel, branches, worlds, entities,
+ingest. Гипотеза опровергнута собственным бенчмарком (см. корневой
+<code>Отчет об эффективности FRP 2026-09-16.md</code>): полный FRP дороже классики по
+токенам и времени, claims/procedures не переиспользуются. Осталось
+~28.7k LOC в <code>frp/</code> (159 файлов, 20 подсистем) и HTTP API из ~40 эндпоинтов.</p>
+<p><strong>Эпоха 2 — pivot к temporal-semantic memory + AML-эксперименты.</strong>
+<code>pivot.md</code>, <code>docs/pivot/*</code> (10 документов), AML-хarness (<code>aml/</code>, ~5.7k
+LOC), бенчмарки <code>benchmarks/aml-*.json</code>, отчёты <code>docs/benchmarks/aml-*</code>
+(2026-09-19). Из этой эпохи в живом продукте остался один пакет:
+<code>aml/llm</code> (329 LOC) — OpenAI-совместимый клиент, которым пользуется kernel.</p>
+<p><strong>Эпоха 3 — текущий продукт: observation journal + kernel + Experience
+Timeline.</strong> Universal observation API (migration 000018), Agent Kernel,
+ debugger <code>/experience</code>, <code>/agents</code>, <code>/observability</code>, эксперименты 4–8,
+ forensic view, lens-фильтры. Это единственная эпоха с работающим
+ end-to-end контуром и acceptance-тестами.</p>
+<p>Проблема не в том, что эпохи существовали, а в том, что они <strong>не
+разделены</strong>: runtime одной сборкой обслуживает FRP и продукт, debugger —
+один сайт на четыре страницы из трёх эпох, документация корня описывает
+статус FRP-мильстоунов, а не продукт.</p>
+<h2 id="3-инвентаризация"><a class="anchor" href="#3-инвентаризация" aria-label="Section link">#</a>3. Инвентаризация</h2><p>Размеры — LOC Go/TS без тестов-артефактов; статусы: <strong>ядро</strong> (продукт),
+<strong>поддержка</strong> (нужно продукту, но чужое место), <strong>legacy</strong> (прошлая
+гипотеза, не на продуктовом пути), <strong>шум</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Путь</th>
+<th>Размер</th>
+<th>Эпоха</th>
+<th>Статус</th>
+<th>Комментарий</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kernel/</code></td>
+<td>3.1k</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>workflow, activities, heuristics, approval_preview, mcpclient, outbox, sandbox</td>
+</tr>
+<tr>
+<td><code>cmd/agent-kernel/</code></td>
+<td>~0.5k</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>точка входа kernel (:8090)</td>
+</tr>
+<tr>
+<td><code>observation/</code></td>
+<td>1.0k</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>event, store, cursor, hints, knowledge (projection + ranking)</td>
+</tr>
+<tr>
+<td><code>frp/runtime/httpapi</code> (observation endpoints)</td>
+<td>часть</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>5 эндпоинтов <code>/v1/observations/*</code> живут внутри FRP-сервера</td>
+</tr>
+<tr>
+<td><code>frp/substrate/</code> (postgres, memory)</td>
+<td>5.5k</td>
+<td>1/3</td>
+<td><strong>поддержка</strong></td>
+<td>хранилище: event store FRP + observation_events; нужен продуктy</td>
+</tr>
+<tr>
+<td><code>debugger/src/ExperienceTimeline.tsx</code> + <code>experience.ts</code></td>
+<td>~3.5k TS</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>главный экран продукта + fold + forensic</td>
+</tr>
+<tr>
+<td><code>debugger/src/AgentRuns.tsx</code>, <code>Observability.tsx</code></td>
+<td>~1.3k TS</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>раны kernel и knowledge observability</td>
+</tr>
+<tr>
+<td><code>schemas/</code></td>
+<td>19 файлов</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td><code>temporality.event.v1.schema.json</code> — контракт продукта</td>
+</tr>
+<tr>
+<td><code>examples/experiment4..8/</code> + <code>scripts/exp6..8/</code></td>
+<td>—</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>acceptance-корпуса и драйверы</td>
+</tr>
+<tr>
+<td><code>migrations/000018_observation_events</code></td>
+<td>1 файл</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>схема журнала</td>
+</tr>
+<tr>
+<td><code>examples/javascript</code>, <code>examples/python</code></td>
+<td>—</td>
+<td>3</td>
+<td><strong>поддержка</strong></td>
+<td>dependency-free клиенты universal API</td>
+</tr>
+<tr>
+<td><code>examples/test-mcp</code></td>
+<td>—</td>
+<td>3</td>
+<td><strong>поддержка</strong></td>
+<td>fixture для MCP-интеграционных тестов kernel</td>
+</tr>
+<tr>
+<td><code>examples/code-change</code>, <code>lead_coder_reviewer_qa</code></td>
+<td>—</td>
+<td>3</td>
+<td><strong>поддержка</strong></td>
+<td>Phase 2 acceptance (calculator, delegation)</td>
+</tr>
+<tr>
+<td><code>aml/llm/</code></td>
+<td>0.3k</td>
+<td>2</td>
+<td><strong>поддержка</strong></td>
+<td>LLM-клиент kernel; живёт в legacy-дереве</td>
+</tr>
+<tr>
+<td><code>frp/*</code> (остальные 19 подсистем)</td>
+<td>~23k</td>
+<td>1</td>
+<td><strong>legacy</strong></td>
+<td>frames, attention, render, world, cognition, execution, timetravel, branch, procedure, planner, objective, affordance, entity, replay, projection, protocol, model, ingest, frame</td>
+</tr>
+<tr>
+<td><code>cmd/temporality-runtime/</code></td>
+<td>~0.1k</td>
+<td>1/3</td>
+<td><strong>поддержка</strong></td>
+<td>подаёт FRP API + observation API одной сборкой</td>
+</tr>
+<tr>
+<td><code>cmd/temporality-executor/</code></td>
+<td>~0.1k</td>
+<td>1</td>
+<td><strong>legacy</strong></td>
+<td>исполнитель FRP-affordances; kernel не использует (своя sandbox)</td>
+</tr>
+<tr>
+<td><code>aml/*</code> (кроме llm)</td>
+<td>~5.4k</td>
+<td>2</td>
+<td><strong>legacy</strong></td>
+<td>coding, harness, memory, opsenv, sidecar, temporality</td>
+</tr>
+<tr>
+<td><code>cmd/aml-bench</code>, <code>aml-coding-bench</code>, <code>aml-sidecar</code></td>
+<td>~1.5k</td>
+<td>2</td>
+<td><strong>legacy</strong></td>
+<td>бенчмарк-инструменты эпохи AML</td>
+</tr>
+<tr>
+<td><code>debugger/src/App.tsx</code> (Cognitive Debugger)</td>
+<td>~2k TS</td>
+<td>1</td>
+<td><strong>legacy</strong></td>
+<td>FRP-страница: episodes, frames, attention, render</td>
+</tr>
+<tr>
+<td><code>debugger/src/Investigation.tsx</code>, <code>trajectory.ts</code></td>
+<td>~0.7k TS</td>
+<td>2</td>
+<td><strong>legacy</strong></td>
+<td>pivot-этап 5, построен на FrpEvent</td>
+</tr>
+<tr>
+<td><code>benchmarks/</code> (aml-*.json, aml3)</td>
+<td>36 файлов</td>
+<td>2</td>
+<td><strong>legacy</strong></td>
+<td>результаты AML-прогонов</td>
+</tr>
+<tr>
+<td><code>scripts/</code> (aml_*, benchmark, memory_benchmark, token_benchmark, realrepo*, first_contact)</td>
+<td>11 py</td>
+<td>2</td>
+<td><strong>legacy</strong></td>
+<td>драйверы бенчмарков прошлых эпох; <code>model_smoke.py</code>, <code>smoke.py</code> — живые</td>
+</tr>
+<tr>
+<td><code>docs/</code> (architecture, contract, knowledge-model, event-model, failure-model, approval-model, replay-model, validation-report, experiment4-8, decisions/)</td>
+<td>~30 док</td>
+<td>3</td>
+<td><strong>ядро</strong></td>
+<td>актуальная документация продукта</td>
+</tr>
+<tr>
+<td><code>docs/pivot/</code></td>
+<td>10 док</td>
+<td>2</td>
+<td><strong>история</strong></td>
+<td>ценно как хроника, не продукт</td>
+</tr>
+<tr>
+<td><code>docs/benchmarks/</code> (aml-*)</td>
+<td>~8 док</td>
+<td>2</td>
+<td><strong>legacy</strong></td>
+<td>отчёты AML</td>
+</tr>
+<tr>
+<td>корень: <code>Frame Runtile Protocol FRP v0.3.md</code>, <code>Архитектура FRP v0.3.md</code>, <code>FRP_Longitudinal_Memory_Benchmark_TZ.md</code>, <code>Отчет об эффективности FRP…</code>, <code>План развития M11-M15.md</code>, <code>Roadmap_ от M10…</code>, <code>pivot.md</code>, <code>temporality-pivot-tz.md</code>, <code>ROADMAP.md</code></td>
+<td>9 док</td>
+<td>1–2</td>
+<td><strong>шум</strong></td>
+<td>разные эпохи на самом видном месте; <code>README.md</code> описывает FRP-статус</td>
+</tr>
+<tr>
+<td><code>docs-placeholder</code> (пустой файл)</td>
+<td>0</td>
+<td>—</td>
+<td><strong>шум</strong></td>
+<td>удалить</td>
+</tr>
+<tr>
+<td><code>bin/</code></td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>gitignored артефакты сборки, ок</td>
+</tr>
+</tbody></table>
+<p>Итого: из ~45k LOC Go в репозитории на продуктовом пути стоит примерно
+<strong>9–10k</strong> (kernel + observation + субстрат + runtime-точка входа + llm).
+Из ~4.8k LOC TypeScript в debugger продуктовые — примерно <strong>2.5k</strong>.</p>
+<h2 id="4-конкретные-проблемы-текущей-структуры"><a class="anchor" href="#4-конкретные-проблемы-текущей-структуры" aria-label="Section link">#</a>4. Конкретные проблемы текущей структуры</h2><ol>
+<li><strong>Продукт живёт внутри legacy-сервера.</strong> Observation API — это 5
+хендлеров внутри <code>frp/runtime/httpapi/server.go</code>, которые делят binary,
+миграции (17 FRP-миграций до 000018) и идентичность («protocol frp» в
+логах) с 35+ эндпоинтами мёртвой гипотезы. Любая разработка продукта
+редактирует legacy-код.</li>
+<li><strong>Именование эпохи 1 выдаёт себя за продукт.</strong> <code>VITE_FRP_API_URL</code>
+указывает на observation API; debugger называет себя «TEMPORALITY /
+FRP»; README начинается со статуса FRP-мильстоунов; <code>ROADMAP.md</code> —
+FRP-план. Новый инженер (или вы через месяц) не сможет отличить
+продукт от истории.</li>
+<li><strong>Debugger — витрина трёх эпох без указателя.</strong> <code>/</code> (FRP Cognitive
+Debugger) открывается по умолчанию, тогда как продукт — это
+<code>/experience</code>. Заголовок Experience Timeline ссылается на «FRP
+debugger» как на равного соседа.</li>
+<li><strong><code>aml/llm</code> — единственный живой код эпохи 2</strong> — живёт в полностью
+legacy-дереве и тянет за собой три legacy-бинарника в <code>cmd/</code>.</li>
+<li><strong>Дубли документации.</strong> Одни и те же решения описаны в корневых
+русских ТЗ, <code>docs/pivot/*</code> и <code>docs/decisions/*</code> — с разными выводами.</li>
+<li><strong>Пустой tracked-файл <code>docs-placeholder</code></strong> и корневой каталог из 9
+документов четырёх эпох вперемешку с кодом.</li>
+</ol>
+<h2 id="5-расчистка-выполнено-2026-09-25"><a class="anchor" href="#5-расчистка-выполнено-2026-09-25" aria-label="Section link">#</a>5. Расчистка — выполнено (2026-09-25)</h2><p>Стадии A–C выполнены одной операцией (см. git log от <code>dc01ff2</code>):</p>
+<ul>
+<li><strong>Извлечён journal</strong>: <code>observation/httpapi</code> + <code>observation/postgres</code>
+(embedded-миграция) + <code>observation/memory</code> (тесты) +
+<code>cmd/temporality-journal</code>; compose-сервис <code>runtime</code>/<code>executor</code> заменён на
+<code>journal</code>; debugger nginx проксирует <code>/api/</code> на journal.</li>
+<li><strong>Kernel отвязан от эпохи 2</strong>: <code>aml/llm</code> → <code>kernel/llm</code>.</li>
+<li><strong>Удалено</strong> (~40k LOC): <code>frp/</code>, <code>aml/</code>, <code>cmd/temporality-runtime</code>,
+<code>cmd/temporality-executor</code>, <code>cmd/aml-*</code>, <code>benchmarks/</code>, legacy-скрипты
+(их эндпоинты жили на FRP-сервере), FRP-страница debugger и её модули,
+<code>docs-placeholder</code>. Makefile собирает journal + agent-kernel.</li>
+<li><strong>Доки</strong>: история эпох 1–2 в <code>docs/history/</code> (ТЗ, отчёты, pivot-серии,
+aml/frp-бенчмарки); продуктовые доки остаются в <code>docs/</code>.</li>
+<li>Продуктовый контур больше не компилирует ни одного legacy-пакета.</li>
+</ul>
+<h2 id="5a-соответствие-целевой-корпоративной-архитектуре"><a class="anchor" href="#5a-соответствие-целевой-корпоративной-архитектуре" aria-label="Section link">#</a>5a. Соответствие целевой корпоративной архитектуре</h2><p>Целевая нарезка (см. §6) и текущий код:</p>
+<table>
+<thead>
+<tr>
+<th>Слой (цель)</th>
+<th>Сегодня в коде</th>
+<th>Заметки</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Temporal — durable execution</td>
+<td><code>temporal</code> в compose; kernel workflow</td>
+<td>уже так</td>
+</tr>
+<tr>
+<td>Agent Harness — Agent Model</td>
+<td><code>kernel/agent</code> (generic + Lead/Coder/Reviewer/QA под build-тегом)</td>
+<td>roles/skills — гипотезы эпох 2, оставить только доказанное</td>
+</tr>
+<tr>
+<td>Agent Harness — Execution</td>
+<td><code>kernel/mcpclient</code>, sandbox (<code>run_command</code>), <code>kernel/llm</code> gateway</td>
+<td>model gateway = <code>kernel/llm</code></td>
+</tr>
+<tr>
+<td>Agent Harness — Orchestration</td>
+<td>Temporal workflow, delegation в <code>kernel/agent/workflow.go</code></td>
+<td>parallelism/policies — по мере надобности</td>
+</tr>
+<tr>
+<td>Agent Harness — Control</td>
+<td>approval (requested/granted, redacted preview), budgets (turns)</td>
+<td>behavioral SLO/policy enforcement — будущие стадии</td>
+</tr>
+<tr>
+<td>Agent Harness — Evidence &amp; Observability</td>
+<td>observation events, kernel event outbox (миграция 000019), effect semantics + operation reconciler</td>
+<td>evidence package / replay — частично (Experience Timeline); failure/reconciliation сделана (2026-09-25)</td>
+</tr>
+<tr>
+<td>Temporality — опыт и память</td>
+<td><code>observation/</code> (journal, knowledge, hints) + Experience Timeline</td>
+<td>ядро продукта</td>
+</tr>
+<tr>
+<td>Enterprise Control Plane</td>
+<td><code>controlplane/</code>: bearer-токены, роли reader/writer/operator/admin, project-scoping на journal и kernel API; квоты <code>KERNEL_RUN_QUOTAS</code> (429 + Retry-After, слот только за валидный запуск, миграция 000020); секреты через <code>&lt;VAR&gt;_FILE</code></td>
+<td>осталось: tenants отложены — для одной команды project-scoping + квоты закрывают кейс, пересмотреть при нескольких орг-структурах</td>
+</tr>
+<tr>
+<td>Infrastructure</td>
+<td>docker compose</td>
+<td>при развёртывании заменить на целевые среды</td>
+</tr>
+</tbody></table>
+<p>Scheduling не выделяется в отдельный блок harness: cron/schedules/events
+естественно живут на стороне Temporal; harness определяет только что
+запускать и с какими параметрами.</p>
+<h2 id="6-что-развивать-как-продукт-и-что-нет"><a class="anchor" href="#6-что-развивать-как-продукт-и-что-нет" aria-label="Section link">#</a>6. Что развивать как продукт (и что нет)</h2><p>Развивать — только то, что усиливает доказанный контур §1:</p>
+<ol>
+<li><strong>Experience Timeline</strong> — главный экран: lens-режимы уже есть
+(trajectory/experience/lifecycle/conflicts/activation + пресеты
+activation-only/conflicts-only + фильтры scope/memory state/search +
+population lane). Следующее: semantic zoom глубже cluster → episode →
+event; сохранение/шаринг вью (URL state).</li>
+<li><strong>Forensic view</strong> — уже кликабелен (evidence/episodes наводят на
+таймлайн). Следующее: activation chain как первый класс (memory →
+decision → action → outcome одним взглядом).</li>
+<li><strong>Kernel memory loop</strong> — hint budget (claim-first ranking доказан на
+forge/lighthouse), dedup canonical-команд (доказан на lighthouse).
+Развивать только там, где мешает наблюдаемости: model-call
+observability, MCP provenance, failure/reconciliation (P0/P1 из
+phase2-status).</li>
+<li><strong>Эксперименты как acceptance-корпуса</strong> — exp9 (множественные
+конкурирующие опыты на длинном горизонте) следующим, каждый корпус —
+fixture + тесты + дока, как exp4–8.</li>
+</ol>
+<p>Не делать (решения уже приняты фазовыми планами и подтверждены кодом):
+универсальный knowledge graph, embeddings-инфраструктура, graph DB,
+автокластеризация, новый runtime, «ещё один debugger».</p>
+<h2 id="7-открытые-решения-за-пользователем"><a class="anchor" href="#7-открытые-решения-за-пользователем" aria-label="Section link">#</a>7. Открытые решения за пользователем</h2><p>Открытые вопросы стадии A–C сняты решениями от 2026-09-25: executor и
+FRP-страница удалены, <code>aml/</code> удалён, расчистка сделана до exp9.</p>
+<p>Следующий открытый фронт — «используемый продукт»:</p>
+<ol>
+<li><strong>Развёртывание для команды</strong> вместо новых экспериментов: env-конфиг,
+.env.example, документация запуска, реальные проекты вместо
+gatekeeper/lighthouse фикстур. Auth/RBAC включены переменными из
+.env.example (см. README → Auth).</li>
+<li><strong>Enterprise Control Plane</strong>: bearer auth + роли + project-scoping на
+journal/kernel готовы (<code>controlplane/</code>, 2026-09-25); остаются tenants
+как отдельная сущность, secrets вне .env, quotas.</li>
+<li><strong>Kernel P0/P1</strong> только там, где мешает наблюдаемости: model-call
+observability, MCP provenance и failure/reconciliation сделаны
+(2026-09-25: model.completed несёт provider/latency/token split/content
+refs/attempts/truncated; mcp.call.* — server + result_ref + result_bytes;
+tool.failed несёт effect=none/uncertain, <code>GET /v1/agent/operations</code>
+проецирует неурегулированные операции, <code>POST .../reconcile</code> пишет
+производный operation.reconciled, KERNEL_FAULT_AFTER_EFFECT вооружает
+live-drill). Остались: surfacing в debugger UI и автоматические
+read-after-write пробы.</li>
+</ol>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="positioning.html"><small>← Назад</small><strong>Позиционирование: варианты восприятия продукта на рынке</strong></a>
+    <a class="pager-next" href="replay-model.html"><small>Далее →</small><strong>Replay model (Phase 2 audit)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

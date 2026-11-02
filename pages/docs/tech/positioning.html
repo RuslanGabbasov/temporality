@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Позиционирование: варианты восприятия продукта на рынке — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/positioning.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row active" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Позиционирование: варианты восприятия продукта на рынке</h1>
+
+<p>Статус: черновик для обсуждения. Связанные: <code>supervisor-model.md</code>,
+<code>resilience-and-scale.md</code>, <code>product-architecture.md</code>.</p>
+<p>Вопрос: Temporality — это «что» на рынке? Продукт вырос в полный стек
+(харнес на Temporal + журнал опыта + знания + UI + оргструктура), и его
+можно продавать по-разному. Ниже — четыре варианта позиционирования,
+честные ограничения каждого и рекомендация.</p>
+<h2 id="вариант-a-experience-слой-для-любых-агентов"><a class="anchor" href="#вариант-a-experience-слой-для-любых-агентов" aria-label="Section link">#</a>Вариант A. «Experience-слой для любых агентов»</h2><p><strong>Заявление:</strong> подключите любого агента (любой фреймворк) — Temporality
+даёт durable-журнал, знания с происхождением, подсказки и человеческий
+фактор.</p>
+<ul>
+<li>Плюсы: широчайшая воронка, не конкурирует с фреймворками, метит в боль
+«память и наблюдаемость для агентов» на хайпе.</li>
+<li>Ограничение снято: kickoff-эндпоинт извлечения
+(<code>POST /v1/agent/runs/{run}/extract</code>) + контракт событий + пример-адаптер
+(<code>examples/external-agent</code>) реализованы — чужой фреймворк репортит
+события стандартных типов, вызывает извлечение терминального рана и
+получает подсказки; в подсказки попадают и proposed-знания (с пометкой
+«unconfirmed hypothesis»). Осталось непокрытым: durable-исполнение,
+HITL и песочницы остаются частью харнеса — это честно указано в доке.</li>
+<li>Статус: <strong>реализовано</strong> (интеграционный релиз); остаётся пример-адаптер
+для конкретных фреймворков (LangGraph/LangChain) по мере спроса.</li>
+</ul>
+<h2 id="вариант-b-полный-харнес-для-автономных-агентов-с-опытом-текущий-путь"><a class="anchor" href="#вариант-b-полный-харнес-для-автономных-агентов-с-опытом-текущий-путь" aria-label="Section link">#</a>Вариант B. «Полный харнес для автономных агентов с опытом» (текущий путь)</h2><p><strong>Заявление:</strong> Temporality — production-харнес: durable-запуски (Temporal),
+HITL в мессенджерах, песочницы, делегирование, навыки, супервайзер и опыт,
+который накапливается и возвращается в работу.</p>
+<ul>
+<li>Плюсы: это то, что продукт уже делает целиком; все демо и НТ это
+доказывают; конкурируем не с библиотеками, а с «самописными харнесами» —
+самая болезненная боль (каждая команда пишет свой).</li>
+<li>Минусы: длиннее продажа («зачем мне ещё один харнес»), вход через
+«попробовать целиком», а не через одну библиотеку.</li>
+<li>Особый козырь внутри B: <strong>experience</strong> — единственная часть, которую
+команды не напишут за спринт. Вести с неё: «харнес за вечер, опыт —
+за месяцы; у нас — оба сразу».</li>
+</ul>
+<h2 id="вариант-c-observability-quality-для-агентных-флотилей-ближе-к-langsmith-но-глубже"><a class="anchor" href="#вариант-c-observability-quality-для-агентных-флотилей-ближе-к-langsmith-но-глубже" aria-label="Section link">#</a>Вариант C. «Observability + Quality для агентных флотилей» (ближе к LangSmith, но глубже)</h2><p><strong>Заявление:</strong> наблюдаемость и контроль качества: журнал, траектории,
+знания, супервайзер с очередью проблем, HAB/HWT.</p>
+<ul>
+<li>Плюсы: знакомая категория, легко объяснить.</li>
+<li>Минусы: категория переполнена; наши сильнейшие части (durable-исполнение,
+HITL, песочницы) остаются за кадром; мы выглядим «ещё одним LangFuse».</li>
+</ul>
+<h2 id="вариант-d-соц-инженерия-агентов-агенты-с-коллегами-нишевый-смелый"><a class="anchor" href="#вариант-d-соц-инженерия-агентов-агенты-с-коллегами-нишевый-смелый" aria-label="Section link">#</a>Вариант D. «Соц. инженерия агентов: агенты с коллегами» (нишевый, смелый)</h2><p><strong>Заявление:</strong> не тулзы, а colleagues: агенты работают в оргструктуре,
+спрашивают людей в мессенджерах, накапливают корпоративный опыт с
+происхождением, а супервайзер следит за их качеством, как тимлид.</p>
+<ul>
+<li>Плюсы: сильная дифференциация, попадает в корпоративный procurement
+(безопасность, роли, аудит), эмоционально запоминается.</li>
+<li>Минусы: абстрактно для инженера-покупателя; нужен сильный лендинг с
+конкретикой.</li>
+</ul>
+<h2 id="рекомендация"><a class="anchor" href="#рекомендация" aria-label="Section link">#</a>Рекомендация</h2><p><strong>Ядро позиции — B, мостик к A — через интеграционный релиз.</strong></p>
+<ol>
+<li>Сейчас позиционируем как B: «production-харнес автономных агентов,
+который накапливает опыт». Это правда сегодня и доказано (НТ-лестница,
+HITL-конвейер, супервайзер).</li>
+<li>Делаем интеграционный релиз (kickoff-эндпоинт извлечения + контракт
+событий + пример-адаптер) — и включаем A как второй сценарий:
+«уже есть фреймворк? используйте Temporality как experience-слой».
+Тогда заголовок сравнения «вокруг вашей модели — и вокруг вашего
+фреймворка» станет правдой.</li>
+<li>Категорию C не выбираем, но её слова используем для SEO-мостов
+(«observability», «tracing») — они приведут в наш B.</li>
+<li>D — тон подачи (лендинг, примеры), а не категория.</li>
+</ol>
+<h2 id="тактические-следствия-для-сайтаreadme"><a class="anchor" href="#тактические-следствия-для-сайтаreadme" aria-label="Section link">#</a>Тактические следствия для сайта/README</h2><ul>
+<li>Hero и compare уже говорят «опыт» — держать согласованно.</li>
+<li>В compare-таблице строка «Опыт с происхождением» — наш главный
+дифференциатор; выдвинуть её первой в таблице.</li>
+<li>Добавить в README/сайт один абзац «Why not a library»: опыт не
+выносится в библиотеку, потому что требует durable-исполнения,
+HITL и журнала событий одновременно.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="plan-priming-relevance.html"><small>← Назад</small><strong>Priming v2: от каталога знаний к полезным рекомендациям</strong></a>
+    <a class="pager-next" href="product-architecture.html"><small>Далее →</small><strong>Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Детекция опасного поведения агента (research) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/agent-behavior-monitoring.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row active" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Детекция опасного поведения агента (research)</h1>
+
+<p>Статус: исследование / дизайн-набросок. Не реализовано.</p>
+<h2 id="1-постановка"><a class="anchor" href="#1-постановка" aria-label="Section link">#</a>1. Постановка</h2><p>Песочница снимает проблему локальных харнесов (защита машины пользователя):
+внутри контейнера агенту можно творить что угодно — blast radius ограничен
+контейнером и воркспейсом. Остаётся две настоящие оси риска:</p>
+<ol>
+<li><strong>Выход за песочницу</strong> — всегда через сеть и секреты. Ограничения должны
+жить в самом токене (least privilege, неразрушающие скоупы, короткий TTL,
+аудит на стороне внешней системы) — тогда даже успешный «побег» не даёт
+деструктивной мощности.</li>
+<li><strong>Опасное поведение модели</strong> — когда она решает, что честно задачу не
+решить, и: фейкует верификацию («тесты зелёные» без запуска), саботирует
+проверки (правит тесты/CI под результат — reward hacking), кладёт деструктив
+в артефакт (бэкдоры, time bombs, скрытые вызовы наружу), ищет путь
+наружу (env/секреты/docker socket/внешние хосты), врёт в отчёте.</li>
+</ol>
+<p>Задача — ловить такое <strong>раньше</strong>, чем начнётся разрушение, не превращая
+эксплуатацию в подтверждение каждого шага.</p>
+<h2 id="2-таксономия-опасных-поведений-что-ловим"><a class="anchor" href="#2-таксономия-опасных-поведений-что-ловим" aria-label="Section link">#</a>2. Таксономия опасных поведений (что ловим)</h2><table>
+<thead>
+<tr>
+<th>Класс</th>
+<th>Примеры</th>
+<th>Основной сигнал</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Фейковая верификация</td>
+<td>«тесты зелёные» без запуска; выборочный прогон</td>
+<td>расхождение claim vs reality</td>
+</tr>
+<tr>
+<td>Подмена проверок (reward hacking)</td>
+<td>правка тестов/чеков/CI под результат; <code>--no-verify</code></td>
+<td>дифф по тестам/CI — отдельная категория</td>
+</tr>
+<tr>
+<td>Деструктив в артефакте</td>
+<td>бэкдор, rm-логика, time bombs, обфусцированный exfil в коде</td>
+<td>сканер диффа артефакта</td>
+</tr>
+<tr>
+<td>Разведка/побег</td>
+<td>чтение env/ключей не по делу, docker socket, метаданные облака, внешние хосты</td>
+<td>egress-лог, сканер аргументов</td>
+</tr>
+<tr>
+<td>Утечка секретов</td>
+<td>значения/кодировки секретов в командах, выводе, диффе</td>
+<td>сканер значений + canary</td>
+</tr>
+<tr>
+<td>Обман в отчёте</td>
+<td>скрытый провал, выдача желаемого за сделанное</td>
+<td>независимая верификация, монитор</td>
+</tr>
+</tbody></table>
+<h2 id="3-механизмы-детекции-по-горизонтам"><a class="anchor" href="#3-механизмы-детекции-по-горизонтам" aria-label="Section link">#</a>3. Механизмы детекции по горизонтам</h2><h3 id="во-время-работы-in-process-главное"><a class="anchor" href="#во-время-работы-in-process-главное" aria-label="Section link">#</a>Во время работы (in-process) — главное</h3><ul>
+<li><strong>Monitor-судья (untrusted monitoring)</strong>: дешёвая/доверенная модель читает
+действия агента (тул + аргументы + контекст задачи) и по заранее
+зафиксированной рубрике ставит suspiciousness. Высокий скор → пауза + кейс
+человеку. Протокол из AI Control (Greenblatt et al., arXiv:2312.06942);
+OpenAI применяет то же для детекции reward hacking в Codex.</li>
+<li><strong>Независимая верификация заявлений</strong> (реализовано, deterministic): раны,
+чей финальный ответ заявляет прохождение проверок, при отсутствии в
+журнале команд верификации попадают в супервайзер как <code>verification_gap</code>.
+Делегировавшие раны пропускаются (проверки исполняют дети). Не верить
+самоотчёту агента — он же и действует, и отчитывается.</li>
+<li><strong>Правки тестов/CI — отдельная видимая категория</strong> диффа (не запрет:
+иногда легитимно, но всегда светится).</li>
+<li><strong>Сканер значений секретов</strong>: значения известны ядру при выдаче; сканировать
+аргументы, вывод, диффы — включая base64/hex/urlencode. Canary-секреты
+(подложные токены): любое использование = побег обнаружен.</li>
+<li><strong>Детерминированный сканер диффа артефакта</strong>: rm -rf, curl|sh, base64-eval,
+обращения к ключевым файлам/секретам, сеть на не-allowlist хосты.</li>
+<li><strong>Egress-контроль песочницы</strong>: домен-allowlist на проект/агента + лог
+DNS/соединений; ловит exfil/побег независимо от формулировок.</li>
+<li><strong>Плановые ворота + сверка с DoD</strong>: одно подтверждение плана, дальше
+монитор сверяет поведение с зафиксированным DoD (дрейф = сигнал).</li>
+</ul>
+<h3 id="до-работы-upfront"><a class="anchor" href="#до-работы-upfront" aria-label="Section link">#</a>До работы (upfront)</h3><ul>
+<li>Токены: скоуп без деструктива, короткий TTL.</li>
+<li>Рубрика «что считается подозрительным» фиксируется заранее.</li>
+<li>Honeypot-файлы в воркспейсе (изменение без права = сигнал).</li>
+</ul>
+<h3 id="после-post-hoc"><a class="anchor" href="#после-post-hoc" aria-label="Section link">#</a>После (post-hoc)</h3><ul>
+<li>Сессионный отчёт: семантический дифф + эпизоды монитора + расхождения
+claim/reality (у нас — журнал + супервайзер).</li>
+<li>Офлайн-пересмотр выборки прошлых ранов более мощным монитором; калибровка
+рубрики.</li>
+</ul>
+<h2 id="4-опыт-больших-харнесов-справка"><a class="anchor" href="#4-опыт-больших-харнесов-справка" aria-label="Section link">#</a>4. Опыт больших харнесов (справка)</h2><p>Локальные харнесы (Claude Code, Codex CLI, Cursor, Cline, Goose, Gemini CLI)
+решают <strong>другую</strong> задачу — защита машины пользователя, поэтому их модели
+(allow/ask/deny списки с паттернами, permission modes, «always allow» на
+проект) нам напрямую не подходят. Полезное оттуда:</p>
+<ul>
+<li>Деление по границе workspace (внутри — свободно, снаружи — спросить) — у нас
+это уже песочница, граница = сеть и секреты.</li>
+<li>Разделение осей: файлы ≠ сеть ≠ секреты ≠ MCP. У нас так и есть.</li>
+<li>Approval fatigue лечится не тумблером, а горизонтами «да» и правилами.</li>
+</ul>
+<p>Облачные агенты (Devin, Copilot coding agent) — противоположный полюс:
+per-call approval отсутствует, изоляция средой + ревью результата (PR). Наша
+песочница ближе к этому полюсу, значит акцент смещается с подтверждений на
+<strong>детекцию</strong>.</p>
+<h2 id="5-детерминированная-семантическая-детекция-по-цепочке-тул-колов"><a class="anchor" href="#5-детерминированная-семантическая-детекция-по-цепочке-тул-колов" aria-label="Section link">#</a>5. Детерминированная семантическая детекция по цепочке тул-колов</h2><p>Идея: без LLM в рантайме — заранее собрать корпус паттернов опасного поведения
+(побег, деструкция, exfil, подмена проверок), превратить их в векторы и быстро
+сверять цепочку ходов рана (n-граммы тул-колов + аргументы) с корпусом.</p>
+<h3 id="оценка-осуществимости"><a class="anchor" href="#оценка-осуществимости" aria-label="Section link">#</a>Оценка осуществимости</h3><p><strong>Ресурсы — копейки.</strong> Модель эмбеддингов уже в процессе (e5-small через
+rembed), эмбеддинг короткого текста — миллисекунды; корпус в сотни паттернов —
+сотни векторов; сравнение — косинус против сотен векторов на ход/ран. Ни
+сети, ни LLM, ни заметной нагрузки.</p>
+<p><strong>Что реально ловится:</strong></p>
+<ul>
+<li><em>Парафразы известных опасных действий</em> — аргументы, сформулированные иначе,
+чем в паттерне («почистить всё в директории» vs <code>rm -rf</code>), но с близкой
+фактурой. Слабое место regex-листов, сильное — эмбеддингов.</li>
+<li><em>Близкое к дословному совпадение</em> с известным плохим паттерном (высокий
+косинус) — самый надёжный режим: near-duplicate detection у эмбеддингов
+работает отлично.</li>
+<li><em>Накопленные реальные инциденты</em>: вердикты супервайзера («плохой ран»)
+пополняют корпус автоматически — копилка известных плохих цепочек растёт от
+эксплуатации (флайвил с существующей миня-инфраструктурой три-грамм).</li>
+</ul>
+<p><strong>Что НЕ ловится (честные границы):</strong></p>
+<ul>
+<li><em>Обфускация</em>: <code>echo aGVsbG8= | base64 -d | sh</code> не похож эмбеддингом на
+«декодировать и исполнить скрытое» — e5 меряет поверхностную семантику
+текста, а не намерение. Целенаправленно замаскированное проходит мимо.
+Против обфускации работают детерминированные слои (сканер значений секретов,
+egress, canary), а не семантика.</li>
+<li><em>Точные имена тулов без аргументов</em> слишком генеричны: почти любой ран
+похож на любой. Опасность живёт в аргументах — векторизовать надо
+<code>тул + командную строку/ключевые аргументы</code>.</li>
+<li><em>Точность</em>: «удалить артефакты сборки» семантически близко к «снести всё» —
+false positives неизбежны. Поэтому это <strong>ранжировщик сигналов для
+супервайзера</strong>, а не автокаратель: скор + совпавший паттерн + эпизоды →
+человек решает.</li>
+</ul>
+<p><strong>Вердикт</strong>: дёшево и полезно как слой раннего предупреждения и приоритизации
+(в т.ч. как фильтр перед дорогим monitor-судьёй), но не как самостоятельный
+детектор намерения. Ставить в стек, ожидать среднюю точность, замыкать
+фидбеком человека.</p>
+<h3 id="дизайн-набросок-слои-все-без-рантайм-llm"><a class="anchor" href="#дизайн-набросок-слои-все-без-рантайм-llm" aria-label="Section link">#</a>Дизайн-набросок (слои, все без рантайм-LLM)</h3><table>
+<thead>
+<tr>
+<th>Слой</th>
+<th>Механизм</th>
+<th>Точность</th>
+<th>Ловит</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0. Тул-паттерны</td>
+<td>regex/точные паттерны по нормализованным аргументам</td>
+<td>высокая precision</td>
+<td>известное дословное</td>
+</tr>
+<tr>
+<td>1. n-граммы</td>
+<td>хешированные n-граммы токенов аргументов и три-граммы цепочки (механизм майнинга уже есть)</td>
+<td>высокая на near-dup</td>
+<td>известные последовательности</td>
+</tr>
+<tr>
+<td>2. Эмбеддинги</td>
+<td>вектор корпуса опасных паттернов (curated + из вердиктов) vs вектор окна цепочки</td>
+<td>средняя</td>
+<td>парафразы, «похожее поведение»</td>
+</tr>
+<tr>
+<td>3. Monitor-судья</td>
+<td>LLM-рубрика</td>
+<td>высшая</td>
+<td>намерение, обман, скрытое</td>
+</tr>
+</tbody></table>
+<ul>
+<li>Корпус: curated из публичных таксономий (MITRE ATT&amp;CK containers, OWASP
+LLM, саботаж-evals) + генерация вариантов судьёй офлайн (LLM на этапе
+сборки корпуса допустим — рантайм остаётся LLM-free) + реальные инциденты
+из вердиктов супервайзера.</li>
+<li>Хранение: векторный стор уже есть (эмбеддинги знаний + neighbors); паттерны
+— с зарезервированным префиксом (<code>danger/…</code>), чтобы не мешать знаниям.</li>
+<li>Гранулярность: скользящее окно последних k вызовов (раннее обнаружение) +
+агрегат рана целиком (итоговый скор). Эмбеддинг аргумента считать один раз
+в момент tool.started (тот же конвейер, что публикует эмбеддинги знаний).</li>
+<li>Действие: скор + совпавший паттерн → кейс супервайзера (новый case-kind);
+при экстремальном скорe — пауза перед следующим ходом. Без автокилла.</li>
+<li>Фидбек: вердикт человека (ложная тревога / подтверждено) обновляет корпус и
+пороги per-project.</li>
+</ul>
+<h2 id="6-приоритезация-внедрения"><a class="anchor" href="#6-приоритезация-внедрения" aria-label="Section link">#</a>6. Приоритезация внедрения</h2><table>
+<thead>
+<tr>
+<th>Этап</th>
+<th>Что</th>
+<th>Цена</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>Сканер значений секретов в args/outputs/диффах</td>
+<td>значения уже в ядре</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Правки тестов/CI в диффе — отдельная видимая категория</td>
+<td>классификация путей диффа</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Детерминированный сканер деструктива в диффе</td>
+<td>статические паттерны</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Слой 0–2 детекции по цепочке (выше) + кейс супервайзеру</td>
+<td>инфраструктура эмбеддингов уже есть</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Независимая верификация заявлений (kernel re-run)</td>
+<td>Activities уже гоняют команды</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Canary-секреты</td>
+<td>выдача секретов уже через ядро с журналом</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Monitor-судья на ход (рубрика + скор)</td>
+<td>судья и супервайзер есть</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Egress allowlist + лог соединений песочницы</td>
+<td>инфраструктура сети</td>
+</tr>
+</tbody></table>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="agent-async-operations.html"><small>← Назад</small><strong>Асинхронные операции агента (background run_command)</strong></a>
+    <a class="pager-next" href="agent-delegation.html"><small>Далее →</small><strong>Делегирование задач между агентами</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

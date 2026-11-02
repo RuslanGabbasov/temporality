@@ -9,7 +9,7 @@ description: Start agents on a schedule, by webhook or on system events.
 
 Triggers start agents without a human: on a schedule, by an inbound webhook or
 on a system event. The **Triggers** page (`/triggers`); the mechanics —
-`docs/triggers-and-escalations.md`.
+[docs/triggers-and-escalations.md](docs/triggers-and-escalations.md).
 
 ## Cron trigger
 

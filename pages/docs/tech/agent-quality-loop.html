@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Контур качества агентов (Quality Loop) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/agent-quality-loop.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row active" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Контур качества агентов (Quality Loop)</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Сделать эволюцию агентов <strong>проверяемой</strong>, а не декларативной. Агенты в
+Temporality развиваются через предложения определений (<code>agent_propose</code>,
+docs/evaluable-agent.md): агент наблюдает собственное трение, предлагает
+изменение промпта, человек применяет. Пока применение ничем не подтверждается,
+кроме внимания человека, любой переход на новую версию определения — акт
+веры: «кажется, станет лучше».</p>
+<p>Контур качества замыкает эту петлю измеримым сигналом:</p>
+<blockquote>
+<p><strong>Применение предложения агента допускается только поверх свежего зелёного
+оценочного прогона на его базовой версии.</strong></p>
+</blockquote>
+<p>Вокруг этого правила выстраивается остальное: откуда берутся оценочные кейсы
+(из живого продакшна), чем проверяются открытые ответы (LLM-судья с
+калибровкой), что происходит при обходе гейта (аудит, который невозможно
+потерять), и как увидеть, стало ли реально лучше (дашборд качества по
+версиям).</p>
+<p>Документ описывает реализованный контур: HITL-вердикты как сигнал, сбор
+golden-кейсов из прогонов, гейт на применении, судью с калибровкой и дашборд
+качества.</p>
+<hr>
+<h2 id="2-проблематика-состояния-до-контура"><a class="anchor" href="#2-проблематика-состояния-до-контура" aria-label="Section link">#</a>2. Проблематика состояния до контура</h2><ul>
+<li><strong>Применение не проверяется.</strong> Человек читает текст предложения и жмёт
+apply. Реакцию агента на типовые задачи после изменения никто не сравнивает
+с реакцией до него.</li>
+<li><strong>Сигналы исчезали.</strong> Решения людей (<code>ask_human</code>, подтверждения операций)
+оставались в журнале, но не становились измеримым качеством: сколько
+предложений агента приняли, сколько исправили, сколько отвергли — по
+версиям определения этого не видно.</li>
+<li><strong>Golden-кейсы протухают незаметно.</strong> Даже там, где оценочные прогоны были
+(living skills), ожидаемые ответы не пересматривались: дрейф мира и дрейф
+ожиданий маскировались под «агент деградирует» — или наоборот, старый
+эталон скрывал реальную деградацию.</li>
+<li><strong>Паттерны не покрывают открытые ответы.</strong> Проверка «в ответе есть
+подстрока» работает для фактов и не работает там, где важна связность,
+полнота и отсутствие вредных советов.</li>
+<li><strong>Обход без следа.</strong> Применить определение мимо любой проверки можно было
+бы одним флагом — и если бы аудит при этом падал, применение оставалось бы
+без журнала обхода (CWE-778).</li>
+<li><strong>Нет ответа на главный вопрос.</strong> «Стало ли лучше после N версий?»
+требовало ручного сравнения прогонов.</li>
+</ul>
+<hr>
+<h2 id="3-основные-понятия"><a class="anchor" href="#3-основные-понятия" aria-label="Section link">#</a>3. Основные понятия</h2><h3 id="31-evaluation-suite-оценочный-сьют"><a class="anchor" href="#31-evaluation-suite-оценочный-сьют" aria-label="Section link">#</a>3.1. Evaluation Suite (оценочный сьют)</h3><p>Список golden-кейсов, привязанный к агенту (не к версии — сьют один, версии
+меняются). Кейс декларативен:</p>
+<ul>
+<li><code>input</code> — задача для агента;</li>
+<li><code>must_contain</code> / <code>must_not_contain</code> — ожидаемые и запрещённые подстроки;</li>
+<li><code>check</code> — класс проверки: <code>patterns</code> (по умолчанию), <code>judge</code>,
+<code>patterns+judge</code> (паттерны необходимы, судья достаточен);</li>
+<li><code>expected_output</code> — эталонный ответ (из принятого кандидата или руками);</li>
+<li><code>held_out</code> — кейс вне гейта: виден в сьюте, но никогда не решает применение
+(страховка от «подгонки под гейт»);</li>
+<li><code>stale_after</code> — дедлайн ревью эталона; по умолчанию 90 дней.</li>
+</ul>
+<p>Сьют ограничен 16 кейсами — это потолок осмысленного ревью, а не техническое
+ограничение.</p>
+<h3 id="32-evaluation-run-оценочный-прогон"><a class="anchor" href="#32-evaluation-run-оценочный-прогон" aria-label="Section link">#</a>3.2. Evaluation Run (оценочный прогон)</h3><p>Прогон сьюта против <strong>зафиксированной версии определения</strong>: каждый кейс —
+отдельный вызов модели, заземлённый скомпилированным промптом именно этой
+версии. Прогон записывается с привязкой к версии, поэтому сравниваются
+определения, а не дрейфующий «текущий» промпт.</p>
+<p>Вердикт прогона: <code>pass</code> / <code>fail</code> / <code>error</code> (<code>error</code> — никогда не <code>pass</code>:
+ошибка судьи или модели не считается успехом). Триггеры прогона: <code>manual</code>,
+<code>gate</code> (запущен гейтом применения), <code>schedule</code> (регулярный запуск планировщиком
+по настраиваемому интервалу, см. §8.1).</p>
+<h3 id="33-eval-gate-гейт-применения"><a class="anchor" href="#33-eval-gate-гейт-применения" aria-label="Section link">#</a>3.3. Eval Gate (гейт применения)</h3><p>Состояние, вычисляемое на момент применения предложения:</p>
+<ul>
+<li><strong>fresh green</strong> — зелёный прогон на базовой версии, не старше окна
+свежести (3 рабочих дня; выходные не расходуют окно);</li>
+<li><strong>red</strong> — красный прогон или judge-degraded зелёный;</li>
+<li><strong>running</strong> — гейт уже запустил прогон, применение ждёт его;</li>
+<li><strong>base_version_stale</strong> — база предложения отстала от агента;</li>
+<li><strong>suite_stale</strong> — в сьюте протухшие по <code>stale_after</code> кейсы.</li>
+</ul>
+<h3 id="34-hitl-вердикт"><a class="anchor" href="#34-hitl-вердикт" aria-label="Section link">#</a>3.4. HITL-вердикт</h3><p>Решение человека, спроецированное в типизированный сигнал и привязанное к
+версии определения, жившей на момент вопроса: <code>accepted</code> (согласился),
+<code>corrected</code> (исправил ответ), <code>rejected</code> (отверг). Источники: ответ на
+<code>ask_human</code>, решение по операции, ручная сверка операции. Классификация
+исхода прогона по вердиктам детерминирована: отвергнутый вердикт
+дисквалифицирует прогон как кандидата в golden.</p>
+<h3 id="35-кандидат-в-golden-кейсы"><a class="anchor" href="#35-кандидат-в-golden-кейсы" aria-label="Section link">#</a>3.5. Кандидат в golden-кейсы</h3><p>Завершённый продакшн-ран, из которого может вырасти оценочный кейс:
+<code>input</code> — промпт задачи, <code>expected_output</code> — ответ прогона (источник
+<code>succeeded_run</code>) или исправление человека (источник <code>human_corrected</code>).
+Кандидат проходит ревью человеком; отклонённые удаляются через 90 дней.</p>
+<h3 id="36-llm-судья"><a class="anchor" href="#36-llm-судья" aria-label="Section link">#</a>3.6. LLM-судья</h3><p>Модель инсталляции (<code>EVAL_JUDGE_MODEL</code>), оценивающая открытые ответы по
+заданной инструкции с порогом 0–100. Судья допускается до гейта только после
+калибровки: соглашение с историческими вердиктами не ниже <strong>0.7</strong>, иначе
+судья помечается <code>judge-degraded</code>, и его прогоны гейт отвергает как красные.</p>
+<h3 id="37-quality-report"><a class="anchor" href="#37-quality-report" aria-label="Section link">#</a>3.7. Quality Report</h3><p>Агрегат по каждой версии определения: прогоны, исходы HITL-вердиктов,
+лучший и последний прогон сьюта (с вердиктом и соглашением судьи),
+количество golden и время до подтверждённого улучшения. Версия без данных
+честно отвечает <code>has_data=false</code> — никаких фейковых нулей.</p>
+<hr>
+<h2 id="4-петля-качества-целиком"><a class="anchor" href="#4-петля-качества-целиком" aria-label="Section link">#</a>4. Петля качества целиком</h2><pre><code class="language-mermaid">flowchart TD
+    A[Продакшн-раны агента] --&gt;|HITL-вердикты| B[Проекция вердиктов на версию определения]
+    A --&gt;|завершённые раны| C[Харвест кандидатов в golden-кейсы]
+    C --&gt;|ревью человека| D[Оценочный сьют]
+    E[Предложение определения agent_propose] --&gt; F{Гейт применения}
+    D --&gt; F
+    F --&gt;|fresh green| G[Применение: claim + version++ + снапшот]
+    F --&gt;|нет прогона| H[202: гейт сам запускает прогон]
+    H --&gt; F
+    F --&gt;|red / suite_stale| I[409 + причина, override писателем]
+    I --&gt; J[Аудит + событие обхода]
+    I --&gt; G
+    G --&gt; A
+    G --&gt; K[Дашборд качества по версиям]
+    B --&gt; K
+</code></pre>
+<p>Петля читается так: продакшн создаёт и кейсы, и вердикты; сьют с вердиктами
+питает гейт; гейт охраняет применение; применение меняет агента; дашборд
+показывает, стало ли лучше — и цикл повторяется. Ни одна стрелка не ведёт
+мимо наблюдаемости: обход гейта (<code>gate:false</code>, override) оставляет аудит и
+событие.</p>
+<hr>
+<h2 id="5-hitl-вердикты-как-оценочный-сигнал"><a class="anchor" href="#5-hitl-вердикты-как-оценочный-сигнал" aria-label="Section link">#</a>5. HITL-вердикты как оценочный сигнал</h2><p>Решения людей — самый честный сигнал качества, но до контура они жили в
+журнале и умирали там. Теперь:</p>
+<ul>
+<li><strong>Три источника</strong> проецируются одинаково: ответ на <code>ask_human</code> (человек
+выбрал вариант или ответил своим), решение по операции (подтвердил /
+отверг побочный эффект), ручная сверка операции.</li>
+<li><strong>Привязка к версии определения.</strong> Вердикт относится к версии, которая была
+активна в момент вопроса, а не в момент чтения отчёта — иначе улучшения
+credited не той версии.</li>
+<li><strong>Классификация исхода прогона детерминирована</strong> (<code>ClassifyRunOutcome</code>):
+статус прогона + набор вердиктов → исход. Отвергнутый вердикт — прогон
+исключается из кандидатов в golden.</li>
+</ul>
+<hr>
+<h2 id="6-сбор-golden-кейсов-из-продакшна"><a class="anchor" href="#6-сбор-golden-кейсов-из-продакшна" aria-label="Section link">#</a>6. Сбор golden-кейсов из продакшна</h2><p>Фоновая задача ядра (тик 5 минут) превращает законченные раны в кандидатов:</p>
+<ol>
+<li><strong>Обновление терминальных статусов</strong> — строки прогонов в workspace
+остаются «started», пока их никто не спросит; задача подтягивает статус и
+ответ из Temporal (те же данные, что отдаёт ручной GET рана).</li>
+<li><strong>Харвест</strong> — в кандидаты попадают только:<ul>
+<li>терминальные раны (completed/succeeded/failed/turn_limit/time_limit/
+token_limit/budget_limit);</li>
+<li>без отвергнутых HITL-вердиктов;</li>
+<li>без несверованных операций (неопределённый эффект — не эталон);</li>
+<li>с ответом не длиннее 8192 символов;</li>
+<li>в окне 90 дней и после «успокоения» журнала (2 минуты).
+Источник эталона: исправление человека (<code>human_corrected</code>) приоритетнее
+ответа успешного прогона (<code>succeeded_run</code>).</li>
+</ul>
+</li>
+<li><strong>Ревью-очередь</strong> — человек принимает или отклоняет; принятое становится
+кейсом сьюта с <code>expected_output</code>.</li>
+<li><strong>Защита от загрязнения</strong> — не более 70 % принятых golden агента может
+приходить из одного проекта (иначе сьют выучивает специфику одного
+клиента).</li>
+<li><strong>Уборка</strong> — отклонённые кандидаты удаляются через 90 дней; повторный
+сбор отклонённого исключён.</li>
+</ol>
+<p>События: <code>eval.case_candidate.created</code>, <code>eval.case_candidate.decided</code>.
+Кандидаты несут производственный текст, поэтому ревью — зона writer/owner.</p>
+<hr>
+<h2 id="7-гейт-на-применении-предложения"><a class="anchor" href="#7-гейт-на-применении-предложения" aria-label="Section link">#</a>7. Гейт на применении предложения</h2><h3 id="71-базовое-правило"><a class="anchor" href="#71-базовое-правило" aria-label="Section link">#</a>7.1. Базовое правило</h3><p><code>POST /v1/workspace/agents/{id}/proposals/{pid}/apply</code> требует свежий зелёный
+прогон сьюта на <strong>базовой версии</strong> предложения (той, на которой предложение
+основано). Логика:</p>
+<table>
+<thead>
+<tr>
+<th>Состояние</th>
+<th>Ответ</th>
+<th>Что происходит</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>База отстала</td>
+<td><code>409 base_version_stale</code></td>
+<td>Предложение нужно перебазировать</td>
+</tr>
+<tr>
+<td>Протухший golden</td>
+<td><code>409 suite_stale</code> + список кейсов</td>
+<td>Ревью эталонов или override</td>
+</tr>
+<tr>
+<td>Сьют не может решить гейт</td>
+<td><code>409 suite_not_ready</code> + cause</td>
+<td>Пусто / меньше 3 кейсов / judge без модели</td>
+</tr>
+<tr>
+<td>Нет прогона</td>
+<td><code>202</code> + <code>evaluation_run_id</code></td>
+<td>Сервер сам запускает прогон (<code>trigger=gate</code>)</td>
+</tr>
+<tr>
+<td>Повторный apply при прогоне</td>
+<td>тот же <code>202</code>, тот же run</td>
+<td>Идемпотентность: второй прогон не стартует</td>
+</tr>
+<tr>
+<td>Красный прогон</td>
+<td><code>409 gate_blocked</code> + проваленные кейсы</td>
+<td>Override писателем с justification</td>
+</tr>
+<tr>
+<td>Зелёный (свежий)</td>
+<td>применение</td>
+<td>Транзакционный apply</td>
+</tr>
+</tbody></table>
+<p>Причины <code>suite_not_ready</code> (<code>suite_empty</code>, <code>suite_too_small</code>,
+<code>judge_not_configured</code>) — те, что вердикт-алгоритм в любом случае превратил
+бы в <code>error</code>. Отказ до запуска прогона — осознанный: детерминированная
+неисправимость сьюта иначе превращается в цикл обречённых gate-прогонов
+(<code>202</code> → error-ран → «нет прогона» → новый <code>202</code>). Пути применения:
+дополнить сьют до трёх кейсов, настроить судью, override с обоснованием
+или <code>gate:false</code> — все обходы по-прежнему аудируются.</p>
+<h3 id="72-свежесть"><a class="anchor" href="#72-свежесть" aria-label="Section link">#</a>7.2. Свежесть</h3><p>Зелёный прогон действителен <strong>3 рабочих дня</strong> (<code>EVAL_GATE_FRESHNESS_WORKDAYS</code>,
+0 — без ограничения). Суббота и воскресенье не расходуют окно: решение,
+принятое в пятницу, валидно в среду. Ручка существует, чтобы подстроиться под
+реальную частоту применений.</p>
+<h3 id="73-транзакционность-применения"><a class="anchor" href="#73-транзакционность-применения" aria-label="Section link">#</a>7.3. Транзакционность применения</h3><p>Применение — одна транзакция: claim предложения + инкремент версии агента +
+неизменяемый снапшот версии. Частичное применение невозможно.</p>
+<h3 id="74-обход-и-его-цена"><a class="anchor" href="#74-обход-и-его-цена" aria-label="Section link">#</a>7.4. Обход и его цена</h3><p><code>gate:false</code> пропускает проверку (право писателя), но обход не бывает
+ни тихим, ни бесплатным:</p>
+<ul>
+<li><strong>F-1 (порядок).</strong> Событие <code>agent.evaluation.gate.skipped</code> эмитится
+только после фактического применения: неудачное применение не оставляет
+следа несуществовавшего обхода.</li>
+<li><strong>F-2 (fail-closed аудит).</strong> Аудит-запись обхода едет <strong>в транзакции
+применения</strong> (<code>Store.ApplyAgentProposalAudited</code>): неудачный INSERT в
+<code>access_audit_log</code> откатывает применение целиком и отвечает
+<code>503 audit_write_failed</code>. Применение без записи об обходе невозможно
+физически (CWE-778).</li>
+<li><strong>Override красного</strong> требует <code>justification</code>, пишет аудит и событие
+<code>agent.evaluation.gate.overridden</code>; доля обходов — метрика здоровья петли.</li>
+</ul>
+<h3 id="75-мёртвые-прогоны"><a class="anchor" href="#75-мёртвые-прогоны" aria-label="Section link">#</a>7.5. Мёртвые прогоны</h3><p>Прогон гейта, зависший в «running» дольше 30 минут (умерло ядро, отвалился
+путь записи), переводится в <code>error</code> следующим apply — частичные прогоны
+никогда не гейтят, вечного <code>202</code> не бывает.</p>
+<hr>
+<h2 id="8-llm-судья-с-калибровкой"><a class="anchor" href="#8-llm-судья-с-калибровкой" aria-label="Section link">#</a>8. LLM-судья с калибровкой</h2><h3 id="81-зачем"><a class="anchor" href="#81-зачем" aria-label="Section link">#</a>8.1. Зачем</h3><p>Паттерны отвечают на «есть ли подстрока», но не на «полный ли это ответ,
+без ли вредного совета и по делу ли». Класс <code>judge</code>/<code>patterns+judge</code> поручает
+оценку модели-судье.</p>
+<h3 id="82-контракт-судьи"><a class="anchor" href="#82-контракт-судьи" aria-label="Section link">#</a>8.2. Контракт судьи</h3><ul>
+<li><strong>Одна модель на инсталляцию</strong> (<code>EVAL_JUDGE_MODEL</code>), валидируется против
+настроенных провайдеров; не настроена — судейские кейсы в PUT сьюта
+отвергаются (<code>422 judge_not_configured</code>).</li>
+<li><strong>Калибровка до допуска.</strong> Судья прогоняется по историческим вердиктам
+агента; соглашение ниже 0.7 — статус <code>judge-degraded</code>, и гейт отвергает
+такие прогоны как красные (<code>cause=judge_degraded</code>).</li>
+<li><strong>Ошибки судьи — ошибки прогона.</strong> Таймаут, битый JSON, ошибка модели —
+<code>error</code>, никогда не <code>pass</code>.</li>
+<li><strong>Маркер самосмещения.</strong> Если судья та же модель, что тестируемый агент
+(<code>judge_same_model</code>), это видно в отчёте — слепая зона «модель хвалит
+себя» не прячется.</li>
+<li><strong>Судья не расширяет права.</strong> Он только оценивает ответы; применение и
+обход — по-прежнему человеческие решения.</li>
+</ul>
+<h3 id="81-конфигурация-судьи-и-расписания"><a class="anchor" href="#81-конфигурация-судьи-и-расписания" aria-label="Section link">#</a>8.1. Конфигурация судьи и расписания</h3><p><code>GET/PUT /v1/workspace/evaluation-judge</code> — модель судьи. PUT требует права
+оператора и валидирует модель по спискам провайдеров (422 на неизвестную);
+пустая модель — явное «выключено». Приоритет: настройка в интерфейсе бьёт
+env <code>EVAL_JUDGE_MODEL</code>; существующая строка настройки (даже пустая) —
+осознанный выбор оператора, env используется только пока строки нет.</p>
+<p><code>GET/PUT /v1/workspace/quality-schedule</code> — интервал регулярных прогонов
+(<code>interval_hours</code>, 0 = выключено; GET доступен читателю, PUT — оператору).
+Планировщик перечитывает настройку каждую минуту (правки без рестарта),
+якорит следующий прогон на последний <code>trigger=schedule</code> прогон и гоняет
+сьюты последовательно (таймаут 10 минут на агента) по текущей версии
+определения. Обе настройки живут в UI на странице агентов.</p>
+<hr>
+<h2 id="9-дашборд-качества"><a class="anchor" href="#9-дашборд-качества" aria-label="Section link">#</a>9. Дашборд качества</h2><p><code>GET /v1/workspace/agents/{id}/quality</code> (writer/owner) — таблица по версиям
+определения:</p>
+<ul>
+<li>прогоны и исходы HITL-вердиктов (accepted / corrected / rejected);</li>
+<li>лучший и последний прогон сьюта: pass rate, вердикт, соглашение судьи;</li>
+<li>количество golden и <strong>время до подтверждённого улучшения</strong> — сколько
+прошло от применения версии до первого зелёного прогона с улучшением;</li>
+<li>версия без данных — <code>has_data=false</code>, метрики <code>null</code>.</li>
+</ul>
+<p><code>GET /v1/workspace/agents/{id}/versions/diff?from=&amp;to=</code> (reader) — структурный
+diff двух снапшотов (что добавлено/удалено/изменено в определении) плюс diff
+скомпилированных промптов: «что именно изменится в голове агента».</p>
+<hr>
+<h2 id="10-наблюдаемость"><a class="anchor" href="#10-наблюдаемость" aria-label="Section link">#</a>10. Наблюдаемость</h2><p>События контура (durable outbox, лучшие усилия — кроме F-2):</p>
+<table>
+<thead>
+<tr>
+<th>Событие</th>
+<th>Когда</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>eval.case_candidate.created</code></td>
+<td>Ран захарвестен в кандидата</td>
+</tr>
+<tr>
+<td><code>eval.case_candidate.decided</code></td>
+<td>Кандидат принят/отклонён</td>
+</tr>
+<tr>
+<td><code>agent.evaluation.gate.passed</code></td>
+<td>Гейт пропустил применение</td>
+</tr>
+<tr>
+<td><code>agent.evaluation.gate.blocked</code></td>
+<td>Красный прогон заблокировал применение</td>
+</tr>
+<tr>
+<td><code>agent.evaluation.gate.overridden</code></td>
+<td>Писатель провёл красный с justification</td>
+</tr>
+<tr>
+<td><code>agent.evaluation.gate.skipped</code></td>
+<td><code>gate:false</code> (после фактического применения)</td>
+</tr>
+<tr>
+<td><code>agent.evaluation.judge.calibrated</code></td>
+<td>Калибровка судьи завершена</td>
+</tr>
+<tr>
+<td><code>agent.evaluation.judge.configured</code></td>
+<td>Оператор изменил модель судьи</td>
+</tr>
+<tr>
+<td><code>agent.evaluation.schedule.changed</code></td>
+<td>Оператор изменил интервал расписания</td>
+</tr>
+<tr>
+<td><code>agent.quality.dashboard_viewed</code></td>
+<td>Кто-то открыл дашборд качества</td>
+</tr>
+</tbody></table>
+<p>Аудит (<code>access_audit_log</code>): override красного, <code>gate:false</code> — транзакционно.</p>
+<hr>
+<h2 id="11-роли-и-приватность"><a class="anchor" href="#11-роли-и-приватность" aria-label="Section link">#</a>11. Роли и приватность</h2><ul>
+<li>Ревью кандидатов и дашборд <code>/quality</code> — writer/owner: там производственный
+текст.</li>
+<li>Сьюты, прогоны, версии, диффы — reader.</li>
+<li>Все обходы — право писателя, ниже — отказ до чтения тела запроса.</li>
+</ul>
+<hr>
+<h2 id="12-метрики-здоровья-петли"><a class="anchor" href="#12-метрики-здоровья-петли" aria-label="Section link">#</a>12. Метрики здоровья петли</h2><ul>
+<li><strong>Override rate &lt; 5 %</strong> — если писатели постоянно проводят красное, гейт
+превратился в ритуал.</li>
+<li><strong>Доля judge-degraded прогонов</strong> — здорова ли калибровка.</li>
+<li><strong>Свежесть гейтов</strong> — как долго зелёные живут до применения.</li>
+<li><strong>Доля версий с <code>has_data=true</code></strong> — покрывает ли петля реальную эволюцию.</li>
+<li><strong>Протухшие кейсы</strong> — сколько golden ждут ревью.</li>
+</ul>
+<hr>
+<h2 id="13-что-сознательно-не-делаем"><a class="anchor" href="#13-что-сознательно-не-делаем" aria-label="Section link">#</a>13. Что сознательно не делаем</h2><ul>
+<li><strong>Не гоняем сьюты на каждый чих.</strong> Прогон — отдельные вызовы модели; его
+запускают гейт, человек или расписание, не каждое движение агента.</li>
+<li><strong>Не доверяем судье окончательно.</strong> Ошибка судья-степа = ошибка прогона;
+degraded-судья = красный прогон; самосмещение маркируется.</li>
+<li><strong>Не растим сьюты бесконечно.</strong> 16 кейсов и 70 %-й потолок доли проекта —
+границы осмысленного ревью.</li>
+<li><strong>Не делаем авто-применение по зелёному.</strong> Зелёный гейт открывает
+применение человеку, а не заменяет его.</li>
+<li><strong>Held-out кейсы не решают гейт</strong> — это контрольная группа против
+оптимизации под тест.</li>
+</ul>
+<hr>
+<h2 id="14-критерии-готовности"><a class="anchor" href="#14-критерии-готовности" aria-label="Section link">#</a>14. Критерии готовности</h2><p>Реализовано и покрыто тестами:</p>
+<ul>
+<li>проекция HITL-вердиктов и классификация исходов прогонов;</li>
+<li>харвест кандидатов: терминальность, дисквалификация по отвергнутым
+вердиктам и несверованным операциям, приоритет исправления человека, окно и
+уборка;</li>
+<li>гейт: все ветки таблицы §7.1, идемпотентный 202, свежесть в рабочих днях,
+перевод мёртвых прогонов в error;</li>
+<li>F-1/F-2: порядок журналирования, транзакционный аудит <code>gate:false</code>
+(откат и 503 при падении INSERT);</li>
+<li>судья: калибровка, порог 0.7, degraded-отказ, judge_same_model,
+валидация конфигурации при PUT сьюта;</li>
+<li>дашборд: агрегаты по версиям, <code>has_data=false</code>, диффы определений и
+промптов.</li>
+</ul>
+<hr>
+<h2 id="15-открытые-вопросы"><a class="anchor" href="#15-открытые-вопросы" aria-label="Section link">#</a>15. Открытые вопросы</h2><ul>
+<li><strong>Авто-приём кандидатов.</strong> Пока каждый golden проходит человека; при росте
+потока понадобится политика доверия (например, авто-приём повторяющихся
+идентичных источников с высокой долей accepted).</li>
+<li><strong>Семантическая дедупликация golden.</strong> Кейсы могут дублировать друг друга
+по смыслу; детерминированной дедупликации нет.</li>
+<li><strong>Расширение проверок.</strong> Скриптовые и траекторные проверки (последовательность
+вызовов инструментов) — следующая ступень после паттернов и судьи.</li>
+</ul>
+<hr>
+<h2 id="16-архитектурные-ограничения"><a class="anchor" href="#16-архитектурные-ограничения" aria-label="Section link">#</a>16. Архитектурные ограничения</h2><ul>
+<li>Вердикты и агрегаты никогда не дублируют логику гейта: дашборд читает
+проекции, гейт вычисляет состояние сам, но из тех же примитивов.</li>
+<li>Оценочный прогон всегда заземлён снапшотом версии: «проверить текущее
+состояние агента» без зафиксированной версии не существует.</li>
+<li>Никакой путь не пишет в аудит после факта без транзакционной связи с
+применением, если этот аудит — единственный след обхода.</li>
+<li>Судья — опция установки, а не требование: контур работает и на одних
+паттернах, деградируя честно (<code>judge_not_configured</code>).</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="agent-knowledge-exploration.html"><small>← Назад</small><strong>ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</strong></a>
+    <a class="pager-next" href="agent-teams.html"><small>Далее →</small><strong>Команды агентов</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

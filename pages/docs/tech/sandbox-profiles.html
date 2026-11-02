@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Профили песочниц (Sandbox Profiles) [L1-360] — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/sandbox-profiles.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row active" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Профили песочниц (Sandbox Profiles) [L1-360]</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Дать агентам разные среды исполнения команд: не один образ на всю
+инсталляцию, а каталог профилей (Go, Node, Python, браузерные E2E),
+которые администратор собирает и закрепляет, а владелец агента назначает
+агенту по типу задачи.</p>
+<h2 id="2-проблематика-текущего-состояния"><a class="anchor" href="#2-проблематика-текущего-состояния" aria-label="Section link">#</a>2. Проблематика текущего состояния</h2><ul>
+<li>Поле <code>sandbox_profile</code> карточки агента (<code>restricted | standard | privileged</code>) мертво: оно сохраняется, показывается в UI и передаётся в
+компиляцию промпта, но ни разу не читается. Реальные ограничения
+контейнера одинаковы для всех агентов.</li>
+<li>Образ песочницы один на инсталляцию (<code>KERNEL_SANDBOX_IMAGE</code> или
+<code>workspace_setting.sandbox_image</code>): <code>golang:1.27-alpine</code> + git, ssh,
+curl, jq, bash, python3, ripgrep. QA-агенту нужен Node и Playwright —
+их в образе нет и без смены образа быть не может.</li>
+<li>Кэш-монтирование <code>/cache</code> зашито под Go (<code>GOCACHE</code>, <code>GOMODCACHE</code>):
+другим тулчейнам кэши не достаются.</li>
+<li>Ресурсы контейнера (память, CPU, размер tmpfs) — глобальные env-параметры
+раннера; браузерным сборкам нужно больше, а повышать всем нельзя.</li>
+</ul>
+<h2 id="3-основные-понятия"><a class="anchor" href="#3-основные-понятия" aria-label="Section link">#</a>3. Основные понятия</h2><h3 id="31-профиль-песочницы-sandbox-profile"><a class="anchor" href="#31-профиль-песочницы-sandbox-profile" aria-label="Section link">#</a>3.1. Профиль песочницы (Sandbox Profile)</h3><p>Сущность workspace:</p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Смысл</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>стабильный слаг (<code>node</code>, <code>browser-e2e</code>)</td>
+</tr>
+<tr>
+<td><code>name</code>, <code>description</code></td>
+<td>человекочитаемые название и назначение</td>
+</tr>
+<tr>
+<td><code>image</code></td>
+<td>digest-pinned ссылка на образ (<code>repo@sha256:…</code>); пусто, пока не собран</td>
+</tr>
+<tr>
+<td><code>toolchains</code></td>
+<td>теги тулчейнов (<code>go</code>, <code>node</code>, <code>python</code>, <code>browser</code>) — для UI и подсказок</td>
+</tr>
+<tr>
+<td><code>memory</code>, <code>cpus</code>, <code>scratch_size</code>, <code>tmp_size</code></td>
+<td>ресурсные переопределения; пусто = значения инсталляции</td>
+</tr>
+<tr>
+<td><code>cache_env</code></td>
+<td><code>KEY=VALUE</code>-переменные кэшей, указывающие в <code>/cache</code> (<code>NPM_CONFIG_CACHE=/cache/npm</code>)</td>
+</tr>
+<tr>
+<td><code>builtin</code></td>
+<td>встроенный профиль каталога; нельзя удалить, можно пересобрать и подстроить ресурсы</td>
+</tr>
+</tbody></table>
+<h3 id="32-резолвинг-на-старте-рана"><a class="anchor" href="#32-резолвинг-на-старте-рана" aria-label="Section link">#</a>3.2. Резолвинг на старте рана</h3><p>Цепочка: профиль агента → пусто = профиль инсталляции (образ раннера,
+текущее поведение без изменений). Разрешение происходит при построении
+<code>RunInput</code> (все пути запуска: задачи, триггеры, чат, делегирование через
+run-config). Результат — <code>SandboxSpec</code> (образ + ресурсы + кэш-переменные),
+который едет с раном до границы исполнения.</p>
+<h3 id="33-граница-исполнения"><a class="anchor" href="#33-граница-исполнения" aria-label="Section link">#</a>3.3. Граница исполнения</h3><p><code>run_command</code> собирает <code>sandbox.Request</code> из <code>SandboxSpec</code>: образ,
+ресурсы и кэш-переменные применяются на каждый вызов команды. Профиль
+не попадает в промпт и не виден модели как отдельная сущность — среда
+исполнения это инфраструктура, а не знание агента.</p>
+<h2 id="4-принципы"><a class="anchor" href="#4-принципы" aria-label="Section link">#</a>4. Принципы</h2><ol>
+<li><strong>Безопасность не зависит от профиля.</strong> Изоляция одна для всех:
+read-only rootfs, <code>--cap-drop=ALL</code>, <code>no-new-privileges</code>, pids-limit,
+noexec <code>/tmp</code>, uid 10001. Профиль меняет только тулчейн и ресурсы.</li>
+<li><strong>Только digest.</strong> Любой образ — встроенной сборки или внешний —
+закреплён полным <code>@sha256:…</code> и запускается с <code>--pull=never</code>
+(docs/sandbox-security-matrix.md). Тег без digest не принимается.</li>
+<li><strong>Молчаливый фолбэк запрещён.</strong> Если агенту назначен профиль, чей
+образ не собран/отсутствует, команда падает с явной ошибкой
+«профиль не собран», а не выполняется в чужом окружении: тихая
+подмена тулчейна хуже видимого сбоя.</li>
+<li><strong>Профиль — не привилегия.</strong> «Привилегированных» профилей нет:
+мёртвая тройка <code>restricted/standard/privileged</code> исчезает. Уровни
+доступа остаются там, где они реально работают: <code>network_access</code>,
+<code>read_only</code>, орг-политики, квоты бюджета.</li>
+<li><strong>Сборка — административное действие.</strong> Пересборка образа профиля
+меняет то, что могут исполнять команды агентов, поэтому попадает
+в аудит и журнал событий.</li>
+<li><strong>Рецепт композируется на известных базах — кроме оператора.</strong>
+Кастомный профиль по умолчанию собирается платформа из известных баз
+(§5.1), базовые образы не выдумываются. Оператор (и только оператор,
+роль writer+) может задать полный рецепт — текст Dockerfile в поле
+<code>dockerfile_override</code> (§5.4), включая любой <code>FROM</code> и multi-stage
+сборки. Это осознанный обмен: mutable-теги внутри редактируемого
+<code>FROM</code> принимаются на себя оператором; компенсирующий контроль не
+снимается — результат сборки по-прежнему пинится <code>@sha256:…</code> и
+запускается с <code>--pull=never</code>. Модель такого рецепта не пишет: поле
+отсутствует в контракте черновика визарда (§5.2).</li>
+</ol>
+<h2 id="5-каталог-встроенных-профилей"><a class="anchor" href="#5-каталог-встроенных-профилей" aria-label="Section link">#</a>5. Каталог встроенных профилей</h2><table>
+<thead>
+<tr>
+<th>id</th>
+<th>Основа</th>
+<th>Тулчейны</th>
+<th>Особенности</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>node</code></td>
+<td><code>node:22-alpine</code> + git, curl, jq, bash, ripgrep</td>
+<td>node</td>
+<td><code>NPM_CONFIG_CACHE=/cache/npm</code></td>
+</tr>
+<tr>
+<td><code>python</code></td>
+<td><code>python:3.12-alpine</code> + git, curl, jq, bash, ripgrep</td>
+<td>python</td>
+<td><code>PIP_CACHE_DIR=/cache/pip</code>, <code>UV_CACHE_DIR=/cache/uv</code></td>
+</tr>
+<tr>
+<td><code>browser-e2e</code></td>
+<td><code>mcr.microsoft.com/playwright:v1.49.0-jammy</code></td>
+<td>node, browser</td>
+<td>память 2g, scratch 1g, <code>/cache/ms-playwright</code> под браузеры</td>
+</tr>
+</tbody></table>
+<p>Профиль по умолчанию (пустое значение) — текущий образ инсталляции;
+отдельной строки каталога для него нет, UI показывает его как
+«По умолчанию». Dockerfile-ы встроенных профилей живут в коде ядра
+(<code>kernel/sandbox</code>), как и базовый <code>EmbeddedDockerfile</code>.</p>
+<h3 id="51-кастомные-профили-на-рецепте-base-packages"><a class="anchor" href="#51-кастомные-профили-на-рецепте-base-packages" aria-label="Section link">#</a>5.1. Кастомные профили на рецепте (base + packages)</h3><p>Кастомный профиль — это либо внешний digest-pinned образ, либо <strong>рецепт</strong>:
+известная база (<code>base</code> ∈ <code>base</code>, <code>node</code>, <code>python</code>, <code>browser-e2e</code>) плюс
+дополнительные OS-пакеты (<code>packages</code>). Рецепт собирается платформой:
+<code>kernel/sandbox.CustomDefinition</code> берёт Dockerfile базы и добавляет один
+слой установки пакетов (apk для alpine-баз, apt для browser-e2e); тег —
+<code>temporality-sandbox-&lt;profile-id&gt;:latest</code>, digest закрепляется в строке
+профиля после сборки.</p>
+<p>Ограничения, общие для API и UI:</p>
+<ul>
+<li><code>base</code> и <code>image</code> взаимоисключающие: у рецепта образ появляется только
+через сборку — рукописный digest при заданном <code>base</code> отвергается;</li>
+<li><code>packages</code> требуют <code>base</code>; имена пакетов — строгий allowlist
+<code>[a-z0-9][a-z0-9.+_-]*</code> (интерполяция в RUN-слой = защита от инъекций);</li>
+<li>правка рецепта (<code>base</code>/<code>packages</code>) сбрасывает закреплённый <code>image</code> —
+digest перестал соответствовать рецепту, профиль ждёт пересборки;</li>
+<li>миграция 000071 добавляет колонки <code>base</code>, <code>packages</code>.</li>
+</ul>
+<h3 id="52-конструктор-из-описания-визард"><a class="anchor" href="#52-конструктор-из-описания-визард" aria-label="Section link">#</a>5.2. Конструктор из описания (визард)</h3><p>Тот же паттерн, что у визардов агентов и команд: оператор описывает
+задачи агента обычным языком, модель-супервайзер (<code>POST …/builder</code>)
+возвращает черновик — базу из закрытого списка, пакеты, тулчейны и лимиты
+по классу нагрузки (light 512m/0.5 → builds 2g/2 → e2e 4g/4, потолок
+8g/8). Черновик не сохраняется сам: он открывается в обычной форме
+профиля, оператор правит и сохраняет, сборка — штатным build-эндпоинтом.</p>
+<h3 id="53-docker-сокет-хоста-dood-опция-профиля"><a class="anchor" href="#53-docker-сокет-хоста-dood-опция-профиля" aria-label="Section link">#</a>5.3. Docker-сокет хоста (DooD, опция профиля)</h3><p>Флаг <code>docker_socket</code> у <strong>кастомного</strong> профиля монтирует сокет хостового
+демона (<code>/var/run/docker.sock</code>) в каждую песочницу профиля вместе с
+дополнительной группой, равной GID сокета: пользователь песочницы
+получает ровно тот доступ к демону, который хост выдал этой группе —
+не больше. <code>DOCKER_HOST</code> закрепляется на смонтированный сокет, флаги
+изоляции (<code>--cap-drop=ALL</code>, <code>no-new-privileges</code>, read-only rootfs)
+сохраняются — профиль получает доступ к демону, но не привилегии
+контейнера.</p>
+<p>Это осознанный размен изоляции: сокет демона эквивалентен root на
+хосте (<code>-v /:/host</code>, <code>--privileged</code>-сиблинги). Включать только для
+доверенной автоматизации, которой нужен сам docker (например, агенты,
+развивающие compose-стек платформы). Настоящий DinD (dockerd внутри
+песочницы) сознательно не поддерживается — ему нужен privileged-
+контейнер, уничтожающий модель изоляции.</p>
+<p>Ограничения:</p>
+<ul>
+<li>только кастомные профили; builtin-строки флаг не принимают;</li>
+<li>флаг не входит в промпт визарда (§5.2) — модель не может его
+предложить и не видит его в черновиках; решает оператор в форме
+профиля;</li>
+<li>при старте команды сокет проверяется: отсутствие сокета при
+включённом флаге — явная ошибка команды, а не загадочный сбой
+монтирования;</li>
+<li>миграция 000075 добавляет колонку <code>docker_socket</code>.</li>
+</ul>
+<h3 id="54-операторский-рецепт-свой-dockerfile"><a class="anchor" href="#54-операторский-рецепт-свой-dockerfile" aria-label="Section link">#</a>5.4. Операторский рецепт (свой Dockerfile)</h3><p>У кастомного профиля вместо <code>base</code>/<code>packages</code> может стоять
+<code>dockerfile_override</code> — полный текст Dockerfile, который оператор пишет
+сам («operator recipe», решение D1 задачи полного редактирования,
+docs/tasks/2026-10-21-sandbox-dockerfile-editing):</p>
+<ul>
+<li>источники рецепта взаимоисключающие (D2.1): <code>base[+packages]</code> <strong>XOR</strong>
+<code>dockerfile_override</code> <strong>XOR</strong> внешний <code>image</code>; смешение — ответ 422 с
+явной ошибкой, молчаливые подмены запрещены;</li>
+<li>валидация текста (D3, авторитетная в <code>kernel/sandbox.OverrideDefinition</code>,
+зеркально — при сохранении): непустой, ≤ 16 KiB, UTF-8 без NUL,
+минимум один <code>FROM</code> (multi-stage разрешён), запрещены <code>ADD</code>, <code>COPY</code> без
+<code>--from</code> и <code>ONBUILD</code> — сборка идёт без контекста (<code>docker build -t &lt;tag&gt; -</code>, Dockerfile через stdin); каждая ошибка называет строку;</li>
+<li><code>POST …/preview</code> принимает опциональный <code>dockerfile_override</code> и
+возвращает либо валидированный текст, либо 422 с ошибкой построчно;</li>
+<li><code>POST …/build</code> собирает текст verbatim, тег —
+<code>temporality-sandbox-&lt;id&gt;:latest</code>; пиннинг digest и <code>--pull=never</code>
+не меняются;</li>
+<li>любая правка текста сбрасывает закреплённый <code>image</code> профиля (D2.3) —
+профиль ждёт пересборки;</li>
+<li>builtin-профили override не принимают (D2.4): каталог едет с
+обновлениями ядра;</li>
+<li>модель-визард не заполняет рецепт: поля нет в контракте черновика
+(§5.2, D2.2); при отказе apk/apt в логе сборки ошибка называет
+ненайденный пакет и подсказку apt↔apk-алиаса (D4);</li>
+<li>ужесточение по design-ревью безопасности (D7): в тексте дополнительно
+запрещены parser-директивы <code># syntax=</code> / <code># escape=</code> (смена frontend —
+сетевой pull произвольного frontend-образа на хост) и
+<code>RUN … --network=host</code> (команда сборки в network-неймспейсе хоста) —
+каждая ошибка называет строку; проверка собранного образа
+(<code>verifyPinned</code>) переопределяет entrypoint (<code>--entrypoint</code>), чтобы
+конфигурация образа не исполнялась на проверочном шаге;</li>
+<li>миграция 0002 добавляет колонку <code>dockerfile_override</code>.</li>
+</ul>
+<h2 id="6-api"><a class="anchor" href="#6-api" aria-label="Section link">#</a>6. API</h2><table>
+<thead>
+<tr>
+<th>Метод</th>
+<th>Путь</th>
+<th>Доступ</th>
+<th>Смысл</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GET</td>
+<td><code>/v1/workspace/sandbox-profiles</code></td>
+<td>reader</td>
+<td>каталог с флагом <code>available</code> (образ есть в локальном Docker)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/workspace/sandbox-profiles</code></td>
+<td>writer</td>
+<td>создать кастомный профиль: внешний digest-pinned образ <strong>или</strong> рецепт (база + доп. пакеты)</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/v1/workspace/sandbox-profiles/{id}</code></td>
+<td>writer</td>
+<td>изменить кастомный; для встроенного — только ресурсы (memory, cpus, scratch, tmp, cache_env), идентичность каталога и image не трогаются</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/workspace/sandbox-profiles/{id}</code></td>
+<td>writer</td>
+<td>удалить кастомный (встроенный — 409)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/workspace/sandbox-profiles/{id}/build</code></td>
+<td>writer</td>
+<td>собрать образ: у встроенного — по каталог-рецепту, у кастомного с <code>base</code> — по составному рецепту; digest закрепляется в строке</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/workspace/sandbox-profiles/builder</code></td>
+<td>writer</td>
+<td>конструктор: текстовое описание задач агента → черновик профиля от модели-супервайзера (не сохраняет, только предлагает)</td>
+</tr>
+</tbody></table>
+<p>События журнала: <code>sandbox.profile.built</code>, <code>sandbox.profile.created</code>,
+<code>sandbox.profile.updated</code>, <code>sandbox.profile.deleted</code>; те же действия
+пишутся в аудит. Назначение профиля агенту — обычное изменение карточки
+агента.</p>
+<h2 id="7-наблюдаемость"><a class="anchor" href="#7-наблюдаемость" aria-label="Section link">#</a>7. Наблюдаемость</h2><ul>
+<li><code>exec_context</code> рана несёт <code>sandbox_profile</code> — видно, в какой среде
+работал ран.</li>
+<li>События <code>run_command</code> не меняются: образ детерминирован профилем из
+<code>exec_context</code>, дублировать его в каждой команде не нужно.</li>
+</ul>
+<h2 id="8-ui"><a class="anchor" href="#8-ui" aria-label="Section link">#</a>8. UI</h2><ul>
+<li><strong>Настройки → Песочницы</strong>: каталог профилей (название, тулчейны,
+digest, ресурсы, статус «собран/не собран»), кнопка «Собрать» для
+встроенных и кастомных на рецепте, создание/удаление кастомных; правка
+ресурсов — и для встроенных (memory, cpus, scratch, tmp, cache_env), и
+для кастомных. Пересборка встроенного профиля сохраняет настроенные
+ресурсы. Кнопка «Из описания» открывает конструктор (§5.2): описание
+задач → черновик в форме с обоснованием от модели; у кастомного профиля
+в форме выбор базы и доп. пакетов вместо ручного образа.</li>
+<li><strong>Карточка агента</strong>: вместо мёртвого селекта — выбор профиля из
+каталога со статусом сборки; «По умолчанию» = образ инсталляции.</li>
+<li>Визард создания агента больше не предлагает уровень песочницы:
+среда исполнения назначается профилем осознанно, а не генерируется.</li>
+</ul>
+<h2 id="9-фазы-реализации"><a class="anchor" href="#9-фазы-реализации" aria-label="Section link">#</a>9. Фазы реализации</h2><h3 id="фаза-1-реестр-и-назначение-текущая"><a class="anchor" href="#фаза-1-реестр-и-назначение-текущая" aria-label="Section link">#</a>Фаза 1 — реестр и назначение (текущая)</h3><ul>
+<li>Сущность <code>workspace_sandbox_profile</code>, миграция 000070; мёртвые значения
+<code>restricted/standard/privileged</code> в карточках агентов мигрируются в пустое.</li>
+<li>Каталог встроенных профилей (node, python, browser-e2e) с сидингом.</li>
+<li><code>SandboxSpec</code> в <code>RunInput</code>/<code>ToolRequest</code>; образ, ресурсы и кэш-переменные
+в <code>sandbox.Request</code>.</li>
+<li>Резолвинг профиля на старте рана, <code>sandbox_profile</code> в <code>exec_context</code>.</li>
+<li>API каталога + сборка + аудит/события; валидация при сохранении агента.</li>
+<li>UI: страница «Песочницы», селект профиля в карточке агента.</li>
+</ul>
+<h3 id="фаза-2-управление-образами"><a class="anchor" href="#фаза-2-управление-образами" aria-label="Section link">#</a>Фаза 2 — управление образами</h3><ul>
+<li>Конструктор образов из компонентов (по мотивам devcontainer features):
+базовый профиль + слои тулчейнов без ручного написания Dockerfile.</li>
+<li>Внешние реестры образов (pull через digest, pinning), сканирование
+образов перед закреплением.</li>
+<li>Версии образов профиля: digest в карточке профиля + история сборок.</li>
+</ul>
+<h3 id="фаза-3-политики"><a class="anchor" href="#фаза-3-политики" aria-label="Section link">#</a>Фаза 3 — политики</h3><ul>
+<li>Org-политики разрешённых профилей по структурным единицам.</li>
+<li>Альтернативные рантаймы изоляции (gVisor) как опция профиля — только
+при реальной мультиарендной нагрузке.</li>
+</ul>
+<h2 id="10-критерии-готовности-фаза-1"><a class="anchor" href="#10-критерии-готовности-фаза-1" aria-label="Section link">#</a>10. Критерии готовности (фаза 1)</h2><ul>
+<li>Агенту назначен <code>browser-e2e</code>, образ собран → <code>run_command node -v</code>
+отвечает версией Node; <code>/cache/npm</code> сохраняется между командами.</li>
+<li>Профиль назначен, образ не собран → <code>run_command</code> возвращает явную
+ошибку про несобранный профиль; ран не стартует в чужом образе.</li>
+<li><code>restricted/standard/privileged</code> нигде не принимаются: сохранение
+агента с таким значением — 422.</li>
+<li>Все образы в <code>sandbox.Request</code> — только <code>@sha256:…</code>; тест на
+отказ от тега.</li>
+<li><code>exec_context</code> рана с профилем содержит <code>sandbox_profile</code>.</li>
+<li>Сборка профиля доступна только writer; пишет аудит и событие журнала.</li>
+<li><code>go test ./... -count=1</code> зелёный; UI собирается, локализация ru/en.</li>
+</ul>
+<h2 id="11-открытые-вопросы"><a class="anchor" href="#11-открытые-вопросы" aria-label="Section link">#</a>11. Открытые вопросы</h2><ul>
+<li>Проектный профиль по умолчанию (проект → свой базовый образ) — нужен
+ли, если у команды один основной тулчейн? Решение отложить до запросов.</li>
+<li>Автосборка недостающего профиля при назначении (долгий docker build в
+момент сохранения карточки агента) — пока намеренно нет.</li>
+<li>Предустановка тулчейнов нескольких типов в одном образе (Nix/devbox)
+как альтернатива каталогу — оценить в фазе 2 по реальным болям.</li>
+</ul>
+<h2 id="12-архитектурные-ограничения"><a class="anchor" href="#12-архитектурные-ограничения" aria-label="Section link">#</a>12. Архитектурные ограничения</h2><ul>
+<li>Рантайм остаётся Docker: замена на microVM (Firecracker, Kata) не
+рассматривается до мультиарендных инсталляций.</li>
+<li>Значения кэш-переменных указывают только в <code>/cache</code> — персистентный
+пер-проектный кэш вне git-workspace; значения вне <code>/cache</code> отвергаются.</li>
+<li>Digest-закрепление обязательно для всех профилей, включая кастомные.</li>
+</ul>
+<h2 id="13-деплой-воркспейс-и-оркестраторы"><a class="anchor" href="#13-деплой-воркспейс-и-оркестраторы" aria-label="Section link">#</a>13. Деплой: воркспейс и оркестраторы</h2><p>Контракт sibling-контейнеров (ядро стартует песочницу через host-демон и
+передаёт <strong>хостовый абсолютный путь</strong> воркспейса) задаёт модель деплоя:</p>
+<ul>
+<li><strong>docker compose (стенд/self-hosted, текущий путь)</strong>: корень песочниц —
+bind-mount постоянного каталога хоста (по умолчанию
+<code>/srv/temporality/sandbox</code>, <code>TEMPORALITY_SANDBOX_ROOT</code> переопределяет).
+Дефолт <code>/tmp</code> был ошибкой и убран: systemd-tmpfiles вычищал воркспейсы
+при перезагрузке хоста.</li>
+<li><strong>Kubernetes (дорожная карта, целевая архитектура)</strong>: bind-mount —
+антипаттерн (привязка пода к ноде, нет multi-replica), поэтому песочничная
+команда становится Job&#39;ом через K8s API, воркспейс — PVC
+(ReadWriteMany; либо RWO + co-scheduling). Раннер уже за интерфейсом
+<code>sandbox.Swappable</code> — добавляется реализация <code>kernel/sandbox/k8s.go</code>;
+отдельный спроектированный релиз, не конфигурация.</li>
+<li><strong>Docker-in-Docker sidecar</strong> — компромиссный вариант для k8s без K8s API
+прав: воркспейс — PVC пода, но dind требует privileged.</li>
+</ul>
+<p>Миграция существующих воркспейсов при переезде на k8s — копирование
+каталога песочниц в PVC (пути внутри <code>/workspace</code> не меняются).</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="sagas.html"><small>← Назад</small><strong>Саги: явная регистрация долгой работы (Sagas)</strong></a>
+    <a class="pager-next" href="sandbox-security-matrix.html"><small>Далее →</small><strong>Sandbox security matrix</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

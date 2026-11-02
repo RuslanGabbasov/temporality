@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Side-effect and event reconciliation (Phase 2 audit) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/failure-reconciliation.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row active" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Side-effect and event reconciliation (Phase 2 audit)</h1>
+
+<h2 id="current-guarantee"><a class="anchor" href="#current-guarantee" aria-label="Section link">#</a>Current guarantee</h2><p>The Kernel persists event intent to <code>kernel_event_outbox</code> before the workflow advances past each <code>ActivityRecordEvent</code>. Outbox rows are unique by <code>(source_id,event_id)</code>. The publisher retries Temporality delivery, accepts <code>accepted</code> and <code>repeated</code>, and marks rows delivered only after acknowledgement. Temporality&#39;s idempotency key makes same-payload redelivery a semantic no-op; a different payload under the same key is a conflict. This is at-least-once publication with idempotent ingestion, not exactly-once transport.</p>
+<p>For a tool side effect, <code>tool.started</code> is committed to the local outbox before <code>ActivityRunTool</code> is scheduled. The workflow configures one attempt for that activity. On a normal returned error it records <code>tool.failed</code> and, for MCP, marks the outcome uncertain. A successful Activity result is held in Temporal history; then <code>tool.completed</code> is enqueued.</p>
+<h2 id="unresolved-crash-window"><a class="anchor" href="#unresolved-crash-window" aria-label="Section link">#</a>Unresolved crash window</h2><p>A worker can lose contact after a remote effect commits but before Temporal records the Activity completion. The tool may have executed even though the Activity is retried/timed out and no <code>tool.completed</code> event exists. The outbox can prove intent, not the remote outcome. MCP currently has no generic idempotency/read-after-write contract, and <code>ToolRequest.OperationID</code> is not passed as a standardized idempotency key to every MCP server. Docker command effects are confined to the mounted workspace but are not transactionally rolled back.</p>
+<p>Therefore the current policy is: do not automatically retry a consequential operation; preserve <code>tool.started</code> plus failed/uncertain status when observable; require operator reconciliation before repeating. This is not yet a complete reconciliation mechanism: after a hard worker crash, an automated reconciler does not query the downstream service or create a durable <code>operation.reconciled</code> event.</p>
+<h2 id="failure-matrix"><a class="anchor" href="#failure-matrix" aria-label="Section link">#</a>Failure matrix</h2><table>
+<thead>
+<tr>
+<th>Boundary</th>
+<th>Durable before next step</th>
+<th>Failure interpretation</th>
+<th>Recovery available</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Event record → Kernel PostgreSQL</td>
+<td>Outbox row</td>
+<td>No row means workflow cannot safely proceed past that event activity</td>
+<td>Temporal activity retries up to its configured attempts</td>
+</tr>
+<tr>
+<td>PostgreSQL → Temporality</td>
+<td>Outbox row</td>
+<td>Projection may lag while local event intent remains</td>
+<td>Publisher retries; same event ID is idempotent</td>
+</tr>
+<tr>
+<td>Before tool Activity</td>
+<td><code>tool.started</code> outbox row</td>
+<td>Intent exists; effect may not have started</td>
+<td>Inspect Temporal Activity state</td>
+</tr>
+<tr>
+<td>During remote MCP effect</td>
+<td><code>tool.started</code>; possibly no result</td>
+<td>Outcome can be uncertain</td>
+<td>Operator reconciles over <code>operation.reconciled</code></td>
+</tr>
+<tr>
+<td>During sandbox command</td>
+<td><code>tool.started</code>; command may have modified workspace</td>
+<td>Partial workspace effect is possible</td>
+<td>Inspect workspace, rerun validation, then record a new operation</td>
+</tr>
+<tr>
+<td>After Activity completion, before <code>tool.completed</code> enqueue</td>
+<td>Temporal Activity result</td>
+<td>Effect/result may exist without semantic completion event</td>
+<td>Listing surfaces it; operator reconciles</td>
+</tr>
+</tbody></table>
+<h2 id="implemented-2026-09-25"><a class="anchor" href="#implemented-2026-09-25" aria-label="Section link">#</a>Implemented (2026-09-25)</h2><p>The remaining-work list below is now implemented; the design decision along the
+way was that <strong>the ledger is a projection, not a table</strong>: the event stream stays
+the single source of truth, and operation state is derived from <code>tool.*</code>
+events plus Temporal liveness on demand.</p>
+<ul>
+<li><strong>Effect semantics on <code>tool.failed</code></strong> — <code>effect=none</code> marks pre-execution
+rejections (non-retryable argument validation: safe to re-issue),
+<code>effect=uncertain</code> marks failures at or after the execution boundary, and
+<code>effect=occurred</code> marks a failed call whose effects fully landed and are
+settled by the journal (currently only delegation). Legacy
+events without the field but with <code>error_type=activity_failed</code> count as
+uncertain.</li>
+<li><strong>Delegation classification</strong> — the <code>delegate</code> tool is internal, so its
+failures are classified precisely instead of defaulting to uncertain:<ul>
+<li><code>delegated_run_start_failed</code> — the child execution was rejected before it
+began (duplicate workflow id, namespace shutdown): <code>effect=none</code>, nothing
+ran.</li>
+<li><code>delegated_run_failed</code> — the child started and failed. Right after the
+failure the <code>kernel.summarize_child_run</code> activity replays the child&#39;s own
+events from the journal: if every child operation is settled, the parent&#39;s
+<code>tool.failed</code> carries <code>effect=occurred</code> (or <code>none</code> when the child performed
+zero operations) with <code>child_ops_total</code>/<code>child_ops_unresolved</code> fields;
+only genuinely unresolved child operations keep <code>effect=uncertain</code>. The
+operations listing surfaces <code>child_run_id</code> and the summary so the UI can
+point at the child trajectory instead of &quot;check the external system&quot;.</li>
+</ul>
+</li>
+<li><strong>MCP idempotency keys</strong> — every <code>mcpclient.Call</code> propagates the operation id
+via the protocol&#39;s <code>_meta</code> field; servers that support idempotent execution
+deduplicate retries. The test MCP server persists the key for <code>create_issue</code>,
+so the contract survives the per-call stdio process restart that mimics the
+retry window.</li>
+<li><strong>Operations listing</strong> — <code>GET /v1/agent/operations?project=</code> (reader)
+projects the journal into operations whose effect state is unresolved:
+<code>crash_window</code> (no terminal event, workflow no longer running),
+<code>stale_in_flight</code> (no terminal event after 10 minutes inside a running
+workflow) and <code>failed_uncertain</code> (uncertain failure). Completed, blocked,
+rejected (<code>effect=none</code>) and already-reconciled operations are settled and do
+not resurface. The listing scans a bounded window — 7 days by default,
+<code>TEMPORALITY_OPERATIONS_WINDOW</code> to override — because it runs on every UI
+poll and pages through six event types with full payloads; unbounded scans
+grew with journal history until busy projects turned every poll into a
+journal-flooding walk and a 500. Operations older than the window stop
+surfacing (their journal rows remain queryable by run id), and pagination is
+capped at 40 pages per event type as a pathological-journal guard. The same
+window covers terminal events, so windowing never marks a settled operation
+as uncertain: a terminal event always follows its <code>tool.started</code>.</li>
+<li><strong>Reconciliation</strong> — <code>POST /v1/agent/operations/reconcile</code> (operator) writes
+a durable derived <code>operation.reconciled</code> event: <code>effect</code> is a closed
+vocabulary <code>none|occurred|unknown</code> (<code>unknown</code> is a legitimate terminal
+record), the note is bounded to 2000 bytes, and provenance links back to the
+<code>tool.started</code> event via <code>parent_event_id</code>. A recorded verdict settles the
+operation — including verdicts over previously uncertain failures.</li>
+<li><strong>Fault injection</strong> — <code>KERNEL_FAULT_AFTER_EFFECT</code> arms a live drill. The value
+is either an exact operation id or a tool name (<code>run_command</code>,
+<code>mcp__create_issue</code>), which faults the first matching execution per run —
+operation ids embed model-generated call ids and cannot be predicted before
+the run starts. The effect commits for real, then the worker reports a
+crash-style failure, producing an honest <code>tool.failed(effect=uncertain)</code>.</li>
+</ul>
+<p>Live drill (2026-09-25, compose stack): a run with <code>KERNEL_FAULT_AFTER_EFFECT=run_command</code>
+wrote <code>drill-proof.txt</code> in the workspace, recorded <code>tool.failed(effect=uncertain)</code>,
+retried the command under a new operation id (success), and completed. The
+operator then verified the file, recorded <code>operation.reconciled(effect=occurred)</code>
+with the workspace file as evidence, and the listing cleared.</p>
+<h2 id="phase-2-remaining-work"><a class="anchor" href="#phase-2-remaining-work" aria-label="Section link">#</a>Phase 2 remaining work</h2><p>The mechanism above is implemented; what remains open on this front:
+automated downstream read-after-write probes (the operator still decides),
+and surfacing uncertain operations in the debugger UI. Do not call this
+exactly-once. Do not infer successful execution from an agent-authored final
+answer.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="failure-model.html"><small>← Назад</small><strong>Agent Kernel failure and delivery model</strong></a>
+    <a class="pager-next" href="filesystem-policy-implementation.html"><small>Далее →</small><strong>Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

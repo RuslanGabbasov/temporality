@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Каналы коммуникации: единая абстракция (Channel Drivers) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/channels.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row active" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Каналы коммуникации: единая абстракция (Channel Drivers)</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Одна точка расширения для каналов. Matrix, Telegram, Slack, Mattermost,
+Teams, вебхуки — любые новые каналы добавляются реализацией драйвера, без
+правок в ядре доставки, inbound-конвейере, настройках, UI и модели данных.</p>
+<p>Принцип: <strong>ядро не знает каналов, драйверы не знают продукта.</strong> Всё, что
+канало-специфично (протокол, payload, идемпотентность, причуды API) — внутри
+драйвера. Всё общее (маршрутизация, получатели, идентификация, события,
+сущности, UI) — в ядре, написано один раз.</p>
+<h2 id="2-проблема-сегодняшнего-кода"><a class="anchor" href="#2-проблема-сегодняшнего-кода" aria-label="Section link">#</a>2. Проблема сегодняшнего кода</h2><p>Добавление канала сегодня — правки восьми несвязанных мест:</p>
+<table>
+<thead>
+<tr>
+<th>Место</th>
+<th>Что правится</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kernel/agent/channels.go</code></td>
+<td>поля <code>TransportSettings</code>, <code>TransportSettingsFromEnv</code>, <code>OverlayEnv</code>, <code>Configured</code>, запись в <code>channelRegistry</code></td>
+</tr>
+<tr>
+<td><code>cmd/agent-kernel/main.go</code></td>
+<td>DB-оверлей транспортиров (типизированные поля), админ-API чтения/записи, env в docker-compose</td>
+</tr>
+<tr>
+<td><code>kernel/agent/notify.go</code></td>
+<td>ветка в <code>sendToChannel</code>, свой sender</td>
+</tr>
+<tr>
+<td><code>kernel/agent/sendfile.go</code></td>
+<td>ветка в switch файловой доставки</td>
+</tr>
+<tr>
+<td><code>cmd/agent-kernel/matrixinbound.go</code></td>
+<td>копия inbound-лупа под протокол нового канала</td>
+</tr>
+<tr>
+<td>ядро матчинга</td>
+<td>матчинг ответов зашит под матричные комнаты</td>
+</tr>
+<tr>
+<td><code>debugger/src/*</code></td>
+<td>формы настроек канала, выбор канала у пользователя, локали</td>
+</tr>
+<tr>
+<td>docker-compose / README</td>
+<td>переменные окружения</td>
+</tr>
+</tbody></table>
+<p>Модель доставки тоже зашита: matrix — long-poll <code>/sync</code>, telegram — нечто
+другое (getUpdates), Slack/Mattermost/Teams — push через webhook. Код
+предполагает поллинг и не умеет push вообще.</p>
+<h2 id="3-контракт-драйвера"><a class="anchor" href="#3-контракт-драйвера" aria-label="Section link">#</a>3. Контракт драйвера</h2><pre><code class="language-go">// ChannelDriver — единственная точка расширения. Реализация инкапсулирует
+// протокол; ядро зовёт только этот контракт.
+type ChannelDriver interface {
+    // Метаданные
+    Type() string            // &quot;matrix&quot;, &quot;telegram&quot;, &quot;slack&quot;, &quot;mattermost&quot;, &quot;teams&quot;, &quot;webhook&quot;
+    Spec() ChannelSpec       // label, address hint, capabilities, схема настроек
+
+    // Настройки
+    // Драйвер получает generic map (JSONB из workspace + env fallback) и сам
+    // валидирует свои поля. Ядро не знает имён полей.
+    Configure(settings map[string]string) error
+    IsConfigured() bool
+
+    // Исходящая доставка
+    SendText(ctx context.Context, to ChannelAddress, msg OutboundText) error
+    SendFile(ctx context.Context, to ChannelAddress, file OutboundFile) error // ErrUnsupported по capabilities
+
+    // Входящие — драйвер реализует ровно одну модель:
+    Poller() ChannelPoller    // pull: matrix /sync, telegram getUpdates, mattermost websocket
+    Webhook() ChannelWebhook  // push: slack events, teams
+
+    // Идентичность отправителя в этом канале (mxid, chat id, member id…)
+    SenderIdentity(user UserChannel) string
+}
+
+// ChannelSpec описывает канал для ядра и UI.
+type ChannelSpec struct {
+    Type         string
+    Label        string
+    AddressHint  string
+    Capabilities Capabilities
+    Settings     []SettingField // name, label, secret — UI рендерит generic
+}
+
+type Capabilities struct {
+    Text       bool // все
+    TwoWay     bool // ответ в канале маршрутизируется обратно (подсказка «reply here»)
+    FilesOut   bool // отправка файлов агентом
+    FilesIn    bool // приём вложений от пользователя
+    Threads    bool // ответ должен попасть в тред вопроса (slack/teams/mattermost)
+    Interactive bool // кнопки для options (future; MVP рендерит текстом)
+    MaxTextLen int  // 0 = без лимита (telegram 4096)
+}
+
+// Pull-модель: курсорное долгое ожидание.
+type ChannelPoller interface {
+    // Poll блокируется до появления событий или таймаута; cursor — opaque
+    // строка, ядро персистит её между циклами.
+    Poll(ctx context.Context, cursor string) (events []InboundMessage, next string, err error)
+    // VerifySelf опциональная самопроверка (matrix whoami — не матчить себя).
+    VerifySelf(ctx context.Context) error
+}
+
+// Push-модель: канал сам стучится HTTP.
+type ChannelWebhook interface {
+    Route() string                              // &quot;/v1/channels/slack/events&quot;
+    VerifyRequest(r *http.Request, body []byte) error  // подписи/токены канала
+    Parse(r *http.Request, body []byte) []InboundMessage
+}
+</code></pre>
+<h2 id="4-нормализованная-модель-сообщений"><a class="anchor" href="#4-нормализованная-модель-сообщений" aria-label="Section link">#</a>4. Нормализованная модель сообщений</h2><p>Всё канало-специфичное остаётся в <code>refs</code>, ядро работает с общими полями:</p>
+<pre><code class="language-go">type InboundMessage struct {
+    ID        string          // канальный идентификатор (matrix event_id, tg update_id) — дедуп
+    Channel   string          // тип драйвера
+    ChatID    string          // комната/чат — сопоставляется с адресом канала пользователя
+    Sender    string          // канальная идентичность автора (mxid, member id, tg user id)
+    Text      string
+    Files     []InboundFile   // {Ref, Name}; Ref — opaque для ядра (mxc://, file_id, URL)
+    Timestamp time.Time
+    ReplyTo   string          // если канал несёт ссылку на сообщение-вопрос (треды, reply_to)
+}
+
+// Ядро: «дай мне байты вложения» — скачивание инкапсулировано в драйвере
+// (matrix — авторизованный download mxc://, telegram — getFile, slack — URL).
+FetchFile(ctx context.Context, file InboundFile) ([]byte, error)
+</code></pre>
+<h2 id="5-общий-inbound-конвейер"><a class="anchor" href="#5-общий-inbound-конвейер" aria-label="Section link">#</a>5. Общий inbound-конвейер</h2><p>Сегодняшний <code>matrixInboundLoop</code> — частный случай. Общий конвейер (один на
+инсталляцию, по потоку на driver):</p>
+<pre><code class="language-text">[Poller | Webhook] → InboundMessage
+  → дедуп по (channel, ID)          -- workspace_inbound_message, UNIQUE
+  → идентификация отправителя        -- закрытый мир: Sender == SenderIdentity(user)
+  → матчинг ответов                   -- открытые human requests с адресом этого чата
+  → иначе intake                      -- docs/inbound-messages.md
+</code></pre>
+<p>Матчинг ответов (<code>MatchMatrixReplies</code>) обобщается без канальной логики:
+«сообщение в чате X отвечает старейшему открытому вопросу, доставленному в
+чат X» — правило про адреса и время, не про матрицу. Отдельно живёт
+<code>workspace_channel_cursor (channel, cursor, updated_at)</code> — телеграмный
+<code>offset</code> обязан переживать рестарт, матричный <code>since</code> — желательно.</p>
+<p>Webhook-драйверы регистрируют свой route в общем mux; после Verify+Parse
+сообщение попадает в тот же конвейер.</p>
+<h2 id="6-настройки-схема-вместо-типизированной-структуры"><a class="anchor" href="#6-настройки-схема-вместо-типизированной-структуры" aria-label="Section link">#</a>6. Настройки: схема вместо типизированной структуры</h2><p><code>TransportSettings</code> с именованными полями заменяется generic-хранилищем:</p>
+<ul>
+<li>workspace: <code>channel_transport</code> → payload JSONB <code>{&quot;matrix&quot;: {&quot;homeserver&quot;: …, &quot;access_token&quot;: …}, &quot;telegram&quot;: {&quot;bot_token&quot;: …}}</code> (миграция колонок в
+JSONB один раз, дальше новые каналы без миграций);</li>
+<li>env fallback: <code>KERNEL_CHANNEL__&lt;TYPE&gt;__&lt;FIELD&gt;</code>; легаси <code>KERNEL_MATRIX_*</code> /
+<code>KERNEL_TELEGRAM_*</code> читаются как алиасы;</li>
+<li><code>Configured</code> и «чего не хватает» (NotConfiguredHint) вычисляет драйвер по
+своей схеме — UI рендерит форму настроек из <code>Settings</code>, а не из свича.</li>
+</ul>
+<p>Секреты по-прежнему не возвращаются API в открытом виде (<code>SecretHint</code>).</p>
+<h2 id="7-что-не-меняется"><a class="anchor" href="#7-что-не-меняется" aria-label="Section link">#</a>7. Что не меняется</h2><ul>
+<li>Разрешение получателя (<code>ResolveRecipient</code>), выбор канала (<code>pickChannel</code>),
+правила доставки — канало-нейтральны уже сейчас.</li>
+<li><code>human_request</code> как сущность, маршрутизация ответов через Approval-signal,
+таймауты с политиками.</li>
+<li>Отправка из активностей Temporal (25-секундный таймаут, доставка не роняет
+ран) — драйверы обязаны в него укладываться.</li>
+<li>«Web» как безусловный фолбэк: канал не сконфигурирован/упал → web inbox.</li>
+</ul>
+<h2 id="8-чеклист-нового-канала"><a class="anchor" href="#8-чеклист-нового-канала" aria-label="Section link">#</a>8. Чеклист нового канала</h2><p>После рефакторинга добавление Mattermost = один файл-драйвер + одна строка
+регистрации. Бесплатно получаете: доставку вопросов, send_file, inbound с
+дедупом и идентификацией, матчинг ответов, intake, настройки в UI, фолбэк на
+web, события, тестовую обвязку.</p>
+<p>Обязанности драйвера: протокол и auth, рендер текста под лимиты/разметку
+канала, идемпотентность отправки (matrix txnID — уже так), FetchFile,
+VerifyRequest (для push), курсор (для pull).</p>
+<h2 id="9-особенности-известных-каналов"><a class="anchor" href="#9-особенности-известных-каналов" aria-label="Section link">#</a>9. Особенности известных каналов</h2><table>
+<thead>
+<tr>
+<th>Канал</th>
+<th>Модель</th>
+<th>Identity</th>
+<th>Специфика</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>matrix</td>
+<td>pull <code>/sync</code></td>
+<td>mxid</td>
+<td>whoami для пропуска себя; mxc:// download; txn idempotency</td>
+</tr>
+<tr>
+<td>telegram</td>
+<td>pull <code>getUpdates</code></td>
+<td>chat id (личка) = адрес</td>
+<td>offset-курсор персистить; лимит 4096; getFile</td>
+</tr>
+<tr>
+<td>slack (webhook)</td>
+<td>только outbound</td>
+<td>—</td>
+<td>текущее поведение, остаётся отдельным типом</td>
+</tr>
+<tr>
+<td>slack (bot)</td>
+<td>push Events API</td>
+<td>member id</td>
+<td>треды (ReplyTo=ts), подпись запроса, blocks (future)</td>
+</tr>
+<tr>
+<td>mattermost</td>
+<td>pull WebSocket (<code>posted</code>)</td>
+<td>user id</td>
+<td>self-hosted: URL сервера в настройках; тот же base_url+token стримит входящие через WS, включая DM, куда outgoing webhooks не достают; REST v4 для отправки. Ранее — outgoing webhooks: их стоит удалить из сервера, роут <code>/v1/channels/mattermost/hooks</code> больше не регистрируется</td>
+</tr>
+<tr>
+<td>teams</td>
+<td>push Bot Framework</td>
+<td>aad id</td>
+<td>верификация Microsoft, самый тяжёлый onboard</td>
+</tr>
+<tr>
+<td>webhook (generic)</td>
+<td>только outbound</td>
+<td>—</td>
+<td>escape hatch: envelope + HMAC-подпись, ответы в UI</td>
+</tr>
+</tbody></table>
+<h3 id="91-треды-capabilitiesthreads"><a class="anchor" href="#91-треды-capabilitiesthreads" aria-label="Section link">#</a>9.1. Треды (Capabilities.Threads)</h3><p>Канал объявляет <code>Threads</code>, если умеет держать беседу в треде вопроса
+(slack ts, mattermost root post). Контракт:</p>
+<ul>
+<li><code>OutboundText.Thread</code> — указатель треда (<code>&quot;&quot;</code> = верхний уровень); ядро
+заполняет его из <code>thread_ref</code> предыдущего вопроса того же рана тому же
+адресату — продолжение беседы не плодит новые треды.</li>
+<li>Драйвер может реализовать <code>ThreadedTextPoster</code>: возвращает id отправленного
+сообщения, ядро закрепляет его как <code>thread_ref</code> (fill-when-empty: якорь
+беседы не переназначается). Драйверы без расширения остаются на базовом
+<code>SendText</code>.</li>
+<li>Ответ с <code>ReplyTo</code> матчится сначала по точному совпадению с <code>thread_ref</code>
+вопроса, и только затем — общий fallback «чат + самый старый открытый
+вопрос». Первый тредный ответ на вопрос без <code>thread_ref</code> заполняет его
+(backfill): остальная часть треда матчится точно.</li>
+<li>Team fan-out хранит один <code>thread_ref</code> на запрос (зеркало первого
+доставленного участника) — колонка на уровне запроса, не доставки.</li>
+</ul>
+<h2 id="10-безопасность"><a class="anchor" href="#10-безопасность" aria-label="Section link">#</a>10. Безопасность</h2><ul>
+<li>Push-драйверы обязаны верифицировать запрос (подпись/секрет) —
+<code>VerifyRequest</code> не опционален.</li>
+<li>Закрытый мир идентичности (inbound-messages.md §5): инициативное сообщение
+принимается только при совпадении <code>Sender</code> с зарегистрированной
+идентичностью владельца канала. Поле <code>sender_id</code> появляется в канале
+пользователя, заполняется по подсказке драйвера.</li>
+<li>Исходящие секреты (токены ботов) — только в настройках/секрет-сторе, в
+события и логи не попадают.</li>
+</ul>
+<h2 id="11-фазы"><a class="anchor" href="#11-фазы" aria-label="Section link">#</a>11. Фазы</h2><h3 id="фаза-0-выделение-слоя-без-изменения-поведения"><a class="anchor" href="#фаза-0-выделение-слоя-без-изменения-поведения" aria-label="Section link">#</a>Фаза 0 — выделение слоя (без изменения поведения)</h3><ul>
+<li>Интерфейс + реестр драйверов; matrix/telegram/slack-webhook/generic-webhook
+переезжают в драйверы; <code>sendToChannel</code> и sendfile-switch → dispatch по
+реестру.</li>
+<li>Настройки: JSONB payload + env-алиасы, generic админ-форма из схемы.</li>
+<li><code>matrixInboundLoop</code> → общий poll-луп + matrix-драйвер; общий конвейер с
+дедупом; матчинг ответов канализируется.</li>
+<li>Курсоры в БД.</li>
+</ul>
+<h3 id="фаза-1-intake-поверх-слоя"><a class="anchor" href="#фаза-1-intake-поверх-слоя" aria-label="Section link">#</a>Фаза 1 — intake поверх слоя</h3><p><code>docs/inbound-messages.md</code> фаза 1 строится на общем конвейере (matrix —
+первый драйвер с TwoWay).</p>
+<h3 id="фаза-2-новые-inbound-каналы"><a class="anchor" href="#фаза-2-новые-inbound-каналы" aria-label="Section link">#</a>Фаза 2 — новые inbound-каналы</h3><p>Telegram inbound (pull, персистентный offset), Mattermost (push), Slack-bot
+(push, треды) — по мере надобности, каждый = драйвер.</p>
+<h3 id="фаза-3-интерактивность"><a class="anchor" href="#фаза-3-интерактивность" aria-label="Section link">#</a>Фаза 3 — интерактивность</h3><p>Options как кнопки там, где capabilities.Interactive (telegram inline
+keyboard, slack blocks); везде остаётся текстовый фолбэк.</p>
+<h2 id="12-критерии-готовности"><a class="anchor" href="#12-критерии-готовности" aria-label="Section link">#</a>12. Критерии готовности</h2><ol>
+<li>Добавление тестового fake-канала (driver + регистрация, ~100 строк) даёт:
+доставку вопросов, send_file, inbound с дедупом, идентификацию, фолбэк на
+web — без единой правки вне файла драйвера.</li>
+<li>Регресс существующих каналов: матричные вопросы/ответы/файлы, телеграмная
+доставка, слак-webhook и generic-webhook ведут себя как до рефакторинга
+(золото: существующие тесты notify/sendfile/matrixinbound без правок
+ассертов).</li>
+<li>Настройки канала, заданные через env и через UI, эквивалентны.</li>
+<li>Рестарт кернела не теряет курсоры и не порождает дублей сообщений.</li>
+</ol>
+<h2 id="13-открытые-вопросы"><a class="anchor" href="#13-открытые-вопросы" aria-label="Section link">#</a>13. Открытые вопросы</h2><ul>
+<li>Разметка исходящих: markdown у нас, у каналов HTML (matrix custom
+org.matrix.custom.html, telegram HTML/MarkdownV2) — нужен renderer per
+driver; MVP остаётся plain text.</li>
+<li>Несколько ботов одного типа (два матрикс-аккаунта для разных юнитов) —
+настройки станут списком инстансов драйвера; пока один на тип.</li>
+<li>Rate limits и retry-политики отправки по каналам (у телеграма жёсткие) —
+общий бюджет попыток в ядре, паузы в драйвере.</li>
+<li>Voice/stickers: игнорируем или транскрибируем — вне скоупа, фиксируем в
+capabilities как отсутствие.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="builtin-skills.html"><small>← Назад</small><strong>Предустановленные скилы: офисный пакет (builtin skills)</strong></a>
+    <a class="pager-next" href="dev-stack-runs.html"><small>Далее →</small><strong>Dev-стек: живучесть ранов при пересборках</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

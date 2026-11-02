@@ -48,7 +48,7 @@ description: Диалог с агентом — от сообщения до р�
   `max_turns` на задачу.
 
 Ход плана виден прямо в чате: задачи, статусы, зависимости. Полный механизм —
-в `docs/agent-delegation.md`.
+в [docs/agent-delegation.md](docs/agent-delegation.md).
 
 ## Поправки (amendments)
 

@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>План работ: Команды агентов — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/plan-agent-teams.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row active" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>План работ: Команды агентов</h1>
+
+<p>Source spec: <code>docs/agent-teams.md</code> (21 раздел / 8 фаз).
+Статус: <strong>в работе</strong> (волны A–C готовы, MVP остаётся за UI волны D). Волны A–H соответствуют фазам 1–8 спеки; порядок выбран так, чтобы после волны D система была юзабельна (MVP = A–D), а formation и эволюция надстраивались поверх работающей механики.</p>
+<p>Размеры задач: S / M / L — относительно одной волны работы.</p>
+<h2 id="0-текущее-состояние-baseline-после-9c00cb4"><a class="anchor" href="#0-текущее-состояние-baseline-после-9c00cb4" aria-label="Section link">#</a>0. Текущее состояние (baseline после 9c00cb4)</h2><ul>
+<li>Механика совместной работы есть в ядре: <code>delegate</code> (1:1) и <code>plan</code> (DAG: <code>goal</code>, <code>tasks[{id, agent_id, prompt, depends_on, review_of, max_turns}]</code>, <code>max_rework</code>), acceptance gates с rework-циклами (<code>plan.task.rejected/reopened/invalidated/skipped</code>), валидация циклов, резолв всех агентов до старта (<code>effect: none</code>), бюджеты запусков, <code>MaxDelegationDepth</code>.</li>
+<li>События и UI: <code>delegation.*</code>, <code>plan.*</code>; DelegationTree и PlanGraph рендерят их без привязки к «команде».</li>
+<li>Пример команды захардкожен: <code>examples/lead_coder_reviewer_qa</code> (отдельный Temporal-workflow, последовательный pipeline lead→coder→reviewer→qa) — подлежит миграции в волне H.</li>
+<li>Паттерн версионированной сущности готов: <code>workspace_skill</code> + <code>workspace_skill_version</code> (immutable, provenance, draft→apply), орг-привязка <code>org_unit_id</code> + <code>ListSkillsVisible</code>.</li>
+<li>Организация: <code>Principal.VisibleUnits</code>, эффективная видимость, роли на узлах, аудит <code>access_audit_log</code>, execution identity.</li>
+<li>Cost: per-run учёт токенов/стоимости (<code>/v1/agent/cost/run</code>, <code>total_tokens</code>/<code>cost_usd</code> в <code>run.completed</code>); rollup по дереву — нет.</li>
+</ul>
+<p>Известные пробелы против спеки — вся сущность «команда»: нет <code>workspace_team</code>, слотов, протоколов, team-ранов, rollup, formation, эволюции.</p>
+<h2 id="1-карта-фаз-спеки-волны-плана"><a class="anchor" href="#1-карта-фаз-спеки-волны-плана" aria-label="Section link">#</a>1. Карта фаз спеки → волны плана</h2><table>
+<thead>
+<tr>
+<th>Фаза спеки</th>
+<th>Содержание</th>
+<th>Волна</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1 Модель и API</td>
+<td><code>workspace_team</code> + версии, слоты/протоколы как данные, CRUD, org-видимость</td>
+<td>A</td>
+</tr>
+<tr>
+<td>2 Рантайм</td>
+<td>компиляция протоколов в plan/delegate, <code>team.*</code> события, снапшот, запуск/отмена</td>
+<td>B</td>
+</tr>
+<tr>
+<td>3 Привязка слотов</td>
+<td>fixed/role-подбор, подтверждение, unresolved-ошибки</td>
+<td>C</td>
+</tr>
+<tr>
+<td>4 UI команд</td>
+<td>раздел, карточка с вкладками, запуск, rollup-сводка</td>
+<td>D</td>
+</tr>
+<tr>
+<td>5 Formation</td>
+<td>Team Builder Agent, wizard, происхождение значений</td>
+<td>E</td>
+</tr>
+<tr>
+<td>6 Командный контекст</td>
+<td>team scratch, артефакты контрактов, scoped hints</td>
+<td>F</td>
+</tr>
+<tr>
+<td>7 Телеметрия и эволюция</td>
+<td>метрики версий, evolution proposals, вкладка «Эволюция»</td>
+<td>G</td>
+</tr>
+<tr>
+<td>8 Миграция примера</td>
+<td>LeadCoderReviewerQA → шаблон pipeline; шаблоны команд</td>
+<td>H</td>
+</tr>
+</tbody></table>
+<h2 id="2-волны-работ"><a class="anchor" href="#2-волны-работ" aria-label="Section link">#</a>2. Волны работ</h2><h3 id="волна-a-модель-и-api-m-фаза-1-готово"><a class="anchor" href="#волна-a-модель-и-api-m-фаза-1-готово" aria-label="Section link">#</a>Волна A. Модель и API — M — фаза 1 — <strong>готово</strong></h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Миграция: <code>workspace_team</code> (id, name, description, version, manifest JSONB — слоты/протокол/дефолты, org_unit_id) + <code>workspace_team_version</code> (immutable, PK(team_id,version)); аналог 000028. (000047)</li>
+<li><input checked="" disabled="" type="checkbox"> Стор <code>workspace/teams.go</code>: Team/TeamVersion-структуры, Create/Get/ListAll/ListVisible/Update/Delete, ListVersions, ProposeVersion/ApplyVersion (переиспользовать паттерн draft→apply из skills). (+ Reject)</li>
+<li><input checked="" disabled="" type="checkbox"> Валидация манифеста в сторe: известный <code>protocol.kind</code>, непустые слоты с уникальными id, <code>binding.mode</code> ∈ {fixed, role}, <code>fixed</code> требует agent_id; синтаксис-ошибки — 422. (+ cycle/dangling-проверки для dag)</li>
+<li><input checked="" disabled="" type="checkbox"> API <code>/v1/workspace/teams</code> CRUD (+ <code>GET /{id}/versions</code>, <code>POST /{id}/versions/{v}/apply</code>, <code>POST /{id}/versions/{v}/reject</code>); списки фильтруются по OrgVisible, мутации — по роли; PUT не сбрасывает <code>org_unit_id</code> (binding — админ-эндпоинт, как у остальных).</li>
+<li><input checked="" disabled="" type="checkbox"> Аудит <code>team.created/updated/deleted</code>, <code>team_version.proposed/applied/rejected</code>.</li>
+<li><input checked="" disabled="" type="checkbox"> Go-тесты: валидация манифеста (22 кейса), версии (immutable, apply переключает указатель, повторный apply 409), видимость по дереву, CRUD.</li>
+</ul>
+<p>Заметки: аудит проверен на стенде (<code>team.created/proposed/applied</code> в <code>access_audit_log</code>, actor ops); binding-smoke: <code>PUT /v1/org/resources/team/code-delivery/binding</code> → появляется в <code>GET /v1/org/units/rd/resources</code> → unbind очищает.</p>
+<h3 id="волна-b-рантайм-командных-запусков-l-фаза-2-готово"><a class="anchor" href="#волна-b-рантайм-командных-запусков-l-фаза-2-готово" aria-label="Section link">#</a>Волна B. Рантайм командных запусков — L — фаза 2 — <strong>готово</strong></h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>POST /v1/agent/teams/{id}/runs</code> {project, goal, bindings?, version?}: снапшот манифеста в input рана (семантика §35), резолв слотов (<code>TeamSlotBindings</code>: fixed→агент; role→preferred/override или 422).</li>
+<li><input checked="" disabled="" type="checkbox"> Компиляция протоколов в существующие механизмы (<code>CompileTeamProgram</code>): <code>pipeline</code> (последовательные дочерние раны, контракт → промпт следующего), <code>review_gate</code> (plan c <code>review_of</code> + <code>max_rework</code>), <code>dag</code> (шаги с <code>depends_on</code>), <code>fan_out</code> (последний слот зависит от всех), <code>lead_workers</code> (один lead-ран с ростером, без механических гейтов). Дочерние раны — настоящие AgentRun.</li>
+<li><input checked="" disabled="" type="checkbox"> События <code>team.started</code> {team_id, version, goal, bindings}, <code>slot.bound</code> {slot_id, agent_id, mode}, <code>team.completed</code> {status, total_tokens, cost_usd, rework_rounds}, <code>team.failed</code> — эмит из корневого workflow; тоталы — честный subtree-rollup (own + children) в <code>run.completed</code>/<code>team.completed</code>, включая путь завершения по review-verdict.</li>
+<li><input checked="" disabled="" type="checkbox"> Отмена командного рана — вниз по дереву (существующий механизм cancellation); budgets: тоталы агрегируются по поддереву.</li>
+<li><input checked="" disabled="" type="checkbox"> Сквозные Go-тесты: компилятор всех 5 протоколов, привязка слотов (6 кейсов), pipeline порядок событий + тоталы, review_gate rework-цикл (отклонение→доработка→принятие), failure → team.failed, lead_workers.</li>
+</ul>
+<h3 id="волна-c-привязка-слотов-m-фаза-3-готово"><a class="anchor" href="#волна-c-привязка-слотов-m-фаза-3-готово" aria-label="Section link">#</a>Волна C. Привязка слотов — M — фаза 3 — <strong>готово</strong></h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Роль-подбор при запуске: кандидаты из ListAgentsVisible (+ фильтр проектного скоупа агентов) по requirements (<code>Agent.SatisfiesRequirements</code>: capabilities в семантике карточек ростера — nil/true = может, false = нет, delegation только явная выдача; skills ⊇ required); однозначный кандидат → авто-привязка, несколько без preferred → 409 со списком кандидатов, ноль → 422 с перечнем требований (<code>agent.ResolveTeamBindings</code> + <code>TeamBindingRejection</code>).</li>
+<li><input checked="" disabled="" type="checkbox"> <code>bindings</code> в теле запуска: пользователь фиксирует выбор; оверрайд обязан попасть в ростер запуска (невидимый агент — 422 до старта, effect=none).</li>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /v1/agent/teams/{id}/resolve?project=&amp;version=</code> — предпросмотр привязок для UI: по слотам (agent_id, mode, reason, candidates/requirements), <code>resolvable</code> + причина; превью не падает целиком.</li>
+<li><input checked="" disabled="" type="checkbox"> Валидация манифеста дополняет словарь: неизвестные capability в requirements — 422 на сохранении; <code>write_files</code> принят как исторический алиас <code>modify_files</code>.</li>
+<li><input checked="" disabled="" type="checkbox"> Тесты: fixed-агент вне ростера → 422; role без кандидатов → 422 до старта; preferred при равных; capabilities-матчинг (явный false отсекает, nil пропускает); legacy-агенты — только слоты без требований; delegation — только явная выдача; skills-требования; оверрайды (валидный/невидимый/чужой слот); семантика SatisfiesCapability зафиксирована в workspace.</li>
+</ul>
+<h3 id="волна-d-ui-команд-m-фаза-4-готово"><a class="anchor" href="#волна-d-ui-команд-m-фаза-4-готово" aria-label="Section link">#</a>Волна D. UI команд — M — фаза 4 — <strong>готово</strong></h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Раздел «Команды» в Layout (основное меню, рядом с Запусками): список с фильтром, бейдж узла/«глобально», создание/редактирование/удаление; API-клиент в <code>workspaceApi.ts</code> (CRUD, версии, apply/reject, resolve, запуск).</li>
+<li><input checked="" disabled="" type="checkbox"> Карточка команды: вкладки «Основное» (протокол, шаги DAG, дефолты, статистика), «Состав» (слоты: ответственность, требования, контракт, привязка), «Запуски» (история из journal-событий <code>team.*</code>/<code>run.cancelled</code> с итогами — <code>teamRuns.ts</code> + тесты), «Эволюция» (версии с provenance, apply/reject черновиков; метрики версий — волна G).</li>
+<li><input checked="" disabled="" type="checkbox"> Форма редактирования — структурированная (не YAML): протокол селектом, слоты карточками, requirements чекбоксами из 7 канонических capabilities + навыки списком id, привязка fixed (селект агентов) / role (requirements + preferred); редактор шагов для DAG.</li>
+<li><input checked="" disabled="" type="checkbox"> Диалог запуска: проект, цель, предпросмотр привязок через <code>GET /v1/agent/teams/{id}/resolve</code>, подтверждение/замена слотов (явные bindings), обработка 409 (кандидаты) и 422 (требования); после старта — переход в Запуски на новый ран. Черновик версии не запускается (предупреждение + disabled).</li>
+<li><input checked="" disabled="" type="checkbox"> Runs: командные раны отображаются существующими DelegationTree/PlanGraph; сводка team.completed (токены/стоимость/rework) в шапке рана (AgentRuns.tsx).</li>
+<li><input checked="" disabled="" type="checkbox"> i18n ru/en, обе темы, ListFilter; поле «Доступность» (org_unit_id) как у остальных ресурсов.</li>
+</ul>
+<h3 id="волна-e-formation-m-фаза-5-готово"><a class="anchor" href="#волна-e-formation-m-фаза-5-готово" aria-label="Section link">#</a>Волна E. Formation — M — фаза 5 — <strong>готово</strong></h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>POST /v1/workspace/teams/builder</code> {description} — Team Builder Agent (по образцу skill builder): интерпретация → черновик манифеста (протокол, слоты, требования, дефолты) + происхождение значений. Ростер агентов (видимость как при запуске) уходит в промпт, манифест нормализуется и валидируется <code>ValidateTeamManifest</code> до отдачи в UI.</li>
+<li><input checked="" disabled="" type="checkbox"> Wizard в UI: textarea → «Сформировать команду» → форма редактирования с маркерами происхождения (протокол/дефолты/слоты); уточняющие вопросы в том же wizard (один раунд); «Переформировать» с предупреждением о потере ручных правок (правки не теряются молча — перегенерация спрашивает подтверждение).</li>
+<li><input checked="" disabled="" type="checkbox"> Шаблоны команд (Code Delivery, Research Fan-out, Delivery + QA gate) — seed-строки для builder, не предсозданные сущности.</li>
+</ul>
+<h3 id="волна-f-командный-контекст-m-фаза-6-готово"><a class="anchor" href="#волна-f-командный-контекст-m-фаза-6-готово" aria-label="Section link">#</a>Волна F. Командный контекст — M — фаза 6 — <strong>готово</strong></h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Team scratch: префикс в workspace storage (<code>team/{run_id}/</code> внутри проектного workspace — все слоты и так монтируют его целиком), путь упомянут в промпте каждого слота и лида, TTL-очистка (<code>TEMPORALITY_TEAM_SCRATCH_TTL</code>, по умолчанию 168ч; почасовой свипер <code>SweepTeamScratch</code>).</li>
+<li><input checked="" disabled="" type="checkbox"> Артефакты контрактов: ответ завершённого слота (кроме ревьюеров) пишется activity <code>kernel.team_contract_write</code> в <code>team/{run}/contracts/{slot}.md</code> (best-effort, доработки перезаписывают файл); зависимые слоты получают текст контракта в промпте + ссылку на файл.</li>
+<li><input checked="" disabled="" type="checkbox"> Scoped hints: <code>RunInput.TeamRootRunID</code> распространяется по дереву ранов (слоты плана, делегаты, лид); <code>HintRequest.TeamRoot</code> → <code>team_root</code> в <code>/v1/observations/hints</code>; журнал собирает знания, чьи proposal/confirmation события лежат под этим рутом (<code>&lt;root&gt;</code> или <code>&lt;root&gt;/…</code>), и <code>FindHints</code> допускает их без лексического матчинга (tier как у topic-матча, lifecycle-гейты и issued-suppression сохраняются).</li>
+</ul>
+<h3 id="волна-g-телеметрия-и-эволюция-ml-фаза-7-готово"><a class="anchor" href="#волна-g-телеметрия-и-эволюция-ml-фаза-7-готово" aria-label="Section link">#</a>Волна G. Телеметрия и эволюция — M/L — фаза 7 — <strong>готово</strong></h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Rollup-эндпоинт <code>GET /v1/agent/cost/team-run?project=&amp;run_id=</code> (kernel/cost): агрегация по дереву дочерних ранов (<code>&lt;root&gt;</code> и <code>&lt;root&gt;/…</code>) — тоталы, построчная разбивка ранов, approvals, rework из team.completed; в UI — раскрытие строки запуска на вкладке «Запуски».</li>
+<li><input checked="" disabled="" type="checkbox"> Метрики версий: <code>GET /v1/workspace/teams/{id}/metrics?project=</code> — runs/completed/failed, accept-first-try, средние rework, токены/стоимость/длительность, споры слотов (пары исполнитель←ревьюер из <code>plan.task.rejected</code>); таблица на вкладке «Эволюция».</li>
+<li><input checked="" disabled="" type="checkbox"> Evolution proposals: детерминированный детектор <code>POST /v1/workspace/teams/{id}/evolution/detect?project=</code> — пара слотов отклоняется ≥2 раз в ≥2 ранах текущей версии → draft-версия (origin=agent_proposal) с provenance (observed_problem/proposed_change/expected_effect, source_runs) и дополненным контрактом исполнителя (повторяющийся фидбек ревьюера); существующий UI accept/reject с проваливанием в evidence (ссылки на раны).</li>
+</ul>
+<h3 id="волна-h-миграция-примера-s-фаза-8-отменена"><a class="anchor" href="#волна-h-миграция-примера-s-фаза-8-отменена" aria-label="Section link">#</a>Волна H. Миграция примера — S — фаза 8 — <strong>отменена</strong></h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <del>LeadCoderReviewerQA → шаблон команды <code>pipeline</code>…</del> Решено не делать: пример живёт своей жизнью как отдельный workflow и не мешает; миграция не даёт ценности, сорвана пользователем.</li>
+</ul>
+<h2 id="3-тестирование-и-приёмка-по-20-спеки"><a class="anchor" href="#3-тестирование-и-приёмка-по-20-спеки" aria-label="Section link">#</a>3. Тестирование и приёмка (по §20 спеки)</h2><ul>
+<li>CRUD команды + версии (immutable, apply переключает указатель, история читается).</li>
+<li><code>pipeline</code>-запуск: дерево дочерних ранов, события <code>team.*</code> и <code>plan.*</code>/<code>delegation.*</code> в правильном порядке.</li>
+<li><code>review_gate</code>: работа → отклонение → доработка → принятие (полный цикл).</li>
+<li>Слот <code>role</code> находит агента по capabilities / несколько кандидатов → 409 / ноль → 422 до старта.</li>
+<li>Rollup токенов/стоимости командного рана в Runs.</li>
+<li>Изменение определения после старта не влияет на идущий запуск.</li>
+<li>Команда не расширяет права участников (у каждого слота свои политики).</li>
+<li>Org-видимость фильтрует списки команд и кандидатов привязки.</li>
+<li>Пользователь ни в одном сценарии не видит <code>team.yaml</code> (манифест = внутренний формат).</li>
+</ul>
+<h2 id="4-принятые-решения"><a class="anchor" href="#4-принятые-решения" aria-label="Section link">#</a>4. Принятые решения</h2><ol>
+<li><strong>Без нового движка оркестрации</strong>: протоколы компилируются в существующие <code>plan</code>/<code>delegate</code>; командный рантайм — надстройка над AgentRun.</li>
+<li><strong>Модель версий — как у skills</strong>: immutable <code>workspace_team_version</code>, draft→apply, provenance у версии — переиспользуем проверенный паттерн.</li>
+<li><strong>Слоты — данные манифеста, не отдельная таблица</strong>: MVP хранит слоты в JSONB манифеста; выделенная таблица — если понадобится запросами по слотам.</li>
+<li><strong>Role-подбор детерминирован и скромен</strong>: capabilities-матчинг + preferred-тай-брейк; без LLM-подбора и истории успеха в первой версии.</li>
+<li><strong><code>team.*</code> события рядом с <code>plan.*</code>/<code>delegation.*</code></strong>: существующие UI работают без переделки, командная разметка аддитивна.</li>
+<li><strong>Шаблоны вместо предсозданных команд</strong> (урок встроенных агентов): builder предлагает, пользователь создаёт свою сущность.</li>
+<li><strong>Rollup строится поверх per-run cost-учёта</strong> (9c00cb4): без отдельного биллинга.</li>
+</ol>
+<h2 id="5-не-цели-первой-версии"><a class="anchor" href="#5-не-цели-первой-версии" aria-label="Section link">#</a>5. Не-цели (первой версии)</h2><ul>
+<li>N-агентный свободный чат и произвольные топологии вне словаря протоколов.</li>
+<li>Вложение команд (команда слотом другой команды).</li>
+<li>LLM-матчинг слотов, «переговоры» слотов о контрактах.</li>
+<li>Расписания/триггеры для команд (связка с triggers — будущая работа).</li>
+<li>Отдельная таблица слотов и аудит привязок на каждый запуск (минимальный аудит — в волнах A/G).</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="perf-audit-plan.html"><small>← Назад</small><strong>План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</strong></a>
+    <a class="pager-next" href="plan-evaluable-agent.html"><small>Далее →</small><strong>План работ: Evaluable Agent — определение агента и компиляция системного промта</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

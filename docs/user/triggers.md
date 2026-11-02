@@ -9,7 +9,7 @@ description: Запуск агентов по расписанию, вебхук
 
 Триггеры запускают агентов без человека: по расписанию, входящему вебхуку
 или событию системы. Страница **Триггеры** (`/triggers`), механика —
-`docs/triggers-and-escalations.md`.
+[docs/triggers-and-escalations.md](docs/triggers-and-escalations.md).
 
 ## Cron-триггер
 

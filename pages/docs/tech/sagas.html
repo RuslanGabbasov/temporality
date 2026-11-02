@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Саги: явная регистрация долгой работы (Sagas) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/sagas.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row active" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Саги: явная регистрация долгой работы (Sagas)</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Сделать <strong>сагу</strong> — продолжительное усилие, которое живёт дольше одного рана и
+может переходить между агентами, — явной сущностью с явной регистрацией, а не
+скрытой группировкой по <code>task_id</code>.</p>
+<p>Первоначальная реализация бюджета (<code>kernel/cost</code>) называла сагой каждую задачу:
+события группировались по <code>ev.Context.Task</code>, и любые раны одной задачи
+складывались в «сагу» автоматически. Это давало сумму затрат, но не отвечало на
+главный вопрос: <strong>какая работа считается одним целым</strong>, когда её ведут разные
+люди и агенты. Продолжение беседы в чате, делегирование, перехват задачи лидом
+у аналитика — всё это одна работа с общей стоимостью, и решение о том, что она
+едина, должен принимать агент, а не эвристика группировки.</p>
+<p>Ключевые принципы:</p>
+<ul>
+<li><strong>Сага регистрируется явно.</strong> Инструмент <code>saga_register</code> создаёт сагу и
+привязывает к ней текущую задачу. Никаких неявных саг больше не возникает.</li>
+<li><strong>Привязка живёт на уровне задачи.</strong> Сага привязывается к <code>task_id</code>, а не к
+рану: продолжения беседы (новые раны той же задачи) и делегированные дети
+(наследуют <code>TaskID</code> корня) попадают в сагу автоматически.</li>
+<li><strong>События — единственное состояние.</strong> Саги существуют только как journal
+события <code>saga.registered</code> / <code>saga.attached</code>; проекция строится при чтении.
+Ни одной новой таблицы, ни одного CRUD — консистентно с моделью knowledge.</li>
+</ul>
+<hr>
+<h2 id="2-модель"><a class="anchor" href="#2-модель" aria-label="Section link">#</a>2. Модель</h2><pre><code>Saga (явная регистрация)
+ └── Task 1 ── раны (продолжения чата, retry)
+ │            └── делегированные дети (delegate/plan, наследуют TaskID)
+ └── Task 2 ── раны (задача лида, присоединилась через saga_attach)
+</code></pre>
+<ul>
+<li><strong>Saga</strong> — именованное усилие: <code>saga_id</code>, <code>title</code>, <code>goal</code>, автор
+(ран, зарегистрировавший сагу), время регистрации. Идентификатор
+детерминирован: <code>saga-&lt;slug(title)&gt;-&lt;hash6(task_id)&gt;</code> — повторная
+регистрация после потерянного ответа попадает в тот же <code>saga_id</code>.</li>
+<li><strong>Task</strong> — основная единица привязки. У задачи не больше одной активной
+саги: последнее событие привязки выигрывает (последовательные
+<code>registered</code>/<code>attached</code> сортируются по времени, а не по порядку прибытия).</li>
+<li><strong>Run</strong> — прежняя единица исполнения; ничего не меняется.</li>
+</ul>
+<p>Задачи без саги никуда не исчезают: они сворачиваются в отдельный список
+«задачи без саги» на странице обзора проекта. Сага не обязана быть у каждой
+задачи — только у работы, которую агент считает продолжительной или
+сквозной.</p>
+<hr>
+<h2 id="3-инструменты-агента"><a class="anchor" href="#3-инструменты-агента" aria-label="Section link">#</a>3. Инструменты агента</h2><table>
+<thead>
+<tr>
+<th>Инструмент</th>
+<th>Что делает</th>
+<th>Идемпотентность</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>saga_register(title, goal?)</code></td>
+<td>Регистрирует сагу и привязывает текущую задачу</td>
+<td>Повторный вызов для уже привязанной задачи возвращает существующую сагу без новой эмиссии</td>
+</tr>
+<tr>
+<td><code>saga_attach(saga_id, note?)</code></td>
+<td>Привязывает текущую задачу к существующей саге</td>
+<td>Повторная привязка к той же саге возвращает <code>already_attached</code>; привязка к другой саге переносит задачу (последний выигрывает)</td>
+</tr>
+<tr>
+<td><code>saga_list()</code></td>
+<td>Список саг проекта: id, title, goal, задачи, время</td>
+<td>Чтение</td>
+</tr>
+</tbody></table>
+<p>Требования к вызову: у рана должны быть <code>Project</code> и <code>TaskID</code> — иначе понятная
+ошибка («этот ран без задачи, привязывать нечего»).</p>
+<p><code>saga_attach</code> проверяет, что сага зарегистрирована в этом проекте (по journal),
+иначе отказ с подсказкой вызвать <code>saga_list</code> — защита от фантомных привязок по
+опечатке в id.</p>
+<p>Классификация инструментов:</p>
+<ul>
+<li><code>saga_list</code> — read-only (журнальное чтение);</li>
+<li><code>saga_register</code> / <code>saga_attach</code> — policy-safe записи в observation-слой
+(как <code>remember</code>): не касаются воркспейса и внешних систем, approval не
+требуется.</li>
+</ul>
+<hr>
+<h2 id="4-события"><a class="anchor" href="#4-события" aria-label="Section link">#</a>4. События</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Data</th>
+<th>Context</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>saga.registered</code></td>
+<td><code>saga_id</code>, <code>title</code>, <code>goal?</code>, <code>origin</code> (<code>agent-tool</code> / <code>human-ui</code>), <code>task_id?</code></td>
+<td>Project, Run?, Task?, Actor</td>
+</tr>
+<tr>
+<td><code>saga.attached</code></td>
+<td><code>saga_id</code>, <code>task_id</code>, <code>note?</code>, <code>origin?</code></td>
+<td>Project, Run?, Task?, Actor</td>
+</tr>
+<tr>
+<td><code>saga.renamed</code></td>
+<td><code>saga_id</code>, <code>title?</code>, <code>goal?</code>, <code>origin=human-ui</code></td>
+<td>Project, Actor</td>
+</tr>
+<tr>
+<td><code>saga.merged</code></td>
+<td><code>saga_id</code> (цель), <code>source_saga_ids[]</code>, <code>origin=human-ui</code></td>
+<td>Project, Actor</td>
+</tr>
+<tr>
+<td><code>saga.detached</code></td>
+<td><code>task_id</code>, <code>origin=human-ui</code></td>
+<td>Project, Task, Actor</td>
+</tr>
+</tbody></table>
+<p>EventID включает <code>UnixNano</code> (<code>&lt;run&gt;/&lt;type&gt;/&lt;nano&gt;</code> или <code>saga-lifecycle/&lt;saga&gt;/&lt;type&gt;/&lt;nano&gt;</code> для ручных) — повторные эмиссии после
+ретрая активности не коллайдят. Дубликаты безопасны по смыслу: проекция
+сворачивает их по <code>saga_id</code>/<code>task_id</code>.</p>
+<p>Эмиссия идёт через durable outbox из activity (как <code>skill.proposed</code>), а не из
+workflow-потока: тул выполняется в <code>ActivityRunTool</code>.</p>
+<hr>
+<h2 id="5-распространение-саги"><a class="anchor" href="#5-распространение-саги" aria-label="Section link">#</a>5. Распространение саги</h2><ul>
+<li><strong>Продолжение беседы.</strong> Продолжение создаёт новый ран той же задачи — сага
+наследуется через <code>task_id</code> без каких-либо действий.</li>
+<li><strong>Делегирование.</strong> <code>delegate</code> и <code>plan</code> копируют <code>TaskID</code> корня в ребёнка
+(kernel <code>ResolveAgent</code>), поэтому всё дерево делегирований уже внутри саги.</li>
+<li><strong>Кросс-агентский перехват (takeover).</strong> Аналитик зарегистрировал сагу;
+лид берёт работу — его задача присоединяется через <code>saga_attach(saga_id)</code>.
+<code>saga_id</code> лид находит через <code>saga_list</code>. Дальше затраты обеих задач
+суммируются в одной саге.</li>
+</ul>
+<p>Ничего из этого не требует новых механизмов распространения: сага ездит на
+задаче, задача — на ранах и делегациях.</p>
+<hr>
+<h2 id="6-агрегация-kernelcost"><a class="anchor" href="#6-агрегация-kernelcost" aria-label="Section link">#</a>6. Агрегация (kernel/cost)</h2><p><code>ProjectBudget</code> теперь содержит три уровня:</p>
+<ul>
+<li><strong>Тоталы проекта</strong> — сумма по всем задачам (привязанным и нет).</li>
+<li><code>sagas[]</code> — по строке на каждую зарегистрированную сагу: мета (title, goal,
+автор, время), <code>task_ids</code> (хронологически), суммарные раны/агенты/токены/
+стоимость/approvals. Зарегистрированная сага без событий тоже показывается
+(нулевые тоталы) — регистрация сама по себе факт.</li>
+<li><code>tasks[]</code> — по строке на задачу: те же тоталы плюс <code>saga_id</code>, если задача
+привязана.</li>
+</ul>
+<p>Алгоритм агрегации двухпроходный и устойчив к порядку событий:</p>
+<ol>
+<li>Проход по <code>saga.*</code> событиям строит мету саг и карту task→saga (последняя по
+времени привязка выигрывает; привязка к неизвестной саге игнорируется).</li>
+<li>Проход по остальным событиям накапливает задачу в её собственный
+аккумулятор и, если задача привязана, — параллельно в аккумулятор саги.</li>
+</ol>
+<p><code>SagaCount</code> сменил смысл с «число задач» на «число явных саг»; <code>TaskCount</code> —
+новое поле. Пер-рановый <code>/v1/agent/cost/task</code> не изменился.</p>
+<p>Детерминизм: сортировки саг и задач — по времени начала (новые сверху),
+tie-break по идентификатору; внутри саги задачи упорядочены по времени старта.</p>
+<hr>
+<h2 id="7-ui"><a class="anchor" href="#7-ui" aria-label="Section link">#</a>7. UI</h2><p>Вкладка <strong>Саги</strong> дашборда (<code>/dashboard</code>, рядом с «Запусками»):</p>
+<ul>
+<li>тоталы проекта: задачи, саги, раны, elapsed/active, токены, стоимость,
+approvals;</li>
+<li>таблица саг с раскрыванием в привязанные задачи;</li>
+<li>таблица «Задачи без саги»;</li>
+<li>ручное управление (§8): переименование, объединение дублей, привязка задач.</li>
+</ul>
+<p>Из вкладки Runs секция саг убрана: раны — исполнение, саги — учёт. Пер-рановый
+budget-вью (<code>Task budget</code> по выбранному рану) остался в Runs без изменений.</p>
+<hr>
+<h2 id="8-ручное-управление-ui-writer"><a class="anchor" href="#8-ручное-управление-ui-writer" aria-label="Section link">#</a>8. Ручное управление (UI, writer)</h2><p>Саги остаются event-sourced: ручные операции — это те же журнальные события,
+что и у тулов агента, только с <code>origin=human-ui</code> и человеческим актором.
+Никаких таблиц и переписываний истории — обе проекции (kernel/cost и
+saga_list) перекладывают события заново.</p>
+<p>API (<code>cmd/agent-kernel/sagalifecycle.go</code>, все writer-only, <code>?project=</code> обязателен):</p>
+<table>
+<thead>
+<tr>
+<th>Эндпоинт</th>
+<th>Тело</th>
+<th>Событие</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>POST /v1/workspace/sagas</code></td>
+<td><code>title</code>, <code>goal?</code>, <code>task_id?</code></td>
+<td><code>saga.registered</code></td>
+</tr>
+<tr>
+<td><code>POST /v1/workspace/sagas/{id}/rename</code></td>
+<td><code>title?</code>, <code>goal?</code> (хотя бы одно)</td>
+<td><code>saga.renamed</code></td>
+</tr>
+<tr>
+<td><code>POST /v1/workspace/sagas/{id}/merge</code></td>
+<td><code>source_saga_ids[]</code></td>
+<td><code>saga.merged</code></td>
+</tr>
+<tr>
+<td><code>POST /v1/workspace/sagas/{id}/delete</code></td>
+<td>—</td>
+<td><code>saga.deleted</code></td>
+</tr>
+<tr>
+<td><code>POST /v1/workspace/tasks/{taskID}/saga</code></td>
+<td><code>saga_id</code> (пустая — отвязать)</td>
+<td><code>saga.attached</code> / <code>saga.detached</code></td>
+</tr>
+</tbody></table>
+<p>Правила проекции:</p>
+<ul>
+<li><strong>rename</strong>: последний <code>saga.renamed</code> по времени перекрывает title/goal
+регистрации; пустые поля не затирают существующие;</li>
+<li><strong>merge</strong>: привязки саг-источников перепроецируются на цель (цепочки
+слияний разворачиваются до финальной цели), источники остаются
+строками-перенаправлениями (<code>merged_into</code>) без задач и затрат;
+<code>saga_attach</code> к слитой саге отклоняется с подсказкой о цели;</li>
+<li><strong>detach</strong>: задача возвращается в пул «без саги», позднейший attach может
+привязать её снова;</li>
+<li><strong>delete</strong> (гигиена оператора): криво созданная или неверно слитая сага
+удаляется одним <code>saga.deleted</code> — обе проекции (rollup дашборда и
+<code>saga_list</code>) забывают сагу, её задачи возвращаются в пул «без саги»;
+раны, задачи и события журнала не трогаются (отклоняется группировка, не
+работа). Повторная регистрация с тем же id после удаления чисто
+воскрешает сагу. В UI — кнопка ✕ в строке саги с подтверждением.</li>
+</ul>
+<p>Существование саги проверяется по <code>saga.registered</code>-событиям журнала —
+другие типы сагу не создают.</p>
+<h3 id="что-сознательно-не-сделано"><a class="anchor" href="#что-сознательно-не-сделано" aria-label="Section link">#</a>Что сознательно не сделано</h3><ul>
+<li><strong>Закрытие саг</strong> (<code>saga.close</code>). Сага без активности естественным образом
+«остывает» (running=0, последний ран давно). Явное закрытие имеет смысл
+ввести, когда появится вопрос «какие саги вообще живы» на сотнях саг.</li>
+<li><strong>Саги между проектами.</strong> Привязка проверяется в рамках одного проекта;
+кросс-проектные усилия требуют другой модели владения.</li>
+</ul>
+<hr>
+<h2 id="9-открытые-вопросы"><a class="anchor" href="#9-открытые-вопросы" aria-label="Section link">#</a>9. Открытые вопросы</h2><ul>
+<li>Стоит ли авто-предлагать <code>saga_register</code> агенту при длинных задачах
+(например, при N-м продолжении беседы) — и в каком месте системного промпта?</li>
+<li>Нужен ли поиск/фильтр саг на странице обзора при большом их количестве?</li>
+<li>Как показывать саги, у которых все задачи давно завершились, но сага не
+закрыта — «stale»-индикатор по порогу неактивности?</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="runbook.html"><small>← Назад</small><strong>Runbook — Temporality</strong></a>
+    <a class="pager-next" href="sandbox-profiles.html"><small>Далее →</small><strong>Профили песочниц (Sandbox Profiles) [L1-360]</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

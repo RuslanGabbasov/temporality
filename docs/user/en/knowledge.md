@@ -76,5 +76,5 @@ can return to later. The agent explores the base too, through the
 `knowledge_explore` tool (orient/search/expand/trace/compare/synthesize), and
 its research runs appear in a separate tab.
 
-The mechanics in depth — `docs/knowledge-model.md`, `docs/knowledge-evolution.md`,
-`docs/human-knowledge-explorer.md`.
+The mechanics in depth — [docs/knowledge-model.md](docs/knowledge-model.md), [docs/knowledge-evolution.md](docs/knowledge-evolution.md),
+[docs/human-knowledge-explorer.md](docs/human-knowledge-explorer.md).

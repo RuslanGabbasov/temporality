@@ -75,5 +75,5 @@ Treemap-карта группирует знания по темам и сущн
 `knowledge_explore` (orient/search/expand/trace/compare/synthesize), и его
 исследования видны отдельной вкладкой.
 
-Подробности механики — `docs/knowledge-model.md`, `docs/knowledge-evolution.md`,
-`docs/human-knowledge-explorer.md`.
+Подробности механики — [docs/knowledge-model.md](docs/knowledge-model.md), [docs/knowledge-evolution.md](docs/knowledge-evolution.md),
+[docs/human-knowledge-explorer.md](docs/human-knowledge-explorer.md).

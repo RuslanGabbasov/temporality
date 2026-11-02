@@ -23,11 +23,11 @@ The **Dashboard** (`/dashboard`) is a health summary over a chosen time window
 - the **sandboxes** widget: live containers, integral load (CPU/memory/network), hover — who and which run, click — jump to the trace.
 
 Fault tolerance and scale bounds (replay, workflow history,
-Continue-As-New, quotas) — see `docs/resilience-and-scale.md`.
+Continue-As-New, quotas) — see [docs/resilience-and-scale.md](docs/resilience-and-scale.md).
 
 ### The Supervisor tab and the /supervisor page
 
-The supervisor model's monitoring surface (`docs/supervisor-model.md`):
+The supervisor model's monitoring surface ([docs/supervisor-model.md](docs/supervisor-model.md)):
 failed-run diagnoses collapsed into same-root failure clusters, health
 anomaly explanations, and the wave-B/C cases — knowledge contradiction
 triage and hygiene, evolution proposals, skill candidates, user friction,
@@ -93,7 +93,7 @@ what survives runs) and the toolchain cache. Capabilities:
 - download, upload, delete of files and folders (deleting root areas is left to the background sweeper).
 
 Project quotas and disk usage live on the dashboard, the "Storage" widget.
-The full storage model — `docs/sandbox-storage.md`.
+The full storage model — [docs/sandbox-storage.md](docs/sandbox-storage.md).
 
 ## Export and audit
 

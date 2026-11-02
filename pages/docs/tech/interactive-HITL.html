@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>HITL: унифицированный контракт для каналов и встроенного чата — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/interactive-HITL.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row active" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>HITL: унифицированный контракт для каналов и встроенного чата</h1>
+
+<p><strong>Версия:</strong> 2.0
+<strong>Статус:</strong> Доработано под текущую реализацию (as-built + план). v1.0 — общее ТЗ;
+v2.0 привязывает его к яру human_request / ask_human, фактическому реестру
+каналов (docs/channels.md) и встроенному чату Workspace.</p>
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Единый механизм взаимодействия агента с человеком (Human-in-the-Loop):
+агент запрашивает решение, данные или подтверждение, рана становится на паузу,
+вопрос доставляется человеку в его канал, ответ возобновляет ран. Контракт
+вопроса не зависит от канала: агент описывает запрос один раз, ядро выбирает
+способ доставки и отображения.</p>
+<p>Принцип неизменен со времён v1.0: <strong>агент не знает каналов, каналы не знают
+продукта</strong> — ядро мэтчит ответ на вопрос по адресам и времени, а не по
+протоколу мессенджера.</p>
+<h2 id="2-что-уже-реализовано-as-built"><a class="anchor" href="#2-что-уже-реализовано-as-built" aria-label="Section link">#</a>2. Что уже реализовано (as-built)</h2><p>Ядро HITL работает в проде; канонический контракт v1.0 совпадает с ним
+практически один в один:</p>
+<table>
+<thead>
+<tr>
+<th>Концепция v1.0</th>
+<th>Реализация</th>
+<th>Где</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Создание HITL-запроса</td>
+<td>tool <code>ask_human</code>: <code>question</code>, <code>context</code>, <code>options[]</code>, <code>recipient</code>, <code>timeout_sec</code>, <code>timeout_policy</code></td>
+<td><code>kernel/agent/workflow.go</code> (~L3470 — описание tool, ~L1715 — исполнение)</td>
+</tr>
+<tr>
+<td>Пауза и возобновление</td>
+<td>Temporal signal <code>Approval</code> (<code>awaitApproval</code>), раунды ожидания для retry/escalate</td>
+<td><code>kernel/agent/workflow.go</code></td>
+</tr>
+<tr>
+<td>Хранилище запросов</td>
+<td>сущность <code>human_request</code>: статусы, <code>thread_ref</code>, fan-out <code>deliveries</code></td>
+<td><code>workspace/models.go</code></td>
+</tr>
+<tr>
+<td>Канальная доставка</td>
+<td>activity → <code>pickChannel</code> → реестр <code>ChannelDriver</code> (matrix, telegram, slack, slackbot, mattermost, webhook)</td>
+<td><code>kernel/agent/notify.go</code>, <code>kernel/agent/channeldriver.go</code></td>
+</tr>
+<tr>
+<td>Приём ответов из канала</td>
+<td>общий inbound-конвейер: дедуп → идентификация → матчинг «чат + старейший открытый вопрос» (тред — точный) → <code>AnswerHumanRequest</code> + Approval signal</td>
+<td><code>cmd/agent-kernel/channelinbound.go</code></td>
+</tr>
+<tr>
+<td>Submission API</td>
+<td><code>POST /v1/agent/runs/{runID}/approval</code>: операция, <code>arguments_hash</code> (версия), actor, response; закрывает строку <code>human_request</code>, аудит, вердикт в durable outbox (<code>hitl.verdict.recorded</code>)</td>
+<td><code>cmd/agent-kernel/main.go</code></td>
+</tr>
+<tr>
+<td>Web UI (inbox)</td>
+<td>открытые вопросы: список <code>onlyOpen</code>, ленивое истечение; ответ — тайлы вопроса на странице Runs</td>
+<td><code>debugger/src/AgentRuns.tsx</code>, <code>debugger/src/Layout.tsx</code></td>
+</tr>
+<tr>
+<td>Встроенный чат</td>
+<td>карточка вопроса в бабле рана, опции + свободный ответ + отмена; ответ через тот же approval endpoint</td>
+<td><code>debugger/src/Workspace.tsx</code> (§5)</td>
+</tr>
+<tr>
+<td>Таймауты и эскалация</td>
+<td>политики <code>fallback / fail / retry / escalate / cancel</code>, повторный ask (<code>human.reasked</code>), идемпотентное закрытие строки</td>
+<td><code>kernel/agent/workflow.go</code>, <code>workspace/models.go</code></td>
+</tr>
+<tr>
+<td>Командные вопросы</td>
+<td><code>org:&lt;unit&gt;</code> fan-out: копия каждому активному участнику, <code>deliveries</code>, один <code>thread_ref</code> на запрос</td>
+<td><code>kernel/agent/notify.go</code>, docs/inbound-messages.md</td>
+</tr>
+<tr>
+<td>Поиск адресата</td>
+<td>tool <code>human_contacts</code> (+ <code>escalate_for</code>) перед <code>ask_human</code></td>
+<td><code>kernel/agent/contacts.go</code></td>
+</tr>
+</tbody></table>
+<p>Вывод: <strong>этапы 1–2 v1.0 (канонический контракт + универсальный web UI) уже
+выполнены</strong>, но в терминах этой системы — «human_request + approval endpoint»,
+а не отдельный HITL-сервис. Дальше — интерактивность каналов и формы.</p>
+<h2 id="3-текущие-каналы-связи"><a class="anchor" href="#3-текущие-каналы-связи" aria-label="Section link">#</a>3. Текущие каналы связи</h2><p>Фактический реестр — <code>channelDrivers</code> (<code>kernel/agent/channeldriver.go</code>);
+возможности каждого канала объявляет <code>Spec().Capabilities</code>. Каналы вне
+реестра (Teams, Mini Apps) — не в ближнем скоупе (§9).</p>
+<table>
+<thead>
+<tr>
+<th>Канал</th>
+<th>Модель inbound</th>
+<th>TwoWay</th>
+<th>Threads</th>
+<th>Интерактивность сейчас</th>
+<th>План</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Matrix</td>
+<td>pull <code>/sync</code>, mxid</td>
+<td>да</td>
+<td>—</td>
+<td>текст + ссылка «ответить здесь»</td>
+<td>кнопки через клиент-агностику не обещаем</td>
+</tr>
+<tr>
+<td>Telegram</td>
+<td>pull <code>getUpdates</code>, chat id</td>
+<td>да (личка)</td>
+<td>—</td>
+<td>текст</td>
+<td>inline keyboard (<code>Capabilities.Interactive</code>)</td>
+</tr>
+<tr>
+<td>Slack (webhook)</td>
+<td>только outbound</td>
+<td>—</td>
+<td>—</td>
+<td>текст + <code>answer_url</code></td>
+<td>остаётся outbound-каналом</td>
+</tr>
+<tr>
+<td>Slack (bot)</td>
+<td>push Events API, member id</td>
+<td>да</td>
+<td>да (ts)</td>
+<td>текст в треде вопроса</td>
+<td>Block Kit buttons</td>
+</tr>
+<tr>
+<td>Mattermost</td>
+<td>pull WebSocket, user id</td>
+<td>да</td>
+<td>да (root post)</td>
+<td>текст в треде вопроса</td>
+<td>interactive dialogs</td>
+</tr>
+<tr>
+<td>Generic webhook</td>
+<td>только outbound (HMAC envelope)</td>
+<td>—</td>
+<td>—</td>
+<td><code>answer_url</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Web inbox (UI)</td>
+<td>роут приложения</td>
+<td>да</td>
+<td>—</td>
+<td>тайлы на странице Runs</td>
+<td>формы (§7)</td>
+</tr>
+<tr>
+<td>Встроенный чат (Workspace)</td>
+<td>SSE-стрим рана</td>
+<td>да</td>
+<td>—</td>
+<td>карточка вопроса (§5)</td>
+<td>формы (§7)</td>
+</tr>
+</tbody></table>
+<p>Правила выбора канала неизменны (<code>pickChannel</code>): предпочитаемый канал
+получателя, иначе первый включённый и сконфигурированный, иначе web inbox.
+«Web» — безусловный фолбэк: недоставленный или упавший канал не теряет вопрос.</p>
+<h2 id="31-хостед-формы-в-каналах-один-клик-из-мессенджера"><a class="anchor" href="#31-хостед-формы-в-каналах-один-клик-из-мессенджера" aria-label="Section link">#</a>3.1. Хостед-формы в каналах (один клик из мессенджера)</h2><p>Нативные формы в чат-платформах слабы, поэтому schema-вопрос при доставке в
+канал минтит <strong>хостед-форму</strong>: <code>workspace_form_link</code> (токен 32 байта, один
+вопрос на токен, жизнь 7 дней или до решения) и кнопку-ссылку
+<code>&lt;UI_URL&gt;/kernel-api/forms/&lt;token&gt;</code> в сообщении. База ссылки — тот же UI URL
+из настроек доставки, что и у всех нотификационных ссылок; страница и ответ
+живут за <code>/kernel-api</code> на ядре (роуты форм токен-авторизованы, логин в
+харнес не нужен).</p>
+<p>Матрикс: карточка с таблицей полей и кнопкой «fill the form». Остальные
+каналы: URL в тексте. Ответ проходит ту же валидацию и сигнал, что и из
+чата; аудит пишет actor <code>form-link</code>.</p>
+<h2 id="4-capability-negotiation"><a class="anchor" href="#4-capability-negotiation" aria-label="Section link">#</a>4. Capability negotiation</h2><p>Договор v1.0 (§5.4) отображается на существующий контракт драйвера без новой
+абстракции:</p>
+<ul>
+<li>возможности канала = <code>ChannelSpec.Capabilities</code> (<code>Text</code>, <code>TwoWay</code>, <code>Threads</code>,
+<code>FilesOut</code>, <code>FilesIn</code>) + <code>MaxTextLen</code> и <code>Interactive</code> из docs/channels.md §3
+(при появлении нативных кнопок);</li>
+<li>алгоритм выбора отображения: вся форма нативно? → канал; нет → web inbox /
+встроенный чат; взаимодействие невозможно → вопрос всё равно создаётся и
+ждёт в inbox, доставка фиксируется в <code>notification.sent</code> (status, detail);</li>
+<li>ядро не ветвится по типу канала: всё, что канало-специфично — внутри
+драйвера (docs/channels.md §3).</li>
+</ul>
+<h2 id="5-встроенный-чат-workspace-реализовано"><a class="anchor" href="#5-встроенный-чат-workspace-реализовано" aria-label="Section link">#</a>5. Встроенный чат (Workspace) — реализовано</h2><p>Встроенный чат — канал первого класса: ран, запущенный из чата, показывает
+вопрос прямо в бабле своего сообщения, отвечать можно не покидая диалог.</p>
+<p>Механика (все части уже существовали, новая — только карточка):</p>
+<ol>
+<li><strong>Доставка</strong> — отдельного канала нет: workflow и так эмитит <code>human.requested</code>
+в журнал рана, SSE-стрим <code>/v1/workspace/runs/{id}/stream</code> пересылает его
+чату. Карточка прикрепляется к сообщению рана (<code>ChatQuestion</code>:
+<code>operation_id</code>, <code>arguments_hash</code>, вопрос, контекст, опции).</li>
+<li><strong>Отображение</strong> — <code>ChatQuestionCard</code>: опции кнопками (выбор = ответ),
+свободный ответ полем (Enter = отправить), «отменить вопрос».</li>
+<li><strong>Ответ</strong> — <code>POST /v1/agent/runs/{runID}/approval?project=…</code> с телом
+<code>{operation_id, arguments_hash, approved, actor_id, response}</code> — тот же
+endpoint, что у страницы Runs: одна точка входа, одна модель авторизации
+и аудита. Отмена — <code>approved=false, response=&quot;&quot;</code>.</li>
+<li><strong>Закрытие</strong> — авторитетное состояние карточки: журналированные
+<code>human.answered / human.cancelled / human.timed_out / human.rejected</code>;
+оптимистичный апдейт после 202 — только для отзывчивости UI. Терминальное
+событие закрывает карточку только своего <code>operation_id</code> — события старого
+вопроса не гасят новый.</li>
+<li><strong>Восстановление</strong> — после перезагрузки карточка возвращается из
+localStorage (там живёт весь <code>ChatMessage</code>) и по tail-replay стрима
+(пауза рана = <code>human.requested</code> в последних 50 событиях). Восстановление
+на другом устройстве карточки не создаёт (транскрипт сервера не хранит
+<code>run_id</code>) — вопрос остаётся виден в inbox; это осознанное ограничение.</li>
+</ol>
+<p>Активность вопроса также пишется в ленту статуса бабла (<code>❓ …</code>, <code>✓ Отвечено: …</code>, <code>⏱ …</code>) — по тем же <code>formatStreamEvent</code>, что и остальные события.</p>
+<h2 id="6-жизненный-цикл"><a class="anchor" href="#6-жизненный-цикл" aria-label="Section link">#</a>6. Жизненный цикл</h2><p>Состояния v1.0 мэтчатся на <code>human_request</code> так:</p>
+<table>
+<thead>
+<tr>
+<th>v1.0</th>
+<th>human_request</th>
+<th>Кто ставит</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>created+delivered</td>
+<td><code>pending</code> → <code>delivered</code></td>
+<td>workflow + activity доставки</td>
+</tr>
+<tr>
+<td>in_progress</td>
+<td>— (не различаем: клиентское понятие)</td>
+<td></td>
+</tr>
+<tr>
+<td>submitted+consumed</td>
+<td><code>answered</code></td>
+<td>approval endpoint / inbound-конвейер</td>
+</tr>
+<tr>
+<td>rejected</td>
+<td><code>rejected</code> (адресация запрещена идентичностью)</td>
+<td>workflow §30</td>
+</tr>
+<tr>
+<td>cancelled</td>
+<td><code>cancelled</code></td>
+<td>человек или отмена рана</td>
+</tr>
+<tr>
+<td>expired</td>
+<td><code>expired</code></td>
+<td>таймаут + ленивое истечение в list-эндпоинте</td>
+</tr>
+<tr>
+<td>delivery_failed</td>
+<td>строка остаётся открытой, факт фиксирует <code>notification.sent</code></td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Недопустимые переходы отклоняются хранилищем (<code>AnswerHumanRequest</code> на
+закрытой строке — <code>ErrNotFound</code>/no-op; гонка «ответ пришёл после таймаута» —
+ожидаемая, строка уже закрыта, ран пошёл дальше).</p>
+<p>Версионирование v1.0 (§7.3) уже реализовано избирательно: повторный ответ
+принимается только под тем же <code>arguments_hash</code> операции; изменение схемы
+вопроса агентом = новый <code>ask_human</code> с новой операцией.</p>
+<h2 id="7-формы-v2-контракта-реализовано"><a class="anchor" href="#7-формы-v2-контракта-реализовано" aria-label="Section link">#</a>7. Формы (v2 контракта — реализовано)</h2><p>Простой вопрос (<code>options[]</code> + свободный текст) остаётся базовым случаем.
+Поверх <code>human_request</code> работает форма: агент прикладывает к <code>ask_human</code>
+необязательную <code>schema</code>, человек заполняет её в UI, сервер проверяет ответ
+до возобновления рана.</p>
+<p>Контракт:</p>
+<ul>
+<li>tool <code>ask_human</code>, параметр <code>schema</code> — JSON Schema-объект
+<code>{type:&quot;object&quot;, properties:{…}, required:[…]}</code>; ограничен 8KB и 20 полями,
+нерабочая схема деградирует в обычный вопрос (не роняет tool call);</li>
+<li>схема хранится в <code>human_request.schema</code> (JSONB, миграция 0009), едет в
+карточку через журнальное событие <code>human.requested</code>;</li>
+<li>рендерер общий: карточка чата и тайлы Runs используют <code>HumanForm.tsx</code>;
+каналы без форм получают текстовую заглушку с перечнем полей и <code>answer_url</code>;</li>
+<li>ответ: approval endpoint принимает <code>values</code> (map); серверная валидация —
+<code>workspace.ValidateFormValues</code> ДО сигнала воркфлоу (422 при нарушении,
+строка остаётся открытой); канонический JSON значений становится <code>Response</code>
+— модель получает данные как JSON в tool result, контракт сигнала не менялся;</li>
+<li>текстовый ответ из мессенджера принимается как прежде — валидация схемы
+применяется только к структурированной отправке <code>values</code>.</li>
+</ul>
+<p>Поддерживаемое подмножество (<code>workspace/forms.go</code> — серверная авторитетная
+проверка, <code>validateFormValues</code> в <code>HumanForm.tsx</code> — клиентское удобство):</p>
+<table>
+<thead>
+<tr>
+<th>Что</th>
+<th>Ключи</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Типы полей</td>
+<td><code>string</code>, <code>integer</code>, <code>number</code>, <code>boolean</code>, <code>array</code></td>
+</tr>
+<tr>
+<td>Один выбор (radio/select)</td>
+<td><code>enum</code> у <code>string</code></td>
+</tr>
+<tr>
+<td>Множественный выбор (чекбоксы)</td>
+<td><code>type: &quot;array&quot;</code> + <code>items.enum</code></td>
+</tr>
+<tr>
+<td>Диапазон дат (два пикера)</td>
+<td><code>type: &quot;array&quot;</code>, <code>minItems: 2, maxItems: 2</code>, <code>items: {type: &quot;string&quot;, format: &quot;date&quot;}</code></td>
+</tr>
+<tr>
+<td>Обязательность</td>
+<td><code>required</code> (верхний уровень)</td>
+</tr>
+<tr>
+<td>Строки</td>
+<td><code>minLength</code>, <code>maxLength</code>, <code>pattern</code> (RE2, семантика JSON Schema — без якорей ищет в подстроке). Поле с <code>pattern</code> ОБЯЗАНО нести <code>title</code>/<code>description</code> по-человечески — регулярку человек не читает; если подписи нет, UI показывает расшифровку (<code>^[A-Z]{2,4}-[0-9]{3,6}$</code> → «A–Z×2–4 + &quot;-&quot; + 0–9×3–6, строка целиком»), а ошибка сервера цитирует паттерн</td>
+</tr>
+<tr>
+<td>Числа</td>
+<td><code>minimum</code>, <code>maximum</code></td>
+</tr>
+<tr>
+<td>Форматы строк</td>
+<td><code>format</code>: <code>date</code> (YYYY-MM-DD), <code>date-time</code> (RFC 3339), <code>time</code> (HH:MM:SS), <code>email</code>, <code>url</code>, <code>password</code> (секретный ввод). Датовые контролы следуют локали браузера (порядок дат, 12/24ч); клиент нормализует браузерные значения при отправке (секунды + смещение пояса), сервер принимает и наивные формы (<code>2006-01-02T15:04</code>, <code>15:04</code>), трактуя их как UTC</td>
+</tr>
+<tr>
+<td>Массивы</td>
+<td><code>minItems</code>, <code>maxItems</code> (≤100 элементов)</td>
+</tr>
+<tr>
+<td>Метаданные</td>
+<td><code>title</code>, <code>description</code> (подпись и подсказка поля)</td>
+</tr>
+</tbody></table>
+<p>Паттерны компилируются как Go RE2 — тот же синтаксис валиден в браузере,
+поэтому клиентская и серверная проверки согласованы. Неизвестные ключи
+игнорируются, неизвестный тип поля отклоняет значение: нераспознанное
+ограничение не проходит молча.</p>
+<p>Ответ доставляется модели целиком: эндпоинт сворачивает проверенные <code>values</code>
+в канонический JSON <strong>до сигнала</strong> (422 — до возобновления рана), workflow
+отдаёт его в tool result без 256-байтового предпросмотра-обрезания — форма
+не может «дойти пустой».</p>
+<p>Пример (агент спрашивает параметры деплоя):</p>
+<pre><code class="language-json">{&quot;question&quot;: &quot;Параметры релиза billing-service?&quot;,
+ &quot;schema&quot;: {&quot;type&quot;: &quot;object&quot;,
+   &quot;properties&quot;: {
+     &quot;channel&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;canary&quot;, &quot;stable&quot;], &quot;title&quot;: &quot;Канал&quot;},
+     &quot;version&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;minLength&quot;: 5, &quot;title&quot;: &quot;Версия&quot;},
+     &quot;replicas&quot;: {&quot;type&quot;: &quot;integer&quot;, &quot;minimum&quot;: 1, &quot;maximum&quot;: 50},
+     &quot;confirm&quot;:  {&quot;type&quot;: &quot;boolean&quot;, &quot;title&quot;: &quot;Подтверждаю выкат&quot;}},
+   &quot;required&quot;: [&quot;channel&quot;, &quot;version&quot;, &quot;confirm&quot;]}}
+</code></pre>
+<p>Ответ придёт агенту как <code>Human response: {&quot;channel&quot;:&quot;canary&quot;,&quot;version&quot;:&quot;v1.2.3&quot;,&quot;replicas&quot;:2,&quot;confirm&quot;:true}</code>.</p>
+<p>Каталог примитивов, условные поля, многошаговость и карточки сущностей из
+v1.0 §3.2–3.4 остаются референсом для расширений подмножества (не блокируют
+каналы: новый тип поля = поле в рендерере + ветка в валидаторе).</p>
+<h2 id="8-безопасность-без-изменений-по-существу"><a class="anchor" href="#8-безопасность-без-изменений-по-существу" aria-label="Section link">#</a>8. Безопасность (без изменений по существу)</h2><ul>
+<li>авторизация: <code>RoleOperator</code> + проект на approval endpoint; identity-лесенка
+может запретить адресацию (<code>human.rejected</code>, §30);</li>
+<li>actor: аутентифицированный principal перекрывает присланный <code>actor_id</code>;</li>
+<li>ответы человека — недоверенные данные: текст ответа никогда не исполняется
+как инструкция (уходит в модель как tool result, не как prompt верхнего
+уровня);</li>
+<li>идемпотентность: одна строка <code>human_request</code> на операцию; повторная
+доставка события канала отсекается дедупом, повторный ответ — закрытой
+строкой;</li>
+<li>аудит: <code>RecordAccessAudit</code> на ответ/отмену, вердикт — через durable outbox;</li>
+<li>ссылка <code>answer_url</code> ведёт в UI под логином, постоянных секретов в URL нет.</li>
+</ul>
+<h2 id="9-вне-ближнего-скоупа"><a class="anchor" href="#9-вне-ближнего-скоупа" aria-label="Section link">#</a>9. Вне ближнего скоупа</h2><p>Перенесено из v1.0 в бэклог без сроков: Microsoft Teams, Mattermost Dialogs,
+Telegram Mini Apps, Matrix-кнопки, A2UI/MCP Apps как транспорт форм,
+групповое согласование и перенос запроса между каналами. Основание: текущие
+каналы и два UI (inbox, чат) покрывают сценарии; добавление канала — один
+драйвер (docs/channels.md §8), и формы поверх <code>human_request</code> (§7) не должны
+заставлять драйверы знать о HITL больше, чем про текст и тред.</p>
+<h2 id="10-этапы-доработки"><a class="anchor" href="#10-этапы-доработки" aria-label="Section link">#</a>10. Этапы доработки</h2><ul>
+<li><strong>Этап A (готово):</strong> контракт v1 (<code>ask_human</code> + <code>human_request</code> + approval
+endpoint + политики таймаутов) — работает во всех каналах.</li>
+<li><strong>Этап B (готово):</strong> встроенный чат — карточка вопроса, ответ/отмена в
+диалоге, восстановление после перезагрузки.</li>
+<li><strong>Этап C (готово):</strong> формы — <code>schema</code> в <code>ask_human</code>, хранение в
+<code>human_request</code>, серверная валидация значений, общий рендерер <code>HumanForm</code>
+в чате и на Runs, текстовая заглушка для каналов (§7).</li>
+<li><strong>Этап D:</strong> нативные кнопки там, где канал умеет: <code>Capabilities.Interactive</code>,
+telegram inline keyboard, slack Block Kit; текстовый фолбэк обязателен
+(docs/channels.md, фаза 3).</li>
+<li><strong>Этап E:</strong> расширения форм из v1.0 §3.2–3.4 по мере надобности: условные
+поля, многошаговость, динамические справочники, карточки сущностей.</li>
+<li><strong>Этап F:</strong> бэклог §9 по мере появления каналов и требований.</li>
+</ul>
+<h2 id="11-критерии-приёмки"><a class="anchor" href="#11-критерии-приёмки" aria-label="Section link">#</a>11. Критерии приёмки</h2><ol>
+<li>Агент создаёт вопрос одним контрактом (<code>ask_human</code>), не зная канала.</li>
+<li>Вопрос, доставленный в любой канал, отвечает в любом другом (матчинг по
+адресам/тредам, строка одна).</li>
+<li>Встроенный чат показывает вопрос в диалоге и позволяет ответить (опции,
+свободный текст, форма, отмена) без ухода со страницы.</li>
+<li>Ответ из чата идёт через тот же approval endpoint и тот же аудит, что и
+из Runs и из мессенджера.</li>
+<li>Перезагрузка страницы при paused-ране восстанавливает открытую карточку;
+ответ, данный в другом месте, закрывает карточку через журнальное событие.</li>
+<li>Таймаут закрывает вопрос по политике (<code>fallback/fail/retry/escalate/cancel</code>)
+и не оставляет открытую строку.</li>
+<li>Ответ без права/под неверным <code>arguments_hash</code> отклоняется сервером; форма
+с нарушенной схемой отклоняется с 422 до возобновления рана.</li>
+<li>Форма рендерится одним компонентом в чате и на Runs; канал без форм
+получает текстовую заглушку с перечнем полей и не теряет вопрос.</li>
+<li>Добавление нового канала не меняет контракт агента и не требует правок в
+ядре HITL (драйвер + возможности).</li>
+</ol>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="inbound-messages.html"><small>← Назад</small><strong>Входящие сообщения: задачи по инициативе пользователя</strong></a>
+    <a class="pager-next" href="knowledge-evolution.html"><small>Далее →</small><strong>Разделение Experience, Knowledge, Skills и контекстной эволюции агента</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

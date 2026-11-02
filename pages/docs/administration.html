@@ -179,7 +179,7 @@ daemon ядру нужен только для этой изоляции — с�
 </ul>
 <p>Применение предложений агентов и версий навыков гейтится зелёным оценочным
 прогоном — см. <a href="agents.html#эволюция-агента">Агенты</a>.</p>
-<h2 id="аутентификация-внешняя"><a class="anchor" href="#аутентификация-внешняя" aria-label="Section link">#</a>Аутентификация внешняя</h2><p>Поддерживается OIDC-федерация (Keycloak, authentik и другие): <code>docs/auth-federation.md</code>.
+<h2 id="аутентификация-внешняя"><a class="anchor" href="#аутентификация-внешняя" aria-label="Section link">#</a>Аутентификация внешняя</h2><p>Поддерживается OIDC-федерация (Keycloak, authentik и другие): <a href="tech/auth-federation.html">docs/auth-federation.md</a>.
 Схема: discovery + JWKS-кэш (ротация ключей без рестарта), серверные сессии
 (<code>KERNEL_SESSION_TTL</code> 12h / <code>KERNEL_SESSION_ABSOLUTE_TTL</code> 7d), JIT-провижининг
 с ролью по умолчанию и ролью <code>deny</code> («вход успешен, доступ запрещён» до ручного

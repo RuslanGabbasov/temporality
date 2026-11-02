@@ -52,7 +52,7 @@ description: Environment variables, ports, UI pages and links to the in-depth do
 | `KERNEL_BROWSER_CDP_URL` | lightpanda | Headless browser for `browser` (empty = off) |
 | `KERNEL_CHANNEL__MATRIX__*`, `__TELEGRAM__*`, `__MATTERMOST__*`, `__SLACKBOT__*` | — | Channel transports |
 
-The full list with semantics is in the root `README.md` and `docs/runbook.md`.
+The full list with semantics is in the root `README.md` and [docs/runbook.md](docs/runbook.md).
 
 ## Ports
 
@@ -100,11 +100,14 @@ The full list with semantics is in the root `README.md` and `docs/runbook.md`.
 
 ## Engineering documents
 
-The architecture and internals are described in the repository's `docs/`:
-`architecture.md` (overview), `event-model.md`, `knowledge-model.md`,
-`agent-quality-loop.md`, `living-skills.md`, `agent-delegation.md`,
-`inbound-messages.md`, `org-structure.md` (org structure, policies,
-execution identity), `sandbox-security-matrix.md`,
-`failure-model.md`, `failure-reconciliation.md`, `resilience-and-scale.md`
+The architecture and internals are described in the repository's `docs/` (on
+the site — the [Engineering documents](../tech/index.md) section):
+[architecture.md](docs/architecture.md) (overview), [event-model.md](docs/event-model.md),
+[knowledge-model.md](docs/knowledge-model.md), [agent-quality-loop.md](docs/agent-quality-loop.md),
+[living-skills.md](docs/living-skills.md), [agent-delegation.md](docs/agent-delegation.md),
+[inbound-messages.md](docs/inbound-messages.md), [org-structure.md](docs/org-structure.md)
+(org structure, policies, execution identity), [sandbox-security-matrix.md](docs/sandbox-security-matrix.md),
+[failure-model.md](docs/failure-model.md), [failure-reconciliation.md](docs/failure-reconciliation.md),
+[resilience-and-scale.md](docs/resilience-and-scale.md)
 (fault tolerance and scale bounds: replay, workflow history, Continue-As-New),
-`runbook.md` (operations) and others.
+[runbook.md](docs/runbook.md) (operations) and others.

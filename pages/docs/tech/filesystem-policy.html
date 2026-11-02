@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/filesystem-policy.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row active" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Реализовать единую файловую систему проекта с централизованным управлением доступом на основании действующих политик Temporality.</p>
+<p>Основные принципы:</p>
+<ol>
+<li>Все агенты работают с одной канонической структурой файлов и каталогов проекта.</li>
+<li>Файловые полномочия определяются пользователем, инициировавшим запуск, а не типом агента, его ролью или местом в дереве делегирования.</li>
+<li>Ограничения доступа задаются через существующую модель Org Policies и наследуются по существующим правилам <code>EffectivePolicy</code>.</li>
+<li>Ограничения должны обеспечиваться технически, а не только инструкциями в system prompt.</li>
+<li>Параллельная разработка должна поддерживать независимые изменения одного проекта, включая изменения пересекающихся участков кода.</li>
+<li>Координация параллельной работы не должна требовать от агентов самостоятельного изобретения структуры каталогов и соглашений о расположении файлов.</li>
+</ol>
+<p>Не создавать отдельные файловые пространства для Org Units, команд, ролей и агентов.</p>
+<h2 id="2-термины-и-разделение-ответственности"><a class="anchor" href="#2-термины-и-разделение-ответственности" aria-label="Section link">#</a>2. Термины и разделение ответственности</h2><p>В системе должны быть чётко разделены три механизма.</p>
+<table>
+<thead>
+<tr>
+<th>Механизм</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Filesystem Policy</td>
+<td>Определяет, что пользователь вправе читать и изменять</td>
+</tr>
+<tr>
+<td>Workspace</td>
+<td>Единая каноническая файловая система проекта</td>
+</tr>
+<tr>
+<td>Task Isolation</td>
+<td>Предотвращает конфликты параллельной разработки и управляет интеграцией изменений</td>
+</tr>
+</tbody></table>
+<p>Filesystem Policy отвечает за авторизацию. Task Isolation отвечает за координацию изменений. Ни один из этих механизмов не должен подменять другой.</p>
+<h2 id="3-модель-файловых-полномочий"><a class="anchor" href="#3-модель-файловых-полномочий" aria-label="Section link">#</a>3. Модель файловых полномочий</h2><h3 id="31-субъект-авторизации"><a class="anchor" href="#31-субъект-авторизации" aria-label="Section link">#</a>3.1. Субъект авторизации</h3><p>Основной субъект авторизации — инициатор запуска (<code>actor_id</code>).</p>
+<p>Для обычного пользовательского запуска полномочия определяются через:</p>
+<ul>
+<li>организационную принадлежность пользователя;</li>
+<li>членство в проекте;</li>
+<li>связи проекта с Org Units;</li>
+<li>действующие глобальные и локальные Org Policies.</li>
+</ul>
+<p>Для автоматических запусков через webhook, scheduler и triggers использовать соответствующую Execution Identity и существующий механизм определения её полномочий.</p>
+<p>При делегировании дочерний запуск наследует security context исходного инициатора.</p>
+<p>Запрещено:</p>
+<ul>
+<li>использовать Agent ID как субъект файловой авторизации;</li>
+<li>повышать полномочия при делегировании;</li>
+<li>пересчитывать полномочия от имени агента, которому делегирована задача;</li>
+<li>считать роль Lead, Coder, Reviewer или QA основанием для предоставления файловых полномочий.</li>
+</ul>
+<h3 id="32-набор-операций"><a class="anchor" href="#32-набор-операций" aria-label="Section link">#</a>3.2. Набор операций</h3><p>Предусмотреть два уровня доступа:</p>
+<ul>
+<li><code>read</code> — чтение файлов и получение информации о содержимом и структуре файловой системы;</li>
+<li><code>write</code> — любое изменение файловой системы, включая создание, перезапись, изменение, обнуление, переименование и удаление файлов, создание и удаление каталогов.</li>
+</ul>
+<p>Отдельное право <code>delete</code> не вводить. Удаление является операцией изменения состояния и входит в <code>write</code>.</p>
+<h3 id="33-структура-правил"><a class="anchor" href="#33-структура-правил" aria-label="Section link">#</a>3.3. Структура правил</h3><p>Расширить существующую сущность <code>workspace.Policy</code>.</p>
+<p>Предлагаемая структура:</p>
+<pre><code class="language-json">{
+  &quot;filesystem&quot;: {
+    &quot;read&quot;: [
+      &quot;**&quot;
+    ],
+    &quot;write&quot;: [
+      &quot;src/**&quot;,
+      &quot;tests/**&quot;,
+      &quot;docs/**&quot;
+    ],
+    &quot;deny&quot;: [
+      &quot;secrets/**&quot;,
+      &quot;deploy/production/**&quot;
+    ]
+  }
+}
+</code></pre>
+<p>Семантика:</p>
+<ul>
+<li><code>read</code> — разрешённые области чтения;</li>
+<li><code>write</code> — разрешённые области изменения;</li>
+<li><code>deny</code> — абсолютные запреты на любые операции с указанными областями, включая чтение и запись.</li>
+</ul>
+<p><code>deny</code> имеет приоритет над всеми разрешениями и не может быть отменён дочерней политикой.</p>
+<p>Пустое или неустановленное значение должно сохранять семантику существующей модели политик: отсутствие ограничения не должно случайно интерпретироваться как запрет всего.</p>
+<p>Необходимо явно определить и протестировать семантику <code>nil</code>, пустого списка и wildcard.</p>
+<h3 id="34-наследование-и-объединение"><a class="anchor" href="#34-наследование-и-объединение" aria-label="Section link">#</a>3.4. Наследование и объединение</h3><p>Использовать существующий <code>EffectivePolicy(unitIDs...)</code> и его модель рестриктивного объединения.</p>
+<p>Для файловых правил реализовать семантическое пересечение областей путей.</p>
+<p>Пример:</p>
+<pre><code class="language-text">Global:
+  write: **
+
+Org Unit:
+  write: src/**
+
+Project:
+  write: src/backend/**
+
+Effective:
+  write: src/backend/**
+</code></pre>
+<p>Если на любом уровне присутствует запрет:</p>
+<pre><code class="language-text">Org Unit:
+  deny: src/backend/generated/**
+</code></pre>
+<p>то область остаётся запрещённой независимо от разрешений нижестоящих политик.</p>
+<p>Для файловых масок использовать нормализованные относительные пути с <code>/</code> в качестве разделителя.</p>
+<p>Необходимо учитывать вложенность glob-масок. Простое пересечение строковых значений недостаточно.</p>
+<h3 id="35-значения-по-умолчанию"><a class="anchor" href="#35-значения-по-умолчанию" aria-label="Section link">#</a>3.5. Значения по умолчанию</h3><p>Сохранить совместимость с существующими проектами и политиками.</p>
+<p>Отсутствие файловых правил в ранее созданной политике не должно автоматически лишать пользователя доступа к существующим файлам.</p>
+<p>Глобальная политика установки должна иметь возможность ограничить файловые полномочия для всех пользователей.</p>
+<h2 id="4-единая-файловая-система"><a class="anchor" href="#4-единая-файловая-система" aria-label="Section link">#</a>4. Единая файловая система</h2><h3 id="41-каноническое-пространство"><a class="anchor" href="#41-каноническое-пространство" aria-label="Section link">#</a>4.1. Каноническое пространство</h3><p>Сохранить одну файловую систему проекта:</p>
+<pre><code class="language-text">/workspace/projects/&lt;project-id&gt;/
+    src/
+    tests/
+    docs/
+    deploy/
+    artifacts/
+    ...
+</code></pre>
+<p>Структура проекта определяется самим проектом и его инструментами разработки.</p>
+<p>Не вводить обязательную структуру вида:</p>
+<pre><code class="language-text">/workspace/org/&lt;org-unit&gt;/
+/workspace/teams/&lt;team-id&gt;/
+/workspace/agents/&lt;agent-id&gt;/
+</code></pre>
+<p>Не создавать копии одних и тех же файлов для разных агентов и подразделений.</p>
+<p>Все агенты одного проекта используют единые канонические пути.</p>
+<h3 id="42-стабильность-путей"><a class="anchor" href="#42-стабильность-путей" aria-label="Section link">#</a>4.2. Стабильность путей</h3><p>Путь к файлу должен иметь одинаковое значение для всех участников работы.</p>
+<p>Если агент создал или изменил файл, другой агент должен иметь возможность найти его по тому же пути в пределах своих полномочий.</p>
+<p>Необходимо исключить ситуации, когда:</p>
+<ul>
+<li>агенты создают дублирующие копии одного артефакта;</li>
+<li>разные делегации используют собственные варианты расположения одного результата;</li>
+<li>передача задачи требует пересылки файлов между изолированными каталогами;</li>
+<li>Lead вынужден вручную объяснять, где искать результаты предыдущей работы.</li>
+</ul>
+<h3 id="43-scratch"><a class="anchor" href="#43-scratch" aria-label="Section link">#</a>4.3. Scratch</h3><p>Существующий scratch можно сохранить для временных данных и технических артефактов конкретного запуска.</p>
+<p>Scratch не должен становиться альтернативным постоянным хранилищем проектных файлов.</p>
+<p>Пути и ссылки на scratch-артефакты должны быть доступны участникам соответствующей работы и сохранять однозначность.</p>
+<h2 id="5-enforcement-файловых-полномочий"><a class="anchor" href="#5-enforcement-файловых-полномочий" aria-label="Section link">#</a>5. Enforcement файловых полномочий</h2><h3 id="51-общие-требования"><a class="anchor" href="#51-общие-требования" aria-label="Section link">#</a>5.1. Общие требования</h3><p>Проверка доступа должна выполняться на уровне исполнения операции, а не на уровне текстовых инструкций модели.</p>
+<p>Запрещённая операция должна завершаться отказом независимо от того, каким инструментом агент пытается её выполнить.</p>
+<p>Нельзя ограничиваться проверками встроенных <code>read_file</code> и <code>write_file</code>: агент может использовать <code>run_command</code>, Python, shell, git и другие программы.</p>
+<h3 id="52-kernel-filesystem-gateway"><a class="anchor" href="#52-kernel-filesystem-gateway" aria-label="Section link">#</a>5.2. Kernel filesystem gateway</h3><p>Встроенные файловые инструменты должны проверять эффективную файловую политику до выполнения операции.</p>
+<p>Проверять:</p>
+<ul>
+<li>чтение файлов;</li>
+<li>поиск и перечисление файлов;</li>
+<li>запись и перезапись;</li>
+<li>создание каталогов;</li>
+<li>переименование;</li>
+<li>удаление;</li>
+<li>операции с временными файлами.</li>
+</ul>
+<p>Проверка должна выполняться на нормализованном пути относительно корня проекта.</p>
+<p>Не допускать обхода через:</p>
+<ul>
+<li><code>..</code>;</li>
+<li>абсолютные пути;</li>
+<li>символьные ссылки;</li>
+<li>альтернативные представления путей;</li>
+<li>ссылки за пределы workspace.</li>
+</ul>
+<h3 id="53-docker-sandbox-и-landlock"><a class="anchor" href="#53-docker-sandbox-и-landlock" aria-label="Section link">#</a>5.3. Docker sandbox и Landlock</h3><p>Рассмотреть Landlock как основной механизм ограничения файловых операций внутри Linux sandbox.</p>
+<p>Цель — оставить единое дерево <code>/workspace</code>, но ограничить операции процесса на уровне ОС.</p>
+<p>Требования:</p>
+<ol>
+<li>Landlock должен применяться к процессу sandbox до запуска пользовательской команды.</li>
+<li>Ограничения должны наследоваться дочерними процессами.</li>
+<li>Политика должна разрешать чтение и запись только в соответствующих областях.</li>
+<li>Запрещённые области должны оставаться физически доступными в общем дереве, но недоступными для запрещённых операций.</li>
+<li>Проверить совместимость с используемыми версиями Linux kernel и Docker.</li>
+<li>Если Landlock недоступен или не поддерживает необходимую семантику на целевой платформе, запуск должен завершаться безопасным отказом либо использовать явно определённый альтернативный механизм enforcement. Не допускать незаметного запуска без ограничений.</li>
+</ol>
+<p>Исследовать следующие операции и особенности:</p>
+<ul>
+<li><code>open</code> с различными флагами доступа;</li>
+<li><code>truncate</code>;</li>
+<li><code>rename</code>;</li>
+<li><code>unlink</code>;</li>
+<li>создание и удаление каталогов;</li>
+<li>hard links;</li>
+<li>symlinks;</li>
+<li>временные файлы;</li>
+<li>atomic writes;</li>
+<li>git checkout, merge, rebase и другие операции, меняющие дерево;</li>
+<li>доступ к <code>/tmp</code>, <code>/scratch</code> и другим writable mount points.</li>
+</ul>
+<p>Отдельно определить права на технические каталоги, необходимые для работы sandbox и инструментов. Они не должны становиться способом обхода проектной политики.</p>
+<h3 id="54-общая-политика-для-всех-способов-доступа"><a class="anchor" href="#54-общая-политика-для-всех-способов-доступа" aria-label="Section link">#</a>5.4. Общая политика для всех способов доступа</h3><p>Kernel filesystem gateway и Landlock должны получать одну и ту же эффективную политику.</p>
+<p>Не реализовывать независимые правила для shell и встроенных файловых инструментов.</p>
+<p>Для каждого запуска политика должна быть разрешена один раз и передаваться через неизменяемый security context.</p>
+<h2 id="6-контекст-полномочий-запуска"><a class="anchor" href="#6-контекст-полномочий-запуска" aria-label="Section link">#</a>6. Контекст полномочий запуска</h2><h3 id="61-security-context"><a class="anchor" href="#61-security-context" aria-label="Section link">#</a>6.1. Security context</h3><p>Ввести или расширить структуру контекста запуска, содержащую:</p>
+<pre><code class="language-go">type FilesystemPolicy struct {
+    Read  []string
+    Write []string
+    Deny  []string
+}
+
+type RunSecurityContext struct {
+    ActorID          string
+    ExecutionIdentityID string
+    ProjectID        string
+    Filesystem       FilesystemPolicy
+    PolicyVersion    string
+}
+</code></pre>
+<p>Структура приведена концептуально. Использовать существующие типы и соглашения проекта, избегая дублирования данных.</p>
+<h3 id="62-делегирование"><a class="anchor" href="#62-делегирование" aria-label="Section link">#</a>6.2. Делегирование</h3><p>Дочерние запуски получают security context исходного запуска.</p>
+<p>Все участники дерева делегирования используют одни и те же файловые полномочия инициатора.</p>
+<p>Делегирование не может расширить доступ.</p>
+<h3 id="63-изменение-политик-во-время-выполнения"><a class="anchor" href="#63-изменение-политик-во-время-выполнения" aria-label="Section link">#</a>6.3. Изменение политик во время выполнения</h3><p>Определить предсказуемую семантику изменения политик.</p>
+<p>Предпочтительный вариант:</p>
+<ul>
+<li>эффективная политика фиксируется при старте run;</li>
+<li>изменения политики не повышают полномочия уже запущенного процесса;</li>
+<li>критическое ужесточение политики должно позволять принудительно остановить или пересоздать sandbox;</li>
+<li>новые запуски используют актуальную политику.</li>
+</ul>
+<p>В журнале должна сохраняться версия или идентификатор снимка политики, по которому был авторизован запуск.</p>
+<h2 id="7-изоляция-параллельной-разработки"><a class="anchor" href="#7-изоляция-параллельной-разработки" aria-label="Section link">#</a>7. Изоляция параллельной разработки</h2><h3 id="71-назначение"><a class="anchor" href="#71-назначение" aria-label="Section link">#</a>7.1. Назначение</h3><p>Filesystem Policy не решает конфликты параллельной записи.</p>
+<p>Для независимой разработки нескольких задач использовать Git worktree и механизм task claims.</p>
+<p>При этом worktree — технический механизм изоляции изменений, а не отдельная файловая система для каждой роли или подразделения.</p>
+<h3 id="72-ответственность-lead"><a class="anchor" href="#72-ответственность-lead" aria-label="Section link">#</a>7.2. Ответственность Lead</h3><p>Lead отвечает за декомпозицию работы и определение зависимостей между задачами.</p>
+<p>Когда задачи могут изменять пересекающиеся участки проекта, Lead должен определить границы работы или порядок выполнения.</p>
+<p>Не требуется от Lead:</p>
+<ul>
+<li>создавать произвольные каталоги для каждой делегации;</li>
+<li>придумывать соглашения о расположении файлов;</li>
+<li>вручную копировать результаты между каталогами;</li>
+<li>объяснять каждому агенту альтернативные пути к одним и тем же файлам.</li>
+</ul>
+<p>Требуется от Lead:</p>
+<ul>
+<li>определить ожидаемые области изменений;</li>
+<li>указать зависимости между задачами;</li>
+<li>обозначить задачи, которые могут конфликтовать;</li>
+<li>определить порядок интеграции, если параллельная работа небезопасна.</li>
+</ul>
+<p>Система должна помогать выявлять конфликты и обеспечивать техническую изоляцию.</p>
+<h3 id="73-workspace-claims"><a class="anchor" href="#73-workspace-claims" aria-label="Section link">#</a>7.3. Workspace claims</h3><p>Расширить описание задач планировщика необязательными claims:</p>
+<pre><code class="language-json">{
+  &quot;workspace_claims&quot;: [
+    {
+      &quot;path&quot;: &quot;src/backend/&quot;,
+      &quot;access&quot;: &quot;write&quot;
+    },
+    {
+      &quot;path&quot;: &quot;src/shared/&quot;,
+      &quot;access&quot;: &quot;read&quot;
+    }
+  ]
+}
+</code></pre>
+<p>Claim описывает предполагаемую область работы задачи, а не полномочия пользователя.</p>
+<p>Claims используются для:</p>
+<ul>
+<li>обнаружения пересекающихся областей записи;</li>
+<li>определения возможности параллельного исполнения;</li>
+<li>назначения worktree;</li>
+<li>выявления потенциальных конфликтов;</li>
+<li>сериализации задач, если изоляция невозможна или нежелательна.</li>
+</ul>
+<p>Отсутствие claim не должно давать дополнительных файловых полномочий.</p>
+<h3 id="74-обнаружение-конфликтов"><a class="anchor" href="#74-обнаружение-конфликтов" aria-label="Section link">#</a>7.4. Обнаружение конфликтов</h3><p>При создании плана или запуске параллельной волны сравнивать write claims задач.</p>
+<p>Пример:</p>
+<pre><code class="language-text">Task A:
+  write src/backend/auth/
+
+Task B:
+  write src/backend/payments/
+
+Result:
+  Can execute in parallel
+
+Task C:
+  write src/backend/
+
+Result:
+  Conflicts with A and B
+</code></pre>
+<p>Если области пересекаются:</p>
+<ul>
+<li>система предупреждает Lead;</li>
+<li>предлагает уточнить границы задач или определить зависимости;</li>
+<li>при отсутствии безопасного решения сериализует исполнение.</li>
+</ul>
+<p>Не считать отсутствие совпадения строковых префиксов доказательством отсутствия конфликта. Учитывать glob, вложенные пути и общие файлы.</p>
+<h3 id="75-git-worktree"><a class="anchor" href="#75-git-worktree" aria-label="Section link">#</a>7.5. Git worktree</h3><p>Для параллельных задач, изменяющих общий Git-проект, предусмотреть автоматическое создание отдельных worktree и веток.</p>
+<p>Например:</p>
+<pre><code class="language-text">Canonical project:
+  main
+
+Task A:
+  branch agent/task-a
+  worktree .worktrees/task-a
+
+Task B:
+  branch agent/task-b
+  worktree .worktrees/task-b
+</code></pre>
+<p>Все worktree принадлежат одному Git-репозиторию и используют единые канонические пути внутри соответствующей рабочей копии.</p>
+<p>Важно: worktree не должен рассматриваться как security boundary. Filesystem Policy должна применяться к каждому worktree и не позволять обойти ограничения через доступ к основному checkout или соседним worktree.</p>
+<h3 id="76-интеграция"><a class="anchor" href="#76-интеграция" aria-label="Section link">#</a>7.6. Интеграция</h3><p>Результаты задач интегрируются в общий проект только после проверки.</p>
+<p>Предусмотреть:</p>
+<ul>
+<li>проверку актуальности базового commit;</li>
+<li>проверку пересечения изменённых файлов;</li>
+<li>merge/rebase;</li>
+<li>автоматическое выявление конфликтов;</li>
+<li>запуск тестов;</li>
+<li>review/acceptance gate;</li>
+<li>фиксацию результата интеграции в Journal.</li>
+</ul>
+<p>Если интеграция невозможна, задача возвращается на rework либо передаётся Lead для разрешения конфликта.</p>
+<p>Не выполнять автоматическую перезапись изменений другой задачи.</p>
+<h3 id="77-общие-файлы-и-неизбежные-конфликты"><a class="anchor" href="#77-общие-файлы-и-неизбежные-конфликты" aria-label="Section link">#</a>7.7. Общие файлы и неизбежные конфликты</h3><p>Если несколько задач должны изменить один и тот же файл, система не должна пытаться скрыть этот факт созданием дополнительных каталогов.</p>
+<p>Lead должен определить способ координации:</p>
+<ul>
+<li>одна задача владеет изменением файла, остальные предоставляют требования или патчи;</li>
+<li>задачи выполняются последовательно;</li>
+<li>изменения разрабатываются параллельно в отдельных worktree и интегрируются с обязательным разрешением конфликтов.</li>
+</ul>
+<p>Последний вариант допустим, но не гарантирует бесконфликтную интеграцию.</p>
+<p>Для не-Git проектов предусмотреть отдельный механизм изоляции изменений. Не имитировать Git worktree копированием файлов без контроля конфликтов и происхождения изменений.</p>
+<h2 id="8-журналирование-и-аудит"><a class="anchor" href="#8-журналирование-и-аудит" aria-label="Section link">#</a>8. Журналирование и аудит</h2><p>Фиксировать значимые операции:</p>
+<ul>
+<li>разрешённые изменения файлов;</li>
+<li>отказы по файловой политике;</li>
+<li>инициатора;</li>
+<li>project ID;</li>
+<li>run ID;</li>
+<li>task ID;</li>
+<li>путь;</li>
+<li>операцию;</li>
+<li>применённую версию политики;</li>
+<li>результат операции.</li>
+</ul>
+<p>Для больших файлов и частых операций не записывать содержимое в Journal. Достаточно метаданных, размеров, checksum и ссылки на артефакт, когда это необходимо.</p>
+<p>Отдельно журналировать:</p>
+<ul>
+<li>создание и освобождение workspace claims;</li>
+<li>создание и удаление worktree;</li>
+<li>конфликты claims;</li>
+<li>merge/rebase;</li>
+<li>конфликты интеграции;</li>
+<li>успешное и неуспешное принятие изменений.</li>
+</ul>
+<p>Сохранять причинные связи с событиями соответствующего run/task.</p>
+<h2 id="9-тестирование"><a class="anchor" href="#9-тестирование" aria-label="Section link">#</a>9. Тестирование</h2><h3 id="91-filesystem-policy"><a class="anchor" href="#91-filesystem-policy" aria-label="Section link">#</a>9.1. Filesystem Policy</h3><p>Проверить:</p>
+<ul>
+<li>разрешение чтения;</li>
+<li>запрет чтения;</li>
+<li>разрешение записи;</li>
+<li>запрет записи;</li>
+<li>создание и удаление файлов;</li>
+<li>переименование;</li>
+<li>glob-пересечения;</li>
+<li>наследование Org Policies;</li>
+<li>глобальные запреты;</li>
+<li>пересечение политик нескольких Org Units;</li>
+<li>отсутствие обхода через symlink и <code>..</code>.</li>
+</ul>
+<h3 id="92-идентичность"><a class="anchor" href="#92-идентичность" aria-label="Section link">#</a>9.2. Идентичность</h3><p>Проверить:</p>
+<ul>
+<li>пользовательский run;</li>
+<li>делегированный run;</li>
+<li>несколько уровней делегирования;</li>
+<li>запуск через Execution Identity;</li>
+<li>невозможность расширения полномочий при делегировании;</li>
+<li>невозможность подмены <code>actor_id</code> из пользовательских данных;</li>
+<li>применение актуального снимка политики.</li>
+</ul>
+<h3 id="93-sandbox"><a class="anchor" href="#93-sandbox" aria-label="Section link">#</a>9.3. Sandbox</h3><p>Проверить обходы через:</p>
+<ul>
+<li>shell;</li>
+<li>Python;</li>
+<li><code>sed</code>;</li>
+<li><code>perl</code>;</li>
+<li><code>git</code>;</li>
+<li>произвольные дочерние процессы;</li>
+<li>symlinks;</li>
+<li>hardlinks;</li>
+<li>rename;</li>
+<li>atomic write;</li>
+<li>временные каталоги.</li>
+</ul>
+<p>Обязательно проверить, что запрет, работающий в <code>read_file</code>/<code>write_file</code>, также работает при выполнении эквивалентной операции из <code>run_command</code>.</p>
+<h3 id="94-параллельная-разработка"><a class="anchor" href="#94-параллельная-разработка" aria-label="Section link">#</a>9.4. Параллельная разработка</h3><p>Проверить сценарии:</p>
+<ol>
+<li>Две задачи изменяют независимые каталоги — параллельное выполнение и успешная интеграция.</li>
+<li>Две задачи изменяют один каталог, но разные файлы — параллельное выполнение.</li>
+<li>Две задачи изменяют один файл — обнаружение конфликта и контролируемая интеграция.</li>
+<li>Одна задача изменяет общий файл, другая зависит от результата — корректное выполнение через DAG.</li>
+<li>Одна задача завершилась ошибкой — остальные не теряют свои изменения.</li>
+<li>Lead не указал claims — система не выдаёт неограниченные полномочия и использует безопасную стратегию координации.</li>
+</ol>
+<h2 id="10-этапы-реализации"><a class="anchor" href="#10-этапы-реализации" aria-label="Section link">#</a>10. Этапы реализации</h2><h3 id="p0-модель-полномочий"><a class="anchor" href="#p0-модель-полномочий" aria-label="Section link">#</a>P0. Модель полномочий</h3><ul>
+<li>Расширить <code>workspace.Policy</code>.</li>
+<li>Добавить файловые правила read/write/deny.</li>
+<li>Реализовать семантическое объединение glob-областей.</li>
+<li>Расширить эффективный security context запуска.</li>
+<li>Обеспечить наследование контекста при делегировании.</li>
+<li>Добавить тесты идентичности и наследования.</li>
+</ul>
+<h3 id="p1-enforcement"><a class="anchor" href="#p1-enforcement" aria-label="Section link">#</a>P1. Enforcement</h3><ul>
+<li>Встроить проверку политики в файловые инструменты Kernel.</li>
+<li>Исследовать и реализовать Landlock в Linux sandbox.</li>
+<li>Обеспечить одинаковую семантику для встроенных инструментов и shell.</li>
+<li>Добавить защиту от обхода через ссылки и альтернативные пути.</li>
+<li>Добавить аудит отказов.</li>
+</ul>
+<h3 id="p2-параллельная-разработка"><a class="anchor" href="#p2-параллельная-разработка" aria-label="Section link">#</a>P2. Параллельная разработка</h3><ul>
+<li>Ввести workspace claims.</li>
+<li>Добавить обнаружение пересечений.</li>
+<li>Автоматизировать создание Git worktree и веток.</li>
+<li>Реализовать контролируемую интеграцию.</li>
+<li>Добавить conflict handling и журналирование.</li>
+</ul>
+<h3 id="p3-расширение"><a class="anchor" href="#p3-расширение" aria-label="Section link">#</a>P3. Расширение</h3><ul>
+<li>Поддержать аналогичную модель для не-Git проектов.</li>
+<li>Добавить UI для редактирования файловых правил Org Policies.</li>
+<li>Добавить отображение эффективных файловых полномочий пользователя.</li>
+<li>Добавить диагностику конфликтов параллельных задач.</li>
+</ul>
+<h2 id="11-критерии-приёмки"><a class="anchor" href="#11-критерии-приёмки" aria-label="Section link">#</a>11. Критерии приёмки</h2><ol>
+<li>В проекте существует единая каноническая структура файлов.</li>
+<li>Агенты не создают отдельные постоянные копии файлов из-за различий в их организационной принадлежности или роли.</li>
+<li>Файловые полномочия определяются инициатором и действующими политиками.</li>
+<li>Делегирование не расширяет полномочия исходного пользователя.</li>
+<li>Ограничения невозможно обойти через <code>run_command</code> или альтернативные инструменты.</li>
+<li>Landlock либо эквивалентный механизм обеспечивает enforcement на уровне ОС.</li>
+<li>Отсутствие отдельного права <code>delete</code> не создаёт неоднозначности: удаление относится к <code>write</code>.</li>
+<li>Параллельные задачи могут работать в независимых worktree.</li>
+<li>Пересекающиеся изменения обнаруживаются и не приводят к молчаливой потере данных.</li>
+<li>Интеграция результатов проходит через проверяемый процесс с журналированием.</li>
+<li>Существующие проекты и запуски сохраняют совместимость с прежней моделью доступа.</li>
+</ol>
+<h2 id="12-архитектурное-ограничение"><a class="anchor" href="#12-архитектурное-ограничение" aria-label="Section link">#</a>12. Архитектурное ограничение</h2><p>Не реализовывать:</p>
+<ul>
+<li>отдельные файловые пространства для агентов;</li>
+<li>каталоги, привязанные к Org Units как механизм ограничения доступа;</li>
+<li>индивидуальные ACL по Agent ID;</li>
+<li>файловые полномочия на основании ролей Lead/Coder/Reviewer/QA;</li>
+<li>отдельные копии проектных артефактов для передачи между делегациями;</li>
+<li>enforcement только на уровне system prompt;</li>
+<li>анализ shell-команд как единственный способ контроля файловых операций.</li>
+</ul>
+<p><strong>Итоговая модель:</strong> одна файловая система, один набор канонических путей, полномочия от инициатора через Org Policies, enforcement на уровне Kernel и ОС, отдельная координация параллельных изменений через claims и Git worktree.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="filesystem-policy-implementation.html"><small>← Назад</small><strong>Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</strong></a>
+    <a class="pager-next" href="human-knowledge-explorer-plan.html"><small>Далее →</small><strong>Knowledge Explorer — этап 1: аудит и технический план</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

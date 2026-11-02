@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Priming v2: от каталога знаний к полезным рекомендациям — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/plan-priming-relevance.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row active" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Priming v2: от каталога знаний к полезным рекомендациям</h1>
+
+<h2 id="1-цель-и-ключевой-принцип"><a class="anchor" href="#1-цель-и-ключевой-принцип" aria-label="Section link">#</a>1. Цель и ключевой принцип</h2><p>Подсказки (hints) — это <strong>не каталог знаний, а ограниченный по бюджету набор рекомендаций, предназначенных повлиять на конкретное решение агента в текущей задаче</strong>.</p>
+<p>Из этого принципа следуют требования к системе priming:</p>
+<ul>
+<li>находить и подавать опыт, полезный именно для данной задачи;</li>
+<li>сознательно возвращать <strong>меньше подсказок или ни одной</strong>, если подходящего опыта нет;</li>
+<li>не тратить контекст на повторы, мусорные совпадения и устаревшие правила;</li>
+<li>делать отбор <strong>детерминированным и воспроизводимым</strong>, чтобы две версии алгоритма можно было сравнивать на одних и тех же задачах.</li>
+</ul>
+<p>Документ фиксирует ревизию текущей реализации, целевую модель отбора и план работ P0/P1/P2. Жизненный цикл Hint (proposed → used/ignored → outcome) и разделение Experience/Knowledge/Skill/Hint определены в <code>docs/knowledge-evolution.md</code> и здесь не пересматриваются.</p>
+<p>Связанные документы: <code>knowledge-evolution.md</code> (модель опыта), <code>knowledge-extraction.md</code> (появление Knowledge), <code>knowledge-model.md</code> (сущность Knowledge и связи), <code>living-skills.md</code> §14–16 (связь навыков и знаний), <code>agent-teams.md</code> §9 (программные раны без подсказок).</p>
+<hr>
+<h2 id="2-ревизия-текущей-реализации"><a class="anchor" href="#2-ревизия-текущей-реализации" aria-label="Section link">#</a>2. Ревизия текущей реализации</h2><p>В коде сосуществуют <strong>два механизма</strong> формирования подсказок. Это важно зафиксировать до любых улучшений: часть критики относится к прототипу, часть — к рабочему контуру, а лечить нужно один механизм, а не оба.</p>
+<h3 id="21-рабочий-контур-активации-observationhintsgo"><a class="anchor" href="#21-рабочий-контур-активации-observationhintsgo" aria-label="Section link">#</a>2.1. Рабочий контур активации (observation/hints.go)</h3><p>Путь, который реально исполняется в рантайме:</p>
+<ol>
+<li><code>AgentRun</code> (<code>kernel/agent/workflow.go</code>) перед циклом ходов вызывает activity <code>kernel.knowledge_hints</code> с <code>query = input.Prompt</code>; лимит зашит в activity — <strong>8 подсказок</strong>. Обращение best-effort: при недоступности пишется <code>memory.read.failed</code>, ран продолжается.</li>
+<li>Activity <code>KnowledgeHints</code> (<code>kernel/agent/activities.go</code>) делает POST <code>/v1/observations/hints</code>.</li>
+<li>Observation (<code>observation/httpapi/server.go</code>) пишет событие <code>hint.query</code>, вызывает <code>FindHints</code> (<code>observation/hints.go</code>) и пишет <code>hint.offered</code> на каждую отобранную подсказку (с proposition, state, matched_by).</li>
+<li><code>FindHints</code>:<ul>
+<li>единица отбора — <strong>отдельное Knowledge</strong>, не группа;</li>
+<li>терминальные состояния (<code>invalidated</code> / <code>superseded</code> / <code>corrected</code>) исключены полностью;</li>
+<li>матчинг: пересечение Entities (tier 0) → Topics (tier 1) → фраза (tier 2) → термы, ≥2 совпадений (tier 3);</li>
+<li>одношаговое расширение по Relationships (<code>related:</code>, <code>via:</code>) с tier+1;</li>
+<li>сортировка детерминированная: matchTier → kindTier (claim &lt; observation) → stateTier (confirmed &lt; proposed &lt; challenged) → KnowledgeID как tie-breaker;</li>
+<li>cautions для <code>proposed</code> / <code>challenged</code> / <code>at_risk</code>; evidence ≤8, history ≤5.</li>
+</ul>
+</li>
+<li>Workflow вставляет каждую подсказку <strong>отдельным system-сообщением</strong>: <code>Temporality context (prior knowledge, inspect provenance): {proposition} [{state}] {caution}</code> — без ограничения длины.</li>
+<li>Обратная связь уже существует: extraction вычисляет <code>hint.used</code> / <code>hint.ignored</code> по отражению терминов пропозиции в ответе модели, а также фиксирует <code>hint.outcome</code>.</li>
+</ol>
+<p><strong>Что уже хорошо и сохраняется в v2:</strong> единица отбора — отдельное знание; детерминированная сортировка с tie-breaker; исключение терминальных состояний из выдачи; cautions; события полного цикла offered → used/ignored → outcome.</p>
+<p><strong>Дефекты рабочего контура:</strong></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Дефект</th>
+<th>Следствие</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Р1</td>
+<td>Лимит по количеству (8), <strong>токен-бюджета нет вообще</strong>; каждая пропозиция вставляется целиком без ограничения</td>
+<td>Контекст расходуется непредсказуемо; одна длинная пропозиция может съесть больше места, чем пять полезных коротких</td>
+</tr>
+<tr>
+<td>Р2</td>
+<td>Матчинг бинарный: любые совпавшие Entities дают tier 0 независимо от специфичности; внутри тира нет градации релевантности</td>
+<td>«gateway» и «temporality» весят одинаково; content-based сравнение фактически отсутствует</td>
+</tr>
+<tr>
+<td>Р3</td>
+<td>Лексика: точное совпадение токенов, нет словоформ и нормализации идентификаторов; русские стоп-слова неполные («не», «без» — не в списке)</td>
+<td>Реальные трейсы: <code>matched_by: term:не, term:узел</code> — мусорные совпадения проходят отбор</td>
+</tr>
+<tr>
+<td>Р4</td>
+<td>Отсутствует сигнал полезности: отбор не знает, помогало ли знание раньше (<code>hint.outcome</code> собирается, но в рейтинг не попадает)</td>
+<td>Ранжирование по формальным признакам, а не по пользе</td>
+</tr>
+<tr>
+<td>Р5</td>
+<td>Инвалидированное исключено молча: нет ни отрицательного опыта, ни подсказки о замене</td>
+<td>Агент повторяет уже опровергнутые подходы</td>
+</tr>
+<tr>
+<td>Р6</td>
+<td>Нет дедупликации: 8 почти одинаковых observation занимают весь лимит</td>
+<td>Бюджент набора тратится на повторы</td>
+</tr>
+<tr>
+<td>Р7</td>
+<td>Контекст агента не учитывается: query = сырой промпт; активные Skills, системный промпт, ранее выданные подсказки не влияют</td>
+<td>Temporality конкурирует с собственным контекстом агента</td>
+</tr>
+<tr>
+<td>Р8</td>
+<td>Каждая подсказка — отдельное system-сообщение с полной пропозицией</td>
+<td>Нет формата cue «правило + условие + основание»; проверяемого контракта <code>knowledge_id</code> нет</td>
+</tr>
+</tbody></table>
+<h3 id="22-параллельный-прототип-kernelprimingpriminggo"><a class="anchor" href="#22-параллельный-прототип-kernelprimingpriminggo" aria-label="Section link">#</a>2.2. Параллельный прототип (kernel/priming/priming.go)</h3><p>Пакет <code>kernel/priming</code> выставлен как <code>GET /v1/agent/priming</code>, но рабочим контуром <code>AgentRun</code> <strong>не используется</strong>. Все дефекты, из-за которых он возник, подтверждены кодом:</p>
+<ul>
+<li>группировка Knowledge по одному <code>primaryScope</code> (topics[0] → entities[0] → первые два слова → «misc»), заголовок группы — <code>scope (N items)</code>; отдельные пропозиции в сравнении с задачей не участвуют;</li>
+<li><code>scorePattern</code> складывает объём и качество в одну сумму: <code>activeRatio*2 + min(N,10)*0.3 + Σ signalWeights*0.1 + overlap*3</code> — группа из 20 элементов получает высокий балл без единого совпадения с задачей, а <code>MinScore = 0.1</code> не фильтрует нерелевантное (базовый балл 2–6);</li>
+<li><code>tokenize</code> отбрасывает токены короче 4 символов (теряет <code>go</code>, <code>r</code>, <code>ui</code>, <code>jwt</code>, <code>v2</code>, <code>api</code>) и знает только английские стоп-слова;</li>
+<li><code>ReuseCount</code> напрямую увеличивает вес сигнала (<code>1.0 + reuse*0.1</code>) — повторное использование принимается за доказательство полезности;</li>
+<li>инвалидированные записи участвуют как сигналы (вес 0.5) и увеличивают размер группы;</li>
+<li>обход map без гарантии порядка + <code>sort.Slice</code> по одному Score без tie-breaker — недетерминизм на равных оценках;</li>
+<li>ограничение только по числу паттернов (<code>MaxPatterns = 7</code>); токен-бюджета нет;</li>
+<li><code>priming_test.go</code> покрывает группировку, относительный рейтинг простого случая, токенизацию и конфиг — но не доказывает, что подсказки помогают решать задачи.</li>
+</ul>
+<h3 id="23-первый-долг-консолидация"><a class="anchor" href="#23-первый-долг-консолидация" aria-label="Section link">#</a>2.3. Первый долг — консолидация</h3><p>Два механизма с разной семантикой — это риск расхождения поведения и удвоение стоимости правок. Решение:</p>
+<ul>
+<li><strong>единый движок отбора</strong> — <code>FindHints</code> v2 в observation (туда сходятся и рантайм-запросы, и любые отладочные эндпоинты);</li>
+<li><code>kernel/priming</code> — исключить из рантайма: эндпоинт <code>/v1/agent/priming</code> либо удалить, либо превратить в тонкий прокси к единому движку (решается в P0);</li>
+<li>группировка (Experience Pattern) сохраняется <strong>только как слой подачи</strong> (см. §3.1), но не как единица релевантности.</li>
+</ul>
+<hr>
+<h2 id="3-целевая-модель-отбора"><a class="anchor" href="#3-целевая-модель-отбора" aria-label="Section link">#</a>3. Целевая модель отбора</h2><h3 id="31-три-уровня-knowledge-experience-pattern-cue"><a class="anchor" href="#31-три-уровня-knowledge-experience-pattern-cue" aria-label="Section link">#</a>3.1. Три уровня: Knowledge / Experience Pattern / Cue</h3><ul>
+<li><strong>Knowledge</strong> — основная единица оценки релевантности. Сравнивается с задачей всегда отдельная пропозиция, а не «тема» или «scope».</li>
+<li><strong>Experience Pattern</strong> — <em>необязательная</em> группировка связанных знаний для компактной подачи: несколько подтверждённых правил одной области могут быть объединены в один cue. Паттерн — результат отбора, а не его вход. Нельзя заранее считать, что тема целиком достойна контекста: в группе «API» могут лежать правило про перегенерацию клиента, правило про Docker для интеграционных тестов и правило про миграции БД — задача «исправить API-клиент» не должна получать все три.</li>
+<li><strong>Cue (подсказка)</strong> — итоговый артефакт: отобранное знание (или компактная группа), уложенное в формат §5.3 и в бюджет.</li>
+</ul>
+<p>Обратная крайность тоже запрещена: семь независимых подсказок об одном и том же случае — это провал бюджета. Нужны индивидуальный рейтинг (§3.3) плюс дедупликация (§9).</p>
+<h3 id="32-этап-a-допуск-gating"><a class="anchor" href="#32-этап-a-допуск-gating" aria-label="Section link">#</a>3.2. Этап A — допуск (gating)</h3><p>Допуск отвечает на вопрос «можно ли показывать это знание в данном контексте вообще». Это <strong>ограничители-инварианты, а не слагаемые рейтинга</strong>: критический недостаток не должен компенсироваться массой положительных факторов.</p>
+<ul>
+<li><strong>A1. Область применимости.</strong> Scope знания (проект / org-unit / агент) должен покрывать контекст запуска. Проверка видимости — через существующую модель доступа, без изобретения новой.</li>
+<li><strong>A2. Жизненный цикл.</strong> Политика состояний — §6: терминальные состояния не выдаются как действующие правила; <code>proposed</code> допускается условно; <code>challenged</code>/<code>at_risk</code> допускаются только как сигналы риска.</li>
+<li><strong>A3. Основания.</strong> Знание без единого подтверждения не попадает в выдачу при среднем матче; допуск <code>proposed</code> требует высокой релевантности (§6).</li>
+<li><strong>A4. Права.</strong> Дозагрузка и выдача проходят те же проверки доступа, что и чтение Knowledge.</li>
+</ul>
+<h3 id="33-этап-b-ранжирование-полезности"><a class="anchor" href="#33-этап-b-ранжирование-полезности" aria-label="Section link">#</a>3.3. Этап B — ранжирование полезности</h3><p>Ранжирование отвечает на вопрос «что полезнее именно сейчас». Ранжируются <strong>четыре независимых свойства</strong>, которые сегодня смешаны в одну сумму:</p>
+<table>
+<thead>
+<tr>
+<th>Свойство</th>
+<th>Вопрос</th>
+<th>Источник сигнала</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Релевантность текущей задаче</td>
+<td>похоже ли содержание на то, что решается</td>
+<td>лексический матч по признакам §4</td>
+</tr>
+<tr>
+<td>Достоверность</td>
+<td>можно ли на это опираться</td>
+<td>состояние + cautions (вход допуска и подачи, <strong>не</strong> слагаемое)</td>
+</tr>
+<tr>
+<td>Полезность в прошлом</td>
+<td>помогало ли это раньше</td>
+<td>агрегированный <code>hint.outcome</code> (§11), а не <code>ReuseCount</code></td>
+</tr>
+<tr>
+<td>Объём свидетельств</td>
+<td>насколько это проверено</td>
+<td>количество/свежесть evidence — влияет на формулировку основания, не на рейтинг</td>
+</tr>
+</tbody></table>
+<p>Факторы ранжирования:</p>
+<ul>
+<li><strong>B1. Соответствие содержанию</strong> — взвешенный матч признаков (§4), где вес терма зависит от его информативности (редкий в корпусе термин весит больше частотного).</li>
+<li><strong>B2. Совпадение технических сущностей и операций</strong> — Entities, идентификаторы, класс операции (миграция / рефакторинг / отладка / тестирование / настройка).</li>
+<li><strong>B3. Применимость к этапу работы</strong> — разведка / реализация / проверка (опционально, включается по мере появления метаданных этапа).</li>
+<li><strong>B4. Подтверждённая практическая полезность</strong> — производная от <code>hint.outcome=helpful</code>, а не факт автоматической выдачи.</li>
+<li><strong>B5. Новизна</strong> относительно уже подключённого контекста (Skills, системный промпт, ранее выданные cue) — штраф за дублирование, а не исключение (§7).</li>
+</ul>
+<p>Веса факторов конфигурируются, детерминированы и версионируются вместе с алгоритмом (§8).</p>
+<hr>
+<h2 id="4-содержательная-релевантность"><a class="anchor" href="#4-содержательная-релевантность" aria-label="Section link">#</a>4. Содержательная релевантность</h2><p>Пересечение токенов — необходимый, но не достаточный механизм. Сравнивать нужно не заголовок группы со задачей, а <strong>признаки знания с признаками задачи</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Признак</th>
+<th>Что искать</th>
+<th>Где взять</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Содержание</td>
+<td>смысл пропозиции</td>
+<td><code>Proposition</code></td>
+</tr>
+<tr>
+<td>Технические сущности</td>
+<td>библиотеки, API, классы, сервисы, файлы, CLI-флаги</td>
+<td><code>Entities</code>, идентификаторы в пропозиции</td>
+</tr>
+<tr>
+<td>Операция</td>
+<td>миграция, рефакторинг, отладка, тестирование, настройка</td>
+<td>глагольные формы, словарь классов операций</td>
+</tr>
+<tr>
+<td>Условия применимости</td>
+<td>версия, окружение, ограничения, предпосылки</td>
+<td>пропозиция + evidence</td>
+</tr>
+<tr>
+<td>Результат</td>
+<td>какой эффект подтверждён</td>
+<td>формулировка + состояние</td>
+</tr>
+<tr>
+<td>Контекст</td>
+<td>org, проект, агент, Skill</td>
+<td>метаданные знания</td>
+</tr>
+</tbody></table>
+<h3 id="41-нормализация-для-русского-и-английского"><a class="anchor" href="#41-нормализация-для-русского-и-английского" aria-label="Section link">#</a>4.1. Нормализация для русского и английского</h3><p>Текущий <code>contentTokens</code> (lowercase, буквы/цифры/<code>_</code>/<code>-</code>, токены длиннее 1 руны, короткий список стоп-слов) недостаточен: <code>term:не</code> в реальных трейсах — прямое следствие.</p>
+<p>Требования к нормализации:</p>
+<ul>
+<li><strong>регистр и пунктуация</strong> — уже есть, сохранить;</li>
+<li><strong>сегментация идентификаторов</strong>: <code>camelCase</code>, <code>snake_case</code>, <code>kebab-case</code> разбиваются на составные токены (<code>AUTH_TOKEN</code> → <code>auth</code>, <code>token</code>);</li>
+<li><strong>словоформы</strong>: «миграция», «миграции», «миграцию» не должны терять связь — минимальный русский стемминг (усечение типовых окончаний) или словарь форм; английский — плюрализм;</li>
+<li><strong>стоп-слова ru/en</strong> — расширить (добавить как минимум «не», «без», «над», «под», «также», «его»…), список — в конфиг с версией;</li>
+<li><strong>короткие токены не выбрасывать бездумно</strong>: <code>go</code>, <code>r</code>, <code>ui</code>, <code>jwt</code>, <code>v2</code>, <code>c#</code> значимы — минимум длины 2 руны (как сейчас) плюс белый список технических терминов; изъятие только через стоп-слова.</li>
+</ul>
+<h3 id="42-порядок-внедрения"><a class="anchor" href="#42-порядок-внедрения" aria-label="Section link">#</a>4.2. Порядок внедрения</h3><ol>
+<li>Детерминированный лексический матч по признакам с IDF-подобным взвешиванием (P0).</li>
+<li>Если бенчмарк (§12) покажет недостаточность — семантическая оценка <strong>кандидатов после лексического префильтра</strong> (embeddings или LLM), но не векторный retrieval по всей базе сразу (P2).</li>
+</ol>
+<hr>
+<h2 id="5-бюджеты-и-формат-cue"><a class="anchor" href="#5-бюджеты-и-формат-cue" aria-label="Section link">#</a>5. Бюджеты и формат cue</h2><h3 id="51-три-отдельных-ограничения"><a class="anchor" href="#51-три-отдельных-ограничения" aria-label="Section link">#</a>5.1. Три отдельных ограничения</h3><table>
+<thead>
+<tr>
+<th>Ограничение</th>
+<th>Назначение</th>
+<th>Стартовое значение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Общий бюджет подсказок</td>
+<td>верхняя граница затрат контекста на priming</td>
+<td>~600 токенов на запуск</td>
+</tr>
+<tr>
+<td>Бюджет одного cue</td>
+<td>один cue не съедает весь набор</td>
+<td>~120 токенов</td>
+</tr>
+<tr>
+<td>Лимит элементов в cue</td>
+<td>группа не превращается в простыню</td>
+<td>≤3–5 знаний</td>
+</tr>
+</tbody></table>
+<p>Токен-бюджет обязателен: сегодня лимит «8 подсказок» при неограниченной длине пропозиций бюджетом не является.</p>
+<h3 id="52-отбор-максимизация-пользы-набора"><a class="anchor" href="#52-отбор-максимизация-пользы-набора" aria-label="Section link">#</a>5.2. Отбор: максимизация пользы набора</h3><p>Цель — максимизировать ожидаемую пользу <strong>всего набора</strong>, а не сумму индивидуальных рейтингов:</p>
+<pre><code>max_{S}  Σ_{i∈S} U_i        при ограничениях: Σ tokens(S) ≤ Budget,
+                             redundancy(S) ≤ R, |S| ≤ MaxCues
+</code></pre>
+<p>где <code>U_i</code> — оценка полезности cue (§3.3), а не популярности или достоверности.</p>
+<p>На первом этапе достаточно <strong>жадного отбора</strong>: взять лучший cue, пересчитать новизну остальных с учётом уже выбранного (повторы штрафуются), взять следующий, пока бюджет не исчерпан или полезность не упала ниже порога. Сложный оптимизатор не нужен. Если первый cue сообщает важное правило, а следующие пять повторяют его другими словами — они не проходят.</p>
+<h3 id="53-формат-cue"><a class="anchor" href="#53-формат-cue" aria-label="Section link">#</a>5.3. Формат cue</h3><p>Подсказка содержит три вещи:</p>
+<ol>
+<li><strong>Правило/вывод</strong> — что нужно знать.</li>
+<li><strong>Условие применимости</strong> — когда это имеет значение.</li>
+<li><strong>Основание/статус</strong> — насколько проверено и куда обратиться за подробностями (<code>knowledge_id</code>).</li>
+</ol>
+<p>Пример:</p>
+<pre><code>При изменении API-контракта в этом проекте проверь generated client и
+integration tests. Правило подтверждено предыдущими запусками.
+knowledge_id=K123
+</code></pre>
+<p>Это полезнее перечисления фактов из одной темы. В P0 cue рендерится <strong>шаблонно и детерминированно</strong> (пропозиция + условия + маркер состояния + id); LLM-компакция — опциональный P2, допускается только если обгоняет шаблон на бенчмарке.</p>
+<p>Инъекция в промпт — одним структурированным блоком с соблюдением бюджета, а не N отдельными system-сообщениями неограниченной длины.</p>
+<hr>
+<h2 id="6-политика-состояний-и-отрицательный-опыт"><a class="anchor" href="#6-политика-состояний-и-отрицательный-опыт" aria-label="Section link">#</a>6. Политика состояний и отрицательный опыт</h2><p>Инвалидированное знание нельзя выдавать как действующее правило. Но именно оно часто содержит самый ценный опыт: какой подход уже пробовали и почему он оказался ошибочным.</p>
+<table>
+<thead>
+<tr>
+<th>Состояние</th>
+<th>Режим выдачи</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>confirmed</code></td>
+<td>действующее правило при подходящем контексте</td>
+</tr>
+<tr>
+<td><code>proposed</code></td>
+<td>только при высокой релевантности, с явной маркировкой неопределённости («гипотеза, не подтверждена»)</td>
+</tr>
+<tr>
+<td><code>challenged</code> / <code>at_risk</code></td>
+<td>не как истина; учитывать при оценке риска, с caution</td>
+</tr>
+<tr>
+<td><code>invalidated</code> / <code>superseded</code> / <code>corrected</code></td>
+<td>не как активная инструкция; допускается короткое предупреждение о прежнем способе или ссылка на заменившее знание</td>
+</tr>
+</tbody></table>
+<p>Требования:</p>
+<ul>
+<li><strong>Связи замены.</strong> Если система знает, что K123 заменено на K456, надо сразу предлагать K456, а не просто исключать K123. Нужна типизированная связь <code>replaces</code>/<code>superseded_by</code> в Relationships (модель Knowledge уже имеет Relationships — требуется закрепить тип и заполнять при инвалидации; сегодня замена упоминается только в свободном тексте <code>reason</code>).</li>
+<li><strong>Отрицательный опыт дозированно.</strong> Не показывать каждый провал; показывать предупреждение, только если прежний подход правдоподобен для текущей задачи (высокий матч) и заменяющее знание найдено.</li>
+<li><strong><code>ReuseCount</code> ≠ доказательство полезности.</strong> Знание могло многократно выдаваться автоматически, не помогая. Повторное использование отличать от подтверждённого положительного результата: полезность — только из <code>hint.outcome</code> (§11).</li>
+</ul>
+<hr>
+<h2 id="7-учёт-существующего-контекста-агента"><a class="anchor" href="#7-учёт-существующего-контекста-агента" aria-label="Section link">#</a>7. Учёт существующего контекста агента</h2><p>Если агенту подключён Skill, подробно описывающий процедуру миграции, не нужно выдавать ту же процедуру как подсказку при каждом запуске. Вход отбора расширяется:</p>
+<ul>
+<li>активные Skills (id + summary);</li>
+<li>системный промпт (сводка/хэш);</li>
+<li>история текущего диалога и подсказки, уже выданные в этом запуске;</li>
+<li>знания, уже дозагруженные агентом по <code>knowledge_id</code>.</li>
+</ul>
+<p>Правила:</p>
+<ul>
+<li>Knowledge, связанное с активным Skill, <strong>не исключается автоматически</strong> — оно может быть важным уточнением, частным случаем или предупреждением, отсутствующим в Skill; оно получает штраф новизны (B5) за пересечение содержания.</li>
+<li>Цель — <strong>максимум новой полезной информации при минимальном дополнительном контексте</strong>, а не минимальное число подсказок само по себе.</li>
+</ul>
+<p>Технически: HintRequest пополняется полем контекста (список skill-ids, digest уже выданного); ядро передаёт его при запросе <code>/v1/observations/hints</code>.</p>
+<hr>
+<h2 id="8-детерминизм"><a class="anchor" href="#8-детерминизм" aria-label="Section link">#</a>8. Детерминизм</h2><p>Детерминизм — необходимое условие отладки и A/B-сравнения версий алгоритма.</p>
+<p>Единый порядок отбора:</p>
+<ol>
+<li>Допуск по scope и lifecycle (§3.2) — стабильный набор кандидатов.</li>
+<li>Рейтинг по содержательной релевантности и полезности (§3.3).</li>
+<li>Устойчивый tie-breaker: score по убыванию, затем <code>KnowledgeID</code> по возрастанию.</li>
+<li>Детерминированный жадный отбор в бюджете (§5.2).</li>
+</ol>
+<p>Дополнительно фиксируются: порядок сигналов/элементов внутри cue (например, по времени evidence), правила дедупликации, алгоритм усечения.</p>
+<p>Контракт: <strong>одинаковый вход и конфигурация → одинаковое множество и порядок cue</strong> (отличаться могут только <code>GeneratedAt</code> и идентификаторы). Каждый результат несёт <code>algorithm_version</code>, по которому воспроизводится конфигурация весов и порогов. Текущий <code>FindHints</code> уже детерминирован — это свойство сохраняется и защищается тестом на N прогонов.</p>
+<hr>
+<h2 id="9-дедупликация-и-разнообразие"><a class="anchor" href="#9-дедупликация-и-разнообразие" aria-label="Section link">#</a>9. Дедупликация и разнообразие</h2><p>Даже идеальный скоринг выдаст почти-дубликаты: задача про OAuth может получить три формулировки одного правила аутентификации — все релевантны, но вторая и третья почти ничего не добавляют.</p>
+<p>Этап diversification после ранжирования:</p>
+<ul>
+<li>удалять точные дубликаты (нормализованная пропозиция);</li>
+<li>удалять почти-дубликаты (Jaccard по множеству признаков выше порога);</li>
+<li>снижать приоритет уже представленных фактов (реализуется через пересчёт новизны в жадном отборе);</li>
+<li>ограничивать число cue из одной тематической группы (один primaryScope/топик) — например, не более двух;</li>
+<li>не позволять одной группе вытеснить всё остальное.</li>
+</ul>
+<p>Разнообразие <strong>не самоцель</strong>: если задача требует пяти разных правил одной темы, их нельзя разбавлять нерелевантными. Смысловая дедупликация моделью — P2, если детерминированных методов не хватит (по бенчмарку).</p>
+<hr>
+<h2 id="10-дозагрузка-по-knowledgeid"><a class="anchor" href="#10-дозагрузка-по-knowledgeid" aria-label="Section link">#</a>10. Дозагрузка по knowledge_id</h2><p>Компактная подсказка — точка входа в подробное знание, а не его урезанная копия.</p>
+<ol>
+<li>Priming возвращает короткий cue с <code>knowledge_id</code>.</li>
+<li>Агент оценивает, достаточно ли этого для решения.</li>
+<li>Если нужны обоснование или детали — запрашивает полное Knowledge по ID через инструмент <strong><code>knowledge_lookup</code></strong> (новый агентский инструмент; activity <code>kernel.knowledge_lookup</code> уже существует как внутренняя — её нужно вынести в доступный агенту инструмент с тем же контрактом).</li>
+<li>Полное Knowledge содержит proposition, evidence, состояние, scope и связи (включая замены).</li>
+<li>Дозагрузка проходит те же проверки авторизации и доступа к проекту, что и обычное чтение Knowledge.</li>
+</ol>
+<p>Правила:</p>
+<ul>
+<li><strong>не заставлять</strong> агента дозагружать каждое знание — это уничтожит выигрыш от компактности;</li>
+<li><code>knowledge_id</code> — рабочий контракт между priming и агентом, а не просто поле ответа: он обязан присутствовать в каждом cue и разрешаться инструментом.</li>
+</ul>
+<p>Сегодня дозагрузку подменяет доставка evidence (≤8) и history (≤5) внутри структуры Hint, но в промпт они не попадают, а инструмента у агента нет — контракт разорван.</p>
+<hr>
+<h2 id="11-замкнутый-цикл-полезности"><a class="anchor" href="#11-замкнутый-цикл-полезности" aria-label="Section link">#</a>11. Замкнутый цикл полезности</h2><p>Инфраструктура обратной связи уже есть и является преимуществом Temporality:</p>
+<ul>
+<li><code>hint.offered</code> / <code>hint.used</code> / <code>hint.ignored</code> — отражение терминов пропозиции в ответе модели (kernel/agent/knowledgeextract.go);</li>
+<li><code>hint.outcome</code> — итоговая оценка, помогла ли подсказка.</li>
+</ul>
+<p>Что добавить:</p>
+<ul>
+<li>агрегированная полезность знания (доля <code>helpful</code> среди выдач с исходом) становится фактором ранжирования B4;</li>
+<li>авторство сигнала различается: <code>used</code> (модель воспользовалась) ≠ <code>helpful</code> (задача решена лучше) — в рейтинг идёт только второе;</li>
+<li>статистика применения (<code>applied_count</code>, <code>helpful_count</code>, <code>last_helpful_at</code>) хранится рядом со знанием и видна в UI наблюдаемости;</li>
+<li>цикл замыкает адаптацию: P2 допускает подстройку весов факторов по исходам, но не самообучение на каждом ране.</li>
+</ul>
+<hr>
+<h2 id="12-benchmark-качества"><a class="anchor" href="#12-benchmark-качества" aria-label="Section link">#</a>12. Benchmark качества</h2><p>Главная недостающая вещь: никакие существующие тесты (<code>priming_test.go</code>, <code>server_test.go</code>) не доказывают, что подсказки <strong>помогают решать задачи</strong>.</p>
+<h3 id="121-корпус"><a class="anchor" href="#121-корпус" aria-label="Section link">#</a>12.1. Корпус</h3><p>Постоянный набор из <strong>30–50 реальных задач</strong> из запусков Temporality (затравка — сценарии gatekeeper/nightlybox из фикстур experiment4–6). Для каждой задачи фиксируется:</p>
+<ul>
+<li>описание задачи;</li>
+<li>доступные на тот момент Knowledge со состояниями и связями;</li>
+<li>разметка: какие знания реально полезны, какие нерелевантны, какие устарели;</li>
+<li>эталонный набор ожидаемых подсказок;</li>
+<li>бюджет контекста.</li>
+</ul>
+<p>Формат — JSON-фикстуры в репозитории; прогон — командой/тестом в CI.</p>
+<h3 id="122-метрики"><a class="anchor" href="#122-метрики" aria-label="Section link">#</a>12.2. Метрики</h3><table>
+<thead>
+<tr>
+<th>Метрика</th>
+<th>Что измеряет</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Precision@K / Precision@Budget</td>
+<td>доля выбранных подсказок, действительно относящихся к задаче</td>
+</tr>
+<tr>
+<td>Recall@Budget</td>
+<td>сколько из известных полезных подсказок передано в пределах бюджета</td>
+</tr>
+<tr>
+<td>Redundancy ratio</td>
+<td>доля бюджета, потраченная на повторяющуюся информацию</td>
+</tr>
+<tr>
+<td>Stale / invalidated leakage</td>
+<td>как часто устаревшее знание попадает в контекст как действующая инструкция</td>
+</tr>
+<tr>
+<td>Token efficiency</td>
+<td>полезных подсказок на единицу токен-бюджета</td>
+</tr>
+<tr>
+<td>Behavioral impact</td>
+<td>изменилось ли поведение и результат агента благодаря подсказкам</td>
+</tr>
+</tbody></table>
+<p>Behavioral impact — важнейшая и самая сложная метрика: одинаковые задачи с priming и без, одна модель и инструменты, несколько повторов для стохастики. Качество подсказки ≠ улучшение результата: высокая точность retrieval не доказывает, что агент воспользовался подсказкой.</p>
+<h3 id="123-правило-сравнения"><a class="anchor" href="#123-правило-сравнения" aria-label="Section link">#</a>12.3. Правило сравнения</h3><p>Каждое изменение алгоритма (веса, нормализация, пороги) прогоняется на корпусе; отчёт сравнивает версии по всем метрикам. Без улучшения на корпусе изменение не принимается.</p>
+<hr>
+<h2 id="13-наблюдаемость"><a class="anchor" href="#13-наблюдаемость" aria-label="Section link">#</a>13. Наблюдаемость</h2><ul>
+<li>Событие <code>hint.offered</code> дополняется: <code>algorithm_version</code>, <code>score</code>, <code>budget_tokens</code>, <code>tokens</code>, <code>reason</code> (краткое why: какие признаки сматчились, что решающим стало).</li>
+<li>В UI трейса подсказка показывается человеком-понятным предложением (уже делается) + причина отбора; для отсеянных кандидатов — режим отладки «почему не выдано» (P1).</li>
+<li>Статистика §11 (applied/helpful) видна в панели Knowledge.</li>
+</ul>
+<hr>
+<h2 id="14-план-работ"><a class="anchor" href="#14-план-работ" aria-label="Section link">#</a>14. План работ</h2><h3 id="статус-реализации-2026-10-10"><a class="anchor" href="#статус-реализации-2026-10-10" aria-label="Section link">#</a>Статус реализации (2026-10-10)</h3><blockquote>
+<p>Происхождение реализации: P0 доставлена в main веткой <code>feat/priming-relevance-budget</code> (merge <code>b061771</code>); P1 — последующими коммитами <code>46bcbfc</code> (diversification), <code>56baebb</code> (replacement), <code>c268a9e</code> (usefulness loop + benchmark corpus).</p>
+</blockquote>
+<p>Сделано в рамках P0:</p>
+<ul>
+<li>п.1 консолидация — ✅ <code>kernel/priming</code> и эндпоинты <code>/v1/agent/priming*</code> удалены; единственный движок — <code>observation.FindHints</code>;</li>
+<li>п.2, п.3 — ✅ жили и закреплены тестами в живом движке (гейтинг invalidated/superseded/corrected, индивидуальный рейтинг, honest zero);</li>
+<li>п.4 — ✅ детерминизм + <code>observation.HintsAlgorithmVersion</code> в событиях <code>hint.query</code>/<code>hint.offered</code> и ответе;</li>
+<li>п.5, п.6 — ✅ <code>observation.RenderHintBlock</code>: один блок, бюджеты 600/120/8, cue-контракт <code>правило [статус] (почему сматчилось) knowledge_id</code>; инъекция одним system-сообщением в <code>AgentRun</code>;</li>
+<li>п.10 (P1) — ✅ тул <code>knowledge_lookup</code> (авто-апрув, project-scoped) замыкает контракт <code>knowledge_id</code>;</li>
+<li>п.7 — ✅ retired-знание с матчем и непустой заменой предлагает замену как кандидата (<code>matched_by=replaces:&lt;oldID&gt;</code>); manual-invalidate принимает <code>replacement_id</code> (эмит <code>knowledge.superseded</code>), цепочка lifecycle и trajectory несут ссылку;</li>
+<li>п.8 (P1) — ✅ diversification в <code>FindHints</code> после ранжирования: точные дубли (нормализованная пропозиция), почти-дубли (Jaccard ≥ 0.8 по content-токенам), кап 2 cue на первичный топик; порядок входа не влияет на результат (тест).</li>
+</ul>
+<p>Сделано в рамках P1 (завершено, <code>HintsAlgorithmVersion</code> → <code>lexical-entity-topic.v3</code>):</p>
+<ul>
+<li>п.9 — ✅ контекст агента (§7): <code>HintQuery.ActiveSkills</code> + <code>IssuedKnowledgeIDs</code>; ядро передаёт дайджесты активных навыков (<code>HintRequest.Skills</code> → <code>active_skills</code> в <code>/v1/observations/hints</code>), движок понижает (не исключает) кандидатов, чьё содержание покрыто навыком на 2/3+ токенов (containment ≥ 0.75); уже выданное в ранее знание подавляется;</li>
+<li>п.12 — ✅ замыкание полезности (§11): extractor (уже существующим вызовом модели, <code>ExtractorVersion</code> → <code>knowledge-extractor.v3</code>) оценивает <code>hint_outcomes</code> для реально предложенных подсказок — helpful/harmful, «нет явного эффекта» не эмитится; workflow пишет <code>hint.outcome</code> (<code>matcher=extraction-judgment.v1</code>), проекция агрегирует <code>helpful/harmful_outcomes</code>; фактор B4 в ранжировании — 2/3-большинство при ≥3 исходах (целочисленно, симметрично), статистика видна в панели Observability; used ≠ helpful сохранён: механическое отражение терминов остаётся <code>hint.used</code>;</li>
+<li>п.11 — ✅ benchmark-корпус (§12): 34 кейса в <code>observation/testdata/priming/*.json</code> (затравка — сценарии gatekeeper/nightlybox + дедупликация, lifecycle, контекст навыков, бюджеты, ru/en); ранер <code>TestPrimingBenchmarkCorpusQuality</code> в CI: жёсткие инварианты (stale leakage = 0, детерминизм, бюджет блока, порядок) + метрики с полами (captured: precision@k = 1.000, recall@budget = 0.992, redundancy = 0.000, эффективность 18.7 полезных cue / 1000 токенов; полы 0.90 / 0.85 / 0.05 / 5.0). Behavioral impact — осознанно вне CI (требует модельных прогонов), остаётся ручным пилотом;</li>
+<li>п.13 — осознанно дескоупнуто: Experience Pattern как слой подачи (объединение отобранных знаний в один cue) не подтверждён потребностью — компактный cue-контракт уже держит бюджет, а группировка до отбора была исходным дефектом (§3.1); вернуть при появлении свидетельств от бенчмарка.</li>
+</ul>
+<p>Попутно исправлено: <code>RenderHintBlock</code> не учитывал руны-разделители <code>\n</code> при склейке блока — блок мог превысить бюджет на ~1 токен; теперь каждая строка несёт свой сепаратор (ceil субаддитивен, инвариант доказуем), <code>RenderResult.KeptIDs</code> открывает попозиционный учёт.</p>
+<p>Не сделано: P2 целиком (семантика/LLM-оценка/адаптация весов — только если бенчмарк покажет потолок текущего движка).</p>
+<h3 id="p0-базовая-семантика-консолидация-и-контракт"><a class="anchor" href="#p0-базовая-семантика-консолидация-и-контракт" aria-label="Section link">#</a>P0 — базовая семантика (консолидация и контракт)</h3><ol>
+<li><strong>Консолидация</strong>: единственный движок отбора — <code>FindHints</code> v2 в observation; <code>kernel/priming</code> выводится из рантайма (эндпоинт — удалить или проксировать).</li>
+<li><strong>Разделить допуск и рейтинг</strong>: gating-инварианты (§3.2) отдельно от ранжирования (§3.3); исключить выдачу инвалидированного как действующего правила.</li>
+<li><strong>Ранжировать отдельные Knowledge по содержанию</strong>: признаки §4, нормализация ru/en (§4.1), IDF-взвешивание, расширение стоп-слов, сегментация идентификаторов.</li>
+<li><strong>Детерминированная сортировка</strong> с tie-breaker + <code>algorithm_version</code> в результате (тест на воспроизводимость).</li>
+<li><strong>Бюджеты</strong>: общий (~600 токенов), на cue (~120), лимит элементов; жадный отбор по marginal utility.</li>
+<li><strong>Формат cue</strong> (правило + условие + статус + <code>knowledge_id</code>) и инъекция одним блоком в промпт.</li>
+<li><strong>Связь замены</strong>: типизированный <code>replaces</code>/<code>superseded_by</code> заполняется при инвалидации; замена предлагается вместо исключения.</li>
+</ol>
+<h3 id="p1-полезность-набора"><a class="anchor" href="#p1-полезность-набора" aria-label="Section link">#</a>P1 — полезность набора</h3><ol start="8">
+<li><del>Дедупликация и разнообразие (точная, Jaccard, лимит на группу) — §9.</del> ✅</li>
+<li><del>Учёт активных Skills и уже выданного контекста — §7.</del> ✅</li>
+<li><del>Инструмент <code>knowledge_lookup</code> для агента — §10.</del> ✅</li>
+<li><del>Benchmark-корпус 30–50 задач, метрики §12, сравнение версий в CI.</del> ✅</li>
+<li><del>Замыкание полезности: агрегированный <code>hint.outcome</code> как фактор B4 — §11.</del> ✅</li>
+<li>Опционально: Experience Pattern как слой подачи — <strong>дескоупнуто</strong> (см. статус выше).</li>
+</ol>
+<h3 id="p2-дорогие-методы-только-если-оправданы-бенчмарком"><a class="anchor" href="#p2-дорогие-методы-только-если-оправданы-бенчмарком" aria-label="Section link">#</a>P2 — дорогие методы (только если оправданы бенчмарком)</h3><ol start="14">
+<li>Семантическое ранжирование кандидатов после лексического префильтра.</li>
+<li>LLM-оценка полезности кандидатов.</li>
+<li>Смысловая дедупликация моделью.</li>
+<li>Адаптация весов стратегии по исходам применений.</li>
+<li>LLM-компакция cue (против шаблонной — решает бенчмарк).</li>
+</ol>
+<hr>
+<h2 id="15-критерии-готовности"><a class="anchor" href="#15-критерии-готовности" aria-label="Section link">#</a>15. Критерии готовности</h2><p><strong>P0:</strong></p>
+<ul>
+<li>один движок отбора; <code>/v1/agent/priming</code> не дублирует логику;</li>
+<li>допуск отделён от рейтинга (код и тесты);</li>
+<li>бюджет соблюдается: суммарные токены выданных cue ≤ конфигурации (тест);</li>
+<li>при отсутствии релевантного опыта возвращается <strong>ноль</strong> подсказок (тест);</li>
+<li>ни одно <code>invalidated/superseded/corrected</code> знание не выдаётся как действующее правило; при наличии замены предлагается заменяющее (тест);</li>
+<li>одинаковый вход + конфиг → одинаковый вывод на N прогонов (тест);</li>
+<li>каждый cue содержит правило, условие, статус и валидный <code>knowledge_id</code>;</li>
+<li>мусорные матчинги вида <code>term:не</code> отсутствуют (тест на расширенных стоп-словах).</li>
+</ul>
+<p><strong>P1:</strong></p>
+<ul>
+<li>доля почти-дубликатов в выдаче ниже порога (Redundancy ratio на корпусе);</li>
+<li>подсказки, дублирующие активный Skill, штрафуются (тест);</li>
+<li><code>knowledge_lookup</code> доступен агенту и проходит авторизацию;</li>
+<li>корпус бенчмарка прогоняется в CI, отчёт сравнивает версии.</li>
+</ul>
+<p><strong>Общие:</strong></p>
+<ul>
+<li>Behavioral impact измерен на пилоте: сравнение задач с priming и без;</li>
+<li>документ актуализируется по итогам P0 (фактические веса, пороги, размеры бюджетов).</li>
+</ul>
+<hr>
+<h2 id="16-что-не-входит-в-скоуп"><a class="anchor" href="#16-что-не-входит-в-скоуп" aria-label="Section link">#</a>16. Что не входит в скоуп</h2><ul>
+<li>изменение контракта extraction и правил появления Knowledge (<code>knowledge-extraction.md</code>);</li>
+<li>пересмотр жизненного цикла Hint и разделения Experience/Knowledge/Skill/Hint (<code>knowledge-evolution.md</code>);</li>
+<li>векторная БД / полноценный semantic retrieval по всей базе знаний (только префикс-фильтрация кандидатов в P2);</li>
+<li>изменение модели доступа — используются существующие проверки видимости (<code>org-structure.md</code>).</li>
+</ul>
+<hr>
+<h2 id="17-открытые-вопросы"><a class="anchor" href="#17-открытые-вопросы" aria-label="Section link">#</a>17. Открытые вопросы</h2><ul>
+<li>Значения весов факторов B1–B5 и порогов — подбираются на бенчмарке P0/P1; стартовые зафиксировать в конфиге с версией.</li>
+<li>Хранение агрегированной полезности (<code>applied/helpful</code>) — в journal рядом со знанием или в observation-слое.</li>
+<li>Должен ли <code>knowledge_lookup</code> возвращать связанные знания одним ответом (граф) — решить при реализации инструмента.</li>
+<li>Формат корпуса бенчмарка: наследовать ли схему фикстур experiment4–6 или завести отдельную.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="plan-org-structure.html"><small>← Назад</small><strong>План работ: Оргструктура и модель доступа</strong></a>
+    <a class="pager-next" href="positioning.html"><small>Далее →</small><strong>Позиционирование: варианты восприятия продукта на рынке</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

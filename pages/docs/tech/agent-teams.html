@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Команды агентов — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/agent-teams.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row active" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Команды агентов</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Ввести <strong>команду агентов</strong> как first-class сущность Temporality: переиспользуемое, версионированное определение состава и порядка совместной работы нескольких агентов над задачей.</p>
+<p>Механика совместной работы в ядре уже есть — инструменты <code>delegate</code> и <code>plan</code> с DAG, acceptance gates и rework-циклами (docs/agent-delegation.md). Команда не заменяет её, а накрывает переиспользуемым определением:</p>
+<ul>
+<li><strong>один раз описать</strong> устойчивую композицию (реализация → ревью → QA; фан-аут исследований → синтез);</li>
+<li><strong>версионировать и сравнивать</strong> составы и протоколы по результатам реальных запусков;</li>
+<li><strong>измерять</strong> композицию целиком: токены, стоимость, rework-циклы, споры;</li>
+<li><strong>эволюционировать</strong> состав на основе evidence — по той же модели, что skills и агенты.</li>
+</ul>
+<p>Ключевое требование к UX: пользователь описывает команду естественным языком и редактирует обычной формой. Внутренний манифест <code>team.yaml</code> — артефакт системы, а не пользовательский интерфейс (тот же принцип, что у <code>skill.yaml</code> и определений агентов).</p>
+<hr>
+<h2 id="2-проблематика-текущего-состояния"><a class="anchor" href="#2-проблематика-текущего-состояния" aria-label="Section link">#</a>2. Проблематика текущего состояния</h2><ul>
+<li>Порядок совместной работы задаётся ad hoc: ведущий агент каждый раз заново изобретает декомпозицию в промпте вызова <code>plan</code>/<code>delegate</code>.</li>
+<li>Единственный пример команды (LeadCoderReviewerQA) захардкожен отдельным Temporal-workflow вне ядра — его нельзя изменить без пересборки.</li>
+<li>Повторяющиеся композиции нельзя сохранить, переиспользовать, измерить и улучшить.</li>
+<li>Метрики есть только на уровне отдельного рана: стоимость и токены не сворачиваются по композиции в целом.</li>
+<li>Пользователь не видит «какие команды существуют и как они устроены» — команды не существуют как сущность.</li>
+<li>Связка «задача → подходящий состав» держится в голове пользователя или в промпте, а не в системе.</li>
+</ul>
+<hr>
+<h2 id="3-основные-понятия"><a class="anchor" href="#3-основные-понятия" aria-label="Section link">#</a>3. Основные понятия</h2><h3 id="31-team-команда"><a class="anchor" href="#31-team-команда" aria-label="Section link">#</a>3.1 Team (команда)</h3><p>Определение совместной работы: название, описание, ролевые слоты, протокол, дефолты, привязка к оргструктуре.</p>
+<p>Команда — это <strong>определение</strong>, а не постоянно работающий процесс. Экземпляр команды существует только внутри запуска и распускается по его завершении.</p>
+<h3 id="32-role-slot-ролевой-слот"><a class="anchor" href="#32-role-slot-ролевой-слот" aria-label="Section link">#</a>3.2 Role Slot (ролевой слот)</h3><p>Роль в команде. Слот описывает:</p>
+<ul>
+<li><code>id</code>, название (Coder, Reviewer, QA);</li>
+<li><strong>ответственность</strong> — за что слот отвечает (в терминах docs/evaluable-agent.md, не стиль общения);</li>
+<li><strong>требования</strong> — capabilities и skills, необходимые агенту для этой роли;</li>
+<li><strong>контракт выхода</strong> — что слот обязан вернуть, чтобы следующий этап мог начаться;</li>
+<li><strong>привязку</strong> — конкретный агент (<code>fixed</code>) или требования для подбора (<code>role</code>).</li>
+</ul>
+<p>Слот переживает смену агентов: пока агент удовлетворяет требованиям слота, команда работает. Это позволяет заменить QA-агента на другого, не трогая определение команды.</p>
+<h3 id="33-protocol-протокол"><a class="anchor" href="#33-protocol-протокол" aria-label="Section link">#</a>3.3 Protocol (протокол)</h3><p>Типовая топология совместной работы. Небольшой словарь:</p>
+<ul>
+<li><code>pipeline</code> — последовательные стадии, контракт каждой стадии подаётся на вход следующей;</li>
+<li><code>lead_workers</code> — ведущий агент получает цель и сам декомпозирует её через <code>plan</code>/<code>delegate</code>;</li>
+<li><code>fan_out</code> — параллельные исполнители + сводящий слот;</li>
+<li><code>review_gate</code> — исполнитель + ревьюер с циклом доработки (механика acceptance gates);</li>
+<li><code>dag</code> — общий случай: шаги с зависимостями и ревью-воротами.</li>
+</ul>
+<p>Протоколы <strong>компилируются в существующие механизмы</strong> <code>plan</code>/<code>delegate</code>, а не исполняются отдельным движком.</p>
+<h3 id="34-team-run-командный-запуск"><a class="anchor" href="#34-team-run-командный-запуск" aria-label="Section link">#</a>3.4 Team Run (командный запуск)</h3><p>Экземпляр работы команды: снапшот определения версии, привязанные слоты, цель. Порождает обычные дочерние AgentRun-ы; события дополнительно помечаются <code>team_id</code> и версией.</p>
+<h3 id="35-roster-ростер"><a class="anchor" href="#35-roster-ростер" aria-label="Section link">#</a>3.5 Roster (ростер)</h3><p>Множество агентов, доступных для привязки с учётом эффективной видимости вызывающего (docs/org-structure.md). Определения агентов у нас уже роле-ориентированы — ростер это они и есть; отдельной сущности «роль» не требуется.</p>
+<hr>
+<h2 id="4-принципы"><a class="anchor" href="#4-принципы" aria-label="Section link">#</a>4. Принципы</h2><h3 id="определение-постоянно-экземпляр-эфемерен"><a class="anchor" href="#определение-постоянно-экземпляр-эфемерен" aria-label="Section link">#</a>Определение постоянно, экземпляр эфемерен</h3><p>Команда-определение версионирована и переиспользуется. Команда-экземпляр живёт только внутри запуска. Нет «постоянно работающего отдела» с фоновым общением.</p>
+<h3 id="слот-это-ответственность-и-контракт-а-не-промпт"><a class="anchor" href="#слот-это-ответственность-и-контракт-а-не-промпт" aria-label="Section link">#</a>Слот — это ответственность и контракт, а не промпт</h3><p>Слот задаёт, за что роль отвечает и что обязана вернуть. Как в docs/evaluable-agent.md — роль определяет ответственность, а не стиль.</p>
+<h3 id="малый-словарь-топологий"><a class="anchor" href="#малый-словарь-топологий" aria-label="Section link">#</a>Малый словарь топологий</h3><p>Произвольные графы общения запрещены осознанно: свободный N-агентный чат доказанно дорог, дрейфует и не отлаживается (анти-паттерн ранних AutoGen GroupChat). Расширение словаря протоколов — продуктовое решение, а не рантайм-свобода агентов.</p>
+<h3 id="контекст-передаётся-явно"><a class="anchor" href="#контекст-передаётся-явно" aria-label="Section link">#</a>Контекст передаётся явно</h3><p>Дочерние раны не делят память неявно. Всё, что нужно слоту, передаётся ему: цель, контракты предыдущих слотов, командный scratch. Соответствует принципу «делегированный запуск — настоящий run» из docs/agent-delegation.md.</p>
+<h3 id="детерминированный-скелет-агентные-решения-в-точках"><a class="anchor" href="#детерминированный-скелет-агентные-решения-в-точках" aria-label="Section link">#</a>Детерминированный скелет, агентные решения в точках</h3><p>Порядок, зависимости и ворота задаёт протокол. Агентские решения допускаются только в определённых точках: декомпозиция (в <code>lead_workers</code>), выполнение задачи, вердикт ревью.</p>
+<h3 id="права-не-складываются"><a class="anchor" href="#права-не-складываются" aria-label="Section link">#</a>Права не складываются</h3><p>Команда не расширяет права участников. Каждый дочерний ран работает с правами и политиками своего агента; командное взаимодействие не является способом эскалации (наследует принцип «ребёнок работает только со своими правами»).</p>
+<h3 id="команда-наблюдаема-как-целое"><a class="anchor" href="#команда-наблюдаема-как-целое" aria-label="Section link">#</a>Команда наблюдаема как целое</h3><p>Дерево вызовов, DAG, события, знания, споры — всё видно в существующих панелях, плюс rollup-метрики уровня команды.</p>
+<hr>
+<h2 id="5-модель-определения"><a class="anchor" href="#5-модель-определения" aria-label="Section link">#</a>5. Модель определения</h2><p>Внутренний манифест (пользователь его не видит):</p>
+<pre><code class="language-yaml">id: squad-code-delivery
+version: 3
+name: Code Delivery
+description: Доставка изменения кода: реализация, ревью, проверка качества.
+org_unit_id: null            # null = вся инсталляция, иначе узел + поддерево
+
+protocol:
+  kind: pipeline             # pipeline | lead_workers | fan_out | review_gate | dag
+  max_rework: 2              # лимит доработок на ворота (DefaultMaxRework ядра)
+
+slots:
+  - id: coder
+    title: Coder
+    responsibility: Реализует изменение и проверяет его выполнимым кодом.
+    requirements:
+      capabilities: [read_files, modify_files, run_commands]
+    contract:
+      output: список изменённых файлов и доказательства проверки
+    binding:
+      mode: role             # role | fixed
+      preferred_agent_id: coder    # подсказка подбору, не обязательство
+
+  - id: reviewer
+    title: Reviewer
+    responsibility: Находит дефекты и оценивает достаточность доказательств.
+    requirements:
+      capabilities: [read_files, run_commands]
+    contract:
+      output: verdict accept | rework + список замечаний
+    binding:
+      mode: fixed
+      agent_id: reviewer
+
+defaults:
+  max_turns: 40
+  budget_usd: 5.0
+  parallel_limit: 4          # одновременных дочерних ранов
+</code></pre>
+<h3 id="версионирование"><a class="anchor" href="#версионирование" aria-label="Section link">#</a>Версионирование</h3><p>Каждое изменение определения создаёт новую версию (как у skills и агентов). Версия хранит: описание, слоты, протокол, дефолты, автора, дату. Запуск фиксирует снапшот версии — изменение определения во время запуска не влияет на него.</p>
+<hr>
+<h2 id="6-протоколы"><a class="anchor" href="#6-протоколы" aria-label="Section link">#</a>6. Протоколы</h2><p>Каждый протокол — компиляция в терминах существующих инструментов:</p>
+<table>
+<thead>
+<tr>
+<th>Протокол</th>
+<th>Компиляция</th>
+<th>Что обобщает</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pipeline</code></td>
+<td>последовательные дочерние раны; контракт слота N — вход слота N+1</td>
+<td>пример LeadCoderReviewerQA</td>
+</tr>
+<tr>
+<td><code>lead_workers</code></td>
+<td>один ран ведущего агента с правом <code>delegate</code>/<code>plan</code>; слоты = ростер для его декомпозиции</td>
+<td>обычное делегирование, но с фиксированным составом кандидатов</td>
+</tr>
+<tr>
+<td><code>fan_out</code></td>
+<td><code>plan</code> с независимыми задачами (<code>depends_on: []</code>) + сводящая задача, зависящая от всех</td>
+<td>параллельные исследования → синтез</td>
+</tr>
+<tr>
+<td><code>review_gate</code></td>
+<td><code>plan</code> c <code>review_of</code> и <code>max_rework</code></td>
+<td>текущие acceptance gates</td>
+</tr>
+<tr>
+<td><code>dag</code></td>
+<td>явный список шагов с <code>depends_on</code>/<code>review_of</code>; слоты подставляются как исполнители шагов</td>
+<td>прямой аналог tool-спеки <code>plan</code>, но в терминах слотов</td>
+</tr>
+</tbody></table>
+<p>Правила, общие для всех протоколов:</p>
+<ul>
+<li>запускам шагов назначаются агенты через привязку слотов (см. §7), а не <code>agent_id</code> из промпта;</li>
+<li>ворота ревью — это ворота протокола; policy-подтверждения (docs/approval-model.md) применяются к каждому дочернему рану как обычно и воротами не заменяются;</li>
+<li>инструменты <code>plan</code>/<code>delegate</code> остаются доступны агентам и <strong>вне</strong> команд: команда — переиспользуемая обёртка, а не единственный способ совместной работы;</li>
+</ul>
+<h3 id="ограничения-протоколов"><a class="anchor" href="#ограничения-протоколов" aria-label="Section link">#</a>Ограничения протоколов</h3><ul>
+<li>циклы в <code>dag</code> запрещены (валидация как в <code>plan</code> — reject до запуска, <code>effect: none</code>);</li>
+<li>глубина делегирования ограничена <code>MaxDelegationDepth</code> ядра;</li>
+<li><code>parallel_limit</code> ограничивает одновременные дочерние раны.</li>
+</ul>
+<hr>
+<h2 id="7-привязка-слотов"><a class="anchor" href="#7-привязка-слотов" aria-label="Section link">#</a>7. Привязка слотов</h2><p>Привязка выполняется <strong>при запуске</strong> (launch-time binding):</p>
+<ol>
+<li>слот <code>fixed</code> → указанный агент; если агент невидим в скоупе запуска (ростер вызывающего + проектный скоуп) — команда не стартует с осмысленной ошибкой;</li>
+<li>слот <code>role</code> → подбор из ростера по требованиям: capabilities (семантика карточек ростера: незаданная capability = разрешена, явный <code>false</code> отсекает; <code>delegation</code> — только явная выдача) и skills; <code>preferred_agent_id</code> используется как тай-брейк при нескольких кандидатах, а не как обязательство; однозначный кандидат привязывается автоматически;</li>
+<li>несколько равных кандидатов без preferred → запуск отклоняется (409) со списком кандидатов для явного выбора; ноль кандидатов → отклонение (422) с перечнем требований;</li>
+<li>пользователь при запуске может зафиксировать привязки в <code>bindings</code> (они обязаны попадать в ростер) или предварительно посмотреть разрешение через <code>GET /v1/agent/teams/{id}/resolve</code>;</li>
+<li>ни одного кандидата → честная ошибка до старта, без частичного запуска (effect=none).</li>
+</ol>
+<p>Подбор не пытается быть умнее пользователя: он либо находит однозначного кандидата, либо показывает короткий список на подтверждение.</p>
+<hr>
+<h2 id="8-создание-команды-formation"><a class="anchor" href="#8-создание-команды-formation" aria-label="Section link">#</a>8. Создание команды (Formation)</h2><p>Wizard по образцу Skill Builder:</p>
+<ol>
+<li><p>Пользователь описывает задачу команды естественным языком:</p>
+<blockquote>
+<p>«Нужна команда, которая реализует фичи: один кодер пишет, ревьюер проверяет, QA прогоняет тесты».</p>
+</blockquote>
+</li>
+<li><p>Team Builder Agent:</p>
+<ul>
+<li>интерпретирует описание;</li>
+<li>выбирает протокол;</li>
+<li>определяет слоты, ответственность, требования и контракты;</li>
+<li>подтягивает доступных агентов и их capabilities из системы;</li>
+<li>формирует черновик определения.</li>
+</ul>
+</li>
+<li><p>Происхождение значений визуально различается (как у skills): из инструкции / предложено агентом / из доступных агентов / подтверждено / требует уточнения.</p>
+</li>
+<li><p>Уточняющие вопросы задаются прямо в wizard:</p>
+<blockquote>
+<p>«Ревьюер может отклонять работу кодера. Сколько кругов доработки допускаем?»</p>
+</blockquote>
+</li>
+<li><p>Результат открывается в обычной форме редактирования (CRUD): название, описание, протокол, слоты, дефолты. Пользователь правит то, что агент понял неточно.</p>
+</li>
+</ol>
+<p>Обязательный опрос не проводится: если значение разумно выводится — оно выводится и помечается.</p>
+<h3 id="режим-переформировать"><a class="anchor" href="#режим-переформировать" aria-label="Section link">#</a>Режим «Переформировать»</h3><p>При существенном изменении описания пользователь может переформировать определение. Перед заменой показывается diff и затронутые ручные правки; ничего не теряется молча (как у агентов, docs/evaluable-agent.md §13).</p>
+<h3 id="шаблоны-команд"><a class="anchor" href="#шаблоны-команд" aria-label="Section link">#</a>Шаблоны команд</h3><p>Продукт поставляется с <strong>шаблонами</strong> («Code Delivery», «Research Fan-out», «Delivery + QA gate»), а не с предсозданными командами — по уроку встроенных агентов: шаблон хороший, создавать сущность под себя — пользователь.</p>
+<hr>
+<h2 id="9-командный-запуск"><a class="anchor" href="#9-командный-запуск" aria-label="Section link">#</a>9. Командный запуск</h2><pre><code>POST /v1/agent/teams/{team_id}/runs
+{ project, goal, bindings?: { slot_id: agent_id }, version?: 3 }
+</code></pre>
+<p>Порядок в ядре:</p>
+<ol>
+<li>загрузить определение (указанную или последнюю версию);</li>
+<li>снапшотировать его в контекст запуска;</li>
+<li>разрешить привязки слотов (§7) — все до старта;</li>
+<li>скомпилировать протокол в последовательность <code>plan</code>/<code>delegate</code> вызовов;</li>
+<li>исполнять как обычные дочерние AgentRun-ы с существующими гарантиями (каузальность, отмена вниз по дереву, бюджеты).</li>
+</ol>
+<h3 id="события"><a class="anchor" href="#события" aria-label="Section link">#</a>События</h3><p>Существующие <code>delegation.*</code> и <code>plan.*</code> сохраняются без изменений. Добавляются:</p>
+<ul>
+<li><code>team.started</code> — <code>{ team_id, version, goal, bindings }</code>;</li>
+<li><code>slot.bound</code> — <code>{ slot_id, agent_id, mode: fixed | matched }</code>;</li>
+<li><code>team.completed</code> — <code>{ status, total_tokens, cost_usd, rework_rounds }</code> (по образцу <code>run.completed</code> с итогами);</li>
+<li><code>team.failed</code> — с причиной и указанием слота/шага.</li>
+</ul>
+<p>Таким образом существующие панели (DelegationTree, PlanGraph, трейс) работают для командных запусков без переделки.</p>
+<hr>
+<h2 id="10-командный-контекст"><a class="anchor" href="#10-командный-контекст" aria-label="Section link">#</a>10. Командный контекст</h2><h3 id="team-scratch"><a class="anchor" href="#team-scratch" aria-label="Section link">#</a>Team scratch</h3><p>Общее персистентное хранилище в рамках командного запуска (префикс в существующем workspace storage):</p>
+<ul>
+<li>скоуп — <code>team run id</code>, доступ на чтение/запись у всех слотов;</li>
+<li>очищается по TTL после завершения запуска;</li>
+<li>путь передаётся каждому дочернему рану явно.</li>
+</ul>
+<h3 id="артефакты-контрактов"><a class="anchor" href="#артефакты-контрактов" aria-label="Section link">#</a>Артефакты контрактов</h3><p>Контракт выхода слота записывается в team scratch (файлом), а зависимые слоты получают и текст в промпте, и ссылку на артефакт. Длинные результаты (логи, диффы, отчёты) не раздувают промпты.</p>
+<h3 id="scoped-hints"><a class="anchor" href="#scoped-hints" aria-label="Section link">#</a>Scoped hints</h3><p>Знания, сформированные внутри командного запуска (<code>knowledge.proposed</code> → <code>confirmed</code>), доступны подсказками всем слотам этого запуска — команда учится в рамках задачи. Глобальные знания — как обычно, через эффективную видимость.</p>
+<hr>
+<h2 id="11-наблюдаемость"><a class="anchor" href="#11-наблюдаемость" aria-label="Section link">#</a>11. Наблюдаемость</h2><ul>
+<li>Дерево вызовов и DAG — существующие компоненты, работают из коробки.</li>
+<li><strong>Rollup уровня команды</strong>: токены, стоимость, длительность, число rework-циклов, споры (RunDisputes). Эндпоинт стоимости расширяется: <code>/v1/agent/cost/run?include_children=1</code> или <code>/v1/agent/cost/team-run</code>.</li>
+<li>В панели Runs — группировка по команде: «Code Delivery · 214 запусков за неделю» с подсвеченными паттернами (частые отклонения, дорогие шаги).</li>
+<li>Точка «где агенты друг друга сбили с толку» — цепочка <code>plan.task.rejected</code> → <code>reopened</code>: видно, чей вердикт отправил чью работу на доработку и с каким фидбеком.</li>
+</ul>
+<hr>
+<h2 id="12-эволюция-команды"><a class="anchor" href="#12-эволюция-команды" aria-label="Section link">#</a>12. Эволюция команды</h2><p>На вкладке «Эволюция» карточки команды — сопоставление версий определения с результатами:</p>
+<pre><code class="language-text">v3  ● текущая
+      ↑ 214 запусков
+      ↑ accept-first-try 71% (+9 к v2)
+      ↑ средние rework-циклы 0.6 (−0.4)
+      ↑ 1 предложение изменения
+
+      ──────────────────────────────────────────
+      Изменение v2 → v3: добавлен слот QA, max_rework 3 → 2
+      Причина: 12% запусков v2 упирались в лимит доработок
+      [Посмотреть доказательства]
+</code></pre>
+<p>Метрики по версии определения:</p>
+<ul>
+<li>accept-first-try — доля задач, принятых ревью с первой попытки;</li>
+<li>среднее число rework-циклов на задачу;</li>
+<li>стоимость/длительность запуска;</li>
+<li>доля споров, разрешённых доработкой.</li>
+</ul>
+<p>Evolution proposals — по модели docs/living-skills.md: система обнаруживает устойчивые паттерны из evidence запусков (например, «ревьюер отклоняет 70% работ слота coder → предложить добавить шаг self-check или сменить пару») и предлагает изменение определения; человек смотрит доказательства и принимает или отклоняет. Проваливание в первоисточник сохраняется: proposal → evidence → executions → trajectories → knowledge → версия определения.</p>
+<hr>
+<h2 id="13-видимость-и-доступ"><a class="anchor" href="#13-видимость-и-доступ" aria-label="Section link">#</a>13. Видимость и доступ</h2><ul>
+<li><code>team.org_unit_id</code> — как у агентов, skills и MCP-серверов: <code>NULL</code> = вся инсталляция, иначе узел оргструктуры + поддерево;</li>
+<li>слот привязывается только к агенту, видимому в скоупе команды;</li>
+<li>списки команд фильтруются по эффективной видимости вызывающего;</li>
+<li>роли на узлах действуют как обычно (docs/org-structure.md §13).</li>
+</ul>
+<hr>
+<h2 id="14-безопасность"><a class="anchor" href="#14-безопасность" aria-label="Section link">#</a>14. Безопасность</h2><ul>
+<li>Права дочерних ранов — собственные права их агентов; команда не эскалирует.</li>
+<li>Policy-подтверждения применяются к каждому слоту как к обычному агенту; командные ворота — не замена policy-гейтам.</li>
+<li>HITL-запросы уходят по каналам инициатора запуска (docs/triggers-and-escalations.md); командный запуск можно поставить на паузу целиком.</li>
+<li>Бюджет команды — сумма бюджетов шагов; превышение останавливает запуск честно (status <code>budget_limit</code>), а не молча.</li>
+</ul>
+<hr>
+<h2 id="15-api"><a class="anchor" href="#15-api" aria-label="Section link">#</a>15. API</h2><ul>
+<li><code>GET/POST/PUT/DELETE /v1/workspace/teams</code> — CRUD (+ <code>org_unit_id</code>);</li>
+<li><code>GET /v1/workspace/teams/{id}/versions</code> — история версий;</li>
+<li><code>POST /v1/agent/teams/{id}/runs</code> — запуск (goal, bindings, version);</li>
+<li><code>GET /v1/agent/teams/{id}/resolve?project=&amp;version=</code> — предпросмотр привязок для UI (кто будет выбран и почему);</li>
+<li><code>GET /v1/agent/teams/runs/{run_id}</code> — статус, состав, дерево;</li>
+<li><code>POST /v1/agent/teams/runs/{run_id}/cancel</code> — отмена;</li>
+<li><code>GET /v1/agent/cost/team-run?run_id=</code> — rollup стоимости/токенов;</li>
+<li><code>POST /v1/workspace/teams/builder</code> — formation (описание → черновик определения).</li>
+</ul>
+<p>Списки фильтруются по эффективной видимости; для admin-токенов ядра — без фильтра (как у остальных ресурсов).</p>
+<hr>
+<h2 id="16-ui"><a class="anchor" href="#16-ui" aria-label="Section link">#</a>16. UI</h2><ul>
+<li>Раздел <strong>«Команды»</strong>: список с фильтром (по аналогии с агентами и skills).</li>
+<li>Карточка команды, вкладки:<ul>
+<li><strong>Основное</strong> — название, описание, протокол, дефолты;</li>
+<li><strong>Состав</strong> — слоты: ответственность, требования, контракт, привязка; для <code>role</code> — подсказки подходящих агентов;</li>
+<li><strong>Запуски</strong> — история с rollup-метриками;</li>
+<li><strong>Эволюция</strong> — версии, метрики, предложения (§12).</li>
+</ul>
+</li>
+<li>Запуск: выбор проекта, цель, подтверждение привязок <code>role</code>-слотов.</li>
+<li>Командный запуск визуализируется существующими DelegationTree + PlanGraph + сводкой (токены / стоимость / rework).</li>
+<li>Formation wizard (§8) с индикацией происхождения значений.</li>
+<li>Поля «Доступность» (org unit) — как у остальных ресурсов.</li>
+</ul>
+<hr>
+<h2 id="17-связь-с-существующими-механизмами"><a class="anchor" href="#17-связь-с-существующими-механизмами" aria-label="Section link">#</a>17. Связь с существующими механизмами</h2><table>
+<thead>
+<tr>
+<th>Механизм</th>
+<th>Отношение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>plan</code> / <code>delegate</code></td>
+<td>двигатели; команда компилируется в них, отдельный оркестратор не вводится</td>
+</tr>
+<tr>
+<td>Acceptance gates</td>
+<td>ворота протоколов <code>review_gate</code>/<code>dag</code> — это они</td>
+</tr>
+<tr>
+<td>DelegationTree / PlanGraph</td>
+<td>работают для командных запусков без переделки</td>
+</tr>
+<tr>
+<td>RunDisputes</td>
+<td>споры агрегируются в метрики команды</td>
+</tr>
+<tr>
+<td>Cost accounting</td>
+<td>rollup поверх существующего per-run учёта</td>
+</tr>
+<tr>
+<td>Knowledge / hints</td>
+<td>scoped hints внутри командного запуска (§10)</td>
+</tr>
+<tr>
+<td>Org structure</td>
+<td>модель видимости переиспользуется целиком</td>
+</tr>
+<tr>
+<td>Approval model</td>
+<td>применяется к каждому слоту без изменений</td>
+</tr>
+<tr>
+<td>Пример LeadCoderReviewerQA</td>
+<td>мигрирует в шаблон команды <code>pipeline</code>; код примера удаляется</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="18-анти-паттерны-зафиксировано-осознанно"><a class="anchor" href="#18-анти-паттерны-зафиксировано-осознанно" aria-label="Section link">#</a>18. Анти-паттерны (зафиксировано осознанно)</h2><ul>
+<li>N-агентный свободный чат как протокол.</li>
+<li>Команда как постоянно работающий «отдел» с фоновым общением.</li>
+<li>Слот, навсегда прибитый к одному агенту.</li>
+<li><code>team.yaml</code> как пользовательская форма.</li>
+<li>Новый движок оркестрации вместо компиляции в <code>plan</code>/<code>delegate</code>.</li>
+<li>Неявный общий контекст «все видят всё».</li>
+<li>Скрытие структуры команды от пользователя.</li>
+</ul>
+<hr>
+<h2 id="19-фазы-реализации"><a class="anchor" href="#19-фазы-реализации" aria-label="Section link">#</a>19. Фазы реализации</h2><ul>
+<li><strong>Фаза 1 — Модель и API</strong>: <code>workspace_team</code> + версии, слоты и протоколы как данные, CRUD, org-видимость, тесты эффективной видимости.</li>
+<li><strong>Фаза 2 — Рантайм</strong>: компиляция <code>pipeline</code>, <code>review_gate</code>, <code>dag</code> в <code>plan</code>/<code>delegate</code>; события <code>team.*</code>; снапшот определения; запуск и отмена; сквозные Go-тесты (порядок событий, снапшот при изменении определения, бюджеты).</li>
+<li><strong>Фаза 3 — Привязка слотов</strong>: <code>fixed</code> и <code>role</code>-подбор, подтверждение/замена в UI, ошибки unresolved-slot, тесты матчинга на capabilities и видимость.</li>
+<li><strong>Фаза 4 — UI команд</strong>: раздел, карточка с вкладками, запуск, rollup-сводка, группировка в Runs.</li>
+<li><strong>Фаза 5 — Formation</strong>: Team Builder Agent, wizard, происхождение значений, «Переформировать» с diff.</li>
+<li><strong>Фаза 6 — Командный контекст</strong>: team scratch, артефакты контрактов, scoped hints.</li>
+<li><strong>Фаза 7 — Телеметрия и эволюция</strong>: метрики версий, evolution proposals, вкладка «Эволюция».</li>
+<li><strong>Фаза 8 — Миграция примера</strong>: LeadCoderReviewerQA → шаблон <code>pipeline</code>; поставка шаблонов команд.</li>
+</ul>
+<hr>
+<h2 id="20-критерии-готовности-mvp-фазы-14"><a class="anchor" href="#20-критерии-готовности-mvp-фазы-14" aria-label="Section link">#</a>20. Критерии готовности (MVP, фазы 1–4)</h2><ul>
+<li>Команду можно создать формой, сохранить, отредактировать (новая версия), удалить.</li>
+<li>Запуск <code>pipeline</code>-команды выполняется как дерево дочерних ранов; события <code>team.*</code> и <code>plan.*</code>/<code>delegation.*</code> в журнале в правильном порядке.</li>
+<li><code>review_gate</code>-команда проходит полный цикл: работа → отклонение → доработка → принятие.</li>
+<li>Слот <code>role</code> находит агента по capabilities либо команда не стартует с понятной ошибкой.</li>
+<li>В Runs видно дерево, DAG и rollup токенов/стоимости командного запуска.</li>
+<li>Изменение определения после старта не влияет на идущий запуск (тест).</li>
+<li>Команда не расширяет права участников (тест на эскалацию).</li>
+<li>Список команд и кандидатов на привязку фильтруется org-видимостью (тест).</li>
+<li>Пользователь ни в одном сценарии не видит <code>team.yaml</code>.</li>
+</ul>
+<hr>
+<h2 id="21-открытые-вопросы"><a class="anchor" href="#21-открытые-вопросы" aria-label="Section link">#</a>21. Открытые вопросы</h2><ul>
+<li>Подбор для <code>role</code>-слотов: только capabilities или также skills и история успеха агента на этой роли?</li>
+<li>Нужны ли командам расписания/триггеры (связка с docs/triggers-and-escalations.md)?</li>
+<li>Допускать ли вложение команд (команда как слот другой команды) — пока осознанно нет, глубина делегирования и так ограничена.</li>
+<li>Нужен ли аудит привязок «кто кого назначил» — предположительно да, в журнале изменений команды (фаза 7).</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="agent-quality-loop.html"><small>← Назад</small><strong>Контур качества агентов (Quality Loop)</strong></a>
+    <a class="pager-next" href="agent-turn-limit-restarts.html"><small>Далее →</small><strong>Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

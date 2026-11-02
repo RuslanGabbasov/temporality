@@ -1,0 +1,1314 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Организационная структура и модель доступа Temporality — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/org-structure.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row active" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Организационная структура и модель доступа Temporality</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Ввести единую модель организационной иерархии и доступа, на которой строятся видимость, использование и управление всеми сущностями Temporality:</p>
+<ul>
+<li>агенты;</li>
+<li>навыки;</li>
+<li>MCP-серверы;</li>
+<li>провайдеры и модели;</li>
+<li>проекты;</li>
+<li>триггеры;</li>
+<li>пользователи;</li>
+<li>роли;</li>
+<li>политики выполнения;</li>
+<li>human-in-the-loop взаимодействия.</li>
+</ul>
+<p>Модель должна поддерживать:</p>
+<ul>
+<li>несколько компаний в одной инсталляции;</li>
+<li>иерархию подразделений;</li>
+<li>наследование ресурсов и политик сверху вниз;</li>
+<li>кросс-функциональные проекты;</li>
+<li>явное членство пользователя в проекте;</li>
+<li>внешних участников;</li>
+<li>автоматические запуски через триггеры;</li>
+<li>отдельную execution identity для автоматических операций;</li>
+<li>обращение агента к человеку через настроенный канал;</li>
+<li>аудит изменений доступа.</li>
+</ul>
+<p>Ключевой принцип:</p>
+<blockquote>
+<p><strong>Оргструктура определяет область видимости и наследования, а не является единственным механизмом авторизации.</strong></p>
+</blockquote>
+<hr>
+<h1 id="2-проблематика-текущей-модели"><a class="anchor" href="#2-проблематика-текущей-модели" aria-label="Section link">#</a>2. Проблематика текущей модели</h1><p>Сейчас в системе сосуществуют три несвязанных механизма:</p>
+<ul>
+<li>глобальные списки агентов, навыков, MCP-серверов и провайдеров;</li>
+<li><code>workspace_user.projects</code> — список проектов в JSONB пользователя;</li>
+<li><code>workspace_project.allowed_users</code> — список пользователей в JSONB проекта.</li>
+</ul>
+<p>Это не масштабируется, поскольку отсутствуют:</p>
+<ul>
+<li>компании и подразделения;</li>
+<li>наследование ресурсов;</li>
+<li>единая модель видимости;</li>
+<li>кросс-функциональные области;</li>
+<li>нормальная модель membership проекта;</li>
+<li>разграничение видимости и права использования;</li>
+<li>субъект автоматического запуска;</li>
+<li>execution identity;</li>
+<li>наследуемые политики;</li>
+<li>полноценный аудит изменений доступа.</li>
+</ul>
+<hr>
+<h1 id="3-основные-понятия"><a class="anchor" href="#3-основные-понятия" aria-label="Section link">#</a>3. Основные понятия</h1><h2 id="31-org-unit"><a class="anchor" href="#31-org-unit" aria-label="Section link">#</a>3.1. Org Unit</h2><p>Узел организационной структуры.</p>
+<p>Примеры:</p>
+<ul>
+<li>компания;</li>
+<li>департамент;</li>
+<li>отдел;</li>
+<li>команда;</li>
+<li>другое организационное подразделение.</li>
+</ul>
+<p>Org Unit образуют дерево.</p>
+<pre><code class="language-text">Компания A
+├── Разработка
+│   ├── Платформа
+│   │   ├── Temporality
+│   │   └── Infrastructure
+│   └── Продукт
+└── Качество
+
+Компания B
+└── ...
+</code></pre>
+<hr>
+<h2 id="32-resource"><a class="anchor" href="#32-resource" aria-label="Section link">#</a>3.2. Resource</h2><p>Ресурс, которым можно управлять или который может использовать агент:</p>
+<ul>
+<li>Agent;</li>
+<li>Skill;</li>
+<li>MCP Server;</li>
+<li>Provider;</li>
+<li>Trigger;</li>
+<li>Policy;</li>
+<li>другие будущие сущности.</li>
+</ul>
+<hr>
+<h2 id="33-project"><a class="anchor" href="#33-project" aria-label="Section link">#</a>3.3. Project</h2><p>Проект не является частью дерева оргструктуры.</p>
+<p>Проект может объединять:</p>
+<ul>
+<li>несколько подразделений;</li>
+<li>несколько компаний;</li>
+<li>отдельных пользователей;</li>
+<li>внешних участников.</li>
+</ul>
+<hr>
+<h2 id="34-identity"><a class="anchor" href="#34-identity" aria-label="Section link">#</a>3.4. Identity</h2><p>В системе существуют разные субъекты:</p>
+<ul>
+<li>пользователь;</li>
+<li>автоматический триггер;</li>
+<li>execution identity;</li>
+<li>системный субъект.</li>
+</ul>
+<p>Нельзя автоматически приравнивать права одного субъекта к другому.</p>
+<hr>
+<h1 id="4-дерево-организационной-структуры"><a class="anchor" href="#4-дерево-организационной-структуры" aria-label="Section link">#</a>4. Дерево организационной структуры</h1><p>Один корневой узел на инсталляцию.</p>
+<pre><code class="language-text">Organization A
+├── Development
+│   ├── Platform
+│   └── Product
+└── QA
+
+Organization B
+└── ...
+</code></pre>
+<h3 id="таблица"><a class="anchor" href="#таблица" aria-label="Section link">#</a>Таблица</h3><pre><code class="language-text">org_unit
+    id
+    parent_id
+    kind
+    name
+    path
+    created_at
+    updated_at
+</code></pre>
+<h3 id="поля"><a class="anchor" href="#поля" aria-label="Section link">#</a>Поля</h3><pre><code class="language-text">id            TEXT PRIMARY KEY
+
+parent_id     TEXT NULL
+              REFERENCES org_unit(id)
+
+kind          TEXT
+              -- organization | department | team | ...
+
+name          TEXT
+
+path          TEXT
+              -- materialized path предков
+
+created_at
+updated_at
+</code></pre>
+<p><code>parent_id = NULL</code> разрешён только у корневого узла.</p>
+<p>Глубина дерева в первой версии — до 7–8 уровней.</p>
+<hr>
+<h1 id="5-материализованный-путь"><a class="anchor" href="#5-материализованный-путь" aria-label="Section link">#</a>5. Материализованный путь</h1><p>Для определения ancestor/descendant использовать materialized path.</p>
+<p>Пример:</p>
+<pre><code class="language-text">a
+a.b
+a.b.c
+a.b.c.d
+</code></pre>
+<p>Для узла <code>a.b.c.d</code> предки:</p>
+<pre><code class="language-text">a
+a.b
+a.b.c
+a.b.c.d
+</code></pre>
+<p>Перемещение узла требует пересчёта <code>path</code> всего поддерева.</p>
+<p>Перемещение считается редкой административной операцией.</p>
+<h3 id="требования"><a class="anchor" href="#требования" aria-label="Section link">#</a>Требования</h3><ul>
+<li>уникальность идентификаторов;</li>
+<li>отсутствие циклов;</li>
+<li>нельзя удалить узел, содержащий пользователей или ресурсы, без явного решения о переносе;</li>
+<li>нельзя переместить узел под собственного потомка;</li>
+<li>транзакционное изменение всего поддерева.</li>
+</ul>
+<hr>
+<h1 id="6-наследование"><a class="anchor" href="#6-наследование" aria-label="Section link">#</a>6. Наследование</h1><p>Основной принцип:</p>
+<blockquote>
+<p>Ресурс, привязанный к Org Unit, доступен этому узлу и всему его поддереву.</p>
+</blockquote>
+<p>Например:</p>
+<pre><code class="language-text">Development
+├── Platform
+└── Product
+</code></pre>
+<p>Агент привязан к <code>Development</code>.</p>
+<p>Он доступен:</p>
+<ul>
+<li>Development;</li>
+<li>Platform;</li>
+<li>Product;</li>
+<li>всем последующим дочерним узлам.</li>
+</ul>
+<h3 id="глобальный-ресурс"><a class="anchor" href="#глобальный-ресурс" aria-label="Section link">#</a>Глобальный ресурс</h3><pre><code class="language-text">org_unit_id = NULL
+</code></pre>
+<p>означает:</p>
+<blockquote>
+<p>ресурс доступен всей инсталляции.</p>
+</blockquote>
+<p>Это сохраняет обратную совместимость с текущей моделью.</p>
+<hr>
+<h1 id="7-запрет-отрицательного-наследования"><a class="anchor" href="#7-запрет-отрицательного-наследования" aria-label="Section link">#</a>7. Запрет отрицательного наследования</h1><p>В первой версии отсутствуют:</p>
+<ul>
+<li>deny;</li>
+<li>explicit deny;</li>
+<li>override;</li>
+<li>исключение дочернего узла.</li>
+</ul>
+<p>То есть модель только аддитивная:</p>
+<pre><code class="language-text">родитель
+   ↓
+поддерево
+</code></pre>
+<p>Если ресурс привязан к <code>Development</code>, невозможно сделать его доступным <code>Platform</code>, но скрытым от <code>Product</code>.</p>
+<p>Это должно быть явно зафиксировано, чтобы не возникла необходимость реализовывать ACL с отрицательными правилами.</p>
+<hr>
+<h1 id="8-привязка-ресурсов"><a class="anchor" href="#8-привязка-ресурсов" aria-label="Section link">#</a>8. Привязка ресурсов</h1><p>Распределяемые ресурсы получают:</p>
+<pre><code class="language-text">org_unit_id TEXT NULL REFERENCES org_unit(id)
+</code></pre>
+<p>Минимально:</p>
+<pre><code class="language-text">workspace_agent.org_unit_id
+workspace_skill.org_unit_id
+workspace_mcp_server.org_unit_id
+workspace_provider.org_unit_id
+org_unit_trigger.org_unit_id
+</code></pre>
+<p>В дальнейшем аналогичный механизм должен быть доступен для других распределяемых ресурсов.</p>
+<hr>
+<h1 id="9-видимость-ресурса"><a class="anchor" href="#9-видимость-ресурса" aria-label="Section link">#</a>9. Видимость ресурса</h1><p>Для пользователя <code>U</code> ресурс <code>R</code> видим, если:</p>
+<pre><code class="language-text">R.org_unit_id IS NULL
+</code></pre>
+<p>или:</p>
+<pre><code class="language-text">R.org_unit_id
+</code></pre>
+<p>является самим Org Unit пользователя либо одним из его предков.</p>
+<p>Иными словами:</p>
+<pre><code class="language-text">resource scope
+       ↓
+     parent
+       ↓
+      user
+</code></pre>
+<hr>
+<h1 id="10-видимость-и-полномочия-разные-понятия"><a class="anchor" href="#10-видимость-и-полномочия-разные-понятия" aria-label="Section link">#</a>10. Видимость и полномочия — разные понятия</h1><p>Это принципиальное требование.</p>
+<p>Видимость ресурса не означает автоматически право:</p>
+<ul>
+<li>использовать его;</li>
+<li>запускать его;</li>
+<li>изменять его;</li>
+<li>удалять его;</li>
+<li>изменять его привязку;</li>
+<li>выдавать к нему доступ.</li>
+</ul>
+<p>Минимально различать:</p>
+<pre><code class="language-text">visibility
+use
+manage
+administer
+</code></pre>
+<h3 id="пример"><a class="anchor" href="#пример" aria-label="Section link">#</a>Пример</h3><p>Пользователь может видеть Agent Reviewer, но не иметь права:</p>
+<pre><code class="language-text">POST /runs
+</code></pre>
+<p>с этим агентом.</p>
+<p>Аналогично пользователь может видеть MCP Server, но не иметь права привязать его к своему агенту.</p>
+<hr>
+<h1 id="11-пользователи"><a class="anchor" href="#11-пользователи" aria-label="Section link">#</a>11. Пользователи</h1><p>В первой версии пользователь имеет одну основную организационную принадлежность:</p>
+<pre><code class="language-text">workspace_user.org_unit_id
+</code></pre>
+<p>Это его <code>primary_org_unit</code>.</p>
+<p>Права и видимость наследуются от этого узла вверх по дереву.</p>
+<p>Например:</p>
+<pre><code class="language-text">Company A
+└── Development
+    └── Platform
+        └── User
+</code></pre>
+<p>Пользователь получает область видимости:</p>
+<pre><code class="language-text">Company A
+Development
+Platform
+</code></pre>
+<hr>
+<h1 id="12-будущая-поддержка-нескольких-org-unit"><a class="anchor" href="#12-будущая-поддержка-нескольких-org-unit" aria-label="Section link">#</a>12. Будущая поддержка нескольких Org Unit</h1><p>Модель должна быть спроектирована так, чтобы в дальнейшем можно было добавить:</p>
+<pre><code class="language-text">workspace_user_org_unit
+    user_id
+    org_unit_id
+    membership_type
+</code></pre>
+<p>без изменения основной модели ресурсов.</p>
+<p>Основной <code>workspace_user.org_unit_id</code> остаётся primary membership.</p>
+<p>Дополнительные memberships нужны для случаев:</p>
+<ul>
+<li>матричной структуры;</li>
+<li>архитектурных комитетов;</li>
+<li>совместных подразделений;</li>
+<li>временного назначения;</li>
+<li>участия в другой компании.</li>
+</ul>
+<p>В MVP достаточно одной основной принадлежности.</p>
+<hr>
+<h1 id="13-роли"><a class="anchor" href="#13-роли" aria-label="Section link">#</a>13. Роли</h1><p>Существующие роли:</p>
+<pre><code class="language-text">admin
+operator
+writer
+reader
+</code></pre>
+<p>сохраняются.</p>
+<p>Но область действия роли должна быть явной.</p>
+<h3 id="уровни"><a class="anchor" href="#уровни" aria-label="Section link">#</a>Уровни</h3><pre><code class="language-text">installation
+org_unit
+project
+</code></pre>
+<h3 id="installation-role"><a class="anchor" href="#installation-role" aria-label="Section link">#</a>Installation role</h3><p>Действует на всей инсталляции.</p>
+<p>Например:</p>
+<pre><code class="language-text">installation admin
+</code></pre>
+<p>не ограничивается Org Unit.</p>
+<h3 id="org-unit-role"><a class="anchor" href="#org-unit-role" aria-label="Section link">#</a>Org Unit role</h3><p>Действует на Org Unit и его поддерево.</p>
+<h3 id="project-role"><a class="anchor" href="#project-role" aria-label="Section link">#</a>Project role</h3><p>Действует только внутри конкретного проекта.</p>
+<hr>
+<h1 id="14-проекты"><a class="anchor" href="#14-проекты" aria-label="Section link">#</a>14. Проекты</h1><p>Проект не является Org Unit.</p>
+<p>Проект может быть связан с несколькими узлами:</p>
+<pre><code class="language-text">workspace_project_org_unit
+
+project_id
+org_unit_id
+
+PRIMARY KEY (project_id, org_unit_id)
+</code></pre>
+<p>Например:</p>
+<pre><code class="language-text">Project X
+├── Company A / Development
+├── Company A / QA
+└── Company B / Product
+</code></pre>
+<hr>
+<h1 id="15-доступ-к-проекту"><a class="anchor" href="#15-доступ-к-проекту" aria-label="Section link">#</a>15. Доступ к проекту</h1><p>Проект виден пользователю, если существует пересечение между:</p>
+<ul>
+<li>Org Unit пользователя и его предками;</li>
+<li>Org Unit проекта и их поддеревьями.</li>
+</ul>
+<p>Иными словами, если проект связан с:</p>
+<pre><code class="language-text">Company A / Development
+</code></pre>
+<p>он доступен пользователям:</p>
+<pre><code class="language-text">Development
+Development / Platform
+Development / Product
+...
+</code></pre>
+<p>но не:</p>
+<pre><code class="language-text">Company A / QA
+Company B / Development
+</code></pre>
+<p>если для них нет отдельной связи.</p>
+<hr>
+<h1 id="16-явное-членство-в-проекте"><a class="anchor" href="#16-явное-членство-в-проекте" aria-label="Section link">#</a>16. Явное членство в проекте</h1><p>Организационной принадлежности недостаточно для всех сценариев.</p>
+<p>Добавить нормальную таблицу:</p>
+<pre><code class="language-text">workspace_project_member
+
+project_id
+user_id
+role
+created_at
+created_by
+</code></pre>
+<p>Явное членство позволяет дать доступ конкретному пользователю независимо от его Org Unit.</p>
+<p>Например:</p>
+<pre><code class="language-text">Project X
+  ├── Development
+  └── explicit member: external consultant
+</code></pre>
+<p>Это заменяет:</p>
+<pre><code class="language-text">workspace_project.allowed_users
+</code></pre>
+<p>JSONB.</p>
+<h3 id="правило"><a class="anchor" href="#правило" aria-label="Section link">#</a>Правило</h3><p>Доступ к проекту:</p>
+<pre><code class="language-text">org-unit access
+OR
+explicit project membership
+</code></pre>
+<hr>
+<h1 id="17-внешние-пользователи"><a class="anchor" href="#17-внешние-пользователи" aria-label="Section link">#</a>17. Внешние пользователи</h1><p>Не создавать для каждого подрядчика искусственный полноценный Org Unit.</p>
+<p>Пользователь должен иметь признак:</p>
+<pre><code class="language-text">user_type:
+    internal
+    external
+</code></pre>
+<p>Для внешнего участника предусмотреть membership с:</p>
+<pre><code class="language-text">sponsor_org_unit
+expires_at
+</code></pre>
+<p>Доступ внешнего пользователя должен иметь возможность автоматически истекать.</p>
+<p>В MVP допускается использовать explicit project membership.</p>
+<p>Полноценная модель внешних организаций может быть реализована позже.</p>
+<hr>
+<h1 id="18-триггеры"><a class="anchor" href="#18-триггеры" aria-label="Section link">#</a>18. Триггеры</h1><p>Trigger — самостоятельная сущность, запускающая Agent Run на основании внешнего события.</p>
+<p>Примеры:</p>
+<ul>
+<li>Azure DevOps Pull Request;</li>
+<li>Azure DevOps Work Item;</li>
+<li>MindMap test scenario;</li>
+<li>webhook;</li>
+<li>cron;</li>
+<li>другие источники.</li>
+</ul>
+<p>Trigger также должен иметь область видимости:</p>
+<pre><code class="language-text">org_unit_id
+</code></pre>
+<hr>
+<h1 id="19-trigger-не-является-пользователем"><a class="anchor" href="#19-trigger-не-является-пользователем" aria-label="Section link">#</a>19. Trigger не является пользователем</h1><p>Критически важно разделить:</p>
+<pre><code class="language-text">кто создал trigger
+</code></pre>
+<p>и:</p>
+<pre><code class="language-text">от чьего имени выполняется операция
+</code></pre>
+<p>Например:</p>
+<pre><code class="language-text">Azure DevOps webhook
+       ↓
+Trigger
+       ↓
+Reviewer Agent
+       ↓
+Execution Identity
+       ↓
+MCP / Provider / Project
+</code></pre>
+<p>Trigger не должен автоматически получать права администратора или права создавшего его пользователя.</p>
+<hr>
+<h1 id="20-execution-identity"><a class="anchor" href="#20-execution-identity" aria-label="Section link">#</a>20. Execution Identity</h1><p>Автоматический Run должен выполняться в контексте отдельной execution identity.</p>
+<p>Пример:</p>
+<pre><code class="language-text">CI Reviewer
+Test Automation
+PR Reviewer
+</code></pre>
+<p>Execution identity определяет:</p>
+<ul>
+<li>какие агенты можно запускать;</li>
+<li>какие MCP можно использовать;</li>
+<li>какие проекты доступны;</li>
+<li>какие provider разрешены;</li>
+<li>какие действия допустимы;</li>
+<li>кому разрешено задавать вопросы.</li>
+</ul>
+<h3 id="главное-правило"><a class="anchor" href="#главное-правило" aria-label="Section link">#</a>Главное правило</h3><blockquote>
+<p>Автоматический Run не наследует автоматически права пользователя, создавшего Trigger.</p>
+</blockquote>
+<hr>
+<h1 id="21-авторизация-trigger"><a class="anchor" href="#21-авторизация-trigger" aria-label="Section link">#</a>21. Авторизация Trigger</h1><p>При создании Trigger необходимо проверить:</p>
+<ul>
+<li>имеет ли пользователь право создать Trigger;</li>
+<li>имеет ли он право использовать выбранного агента;</li>
+<li>имеет ли он право выбрать execution identity;</li>
+<li>имеет ли execution identity доступ к нужным ресурсам;</li>
+<li>имеет ли Trigger доступ к соответствующему проекту.</li>
+</ul>
+<p>При каждом автоматическом запуске необходимо повторно проверить актуальность критических разрешений.</p>
+<hr>
+<h1 id="22-authorization-на-уровне-операции"><a class="anchor" href="#22-authorization-на-уровне-операции" aria-label="Section link">#</a>22. Authorization на уровне операции</h1><p>Фильтрация UI/API недостаточна.</p>
+<p>Каждая чувствительная операция должна выполнять authorization check.</p>
+<p>Минимально:</p>
+<pre><code class="language-text">GET
+POST
+PUT
+PATCH
+DELETE
+EXECUTE
+BIND
+UNBIND
+</code></pre>
+<p>Например:</p>
+<pre><code class="language-text">POST /runs
+{
+    agent_id: ...
+}
+</code></pre>
+<p>должен проверить:</p>
+<pre><code class="language-text">user
+    ↓
+can use agent?
+    ↓
+can use project?
+    ↓
+can use skills?
+    ↓
+can use MCP?
+    ↓
+can use provider?
+</code></pre>
+<p>Нельзя полагаться на то, что ресурс уже был отфильтрован в предыдущем GET.</p>
+<hr>
+<h1 id="23-provider-и-credentials"><a class="anchor" href="#23-provider-и-credentials" aria-label="Section link">#</a>23. Provider и credentials</h1><p>Provider нельзя рассматривать просто как ещё один ресурс.</p>
+<p>Необходимо разделить:</p>
+<pre><code class="language-text">Provider definition
+Credential / Secret
+Usage policy
+</code></pre>
+<p>Видимость Provider не означает доступ к его credentials.</p>
+<p>Нельзя возвращать секреты через обычные API ресурсов.</p>
+<p>Использование credentials должно происходить только внутри разрешённого execution context.</p>
+<hr>
+<h1 id="24-политики"><a class="anchor" href="#24-политики" aria-label="Section link">#</a>24. Политики</h1><p>Архитектура должна поддерживать отдельную сущность Policy.</p>
+<p>Даже если часть политик реализуется позже, необходимо предусмотреть возможность наследования:</p>
+<pre><code class="language-text">Org Unit
+├── Resources
+├── Roles
+└── Policies
+</code></pre>
+<p>Потенциальные политики:</p>
+<ul>
+<li>разрешённые модели;</li>
+<li>разрешённые MCP;</li>
+<li>максимальный бюджет;</li>
+<li>лимит токенов;</li>
+<li>timeout;</li>
+<li>network policy;</li>
+<li>sandbox policy;</li>
+<li>human approval;</li>
+<li>retention;</li>
+<li>разрешённые каналы коммуникации.</li>
+</ul>
+<p>Политики наследуются сверху вниз по тем же принципам.</p>
+<p>В первой версии допускается реализовать только необходимый минимум.</p>
+<hr>
+<h1 id="25-human-in-the-loop"><a class="anchor" href="#25-human-in-the-loop" aria-label="Section link">#</a>25. Human-in-the-loop</h1><p>Агент может в процессе Run запросить дополнительный контекст у человека.</p>
+<p>Для этого используется специальный инструмент:</p>
+<pre><code class="language-text">ask_human(...)
+</code></pre>
+<p>Это не сообщение в конкретный чат.</p>
+<p>Это системное взаимодействие:</p>
+<pre><code class="language-text">Agent Run
+   ↓
+Human Request
+   ↓
+User / Role / Project owner
+   ↓
+Communication channel
+   ↓
+Response
+   ↓
+Agent Run
+</code></pre>
+<hr>
+<h1 id="26-получатель-human-request"><a class="anchor" href="#26-получатель-human-request" aria-label="Section link">#</a>26. Получатель Human Request</h1><p>Агент не должен напрямую выбирать транспорт:</p>
+<pre><code class="language-text">Matrix
+Telegram
+...
+</code></pre>
+<p>Агент выбирает логического получателя.</p>
+<p>Например:</p>
+<pre><code class="language-text">project_owner
+qa_lead
+specific_user
+</code></pre>
+<p>Система определяет конкретного пользователя и канал.</p>
+<hr>
+<h1 id="27-канал-коммуникации"><a class="anchor" href="#27-канал-коммуникации" aria-label="Section link">#</a>27. Канал коммуникации</h1><p>Настройки пользователя определяют предпочтительный канал.</p>
+<p>Например:</p>
+<pre><code class="language-text">User
+├── Matrix      preferred
+├── Telegram    enabled
+└── Email       enabled
+</code></pre>
+<p>Система использует:</p>
+<pre><code class="language-text">preferred channel
+</code></pre>
+<p>и при необходимости fallback.</p>
+<p>Агент не должен зависеть от реализации конкретного транспорта.</p>
+<hr>
+<h1 id="28-human-request-как-отдельная-сущность"><a class="anchor" href="#28-human-request-как-отдельная-сущность" aria-label="Section link">#</a>28. Human Request как отдельная сущность</h1><pre><code class="language-text">human_request
+
+id
+run_id
+recipient
+question
+options
+status
+channel
+created_at
+delivered_at
+answered_at
+expires_at
+response
+</code></pre>
+<p>Статусы:</p>
+<pre><code class="language-text">pending
+delivered
+waiting
+answered
+expired
+cancelled
+</code></pre>
+<hr>
+<h1 id="29-приостановка-run"><a class="anchor" href="#29-приостановка-run" aria-label="Section link">#</a>29. Приостановка Run</h1><p>После <code>ask_human</code>:</p>
+<pre><code class="language-text">running
+    ↓
+waiting_for_human
+</code></pre>
+<p>При этом:</p>
+<ul>
+<li>токены не расходуются;</li>
+<li>Run не считается завершённым;</li>
+<li>состояние сохраняется в БД;</li>
+<li>ожидание переживает рестарт;</li>
+<li>обычный execution timeout не должен уничтожать ожидающий Run.</li>
+</ul>
+<p>После ответа:</p>
+<pre><code class="language-text">waiting_for_human
+    ↓
+resuming
+    ↓
+running
+</code></pre>
+<hr>
+<h1 id="30-human-request-и-права"><a class="anchor" href="#30-human-request-и-права" aria-label="Section link">#</a>30. Human Request и права</h1><p>Агент не может произвольно обратиться к любому пользователю.</p>
+<p>Необходимо проверить:</p>
+<ul>
+<li>имеет ли execution identity право обращаться к пользователю;</li>
+<li>разрешено ли передавать ему данный контекст;</li>
+<li>относится ли пользователь к проекту/Org Unit;</li>
+<li>разрешён ли соответствующий канал.</li>
+</ul>
+<p>В дальнейшем получателем может быть:</p>
+<pre><code class="language-text">user
+role
+org_unit
+project owner
+</code></pre>
+<hr>
+<h1 id="31-контекст-human-request"><a class="anchor" href="#31-контекст-human-request" aria-label="Section link">#</a>31. Контекст Human Request</h1><p>Запрос человеку должен быть самодостаточным.</p>
+<p>Он должен содержать:</p>
+<ul>
+<li>какую операцию выполняет агент;</li>
+<li>почему возник вопрос;</li>
+<li>что уже известно;</li>
+<li>чего не хватает;</li>
+<li>варианты ответа;</li>
+<li>последствия выбора, если они существенны.</li>
+</ul>
+<p>Не следует передавать весь технический контекст Run.</p>
+<hr>
+<h1 id="32-структурированные-ответы"><a class="anchor" href="#32-структурированные-ответы" aria-label="Section link">#</a>32. Структурированные ответы</h1><p>Если вопрос допускает варианты:</p>
+<pre><code class="language-text">options:
+    - id
+      label
+</code></pre>
+<p>Ответ должен сохранять структурированное значение.</p>
+<p>Свободный текст также поддерживается.</p>
+<hr>
+<h1 id="33-таймаут-human-request"><a class="anchor" href="#33-таймаут-human-request" aria-label="Section link">#</a>33. Таймаут Human Request</h1><p>Human Request должен иметь timeout.</p>
+<p>После истечения система выполняет заданную policy:</p>
+<ul>
+<li>fail;</li>
+<li>retry;</li>
+<li>fallback;</li>
+<li>escalate;</li>
+<li>cancel.</li>
+</ul>
+<p>Политика должна быть частью модели выполнения, а не транспортного адаптера.</p>
+<hr>
+<h1 id="34-изменение-оргструктуры-во-время-run"><a class="anchor" href="#34-изменение-оргструктуры-во-время-run" aria-label="Section link">#</a>34. Изменение оргструктуры во время Run</h1><p>Изменение Org Unit не должно автоматически уничтожать уже созданный Run.</p>
+<p>При создании Run необходимо зафиксировать execution context:</p>
+<pre><code class="language-text">agent
+skills
+MCPs
+provider
+project
+execution identity
+effective policies
+</code></pre>
+<p>Это позволяет восстановить контекст, в котором Run был создан.</p>
+<p>При этом критические действия внутри Run могут повторно проверять актуальные права.</p>
+<hr>
+<h1 id="35-snapshot-execution-context"><a class="anchor" href="#35-snapshot-execution-context" aria-label="Section link">#</a>35. Snapshot execution context</h1><p>Run должен позволять ответить на вопрос:</p>
+<blockquote>
+<p>Почему операция имела право использовать этот ресурс в момент выполнения?</p>
+</blockquote>
+<p>Для этого необходимо сохранять как минимум идентификаторы:</p>
+<pre><code class="language-text">agent_id
+skill_ids
+mcp_ids
+provider_id
+project_id
+execution_identity_id
+policy context
+</code></pre>
+<p>Полное копирование ресурсов не требуется.</p>
+<hr>
+<h1 id="36-аудит"><a class="anchor" href="#36-аудит" aria-label="Section link">#</a>36. Аудит</h1><p>Изменения модели доступа должны иметь отдельный audit trail.</p>
+<p>Минимальные события:</p>
+<pre><code class="language-text">org_unit.created
+org_unit.updated
+org_unit.moved
+org_unit.deleted
+
+user.org_unit_changed
+
+resource.bound
+resource.unbound
+
+project.org_unit_added
+project.org_unit_removed
+
+project.member_added
+project.member_removed
+
+role.granted
+role.revoked
+
+trigger.created
+trigger.updated
+trigger.deleted
+
+execution_identity.created
+execution_identity.updated
+execution_identity.deleted
+</code></pre>
+<p>Каждое событие должно содержать:</p>
+<pre><code class="language-text">actor
+timestamp
+target
+old_value
+new_value
+</code></pre>
+<p>По возможности также:</p>
+<pre><code class="language-text">reason
+</code></pre>
+<hr>
+<h1 id="37-audit-human-in-the-loop"><a class="anchor" href="#37-audit-human-in-the-loop" aria-label="Section link">#</a>37. Audit Human-in-the-loop</h1><p>Human interaction также является частью траектории Run.</p>
+<p>Фиксировать:</p>
+<pre><code class="language-text">human.requested
+human.delivered
+human.response_received
+run.resumed
+</code></pre>
+<p>Это позволит анализировать:</p>
+<ul>
+<li>сколько Run требуют человека;</li>
+<li>кто чаще всего требуется агентам;</li>
+<li>сколько времени занимает ожидание;</li>
+<li>какие типы решений чаще всего требуют вмешательства;</li>
+<li>где агентам не хватает знаний или навыков.</li>
+</ul>
+<hr>
+<h1 id="38-api-организационной-структуры"><a class="anchor" href="#38-api-организационной-структуры" aria-label="Section link">#</a>38. API организационной структуры</h1><pre><code class="language-text">GET    /v1/org/units
+POST   /v1/org/units
+
+GET    /v1/org/units/{id}
+PUT    /v1/org/units/{id}
+DELETE /v1/org/units/{id}
+
+GET    /v1/org/units/{id}/users
+GET    /v1/org/units/{id}/resources
+GET    /v1/org/units/{id}/projects
+</code></pre>
+<p>Изменять дерево может только соответствующий администратор.</p>
+<hr>
+<h1 id="39-api-привязки-ресурсов"><a class="anchor" href="#39-api-привязки-ресурсов" aria-label="Section link">#</a>39. API привязки ресурсов</h1><pre><code class="language-text">PUT    /v1/org/resources/{kind}/{id}/binding
+DELETE /v1/org/resources/{kind}/{id}/binding
+</code></pre>
+<p>Пример:</p>
+<pre><code class="language-text">PUT /v1/org/resources/agents/reviewer/binding
+
+{
+    &quot;org_unit_id&quot;: &quot;development&quot;
+}
+</code></pre>
+<p><code>org_unit_id = null</code> означает глобальную доступность.</p>
+<hr>
+<h1 id="40-api-проектов"><a class="anchor" href="#40-api-проектов" aria-label="Section link">#</a>40. API проектов</h1><p>Добавить:</p>
+<pre><code class="language-text">GET    /v1/projects/{id}/org-units
+PUT    /v1/projects/{id}/org-units
+DELETE /v1/projects/{id}/org-units/{unit_id}
+
+GET    /v1/projects/{id}/members
+POST   /v1/projects/{id}/members
+DELETE /v1/projects/{id}/members/{user_id}
+</code></pre>
+<p>Старые:</p>
+<pre><code class="language-text">workspace_project.allowed_users
+workspace_user.projects
+</code></pre>
+<p>после миграции не используются.</p>
+<hr>
+<h1 id="41-api-списков"><a class="anchor" href="#41-api-списков" aria-label="Section link">#</a>41. API списков</h1><p>Существующие API:</p>
+<pre><code class="language-text">GET /v1/workspace/agents
+GET /v1/workspace/skills
+GET /v1/workspace/mcp-servers
+GET /v1/workspace/providers
+GET /v1/workspace/projects
+GET /v1/workspace/triggers
+</code></pre>
+<p>должны возвращать только сущности, доступные вызывающему субъекту.</p>
+<h3 id="маршрутизация-моделей"><a class="anchor" href="#маршрутизация-моделей" aria-label="Section link">#</a>Маршрутизация моделей</h3><pre><code class="language-text">GET /v1/workspace/model-config?model={model}&amp;project={project}[&amp;provider={provider_id}]
+</code></pre>
+<p>Возвращает провайдер, обслуживающий модель для проекта. Без <code>provider</code> —
+первый из видимых проектову провайдеров (глобальные + привязанные к
+оргединицам проекта), у которого модель есть в списке <code>models</code>. С
+<code>provider={id}</code> (pinned-вызов) — только этот провайдер: явная привязка
+агента к провайдеру — контракт маршрутизации, дублирование модели у другого
+провайдера не перехватывает вызов. Ответ:</p>
+<pre><code class="language-json">{&quot;provider_id&quot;:&quot;prov-...&quot;,&quot;provider_name&quot;:&quot;...&quot;,&quot;base_url&quot;:&quot;https://...&quot;,&quot;api_key&quot;:&quot;...&quot;,&quot;model&quot;:&quot;...&quot;}
+</code></pre>
+<p>404 — модель не обслуживается ни одним видимым провайдером (или пиновый
+провайдер её не декларирует). 409 — обслуживающий провайдер выключен.
+Ядро вызывает этот эндпоинт в <code>call_model</code> для нестандартных моделей
+(TTL-кеш 60 с); ответ содержит ключ провайдера, поэтому эндпоинт закрыт
+гейтом RoleReader.</p>
+<p>Для системного runtime/API, работающего с внутренней execution identity, допускается отдельный privileged API.</p>
+<p>Важно:</p>
+<blockquote>
+<p>privileged API не должен использоваться для обхода authorization в пользовательском API.</p>
+</blockquote>
+<hr>
+<h1 id="42-ui-организация"><a class="anchor" href="#42-ui-организация" aria-label="Section link">#</a>42. UI — Организация</h1><p>Добавить раздел:</p>
+<pre><code class="language-text">Организация
+</code></pre>
+<p>Возможности:</p>
+<ul>
+<li>дерево Org Unit;</li>
+<li>создание;</li>
+<li>переименование;</li>
+<li>перемещение;</li>
+<li>удаление;</li>
+<li>инспекция узла;</li>
+<li>пользователи;</li>
+<li>ресурсы;</li>
+<li>проекты;</li>
+<li>политики.</li>
+</ul>
+<p>Перемещение должно требовать подтверждения, поскольку оно меняет область видимости.</p>
+<hr>
+<h1 id="43-ui-ресурсы"><a class="anchor" href="#43-ui-ресурсы" aria-label="Section link">#</a>43. UI — Ресурсы</h1><p>В формах:</p>
+<ul>
+<li>Agent;</li>
+<li>Skill;</li>
+<li>MCP;</li>
+<li>Provider;</li>
+<li>Trigger;</li>
+</ul>
+<p>добавить:</p>
+<pre><code class="language-text">Доступность
+</code></pre>
+<p>Варианты:</p>
+<pre><code class="language-text">Вся организация
+[Org Unit]
+</code></pre>
+<p>Для администратора отображать эффективную область действия.</p>
+<p>Например:</p>
+<pre><code class="language-text">Доступно:
+Development
+└── 14 дочерних узлов
+</code></pre>
+<hr>
+<h1 id="44-ui-проект"><a class="anchor" href="#44-ui-проект" aria-label="Section link">#</a>44. UI — Проект</h1><p>В проекте:</p>
+<pre><code class="language-text">Организационные области
+</code></pre>
+<p>Мультивыбор Org Unit.</p>
+<p>Отдельно:</p>
+<pre><code class="language-text">Участники
+</code></pre>
+<p>для explicit project membership.</p>
+<p>Это две разные модели и не должны объединяться в одно поле.</p>
+<hr>
+<h1 id="45-ui-пользователь"><a class="anchor" href="#45-ui-пользователь" aria-label="Section link">#</a>45. UI — Пользователь</h1><p>Показывать:</p>
+<pre><code class="language-text">Основное подразделение
+Роли
+Проекты
+</code></pre>
+<p>Основное подразделение выбирается вместо старого списка проектов.</p>
+<p>Проекты показываются как вычисленная область доступа плюс явные memberships.</p>
+<hr>
+<h1 id="46-ui-trigger"><a class="anchor" href="#46-ui-trigger" aria-label="Section link">#</a>46. UI — Trigger</h1><p>При создании Trigger пользователь должен выбрать:</p>
+<ol>
+<li>источник события;</li>
+<li>событие;</li>
+<li>агента;</li>
+<li>проект/область;</li>
+<li>execution identity;</li>
+<li>policy;</li>
+<li>правила human-in-the-loop.</li>
+</ol>
+<p>Не требовать от пользователя написания YAML для типового сценария.</p>
+<hr>
+<h1 id="47-ui-execution-identity"><a class="anchor" href="#47-ui-execution-identity" aria-label="Section link">#</a>47. UI — Execution Identity</h1><p>Отдельная сущность для автоматических запусков.</p>
+<p>Например:</p>
+<pre><code class="language-text">PR Reviewer
+Test Automation
+Work Item Analyst
+</code></pre>
+<p>Показывать:</p>
+<ul>
+<li>какие агенты доступны;</li>
+<li>какие проекты доступны;</li>
+<li>какие MCP доступны;</li>
+<li>какие provider доступны;</li>
+<li>какие human recipients разрешены;</li>
+<li>какие политики применяются.</li>
+</ul>
+<hr>
+<h1 id="48-миграция"><a class="anchor" href="#48-миграция" aria-label="Section link">#</a>48. Миграция</h1><p>Миграция должна быть постепенной.</p>
+<h2 id="этап-1"><a class="anchor" href="#этап-1" aria-label="Section link">#</a>Этап 1</h2><p>Создать корневой Org Unit:</p>
+<pre><code class="language-text">Organization
+</code></pre>
+<p>Все существующие пользователи:</p>
+<pre><code class="language-text">org_unit_id = Organization
+</code></pre>
+<p>Все существующие ресурсы:</p>
+<pre><code class="language-text">org_unit_id = NULL
+</code></pre>
+<p>Поведение системы не меняется.</p>
+<hr>
+<h2 id="этап-2"><a class="anchor" href="#этап-2" aria-label="Section link">#</a>Этап 2</h2><p>Создать новую модель проектов:</p>
+<pre><code class="language-text">workspace_project_org_unit
+workspace_project_member
+</code></pre>
+<p>Перенести существующие связи.</p>
+<p>Старые:</p>
+<pre><code class="language-text">workspace_user.projects
+workspace_project.allowed_users
+</code></pre>
+<p>пока сохраняются.</p>
+<hr>
+<h2 id="этап-3"><a class="anchor" href="#этап-3" aria-label="Section link">#</a>Этап 3</h2><p>Переключить чтение на новую модель.</p>
+<p>Старые JSONB-колонки больше не участвуют в authorization.</p>
+<hr>
+<h2 id="этап-4"><a class="anchor" href="#этап-4" aria-label="Section link">#</a>Этап 4</h2><p>Провести проверку расхождений:</p>
+<pre><code class="language-text">old access model
+vs
+new access model
+</code></pre>
+<p>До удаления старых полей необходимо убедиться, что новая модель не изменила существующие права неожиданным образом.</p>
+<hr>
+<h2 id="этап-5"><a class="anchor" href="#этап-5" aria-label="Section link">#</a>Этап 5</h2><p>После стабилизации удалить:</p>
+<pre><code class="language-text">workspace_user.projects
+workspace_project.allowed_users
+</code></pre>
+<hr>
+<h1 id="49-совместимость"><a class="anchor" href="#49-совместимость" aria-label="Section link">#</a>49. Совместимость</h1><p><code>NULL org_unit_id</code> у ресурсов сохраняет текущую семантику:</p>
+<blockquote>
+<p>ресурс глобальный.</p>
+</blockquote>
+<p>Это позволяет постепенно вводить организационное ограничение без обязательной миграции всех существующих ресурсов.</p>
+<hr>
+<h1 id="50-производительность"><a class="anchor" href="#50-производительность" aria-label="Section link">#</a>50. Производительность</h1><p>Основные authorization-запросы должны быть рассчитаны на выполнение большого количества раз.</p>
+<p>Необходимо предусмотреть индексы для:</p>
+<ul>
+<li><code>org_unit.parent_id</code>;</li>
+<li><code>org_unit.path</code>;</li>
+<li><code>resource.org_unit_id</code>;</li>
+<li><code>workspace_user.org_unit_id</code>;</li>
+<li>project/org-unit;</li>
+<li>project/member;</li>
+<li>execution identity/resource bindings.</li>
+</ul>
+<p>Не следует выполнять полное построение дерева при каждом tool call.</p>
+<p>При необходимости использовать:</p>
+<ul>
+<li>кэш effective access;</li>
+<li>предварительно вычисленные области;</li>
+<li>snapshot контекста Run.</li>
+</ul>
+<p>Конкретный механизм оптимизации может быть выбран при реализации после измерений.</p>
+<hr>
+<h1 id="51-тестирование"><a class="anchor" href="#51-тестирование" aria-label="Section link">#</a>51. Тестирование</h1><p>Обязательны интеграционные тесты следующих сценариев.</p>
+<h2 id="иерархия"><a class="anchor" href="#иерархия" aria-label="Section link">#</a>Иерархия</h2><pre><code class="language-text">A
+└── B
+    └── C
+</code></pre>
+<p>Ресурс A:</p>
+<ul>
+<li>виден A;</li>
+<li>виден B;</li>
+<li>виден C.</li>
+</ul>
+<p>Ресурс C:</p>
+<ul>
+<li>не виден A;</li>
+<li>не виден B;</li>
+<li>виден C.</li>
+</ul>
+<hr>
+<h2 id="глобальный-ресурс"><a class="anchor" href="#глобальный-ресурс" aria-label="Section link">#</a>Глобальный ресурс</h2><pre><code class="language-text">org_unit_id = NULL
+</code></pre>
+<p>виден всем.</p>
+<hr>
+<h2 id="кросс-функциональный-проект"><a class="anchor" href="#кросс-функциональный-проект" aria-label="Section link">#</a>Кросс-функциональный проект</h2><p>Проект связан:</p>
+<pre><code class="language-text">Development
+QA
+Company B / Product
+</code></pre>
+<p>Проверить пользователей каждого подразделения.</p>
+<hr>
+<h2 id="explicit-project-membership"><a class="anchor" href="#explicit-project-membership" aria-label="Section link">#</a>Explicit project membership</h2><p>Пользователь вне организационной области проекта получает доступ только после explicit membership.</p>
+<hr>
+<h2 id="роли"><a class="anchor" href="#роли" aria-label="Section link">#</a>Роли</h2><p>Проверить:</p>
+<ul>
+<li>installation admin;</li>
+<li>org-unit admin;</li>
+<li>project writer;</li>
+<li>project reader;</li>
+<li>обычный пользователь.</li>
+</ul>
+<hr>
+<h2 id="trigger"><a class="anchor" href="#trigger" aria-label="Section link">#</a>Trigger</h2><p>Проверить:</p>
+<ul>
+<li>пользователь может создать разрешённый Trigger;</li>
+<li>пользователь не может создать Trigger с недоступным агентом;</li>
+<li>Trigger не получает права пользователя автоматически;</li>
+<li>execution identity имеет собственные права.</li>
+</ul>
+<hr>
+<h2 id="run"><a class="anchor" href="#run" aria-label="Section link">#</a>Run</h2><p>Проверить:</p>
+<ul>
+<li>агент может использовать разрешённые ресурсы;</li>
+<li>агент не может использовать недоступный MCP;</li>
+<li>агент не может использовать недоступный provider;</li>
+<li>Run нельзя создать с недоступным агентом.</li>
+</ul>
+<hr>
+<h2 id="human-in-the-loop"><a class="anchor" href="#human-in-the-loop" aria-label="Section link">#</a>Human-in-the-loop</h2><p>Проверить:</p>
+<ol>
+<li>агент создаёт Human Request;</li>
+<li>система определяет получателя;</li>
+<li>выбирается preferred channel;</li>
+<li>Run переходит в <code>waiting_for_human</code>;</li>
+<li>ответ сохраняется;</li>
+<li>Run возобновляется;</li>
+<li>ответ становится результатом <code>ask_human</code>.</li>
+</ol>
+<hr>
+<h2 id="изменение-org-unit"><a class="anchor" href="#изменение-org-unit" aria-label="Section link">#</a>Изменение Org Unit</h2><p>Проверить:</p>
+<ol>
+<li>пользователь имел доступ к ресурсу;</li>
+<li>пользователя переместили;</li>
+<li>effective visibility изменилась;</li>
+<li>новый Run использует новые права;</li>
+<li>существующий Run не исчезает;</li>
+<li>критическое действие корректно проходит актуальную authorization check.</li>
+</ol>
+<hr>
+<h1 id="52-фазы-реализации"><a class="anchor" href="#52-фазы-реализации" aria-label="Section link">#</a>52. Фазы реализации</h1><h2 id="фаза-1-org-model"><a class="anchor" href="#фаза-1-org-model" aria-label="Section link">#</a>Фаза 1 — Org Model</h2><ul>
+<li><code>org_unit</code>;</li>
+<li>materialized path;</li>
+<li>CRUD;</li>
+<li>проверки циклов;</li>
+<li>перемещение;</li>
+<li>привязка пользователей;</li>
+<li>resource <code>org_unit_id</code>;</li>
+<li>базовые effective visibility tests.</li>
+</ul>
+<hr>
+<h2 id="фаза-2-project-model"><a class="anchor" href="#фаза-2-project-model" aria-label="Section link">#</a>Фаза 2 — Project Model</h2><ul>
+<li><code>workspace_project_org_unit</code>;</li>
+<li><code>workspace_project_member</code>;</li>
+<li>миграция существующих проектов;</li>
+<li>effective project visibility;</li>
+<li>project roles.</li>
+</ul>
+<hr>
+<h2 id="фаза-3-authorization"><a class="anchor" href="#фаза-3-authorization" aria-label="Section link">#</a>Фаза 3 — Authorization</h2><ul>
+<li>visibility;</li>
+<li>use;</li>
+<li>manage;</li>
+<li>administer;</li>
+<li>installation/org-unit/project scopes;</li>
+<li>authorization middleware/gates;</li>
+<li>проверки Execute/Bind/Unbind;</li>
+<li>execution identity.</li>
+</ul>
+<hr>
+<h2 id="фаза-4-triggers"><a class="anchor" href="#фаза-4-triggers" aria-label="Section link">#</a>Фаза 4 — Triggers</h2><ul>
+<li>Trigger scope;</li>
+<li>execution identity;</li>
+<li>authorization Trigger;</li>
+<li>запуск Run;</li>
+<li>повторная проверка permissions;</li>
+<li>аудит.</li>
+</ul>
+<hr>
+<h2 id="фаза-5-human-in-the-loop"><a class="anchor" href="#фаза-5-human-in-the-loop" aria-label="Section link">#</a>Фаза 5 — Human-in-the-loop</h2><ul>
+<li>Human Request;</li>
+<li><code>ask_human</code>;</li>
+<li>recipient resolution;</li>
+<li>communication adapters;</li>
+<li>Matrix;</li>
+<li>Telegram;</li>
+<li>preferred channel;</li>
+<li>fallback;</li>
+<li>waiting/resume;</li>
+<li>timeout/escalation.</li>
+</ul>
+<hr>
+<h2 id="фаза-6-policies"><a class="anchor" href="#фаза-6-policies" aria-label="Section link">#</a>Фаза 6 — Policies</h2><ul>
+<li>наследуемые policies;</li>
+<li>execution limits;</li>
+<li>MCP/model/provider policies;</li>
+<li>human approval policies;</li>
+<li>sandbox/network policies.</li>
+</ul>
+<hr>
+<h2 id="фаза-7-ui"><a class="anchor" href="#фаза-7-ui" aria-label="Section link">#</a>Фаза 7 — UI</h2><ul>
+<li>Org Tree;</li>
+<li>resource availability;</li>
+<li>project memberships;</li>
+<li>user organization;</li>
+<li>Trigger configuration;</li>
+<li>Execution Identity;</li>
+<li>policies;</li>
+<li>effective access visualization.</li>
+</ul>
+<hr>
+<h2 id="фаза-8-migration-amp-cleanup"><a class="anchor" href="#фаза-8-migration-amp-cleanup" aria-label="Section link">#</a>Фаза 8 — Migration &amp; Cleanup</h2><ul>
+<li>сравнение старой и новой модели;</li>
+<li>миграционные проверки;</li>
+<li>отключение старых JSONB-механизмов;</li>
+<li>удаление legacy-полей;</li>
+<li>документация.</li>
+</ul>
+<hr>
+<h1 id="53-критерии-готовности"><a class="anchor" href="#53-критерии-готовности" aria-label="Section link">#</a>53. Критерии готовности</h1><p>Система считается реализованной, если можно воспроизвести следующий сценарий:</p>
+<pre><code class="language-text">Company A
+└── Development
+    └── Platform
+        └── User
+
+Company B
+└── QA
+</code></pre>
+<p>Создан ресурс:</p>
+<pre><code class="language-text">Reviewer Agent
+scope = Company A / Development
+</code></pre>
+<p>Пользователь Platform его видит и может использовать.</p>
+<p>Пользователь Company B его не видит и не может использовать через прямой API-вызов.</p>
+<p>Создан проект:</p>
+<pre><code class="language-text">Omni
+├── Company A / Development
+└── Company B / QA
+</code></pre>
+<p>Пользователь из обеих областей получает доступ.</p>
+<p>В проект добавлен внешний пользователь через explicit membership.</p>
+<p>Создан Trigger:</p>
+<pre><code class="language-text">Azure DevOps Pull Request
+        ↓
+Reviewer
+        ↓
+Execution Identity = PR Reviewer
+</code></pre>
+<p>Webhook запускает Run.</p>
+<p>Run использует только ресурсы, разрешённые execution identity.</p>
+<p>Reviewer обнаруживает недостаток контекста и вызывает:</p>
+<pre><code class="language-text">ask_human
+</code></pre>
+<p>Система:</p>
+<ol>
+<li>определяет допустимого получателя;</li>
+<li>смотрит настройки пользователя;</li>
+<li>отправляет запрос через Matrix или Telegram;</li>
+<li>переводит Run в <code>waiting_for_human</code>;</li>
+<li>получает ответ;</li>
+<li>возобновляет Run;</li>
+<li>передаёт ответ агенту;</li>
+<li>завершает Run.</li>
+</ol>
+<p>В Temporality при этом видна единая траектория:</p>
+<pre><code class="language-text">trigger
+  ↓
+run.created
+  ↓
+agent execution
+  ↓
+human.requested
+  ↓
+human.delivered
+  ↓
+waiting_for_human
+  ↓
+human.response_received
+  ↓
+run.resumed
+  ↓
+run.completed
+</code></pre>
+<p>Все изменения оргструктуры, membership, ролей, bindings, Trigger и execution identity аудируются.</p>
+<h1 id="54-архитектурные-ограничения-первой-версии"><a class="anchor" href="#54-архитектурные-ограничения-первой-версии" aria-label="Section link">#</a>54. Архитектурные ограничения первой версии</h1><p>Чтобы не превратить первую реализацию в полноценную IAM-платформу, явно <strong>не реализовывать</strong>:</p>
+<ul>
+<li>deny rules;</li>
+<li>сложные ACL;</li>
+<li>произвольные пользовательские permission sets;</li>
+<li>полноценную матричную оргструктуру;</li>
+<li>автоматическую синхронизацию с HR;</li>
+<li>SCIM;</li>
+<li>федерацию организаций;</li>
+<li>сложную иерархию внешних компаний;</li>
+<li>автоматический выбор произвольного человека на основании LLM;</li>
+<li>сложные workflow согласований.</li>
+</ul>
+<p>При этом архитектура должна оставлять возможность добавить эти возможности позднее без переделки базовой модели.</p>
+<h1 id="55-ключевой-принцип-архитектуры"><a class="anchor" href="#55-ключевой-принцип-архитектуры" aria-label="Section link">#</a>55. Ключевой принцип архитектуры</h1><p>Все механизмы должны сходиться к одной модели:</p>
+<pre><code class="language-text">                    ┌──────────────┐
+                    │  Org Units   │
+                    └──────┬───────┘
+                           │
+             ┌─────────────┼─────────────┐
+             ▼             ▼             ▼
+         Resources      Projects       Policies
+             │             │             │
+             └─────────────┼─────────────┘
+                           ▼
+                         User
+                           │
+                           ▼
+                     Authorization
+                           │
+             ┌─────────────┴─────────────┐
+             ▼                           ▼
+        Manual Run                  Trigger Run
+                                         │
+                                         ▼
+                                Execution Identity
+                                         │
+                                         ▼
+                                      Agent Run
+                                         │
+                              ┌──────────┴──────────┐
+                              ▼                     ▼
+                           Tools              Human Request
+                                                    │
+                                                    ▼
+                                           Matrix / Telegram / ...
+</code></pre>
+<p><strong>Org Unit определяет область наследования.
+Project определяет область совместной работы.
+Role определяет полномочия.
+Policy определяет ограничения.
+Execution Identity определяет права автоматической операции.
+Authorization принимает окончательное решение.
+Temporality фиксирует контекст и историю этого решения.</strong></p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="living-skills.html"><small>← Назад</small><strong>Living Skills — эволюционирующие capabilities в Temporality</strong></a>
+    <a class="pager-next" href="perf-audit-plan.html"><small>Далее →</small><strong>План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

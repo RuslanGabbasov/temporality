@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Федеративная аутентификация и провижининг пользователей (Auth Federation) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/auth-federation.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row active" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Федеративная аутентификация и провижининг пользователей (Auth Federation)</h1>
+
+<p>Дата: 2026-10-16. Отвечает на блокер «500 пользователей»: список, структура,
+массовые операции, синхронизация с корпоративными каталогами и интеграция с
+корпоративной аутентификацией (Keycloak, AD / LDAP, IdP по SAML/OIDC).</p>
+<hr>
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Подключить Temporality к корпоративной аутентификации <strong>одним интеграционным
+слоем навсегда</strong>: независимо от того, что стоит у заказчика — Keycloak, Active
+Directory, ADFS, Entra ID или зоопарк из нескольких IdP — на нашей стороне код
+не меняется.</p>
+<p>Ключевой принцип документа: <strong>ядро говорит только на OIDC.</strong> Всё остальное —
+протоколы, маппинг атрибутов, ротацию сертификатов, quirks конкретных IdP —
+решает либо существующий IdP заказчика, либо identity-брокер (Authentik,
+Keycloak), подключённый рядом как конфигурация, а не как наш код.</p>
+<p>Второй принцип: <strong>список пользователей — проекция IdP, а не мастер-копия.</strong>
+Пользователи появляются при первом входе (JIT-provisioning), роли и
+подразделения выводятся из клеймов по редактируемой таблице маппинга,
+исчезновение из каталога деактивирует учётную запись. Ручное заведение сотен
+записей исчезает как класс.</p>
+<hr>
+<h2 id="2-проблематика-текущего-состояния"><a class="anchor" href="#2-проблематика-текущего-состояния" aria-label="Section link">#</a>2. Проблематика текущего состояния</h2><ul>
+<li><strong>Аутентификация только локальная.</strong> <code>controlplane.Gate</code> принимает
+статические env-токены, токены workspace-пользователей из БД и внутренний
+loopback-токен; <code>POST /v1/auth/login</code> — локальный name-or-email + bcrypt.
+SSO нет вообще.</li>
+<li><strong>Провижининг ручной.</strong> Пользователи создаются по одному через UI/API.
+500 пользователей = 500 ручных записей; при увольнениях и переходах
+актуальность списка никто не поддерживает.</li>
+<li><strong>Список не масштабируется.</strong> <code>ListUsers</code> возвращает всех пользователей
+без пагинации, поиска и фильтров; UI рендерит всё сразу.</li>
+<li><strong>Нет массовых операций.</strong> Ни смены роли группе, ни деактивации списка,
+ни импорта.</li>
+<li><strong>Секреты IdP негде хранить.</strong> Скоро появится client secret — ему место в
+существующем контуре секретов (<code>docs/secrets-management.md</code>), а не в
+конфиг-файле рядом с кодом.</li>
+</ul>
+<hr>
+<h2 id="3-принцип-один-протокол-на-нашей-стороне"><a class="anchor" href="#3-принцип-один-протокол-на-нашей-стороне" aria-label="Section link">#</a>3. Принцип: один протокол на нашей стороне</h2><h3 id="31-разделение-проблем"><a class="anchor" href="#31-разделение-проблем" aria-label="Section link">#</a>3.1. Разделение проблем</h3><p>Вопрос «интеграция с корпоративной аутентификацией» — это три разные
+проблемы с разными решениями:</p>
+<table>
+<thead>
+<tr>
+<th>Проблема</th>
+<th>Решение</th>
+<th>Где живёт</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Аутентификация (кто ты)</td>
+<td>OIDC: Authorization Code + PKCE</td>
+<td>Один слой в ядре</td>
+</tr>
+<tr>
+<td>Зоопарк протоколов (LDAP, SAML, несколько IdP)</td>
+<td>Identity-брокер перед нами</td>
+<td>Конфигурация стенда, не наш код</td>
+</tr>
+<tr>
+<td>Провижининг (создание/жизненный цикл, 500 юзеров)</td>
+<td>JIT + reconcile</td>
+<td>Небольшой слой в ядре</td>
+</tr>
+</tbody></table>
+<h3 id="32-топологии-один-и-тот-же-код"><a class="anchor" href="#32-топологии-один-и-тот-же-код" aria-label="Section link">#</a>3.2. Топологии — один и тот же код</h3><ol>
+<li><strong>Малая команда без IdP.</strong> Как сегодня: локальные пароли/токены, ноль
+конфигурации. SSO просто не настроен.</li>
+<li><strong>Корпорация с OIDC-IdP</strong> (Keycloak, Entra ID, Okta, Google). Temporality —
+обычный OIDC-клиент этого IdP. Брокер не нужен.</li>
+<li><strong>Корпорация с AD/LDAP или смешанной средой.</strong> Рядом ставится брокер
+(рекомендуем Authentik, см. §10), который федерит источники и предъявляет
+нам единый OIDC. Вся боль LDAP-схем, SAML-метаданных и сертификатов — в
+его админке.</li>
+</ol>
+<h3 id="33-чего-сознательно-нет-в-ядре"><a class="anchor" href="#33-чего-сознательно-нет-в-ядре" aria-label="Section link">#</a>3.3. Чего сознательно нет в ядре</h3><ul>
+<li><strong>Коннекторов LDAP/SAML в нашем коде.</strong> SAML — XML, метаданные, различия
+ADFS/Okta/Ping; LDAP — своя схема у каждого каталога, и он плохо дружит с
+API-аутентификацией. Всё это уже решено брокерами; каждый нативный
+коннектор — это матрица тестов × IdP навсегда.</li>
+<li><strong>OAuth2-proxy / auth-proxy-сайдкары.</strong> API потребляют наш SPA и агенты
+напрямую; валидация на Gate чище и универсальнее, чем доверять заголовкам
+прокси.</li>
+<li><strong>Хранения корпоративных паролей.</strong> При включённом SSO локальный пароль
+остаётся только у break-glass админа (§5.6).</li>
+<li><strong>SCIM-сервера в первых фазах.</strong> Дорого ради того, что JIT закрывает
+бесплатно; фаза 3, только по требованию реального заказчика.</li>
+</ul>
+<hr>
+<h2 id="4-основные-понятия"><a class="anchor" href="#4-основные-понятия" aria-label="Section link">#</a>4. Основные понятия</h2><ul>
+<li><strong>IdP (Identity Provider)</strong> — система, аутентифицирующая пользователя и
+выдающая токены: Keycloak, Entra ID, ADFS, Authentik.</li>
+<li><strong>Identity-брокер</strong> — сервис-прослойка (Authentik, Keycloak), который
+федерит несколько источников (LDAP, SAML, OIDC) и предъявляет приложению
+один OIDC-интерфейс.</li>
+<li><strong>OIDC</strong> — протокол поверх OAuth2: <code>authorization_code</code> + PKCE для
+браузерных клиентов; идентификация по <code>id_token</code> (JWT), ключи IdP — JWKS.</li>
+<li><strong>JIT-provisioning</strong> — создание записи <code>workspace_user</code> при первом
+успешном входе: IdP уже подтвердил личность, нам остаётся связать её с
+внутренней моделью.</li>
+<li><strong>External identity</strong> — пара (<code>issuer</code>, <code>subject</code> из клеймов) —
+единственный ключ связи пользователя с IdP; хранится в
+<code>workspace_user.external_id</code> / <code>external_issuer</code>.</li>
+<li><strong>Маппинг клеймов</strong> — редактируемая таблица «значение клейма → роль
+Temporality / подразделение». Продуктовая логика Temporality, о которой
+брокер не знает.</li>
+</ul>
+<hr>
+<h2 id="5-архитектура-аутентификации"><a class="anchor" href="#5-архитектура-аутентификации" aria-label="Section link">#</a>5. Архитектура аутентификации</h2><h3 id="51-поток-входа-spa-authorization-code-pkce"><a class="anchor" href="#51-поток-входа-spa-authorization-code-pkce" aria-label="Section link">#</a>5.1. Поток входа SPA (Authorization Code + PKCE)</h3><pre><code>SPA ──1. GET /v1/auth/oidc/start ──────────────► ядро
+      ◄─ 2. 302 {issuer}/authorize?client_id&amp;PKCE&amp;state&amp;nonce
+SPA ──3. логин на IdP/брокере (AD/Keycloak/…)
+IdP ──4. 302 redirect /v1/auth/oidc/callback?code&amp;state ──► ядро
+      ядро: 5. обмен code на токены (backchannel)
+            6. валидация id_token (issuer, aud, nonce, подпись по JWKS)
+            7. JIT + маппинг (§6) + аудит входа
+      ◄─ 8. Set-Cookie: httpOnly-сессия; 302 в SPA
+SPA ──9. дальше все запросы с cookie-сессией
+</code></pre>
+<p>Ядро — единственная сторона, знающая client secret; SPA секретов не видит.
+<code>state</code>/<code>nonce</code> одноразовые, живут в коротком окне в store (таблица
+<code>auth_request</code> или переиспользуемый кэш с TTL).</p>
+<h3 id="52-сессии"><a class="anchor" href="#52-сессии" aria-label="Section link">#</a>5.2. Сессии</h3><ul>
+<li>Таблица <code>auth_session</code>: id (случайный, ≥256 бит), user_id, created_at,
+last_seen_at, expires_at, ip, user_agent. Cookie <code>tm_session</code> — httpOnly,
+SameSite=Lax, Secure за TLS.</li>
+<li>TTL доступа 12 ч, скользящее продление; абсолютный потолок 7 дней, после
+которого — повторный вход через IdP.</li>
+<li>Выход: <code>POST /v1/auth/logout</code> — удаление сессии + (опционально) redirect на
+<code>end_session_endpoint</code> IdP.</li>
+<li>SSE/EventSource работают с cookie автоматически (same-origin) — хак
+<code>?token=</code> остаётся только для статических токенов API.</li>
+</ul>
+<h3 id="53-gate-четвёртый-тип-принципала"><a class="anchor" href="#53-gate-четвёртый-тип-принципала" aria-label="Section link">#</a>5.3. Gate: четвёртый тип принципала</h3><p><code>Gate.Authenticate</code> сейчас различает env-токены, DB-токены и loopback.
+Добавляется проверка cookie-сессии: валидная сессия → <code>Principal</code> из
+<code>workspace_user</code> по тому же пути, что <code>PrincipalForUser</code>
+(<code>workspace/tokens.go</code>) — роли, проекты, орг-цепочка переиспользуются как
+есть. Порядок проверки: env/DB Bearer → loopback → сессия. JWT-валидация
+на каждый запрос не нужна: токен проверяется один раз при обмене <code>code</code>,
+далее живёт наша сессия.</p>
+<p>Опционально (фаза 2+) — приём access-токенов IdP как Bearer (валидация по
+JWKS) для не-браузерных клиентов, которым выдаёт токены сам IdP. Для CLI и
+агентов по умолчанию остаются статические/DB токены: они уже есть и не требуют
+участия человека.</p>
+<h3 id="54-jit-и-клеймы"><a class="anchor" href="#54-jit-и-клеймы" aria-label="Section link">#</a>5.4. JIT и клеймы</h3><p>Минимальный контракт клеймов: <code>sub</code> (обязателен), <code>preferred_username</code> или
+<code>email</code> (имя для отображения), опционально <code>groups</code> / <code>roles</code> (массив или
+строка — нормализуем). Нестандартные имена клеймов настраиваются в
+конфиге IdP-подключения (§5.5).</p>
+<h3 id="55-idp-конфигурация"><a class="anchor" href="#55-idp-конфигурация" aria-label="Section link">#</a>5.5. IdP конфигурация</h3><p>Таблица <code>auth_idp_config</code> (фаза 1 — одна запись):</p>
+<ul>
+<li><code>enabled</code>, <code>issuer</code>, <code>client_id</code>, <code>client_secret_ref</code> — секрет как
+reference в контуре <code>docs/secrets-management.md</code> (<code>secret://…</code>), значение
+разрешается на границе использования;</li>
+<li><code>display_name</code> (кнопка «Войти через …»), <code>scopes</code> (по умолчанию
+<code>openid profile email</code>);</li>
+<li><code>claim_names</code> — переопределения имён клеймов (groups/username/email);</li>
+<li><code>default_role</code> для JIT-пользователей без маппингов (<code>reader</code>;
+вариант <code>deny</code> — вход успешен, доступ запрещён до ручного маппинга);</li>
+<li><code>jit_enabled</code> (bool) — можно ли создавать пользователей автоматически;</li>
+<li>discovery по <code>{issuer}/.well-known/openid-configuration</code>, JWKS-кэш с
+refresh по <code>cache-control</code> / при неизвестном <code>kid</code> (ротация ключей без
+рестарта ядра).</li>
+</ul>
+<p>Редактирование — admin-only API + UI, изменение пишет аудит-событие.</p>
+<h3 id="56-break-glass"><a class="anchor" href="#56-break-glass" aria-label="Section link">#</a>5.6. Break-glass</h3><p>Локальный вход паролем не отключается, а ограничивается: при включённом SSO
+он остаётся доступен только пользователям с ролью admin. Это спасает при
+недоступности IdP. У admin-пользователя локальный пароль задаётся заранее.
+Пароль SSO-пользователя без локального он может установить сам
+(<code>POST /v1/auth/password</code> с пустым текущим) — принципал уже аутентифицирован
+IdP, повторной проверки нечему проводить.</p>
+<hr>
+<h2 id="6-провижининг-и-жизненный-цикл"><a class="anchor" href="#6-провижининг-и-жизненный-цикл" aria-label="Section link">#</a>6. Провижининг и жизненный цикл</h2><h3 id="61-создание-jit"><a class="anchor" href="#61-создание-jit" aria-label="Section link">#</a>6.1. Создание: JIT</h3><p>Первый успешный вход:</p>
+<ol>
+<li>Ищем <code>workspace_user</code> по (<code>external_issuer</code>, <code>external_id</code>).</li>
+<li>Не нашли и <code>jit_enabled</code> → создаём: имя/email из клеймов, роль =
+<code>default_role</code>, <code>sourced=&#39;federated&#39;</code>, активен. Аудит-событие
+<code>auth.user.jit_created</code>.</li>
+<li>Нашли → обновляем имя/email из клеймов (руками их больше не правят),
+проверяем активность.</li>
+</ol>
+<h3 id="62-роли-и-подразделения-маппинг-клеймов"><a class="anchor" href="#62-роли-и-подразделения-маппинг-клеймов" aria-label="Section link">#</a>6.2. Роли и подразделения: маппинг клеймов</h3><p>Таблица <code>auth_claim_mapping</code> (<code>claim</code>, <code>value</code>, <code>install_role</code>,
+<code>org_unit_id</code>): правило «если в клеймах есть значение — дать роль /
+привязать к подразделению».</p>
+<ul>
+<li>Эффективная инсталляционная роль = максимум по всем сработавшим правилам,
+но не ниже <code>default_role</code>; орг-привязка — последнее сработавшее правило
+(при конфликте правит админ вручную, событие в аудите).</li>
+<li><code>install_role</code> может быть пустым — правило только привязывает
+подразделение (сотрудник отдела), роль возьмётся из другого правила.</li>
+<li>Маппинги редактируются в UI (admin) и применяются при каждом входе:
+смена группы в каталоге → смена роли при следующем логине. Ручная смена
+роли у <code>sourced=&#39;federated&#39;</code> пользователя запрещена (аудит объяснит, из
+какой группы пришла роль).</li>
+<li>Дополнительные роли на подразделениях (<code>org_unit_roles</code>) остаются
+ручными — Temporality-специфика.</li>
+</ul>
+<h3 id="63-деактивация-reconcile"><a class="anchor" href="#63-деактивация-reconcile" aria-label="Section link">#</a>6.3. Деактивация: reconcile</h3><p>Раз в час (настраиваемо) — фоновая задача:</p>
+<ol>
+<li>Пользователи <code>sourced=&#39;federated&#39;</code> со <code>last_login_at</code> старше порога
+(по умолчанию 30 дней) перепроверяются у IdP (если есть userinfo/introspection
+или групповый клейм недоступен — помечаются кандидатами на деактивацию).</li>
+<li>Исчезнувший из каталога (по groups-клейму или явному ответу IdP) →
+<code>active=false</code>, аудит <code>auth.user.deactivated</code>, сессии гасятся.</li>
+<li>Удаление не выполняется никогда: на пользователей ссылаются раны,
+аудит, inbound-сообщения. Реактивация — повторным входом.</li>
+</ol>
+<p>Практика: пока IdP не отдаёт групповое членство по API, reconcile
+ограничивается expire-политикой сессий и ручной деактивацией — это честно
+фиксируется в критериях фазы 2.</p>
+<h3 id="64-локальные-поля"><a class="anchor" href="#64-локальные-поля" aria-label="Section link">#</a>6.4. Локальные поля</h3><p>Каналы уведомлений, preferred channel, подписи в чатах остаются локальными
+полями <code>workspace_user</code>, ключ — <code>external_id</code>. Прямое редактирование
+федеративных полей (имя/email/роль) в UI скрывается.</p>
+<hr>
+<h2 id="7-модель-данных"><a class="anchor" href="#7-модель-данных" aria-label="Section link">#</a>7. Модель данных</h2><p>Миграции (следующие номера: 000067+):</p>
+<ul>
+<li><strong>000067 <code>auth_oidc</code></strong>:<ul>
+<li><code>auth_idp_config</code> — см. §5.5, одна строка (<code>id=1</code>).</li>
+<li><code>auth_session</code> — сессии (§5.2).</li>
+<li><code>auth_request</code> — одноразовые state/nonce (TTL-очистка).</li>
+</ul>
+</li>
+<li><strong>000068 <code>auth_claim_mapping</code></strong> — маппинги клеймов.</li>
+<li><strong>000069 <code>workspace_user_federation</code></strong>:<ul>
+<li><code>external_issuer</code>, <code>external_id</code> (уникальная пара, NULL для локальных);</li>
+<li><code>sourced</code> (<code>local</code> | <code>federated</code>);</li>
+<li><code>last_login_at</code>.</li>
+</ul>
+</li>
+</ul>
+<p>Secret для <code>client_secret_ref</code> — обычный Secret ресурс
+(<code>docs/secrets-management.md</code> §3): значение разрешается ядром на границе
+использования — та же механика, что у креденшелов провайдеров моделей
+(<code>resolveProviderAPIKey</code>).</p>
+<hr>
+<h2 id="8-api"><a class="anchor" href="#8-api" aria-label="Section link">#</a>8. API</h2><ul>
+<li><code>GET /v1/workspace/auth/config</code> (admin) / <code>PUT</code> — конфиг IdP; <code>GET</code>
+возвращает всё, кроме значения секрета.</li>
+<li><code>POST /v1/workspace/auth/config/test</code> — проверка discovery + JWKS
+доступности (без полного логина).</li>
+<li><code>GET /v1/auth/oidc/start</code> — редирект на IdP (генерирует state/nonce).</li>
+<li><code>GET /v1/auth/oidc/callback</code> — обмен кода, создание сессии, редирект в SPA.</li>
+<li><code>POST /v1/auth/logout</code> — выход (сессия + опционально end_session IdP).</li>
+<li><code>GET /v1/auth/methods</code> — какие способы входа доступны (sso: вкл/выкл,
+display_name; local: вкл/выкл) — для экрана логина.</li>
+<li>Пагинация пользователей: <code>GET /v1/workspace/users</code> получает <code>q</code>, <code>role</code>,
+<code>org_unit</code>, <code>active</code>, <code>limit/offset</code> (+ <code>order</code>), ответ — <code>{users, total}</code>.
+Массовые операции (admin): <code>POST /v1/workspace/users/bulk</code> —
+<code>{action: activate|deactivate|set_role, ids: […]}</code>.</li>
+</ul>
+<p>Все новые события пишутся в access audit (<code>auth.login.succeeded</code>,
+<code>auth.login.failed</code>, <code>auth.user.jit_created</code>, <code>auth.user.deactivated</code>,
+<code>auth.config.updated</code>, <code>auth.logout</code>).</p>
+<hr>
+<h2 id="9-ui"><a class="anchor" href="#9-ui" aria-label="Section link">#</a>9. UI</h2><ul>
+<li><strong>Экран входа</strong>: кнопка «Войти через {display_name}» (если SSO включён) +
+локальный вход (admin break-glass или SSO выключен). Источник —
+<code>/v1/auth/methods</code>.</li>
+<li><strong>Onboarding</strong>: опциональный шаг «Подключить корпоративный SSO» после
+создания первого проекта — как чек-лист с проверкой discovery, не блокирует
+онбординг.</li>
+<li><strong>Страница Users</strong>: пагинация/поиск/фильтры (роль, подразделение,
+активность, источник local/federated); массовые операции чекбоксами;
+редактирование маппингов клеймов отдельным блоком (таблица правил) с
+кнопкой «проверить на текущем пользователе».</li>
+<li><strong>Настройки SSO</strong> (admin): форма конфига IdP, статус (discovery ок, JWKS
+обновлены), тестовый логин.</li>
+<li>SPA после OIDP-входа работает на cookie-сессии; <code>authHeaders()</code> в
+<code>debugger/src/api.ts</code> остаётся для переходного периода (статические токены).</li>
+</ul>
+<hr>
+<h2 id="10-брокеры-что-рекомендовать"><a class="anchor" href="#10-брокеры-что-рекомендовать" aria-label="Section link">#</a>10. Брокеры: что рекомендовать</h2><table>
+<thead>
+<tr>
+<th></th>
+<th>Когда</th>
+<th>Почему</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Authentik</strong></td>
+<td>Дефолт для стендов без готового IdP</td>
+<td>Лёгкий, простая админка, из коробки федерит LDAP/SAML/OIDC-источники с шедульным синком, MIT</td>
+</tr>
+<tr>
+<td><strong>Keycloak</strong></td>
+<td>Корпоративный стандарт «только утверждённый софт»</td>
+<td>Часто уже развёрнут — тогда брокер не нужен вовсе; JVM/тяжелее, но админы его знают</td>
+</tr>
+<tr>
+<td><strong>Zitadel</strong></td>
+<td>Go-стек, мультитенантность</td>
+<td>Технически хорош, в корпорациях менее заезжен</td>
+</tr>
+</tbody></table>
+<p>Мы не тащим брокера в свой compose как обязательность: дефолт — «подключите
+к вашему IdP», опция — «вот готовый Authentik рядом» (пример compose-профиля
+в docs, не в основном стеке).</p>
+<h3 id="101-dev-стенд-с-authentik"><a class="anchor" href="#101-dev-стенд-с-authentik" aria-label="Section link">#</a>10.1. Dev-стенд с Authentik</h3><p><code>docker-compose.authentik.yml</code> в корне репозитория — опциональный спутник
+для приёмки SSO на дев-стенде: свой postgres/valkey, своя сеть, к стеку
+Temporality не привязан вовсе. Запуск:</p>
+<pre><code class="language-bash">docker compose -f docker-compose.authentik.yml up -d
+# админка: http://localhost:9000 (akadmin; пароль — в логах server при
+# первом старте: grep &quot;Generated password&quot;)
+</code></pre>
+<p>Дальше в админке Authentik:</p>
+<ol>
+<li><strong>Applications → Create → Web application</strong>: redirect URI
+<code>&lt;origin стенда&gt;/kernel-api/v1/auth/oidc/callback</code>.</li>
+<li>Скопировать client id/secret в Temporality: issuer
+<code>http://localhost:9000/application/o/&lt;slug&gt;/</code>, client secret — через
+secret reference (<code>secret://authentik/client</code>).</li>
+<li>Клеймы: Authentik из коробки отдаёт <code>preferred_username</code> и <code>email</code> —
+дефолты конфига Temporality менять не нужно.</li>
+</ol>
+<p>Фаза 1 принимает стенд и с Keycloak: с точки зрения ядра это тот же
+OIDC-флоу, меняется только issuer.</p>
+<hr>
+<h2 id="11-безопасность-и-аудит"><a class="anchor" href="#11-безопасность-и-аудит" aria-label="Section link">#</a>11. Безопасность и аудит</h2><ul>
+<li><strong>Токены</strong>: подписи RS256/ES256 (<code>none</code>/HS256 с открытым ключом —
+отвергаются), проверка <code>iss</code>, <code>aud</code>, <code>exp</code> (clock skew ±60 c), <code>nonce</code>.</li>
+<li><strong>JWKS</strong>: кэш с TTL, принудительный refresh при неизвестном <code>kid</code> —
+ротация ключей IdP не требует рестарта ядра.</li>
+<li><strong>Секреты</strong>: client secret только через secret reference; в событиях и
+логах — редация по контуру secrets-management.</li>
+<li><strong>Сессии</strong>: httpOnly + Secure + SameSite; CSRF — SameSite=Lax + проверка
+Origin на мутирующих запросах; logout Everywhere при деактивации.</li>
+<li><strong>Аудит</strong>: все события §8; события входа содержат issuer, способ (sso/
+local), результат.</li>
+</ul>
+<hr>
+<h2 id="12-фазы"><a class="anchor" href="#12-фазы" aria-label="Section link">#</a>12. Фазы</h2><h3 id="фаза-1-oidc-вход-и-jit-закрывает-sso-блокер"><a class="anchor" href="#фаза-1-oidc-вход-и-jit-закрывает-sso-блокер" aria-label="Section link">#</a>Фаза 1 — OIDC-вход и JIT (закрывает SSO-блокер)</h3><ol>
+<li>Миграции 000067–000069.</li>
+<li><code>coreos/go-oidc</code> (+ <code>golang-jwt</code>): discovery, обмен code, валидация
+id_token, JWKS-кэш.</li>
+<li>Сессии + cookie в <code>Gate.Authenticate</code>; logout.</li>
+<li>JIT + <code>default_role</code>; <code>auth/methods</code>; экран входа SPA.</li>
+<li>Admin API конфига IdP; client secret через secret reference.</li>
+<li>Dev-стенд: Authentik в отдельном compose-профиле для приёмки.</li>
+</ol>
+<h3 id="фаза-2-жизненный-цикл-и-масштаб-закрывает-500-пользователей"><a class="anchor" href="#фаза-2-жизненный-цикл-и-масштаб-закрывает-500-пользователей" aria-label="Section link">#</a>Фаза 2 — жизненный цикл и масштаб (закрывает «500 пользователей»)</h3><ol>
+<li>Пагинация/поиск/фильтры <code>ListUsers</code> + UI-таблица.</li>
+<li>Массовые операции (activate/deactivate/set_role).</li>
+<li>Маппинг клеймов → роли/подразделения + UI редактора.</li>
+<li>Reconcile-деактивация (порог last_login + группы, когда IdP даёт).</li>
+<li>CSV-импорт как переходный путь до включения SSO у заказчика.</li>
+<li>Локальные поля — только у локальных пользователей; у федеративных —
+только каналы.</li>
+</ol>
+<h3 id="фаза-3-enterprise-хвосты-по-требованию"><a class="anchor" href="#фаза-3-enterprise-хвосты-по-требованию" aria-label="Section link">#</a>Фаза 3 — enterprise-хвосты (по требованию)</h3><ol>
+<li>Приём access-токенов IdP как Bearer на Gate (JWKS-валидация на запрос).</li>
+<li>SCIM 2.0 server (users/groups) — pre-provisioning без JIT.</li>
+<li>Несколько IdP одновременно (мультистрочность <code>auth_idp_config</code>).</li>
+<li>Нативный SAML-SP через <code>crewjam/saml</code> — только под конкретного заказчика
+без права поставить брокера.</li>
+</ol>
+<hr>
+<h2 id="13-критерии-готовности"><a class="anchor" href="#13-критерии-готовности" aria-label="Section link">#</a>13. Критерии готовности</h2><h3 id="фаза-1"><a class="anchor" href="#фаза-1" aria-label="Section link">#</a>Фаза 1</h3><ul>
+<li>Вход через Keycloak и через Authentik (за LDAP-источником) на dev-стенде;
+пользователь создаётся при первом входе, роль = default_role.</li>
+<li>Повторный вход того же пользователя не создаёт дубль (ключ
+issuer+external_id).</li>
+<li>Сессия: TTL, logout, недоступность IdP не роняет уже выданные сессии
+(только новые входы).</li>
+<li>Локальный вход при включённом SSO работает только для admin.</li>
+<li>События входа в аудите; client secret не появляется ни в событиях, ни в
+ответах API.</li>
+<li>SSO выключен → система полностью как раньше (обратная совместимость).</li>
+</ul>
+<h3 id="фаза-2"><a class="anchor" href="#фаза-2" aria-label="Section link">#</a>Фаза 2</h3><ul>
+<li>500+ пользователей: список открывается &lt; 1 c (пагинация), поиск по
+имени/email, фильтры работают.</li>
+<li>Массовая деактивация 50 пользователей — одна операция с аудит-записью.</li>
+<li>Смена группы в каталоге меняет роль при следующем входе (приёмка на
+Authentik: перенесли пользователя в группу → перелогин → роль обновилась).</li>
+<li>Ручная смена роли федеративного пользователя в UI невозможна.</li>
+</ul>
+<h3 id="фаза-3"><a class="anchor" href="#фаза-3" aria-label="Section link">#</a>Фаза 3</h3><ul>
+<li>Access-токен IdP принимается как Bearer для API-вызова (без сессии).</li>
+<li>SCIM-create пользователя появляется в списке до первого входа.</li>
+<li>Два IdP одновременно: выбор на экране входа.</li>
+</ul>
+<hr>
+<h2 id="14-открытые-вопросы"><a class="anchor" href="#14-открытые-вопросы" aria-label="Section link">#</a>14. Открытые вопросы</h2><ul>
+<li>Отдаёт ли целевой IdP групповое членство в клеймах (или нужен
+userinfo/groups API) — определяет честность reconcile в фазе 2.</li>
+<li>Нужен ли <code>prompt=login</code> для критичных операций (re-auth перед сменой
+auth-конфига) — или достаточно текущей сессии + аудита.</li>
+<li>Мультиарендность (несколько организаций на одной установке) — пока вне
+поля; конфиг IdP на установку один.</li>
+</ul>
+<hr>
+<h2 id="15-архитектурные-ограничения"><a class="anchor" href="#15-архитектурные-ограничения" aria-label="Section link">#</a>15. Архитектурные ограничения</h2><ul>
+<li>Ядро не реализует LDAP- и SAML-коннекторы; единственный протокол
+федерации — OIDC. Изменение этого решения — отдельная спека с
+обоснованием под конкретного заказчика.</li>
+<li>Провижининг без Broker-specific кода: только стандартные OIDC-клеймы и
+редактируемый маппинг; SCIM — отдельная фаза, не подмешивается в ядро.</li>
+<li>Пользователи не удаляются физически; деактивация — единственный путь
+вывода из строя (целостность аудита и ранов).</li>
+<li>Client secret и прочие креденшалы федерации живут только в контуре
+secrets-management (reference, redaction); plaintext-секреты в конфиг-таблицах
+запрещены.</li>
+<li>Cookie-сессии не заменяют статические токены для машинных клиентов
+(триггеры, CLI, агенты) — это параллельные механизмы одного Gate.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="artifact-registry.html"><small>← Назад</small><strong>Реестр артефактов (Artifact Registry)</strong></a>
+    <a class="pager-next" href="builtin-skills.html"><small>Далее →</small><strong>Предустановленные скилы: офисный пакет (builtin skills)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

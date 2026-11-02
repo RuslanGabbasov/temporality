@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Temporality Roadmap — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/ROADMAP.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row active" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Temporality Roadmap</h1>
+
+<h2 id="status-october-2026"><a class="anchor" href="#status-october-2026" aria-label="Section link">#</a>Status: October 2026</h2><h3 id="done-p0"><a class="anchor" href="#done-p0" aria-label="Section link">#</a>Done (P0)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Kernel P0</strong> — failure/reconciliation, duplicate mitigation, cost accounting, quotas, secrets, runbook</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Live MCP E2E</strong> — test-mcp in image, sandbox volume, KERNEL_MCP_TEST_ROOT, approval flow</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Journal endpoints</strong> — state-at-T, diff, activation chain, run state-at-T, compare runs</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Workspace refactor</strong> — agents top-level, providers CRUD, users CRUD with DB tokens</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Experience Priming</strong> — unified engine <code>observation.FindHints</code> (individual ranking, lifecycle gating, budgets 600/120/8, dedup/diversity, skill-context novelty B5, outcome usefulness B4, issued suppression), benchmark corpus in CI (see docs/plan-priming-relevance.md)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Carbon Design System</strong> — full integration, dark theme, proper input styles</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Workspace chat</strong> — SSE streaming, conversation history, Markdown rendering, agent selector on new chat</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Operations page</strong> — human-readable tool display, verdict buttons, pending badge</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Runs trace</strong> — rich event timeline with arguments/output, color-coded icons</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Memory Lens filters</strong> — strength, recency, activated, cross-scope, terminal state, presets</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Experience Timeline</strong> — SVG, scopes, lifecycle, zoom, semantic zoom, detail panel</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Pending badges</strong> — Operations (uncertain ops) and Runs (approval requests) on nav bar</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Sandbox network</strong> — agent network_access wired to Docker --network=bridge</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Read-only tools</strong> — read_file/search/grep no longer flagged as uncertain operations</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Task reuse</strong> — follow-up chat messages reuse same task, not creating new ones</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Tool arguments in traces</strong> — tool.started has arguments, tool.completed has output</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Cost accounting v1</strong> — model prices, per-call costs (per-run/project aggregation pending)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Trace informativeness pass</strong> — delegation/knowledge/hint/plan rows resolve propositions and agent ids instead of guids; delegate tool previews target agent + prompt gist; MCP completions show result size; agent summaries show the answer</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Live model-call progress in Runs</strong> — in-flight «Вызов модели» row shows elapsed time, ~tokens, tok/s and stream liveness (alive/stalled/waiting first token) from the ephemeral token SSE at 1Hz</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>First-run bootstrap</strong> — fresh installs configure themselves in the wizard: migration list fix (intake_enabled), gate hardening (internal loopback token never enables auth; first created user does), auto-generated secret master key persisted to <code>workspace_setting</code> with env override, runtime-swappable sandbox runner with <code>GET /v1/setup/status</code> + <code>POST /v1/setup/sandbox/build</code> (digest-pinned embedded Dockerfile, no restart needed), onboarding now walks project → admin user → provider (secret-backed key) → agent → sandbox build → summary, and hides the main navigation until the first project exists</li>
+</ul>
+<h3 id="done-platform-wave-septoct-2026"><a class="anchor" href="#done-platform-wave-septoct-2026" aria-label="Section link">#</a>Done (Platform wave, Sept–Oct 2026)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Triggers</strong> — schedule (cron), webhook (HTTP endpoint), event listeners; agent tools list/create/update/delete triggers</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Approvals in chat</strong> — approval step for consequential tools, approval badge on Runs tab</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Run cancel</strong> — POST /runs/{id}/cancel + Stop button in chat</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Thinking display</strong> — reasoning stream shown compactly in chat widget</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>i18n</strong> — full EN/RU localization, auto-detect browser language</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Light/dark themes</strong> — OS auto-detect via prefers-color-scheme, persisted choice</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Onboarding wizard</strong> — welcome → project → provider → agent → done, shown on empty workspace</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Project-centric permissions</strong> — allowed_users on projects, per-user project visibility, admin bypass</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Auth gate</strong> — clean token-entry screen for logged-out users</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Design system</strong> — forest/teal/amber identity per DESIGN.md, favicons, consistent dialogs</li>
+</ul>
+<h3 id="done-access-amp-agents-wave-oct-2026"><a class="anchor" href="#done-access-amp-agents-wave-oct-2026" aria-label="Section link">#</a>Done (Access &amp; agents wave, Oct 2026)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Agent definitions &amp; prompt compiler</strong> — structured <code>definition</code> instead of free-form prompts, immutable versions, meaning-first UI, NL agent builder, regenerate with diff, evolution tab (see <code>docs/plan-evaluable-agent.md</code> — complete)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>MCP server registry</strong> — workspace MCP servers (stdio / SSE / Streamable HTTP), agent assignment, per-agent tools panel incl. MCP tools, connection test (<code>POST /v1/workspace/mcp-servers/discover</code> + «Discover tools» in the form)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Conversation branching</strong> — fork a conversation from any point</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Auto run titles</strong> — short run names generated by a lightweight model call (<code>kernel/agent/runtitle.go</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Delegation &amp; plans</strong> — <code>delegate</code> tool (parallel subagents) + <code>plan</code> tool (DAG across agents with predicates); delegation tree and plan graph in Runs and chat (<code>docs/agent-delegation.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Knowledge extraction</strong> — observations/claims extracted from trajectories after run completion, confirmation flow, <code>remember</code> linkage (<code>docs/knowledge-extraction.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Org structure &amp; access model</strong> — org tree with materialized paths, resource binding + effective visibility, project↔units many-to-many, explicit membership, node roles, run authorization, execution identities, unit-scoped triggers, human_request entity with recipient resolution, org policies with restrictive merge — waves A–F of <code>docs/plan-org-structure.md</code></li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Org wave G: migration &amp; cleanup</strong> — old/new access-model divergence report (<code>scripts/access_divergence.sh</code>), dropped the legacy <code>allowed_users</code> / <code>workspace_user.projects</code> columns (migration 000043) and their CRUD round-trips, access-model runbook section (<code>docs/runbook.md</code> §11) — wave G of <code>docs/plan-org-structure.md</code></li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Skills CLI</strong> — <code>temporality skill list/inspect/validate/history/executions/memory</code> against the kernel API (<code>cmd/temporality/</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Org UI tails</strong> — roles-on-nodes editor and execution identities management in Organization tab</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Experiment 9 corpus</strong> — comprehension acceptance fixture <code>debugger/src/fixtures/experiment9-webconfig.json</code> + fold assertions (<code>docs/experiment-9-corpus.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Sandbox security matrix</strong> — matrix doc + args/timeout/credentials/network tests incl. live egress check (<code>docs/sandbox-security-matrix.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Knowledge reinforcement live check</strong> — scenario B of <code>docs/knowledge-evolution.md</code> §11 verified live in <code>smoke-a</code>: deterministic <code>auto/</code> execution observation proposed in run 2, confirmed by <code>execution-reverification.v1</code> in run 3 (<code>scripts/audit_knowledge_live.py</code> → <code>reinforced: 1</code>)</li>
+</ul>
+<h3 id="done-experience-amp-platform-wave-oct-2026"><a class="anchor" href="#done-experience-amp-platform-wave-oct-2026" aria-label="Section link">#</a>Done (Experience &amp; platform wave, Oct 2026)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Web research</strong> — three phases shipped: <code>web_fetch</code> (readability → markdown, SSRF guards), <code>web_search</code> over self-hosted SearXNG with rate limiting, vision (<code>view_image</code> / <code>fetch_image</code>, images as content blocks) and <code>browser</code> — a headless browser over a CDP contract (Lightpanda by default) for JS-rendered pages (<code>docs/web-research.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Agent quality loop</strong> — eval-gated apply of evolution proposals (fresh green run required, suite/base staleness checks, writer override with justification is audited), golden cases with <code>stale_after</code>, LLM judge with calibration endpoints and verdict/judge agreement, per-version quality dashboard (<code>docs/agent-quality-loop.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Artifact registry</strong> — reference documents (regulations, instructions, checklists) that skill manifests point at without inlining into prompts: CRUD + org visibility, <code>artifact_search</code> / <code>artifact_read</code> chunked agent reads with <code>artifact.read</code> auditing, kernel-proxied url provider with a TTL cache, registry UI with &quot;used by N skills&quot; badges (<code>docs/artifact-registry.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Sagas</strong> — explicitly registered long-running efforts: <code>saga_register</code> / <code>saga_attach</code> / <code>saga_list</code> agent tools, task-level binding (chat follow-ups and delegated children join automatically), events-only storage (<code>saga.registered</code> / <code>saga.attached</code>), cross-agent takeover via <code>saga_attach</code> (<code>docs/sagas.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Budget observability</strong> — task budget (<code>GET /v1/agent/cost/task</code>: every run of a task with chat follow-ups and the delegation tree) and project budget (<code>GET /v1/agent/cost/project-budget</code>: totals plus per-saga/per-task rows with time, tokens, cost and approval budget) surfaced on the project overview page</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Activity scoping rethink</strong> — runs, operations, triggers and questions are global listings: the project is a filter/attribution, not a partition; the hidden-run and dead-end badge classes of bugs are gone (<code>docs/activity-scoping.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Knowledge listing</strong> — searchable, faceted, paginated knowledge page with compact bitemporal filters and presets; inline doubt/invalidation actions from the run trace</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Run detail tabs</strong> — trace / trajectory / budget as tabs under the run title; long-run chat reconnect via journal tail (<code>?tail=1</code>) instead of full replay</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Mattermost inbound over WebSocket</strong> — DMs included, outgoing webhooks and <code>OUTGOING_TOKEN</code> removed (see Channel driver layer)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Webhook delivery visibility</strong> — trigger deliveries surfaced in the UI</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Model gateway resilience</strong> — stream idle/no-progress watchdogs, first-token timeout with an adaptive prefill budget and a manual nudge endpoint; runs survive host sleep</li>
+</ul>
+<hr>
+<h2 id="p0-living-skills-mvp"><a class="anchor" href="#p0-living-skills-mvp" aria-label="Section link">#</a>P0 — Living Skills MVP</h2><p>Source spec: <code>docs/living-skills.md</code> (§43 MVP).</p>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Skill package</strong> — <code>SKILL.md</code> + <code>skill.yaml</code> manifest; legacy loading (manifest inferred from SKILL.md, fields marked inferred)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Skill registry</strong> — project-scoped storage, immutable versions, CRUD API</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Contract validation</strong> — manifest schema, capabilities, tools, runtime requirements checked before use</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Prompt injection</strong> — compact skill digests in agent system prompt with token budget</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Agent tools</strong> — <code>skill_search</code>, <code>skill_inspect</code>, <code>skill_validate</code>, <code>skill_history</code>, <code>skill_executions</code>, <code>skill_memory</code>, <code>skill_propose</code> (draft via skill builder, saved as 0.x pending human review)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Execution linkage</strong> — runs record skill versions used; executions listed per skill</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Memory linkage</strong> — <code>remember</code> accepts <code>skill_id</code>/<code>capability</code>; per-skill memory view</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Skills UI</strong> — tab with overview/contract/executions/memory/versions; skill selection on agent form</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>CLI</strong> — <code>temporality skill list/inspect/validate/history/executions/memory</code></li>
+</ul>
+<p>Not in MVP: agent-driven skill mutation beyond 0.x drafts (full evolution workflow), evaluation engine, marketplace, policy engine (Phase 2).</p>
+<h3 id="phase-2-after-mvp"><a class="anchor" href="#phase-2-after-mvp" aria-label="Section link">#</a>Phase 2 (after MVP)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Evolution proposals — draft versions carry the proposal anatomy (observed problem / proposed change / expected effect + evidence &amp; knowledge provenance); apply/reject are the human approval workflow (<code>skill.applied</code> / <code>skill.rejected</code> journal events); <code>skill_diff</code>, <code>skill_evaluate</code> agent tools; CLI <code>apply/reject/diff</code></li>
+<li><input checked="" disabled="" type="checkbox"> Skill diff / rollback — apply of an older active version is the rollback path (history immutable); diff in Skills UI and CLI. Snapshots as a separate artifact remain open (versions already are immutable snapshots)</li>
+<li><input checked="" disabled="" type="checkbox"> Evaluations — per-skill suites (cases with must/must-not-contain patterns), synchronous runner recording run history, <code>skill.evaluation.completed</code> events, Skills UI «Оценки» tab, CLI <code>evals</code> / <code>eval-run</code></li>
+<li><input disabled="" type="checkbox"> Contextual memory retrieval per skill/capability</li>
+<li><input disabled="" type="checkbox"> Evolution analytics</li>
+<li>Note: <code>skill_apply</code> / <code>skill_rollback</code> stay human-only by design (docs/living-skills.md §26: agents observe/propose/evaluate, people approve) — an agent requests approval via <code>request_approval</code></li>
+</ul>
+<hr>
+<h2 id="p0-mcp-server-registry"><a class="anchor" href="#p0-mcp-server-registry" aria-label="Section link">#</a>P0 — MCP server registry</h2><p>Status: shipped.</p>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>MCP servers tab</strong> — configure servers per transport: stdio, SSE, Streamable HTTP</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Agent MCP assignment</strong> — select configured servers on agent form</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Agent tools panel</strong> — per-agent tool availability toggles, including MCP-provided tools</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Connection test</strong> — validate server config before save (<code>POST /v1/workspace/mcp-servers/discover</code>, «Discover tools» button with tool checklist)</li>
+</ul>
+<hr>
+<h2 id="p0-evaluable-agent-agent-definition-amp-prompt-compiler"><a class="anchor" href="#p0-evaluable-agent-agent-definition-amp-prompt-compiler" aria-label="Section link">#</a>P0 — Evaluable Agent (agent definition &amp; prompt compiler)</h2><p>Source spec: <code>docs/evaluable-agent.md</code>, work plan: <code>docs/plan-evaluable-agent.md</code>.
+Status: Phase 1 <strong>complete</strong> — all original plan items done (2026-10-10 revision synced the plan with the current spec: builtin templates are never auto-created, QA template added, delegation capability and org-unit visibility recorded). Phase 2 complete — see below.</p>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Agent definition</strong> — structured <code>definition</code> JSONB (purpose, capabilities, constraints, completion) instead of free-form system prompt; immutable <code>workspace_agent_version</code> per change</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Prompt compiler</strong> — deterministic compile from semantic components (base evidence contract + role + constraints + completion + env policy); no tool/skill duplication, no step-by-step instructions</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Capability enforcement</strong> — toggles actually restrict (modify_files → read-only + no write tools, run_commands, network, skills, knowledge)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Agent builder</strong> — NL description → structured draft (pattern: skill builder), wizard with provenance badges and questions</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Regenerate with diff</strong> — field-level diff vs current definition, manual edits highlighted, accept/cancel</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Meaning-first UI</strong> — card shows Purpose/Can/Cannot/Before-done summary; compiled prompt as a secondary view with optional manual override</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Built-in agent templates</strong> — Coder/Reviewer/Researcher/QA/DevOps shipped as gallery templates, never auto-created; editable via the same UI</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Evolution tab</strong> — version timeline + per-version run stats (runs link <code>agent_version</code>)</li>
+</ul>
+<h3 id="phase-2-evaluations-amp-evolution"><a class="anchor" href="#phase-2-evaluations-amp-evolution" aria-label="Section link">#</a>Phase 2 — evaluations &amp; evolution</h3><p>Status: <strong>complete</strong> (except the optional eval CLI tail).</p>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> Agent evaluations — per-agent suites checked against the compiled prompt of a pinned definition version; synchronous runner, run history, <code>agent.evaluation.completed</code> events, «Оценки» section in the Evolution tab (mirror of skill evaluations)</li>
+<li><input checked="" disabled="" type="checkbox"> Evolution analytics — per-version eval pass rate + run outcomes (avg turns) with regression highlight (pass-rate drop vs previous version on an unchanged suite)</li>
+<li><input checked="" disabled="" type="checkbox"> Evolution proposals — proposal anatomy (observed problem / proposed change / expected effect + evidence), <code>agent_propose</code> tool, <code>workspace_agent_proposal</code> storage, <code>agent.definition.proposed/applied/rejected</code> events, human-only apply through the regular version path; capabilities are never proposable</li>
+<li><input disabled="" type="checkbox"> Agent eval CLI — <code>temporality agent evals</code> / <code>eval-run</code> (optional tail of stage 8)</li>
+<li>Note: agents propose, people apply — mirror of <code>docs/living-skills.md</code> §26</li>
+</ul>
+<hr>
+<h2 id="p1-make-experience-understandable"><a class="anchor" href="#p1-make-experience-understandable" aria-label="Section link">#</a>P1 — Make experience understandable</h2><ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Activation chain UI</strong> — click knowledge → see where it arose, where recalled, where injected, what decision followed, what actions, what outcome, where validated/invalidated/superseded. Distinguish: reused/validated, failed, invalidated, superseded, resurrected.</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Semantic zoom</strong> — Knowledge → Episode → Event. Episode = turn / tool call / observation / formation / validation / invalidation / reuse. Transition from &quot;event log&quot; to &quot;experience episodes&quot;.</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Forensic View</strong> — why did this experience appear? which evidence? which run/action/outcome?</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Experience lineage</strong> — K82 → K73 supersession chain visible on timeline</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Shareable investigation URL</strong> — backend done, frontend polish needed. Lens, filters, zoom, selected entity all in URL.</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Investigation flows</strong> — &quot;why did agent do this?&quot;, &quot;why did knowledge disappear?&quot;, &quot;why do two runs differ?&quot;, &quot;what does the team know?&quot;</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Experiment 9 corpus</strong> — validate human understanding of experience evolution through UI. Scenarios: competing hypotheses, repeated confirmation, contradiction, resurrection, stale knowledge, supersession, different scopes. Delivered as fixture + fold assertions (<code>docs/experiment-9-corpus.md</code>, <code>debugger/src/fixtures/experiment9-webconfig.json</code>); live operator session against the UI still pending.</li>
+</ul>
+<hr>
+<h2 id="p1-platform-usability"><a class="anchor" href="#p1-platform-usability" aria-label="Section link">#</a>P1 — Platform usability</h2><ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>State-at-T as product feature</strong> — not just an API endpoint. &quot;What did the system know when this decision was made?&quot; needs a proper UI accessible from timeline/trace.</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Streaming improvements</strong> — live model tokens (answer + reasoning) now stream to the chat through an ephemeral in-memory bus (<code>TokenBus</code>) fed by <code>StreamComplete</code> in <code>CallModel</code> (blocking <code>Complete</code> remains the fallback), exposed as <code>GET /v1/workspace/runs/{id}/tokens</code> SSE; the journal stays turn-level (a token is not a durable fact). Single-process only — multi-node workers need a real transport (Redis/NATS), noted as the scaling boundary.</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Agent templates</strong> — pre-configured agents for common tasks (coder, reviewer, researcher)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Project settings</strong> — per-project defaults for agent, model, sandbox</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Bulk operations</strong> — select multiple runs/operations for batch actions</li>
+</ul>
+<hr>
+<h2 id="p1-sandbox-security-matrix"><a class="anchor" href="#p1-sandbox-security-matrix" aria-label="Section link">#</a>P1 — Sandbox security matrix</h2><p>Automated security acceptance (not a sandbox platform).</p>
+<p>Existing coverage in <code>kernel/sandbox/docker_test.go</code>:</p>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> <code>../</code> workspace escape — blocked (symlink escape test)</li>
+<li><input checked="" disabled="" type="checkbox"> Docker socket / privileged — inaccessible (<code>--cap-drop=ALL</code>, no <code>--privileged</code>, image digest pinned)</li>
+<li><input checked="" disabled="" type="checkbox"> Memory/CPU/PIDs — limited (args enforced in test)</li>
+<li><input checked="" disabled="" type="checkbox"> Output — bounded (limited buffer truncation test)</li>
+<li><input checked="" disabled="" type="checkbox"> Read-only workspace for reviewer/qa roles — enforced via args</li>
+<li><input checked="" disabled="" type="checkbox"> Network egress — <code>--network=none</code> default / <code>bridge</code> only with granted access (args test + live check: none → curl exit 6, bridge → HTTP 200)</li>
+<li><input checked="" disabled="" type="checkbox"> Credentials — only <code>HOME</code>/<code>TMPDIR</code> cross the boundary, nothing from the host env (args test)</li>
+<li><input checked="" disabled="" type="checkbox"> Timeout — request context kills the run, container force-removed (test with fake docker)</li>
+<li><input checked="" disabled="" type="checkbox"> <code>/scratch</code> — isolated between executions by construction (fresh container + private tmpfs per command)</li>
+<li><input checked="" disabled="" type="checkbox"> Expected-vs-actual matrix doc with explicitly accepted risks (<code>docs/sandbox-security-matrix.md</code>)</li>
+</ul>
+<hr>
+<h2 id="p1-before-inviting-first-users-minimum-usable-experience"><a class="anchor" href="#p1-before-inviting-first-users-minimum-usable-experience" aria-label="Section link">#</a>P1 — Before inviting first users (Minimum Usable Experience)</h2><h3 id="setup"><a class="anchor" href="#setup" aria-label="Section link">#</a>Setup</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> project</li>
+<li><input checked="" disabled="" type="checkbox"> agent</li>
+<li><input checked="" disabled="" type="checkbox"> system prompt</li>
+<li><input checked="" disabled="" type="checkbox"> model</li>
+<li><input checked="" disabled="" type="checkbox"> skill — via Living Skills MVP (skills tab, agent skill selection)</li>
+<li><input checked="" disabled="" type="checkbox"> MCP — via MCP server registry (incl. connection test)</li>
+<li><input checked="" disabled="" type="checkbox"> sandbox</li>
+</ul>
+<h3 id="execution"><a class="anchor" href="#execution" aria-label="Section link">#</a>Execution</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> task</li>
+<li><input checked="" disabled="" type="checkbox"> run</li>
+<li><input checked="" disabled="" type="checkbox"> streaming/status</li>
+<li><input checked="" disabled="" type="checkbox"> tool execution</li>
+<li><input checked="" disabled="" type="checkbox"> approval</li>
+<li><input checked="" disabled="" type="checkbox"> result</li>
+<li><input checked="" disabled="" type="checkbox"> run cancel</li>
+</ul>
+<h3 id="observation"><a class="anchor" href="#observation" aria-label="Section link">#</a>Observation</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> run timeline</li>
+<li><input checked="" disabled="" type="checkbox"> tool calls with arguments/output</li>
+<li><input checked="" disabled="" type="checkbox"> model calls</li>
+<li><input checked="" disabled="" type="checkbox"> MCP provenance</li>
+<li><input checked="" disabled="" type="checkbox"> operations</li>
+<li><input checked="" disabled="" type="checkbox"> uncertain operations</li>
+</ul>
+<h3 id="experience"><a class="anchor" href="#experience" aria-label="Section link">#</a>Experience</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> knowledge</li>
+<li><input checked="" disabled="" type="checkbox"> activation chain</li>
+<li><input checked="" disabled="" type="checkbox"> state-at-T</li>
+<li><input checked="" disabled="" type="checkbox"> replay</li>
+<li><input checked="" disabled="" type="checkbox"> diff</li>
+</ul>
+<h3 id="iteration"><a class="anchor" href="#iteration" aria-label="Section link">#</a>Iteration</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> change prompt</li>
+<li><input checked="" disabled="" type="checkbox"> re-run</li>
+<li><input checked="" disabled="" type="checkbox"> compare runs</li>
+<li><input checked="" disabled="" type="checkbox"> change skill — skill versions are immutable; edit a skill and bump the version</li>
+</ul>
+<p>If this exists, we can invite a small team and stop relying only on fixtures.</p>
+<hr>
+<h2 id="open-org-structure-deferred-tails"><a class="anchor" href="#open-org-structure-deferred-tails" aria-label="Section link">#</a>Open — org structure deferred tails</h2><ul>
+<li><input disabled="" type="checkbox"> <strong>External users</strong> — <code>user_type</code> / <code>expires_at</code> on workspace users</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Provider credentials</strong> — <code>api_key_ref</code> resolves through the secret store: <code>secret://name[#key]</code> refs decrypt at the routing boundary (<code>resolveProviderAPIKey</code>), UPPER_SNAKE names read the process env, legacy literals still pass through; the model-config answer carries plaintext keys only to the kernel&#39;s service principal — human callers get <code>api_key_ref</code>; keyless providers (empty key) route fine now</li>
+</ul>
+<hr>
+<h2 id="p1-channel-driver-layer"><a class="anchor" href="#p1-channel-driver-layer" aria-label="Section link">#</a>P1 — Channel driver layer</h2><p>Source spec: <code>docs/channels.md</code>.</p>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Phase 0 — extract the layer</strong> — ChannelDriver contract (spec/capabilities, settings schema, SendText/SendFile, pull Poller); matrix/telegram/slack/generic-webhook became drivers (<code>kernel/agent/driver_*.go</code>, one registration line); settings → JSONB payload (000051) + <code>KERNEL_CHANNEL__*</code> env aliases with legacy names kept, generic admin form from the driver schema; matrixInboundLoop → generic channelInboundLoop over every driver with a Poller, channel-neutral <code>MatchChannelReplies</code>, cursors + settings fingerprint persisted (000052). Dedup table and sender-identity verification land with the intake pipeline (phase 1, <code>docs/inbound-messages.md</code>). Push Webhook drivers and interactive options remain future work.</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Telegram inbound driver</strong> — two-way telegram (<code>kernel/agent/driver_telegram_inbound.go</code>): getUpdates poller with a persisted offset cursor, private-chat identity (chat.id = from.id), document/photo attachments via getFile; zero edits outside the driver file beyond capabilities/settings declaration</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>New inbound channels as drivers</strong> — push model landed in the driver contract: <code>Webhook()</code> (Route/VerifyRequest/Parse/Respond) next to <code>Poller()</code>, and one shared receiver (<code>channelWebhookReceiver</code>) feeds verified pushes into the same pipeline as polls (dedup → reply matching → intake, serialized per channel). Mattermost driver: REST v4 posts + self-hosted outgoing webhooks (form-encoded, shared-token verification, trigger-word strip, <code>base_url</code> setting); Slack bot driver: Events API with v0 HMAC signatures + 5-min freshness window, url_verification handshake, threads carried as ReplyTo, bot/subtype events skipped, error envelopes (<code>ok:false</code>) surfaced from every Web API call. In-memory retry fence for webhook replays (at-least-once preserved). Interactivity stays a separate roadmap item</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Mattermost inbound moved to WebSocket</strong> — <code>mattermostPoller</code> (<code>kernel/agent/driver_mattermost_inbound.go</code>): one WS connection per 25s poll window, authentication challenge with the same base_url+token pair, <code>posted</code> events parsed (post is a JSON-encoded string inside the payload), DMs included — which outgoing webhooks cannot serve; cursor = last seen <code>create_at</code> (ms), own posts excluded via users/me self. Outgoing-webhook adapter and the <code>/v1/channels/mattermost/hooks</code> route removed: deployments should delete the server-side webhook, the poller starts working with the credentials already configured</li>
+<li><input disabled="" type="checkbox"> <strong>Interactivity</strong> — options as buttons where the channel supports them (Telegram inline keyboards, Slack blocks), text fallback everywhere</li>
+</ul>
+<hr>
+<h2 id="p1-inbound-messages-channel-initiated-tasks"><a class="anchor" href="#p1-inbound-messages-channel-initiated-tasks" aria-label="Section link">#</a>P1 — Inbound messages (channel-initiated tasks)</h2><p>Source spec: <code>docs/inbound-messages.md</code>.</p>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Intake MVP (Matrix)</strong> — <code>workspace_inbound_message</code> + dedup by event id (000053), sender identification (closed world: room = registered address, sender = registered identity), system <code>intake</code> project with a create-if-absent intake agent (<code>KERNEL_INTAKE_ENABLED</code> kill switch), intake tools <code>search_projects</code> / <code>search_org_units</code> / <code>intake_decide</code> / <code>start_task</code> over internal <code>/v1/intake/*</code> endpoints (identity from the run, authorization as the sender&#39;s principal, deterministic task id per message), events <code>intake.received|rejected|classified|routed</code>, «Входящие» page with the state machine and run links</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Org unit head &amp; team requests</strong> — <code>org_unit.head_user_id</code> + effective head (bottom-up), <code>escalate_for</code> prefers the head, <code>org:</code> recipients fan out to all active members (first answer wins), head field in the org tree UI, <code>run_status</code> / <code>cancel_run</code> for status queries and cancellation from the channel</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Dialog &amp; Telegram</strong> — amendments: <code>start_task</code> accepts <code>amend_run_id</code> (run from the sender&#39;s own routed messages, 422 on project mismatch), follow-up run on the same task with prior outcome in the prompt and <code>amends_run</code> in the ExecContext; Telegram became a two-way driver — <code>telegramPoller</code> (getUpdates long-poll 25s, persisted offset cursor = max update_id+1, <code>api_base</code> setting for self-hosted Bot API, getFile downloads ≤100MB, photos take the largest size), capabilities TwoWay+FilesIn; initiative attachments land in <code>{sandbox}/inbound/{hash}/</code> staging, <code>start_task</code> copies them into the project inbox and appends <code>/workspace/inbox/...</code> paths to the run prompt; intake prompt upgraded in place via <code>prompt_version</code> label (admin edits preserved)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Intake policy</strong> — per-project opt-in <code>workspace_project.intake_enabled</code> (000056, default off — only projects with already-routed messages were backfilled to true), <code>start_task</code> refuses routing with 422 until an admin flips it; org policy <code>intake_mode</code> = <code>deny</code> is a subtree veto a child cannot loosen (folded into EffectivePolicy over sender&#39;s unit + project units, 403); sender rate limit <code>KERNEL_INTAKE_MAX_PER_HOUR</code> (default 10, 0 = off) rejects with <code>intake.rejected</code> reason <code>rate_limited</code> + room notice + audit instead of an intake run; retention <code>KERNEL_INTAKE_RETENTION_DAYS</code> (default 30, 0 = forever) scrubs bodies/attachments on the inbound list sweep, the row survives as the audit link with <code>retired_at</code> marked in the UI; <code>GET /v1/intake/audit?sender=</code> chains message → intake run → task run without bodies; UI: intake toggle in the project form, intake mode in the policy editor</li>
+</ul>
+<hr>
+<h2 id="p2-advanced"><a class="anchor" href="#p2-advanced" aria-label="Section link">#</a>P2 — Advanced</h2><ul>
+<li><input disabled="" type="checkbox"> <strong>Read-after-write probes</strong> — operation → observable trace → probe → hint to operator. Probe gives a hint, does NOT automatically issue authoritative verdict. Первая реализация (kernel/probe, 2026) удалена как нерабочая по предпосылкам: FileProbe ждал <code>&gt;</code> отдельным argv-токеном (реальные команды несут редиректы внутри <code>sh -c</code>-строки), MCPProbe читал назад собственный журнал ядра; вернуться к идее при возвращении боли — с дизайном от реальной формы аргументов и внешних следов.</li>
+<li><input disabled="" type="checkbox"> <strong>Cost accounting v2</strong> — cost per run, cost per project, aggregation, token quotas</li>
+<li><input disabled="" type="checkbox"> <strong>Memory population overview</strong> — active/stale/invalidated counts over time</li>
+<li><input disabled="" type="checkbox"> <strong>Cross-project knowledge</strong> — knowledge that spans multiple projects</li>
+<li><input disabled="" type="checkbox"> <strong>Embeddings infrastructure</strong> — if lexical clustering proves insufficient</li>
+<li><input disabled="" type="checkbox"> <strong>Graph-based experience relations</strong> — when timeline is not enough</li>
+</ul>
+<hr>
+<h2 id="not-doing-until-proven-necessary"><a class="anchor" href="#not-doing-until-proven-necessary" aria-label="Section link">#</a>NOT doing (until proven necessary)</h2><ul>
+<li>Universal graph clustering</li>
+<li>Topic modeling</li>
+<li>Graph database</li>
+<li>Complex automatic clustering</li>
+<li>New runtime</li>
+<li>Complex visual editor</li>
+<li>Generic event viewer / second debugger</li>
+<li>Separate scheduler</li>
+<li>Complex model gateway (until second provider/fallback/routing needed)</li>
+<li>Complex tenant model (until multiple org structures exist)</li>
+<li>Full sandbox platform</li>
+<li>Automatic agent-loop-to-workflow replacement</li>
+</ul>
+<p>Return criterion: a concrete real usage scenario that cannot be satisfied by current architecture.</p>
+<hr>
+<h2 id="deferred-infrastructure"><a class="anchor" href="#deferred-infrastructure" aria-label="Section link">#</a>Deferred infrastructure</h2><table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Return when</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Tenants</td>
+<td>multiple org structures</td>
+</tr>
+<tr>
+<td>Helm / non-compose</td>
+<td>beyond single host</td>
+</tr>
+<tr>
+<td>Behavioral SLO</td>
+<td>real abuse scenarios</td>
+</tr>
+<tr>
+<td>Evidence package</td>
+<td>external audit/consumer</td>
+</tr>
+<tr>
+<td>Model gateway</td>
+<td>second provider / fallback / routing</td>
+</tr>
+<tr>
+<td>Embeddings / graph DB</td>
+<td>proven necessity</td>
+</tr>
+<tr>
+<td>Complex sandbox orchestration</td>
+<td>real requirements for multiple workload types</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="architecture"><a class="anchor" href="#architecture" aria-label="Section link">#</a>Architecture</h2><pre><code>Temporal          — durable execution and orchestration
+Agent Harness     — agent execution semantics
+Temporality       — experience and memory
+Enterprise CP     — identity, tenants, RBAC, secrets, quotas, policies
+Infrastructure    — compute, containers, DB, network
+</code></pre>
+<h2 id="strategic-conclusion"><a class="anchor" href="#strategic-conclusion" aria-label="Section link">#</a>Strategic conclusion</h2><p>Temporality is at a transition point:</p>
+<pre><code>Phase 2: &quot;We proved the model is correct&quot;
+    ↓
+Next: &quot;We made a system that people can use&quot;
+    ↓
+Goal: &quot;People use it to understand and improve agent experience&quot;
+</code></pre>
+<p>The immediate goal is NOT to close all Phase 2 remnants.</p>
+<p>The immediate goal:</p>
+<blockquote>
+<p><strong>Collect a minimum end-to-end working loop where a real person runs a real agent and Temporality turns the resulting experience into an investigable temporal picture.</strong></p>
+</blockquote>
+<p>Living Skills extend this loop: the skill a person installs becomes an observable, versioned capability whose usage produces memory and evidence.</p>
+<p>After that, every experiment must be simultaneously:</p>
+<ul>
+<li>acceptance corpus</li>
+<li>real working scenario</li>
+<li>source of product requirements</li>
+</ul>
+<p>This way Temporality won&#39;t drift into &quot;yet another debugger&quot; or &quot;yet another agent runtime&quot;.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="DESIGN.html"><small>← Назад</small><strong>Temporality — visual design specification</strong></a>
+    <a class="pager-next" href="activity-scoping.html"><small>Далее →</small><strong>Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

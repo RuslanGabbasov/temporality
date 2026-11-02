@@ -55,7 +55,7 @@ For larger tasks the agent can decompose the work:
   `max_turns` per task.
 
 Plan progress is visible right in the chat: tasks, statuses, dependencies.
-The full mechanism — `docs/agent-delegation.md`.
+The full mechanism — [docs/agent-delegation.md](docs/agent-delegation.md).
 
 ## Amendments
 

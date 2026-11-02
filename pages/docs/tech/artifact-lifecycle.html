@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/artifact-lifecycle.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row active" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</h1>
+
+<p>Дата: 2026-10-15
+Статус: предложение
+Связанные: docs/artifact-registry.md (реестр и тулы чтения), docs/sagas.md
+(саги), docs/knowledge-evolution.md (паттерн «предложил → человек применил»),
+docs/inbound-messages.md §7 (синтаксис получателей)</p>
+<hr>
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Разрешить агентам <strong>создавать и переиспользовать артефакты между собой</strong>, сохранив
+единственный жёсткий инвариант: <strong>в навыки попадают только артефакты, утверждённые
+человеком</strong>.</p>
+<p>Целевой сценарий (саги):</p>
+<pre><code class="language-text">Агент-аналитик пишет требование          → черновик артефакта (draft)
+Отправляет на согласование людям         → запрос ревью (in_review)
+Люди дорабатывают сами или с агентом     → правки черновика, новые круги
+Человек утверждает                       → артефакт (approved)
+Сага реализует требование в фичу         → раны читают артефакт по saga_id
+</code></pre>
+<p>Артефакт перестаёт быть только «справочником, который загрузил админ», и становится
+общим рабочим материалом системы — при этом статус «утверждён» всегда означает
+«конкретный человек ответил за этот документ», а не «документ часто встречается».</p>
+<hr>
+<h2 id="2-проблематика-текущего-состояния"><a class="anchor" href="#2-проблематика-текущего-состояния" aria-label="Section link">#</a>2. Проблематика текущего состояния</h2><ul>
+<li><strong>Агенты только читают.</strong> <code>artifact_search</code> / <code>artifact_read</code> — весь агентский
+инструментарий; создание и правка доступны только людям через API/UI. Рабочие
+продукты агентов (требования, спеки, отчёты) живут в чатах и файлах песочницы,
+где их нельзя найти, версионировать и связать с сагой.</li>
+<li><strong>Нет жизненного цикла.</strong> Любой артефакт в реестре неявно считается
+авторитетным. Свежезалитый черновник требования ничем не отличается от
+утверждённого регламента — ни для агента, ни для навыка.</li>
+<li><strong>Нет происхождения.</strong> Реестр не знает, кто создал документ: человек или ран
+агента. Для доверия и аудита это критично: «утверждено» без «кем предложено»
+не разбирается.</li>
+<li><strong>Нет цикла согласования.</strong> Доставить требование человеку на ревью можно только
+через <code>ask_human</code>/<code>send_file</code> — без статуса, без нескольких согласующих, без
+фиксации решения рядом с документом.</li>
+<li><strong>Инвариант «в скилах — только утверждённое» не гарантируется ничем.</strong>
+Манифест навыка сегодня может сослаться на любой id, оказавшийся в реестре.</li>
+</ul>
+<hr>
+<h2 id="3-основные-понятия"><a class="anchor" href="#3-основные-понятия" aria-label="Section link">#</a>3. Основные понятия</h2><h3 id="31-статус-и-версии"><a class="anchor" href="#31-статус-и-версии" aria-label="Section link">#</a>3.1. Статус и версии</h3><p>Артефакт получает машину состояний на уровне <strong>версии</strong> (см. §5):</p>
+<ul>
+<li><code>draft</code> — черновик: создан человеком или агентом, редактируем, виден агентам;</li>
+<li><code>in_review</code> — стоит на согласовании, редактирование блокируется;</li>
+<li><code>approved</code> — утверждён человеком: иммутабелен, доступен для ссылок из навыков;</li>
+<li><code>rejected</code> — вернут с замечаниями: можно доработать и отправить снова;</li>
+<li><code>superseded</code> — версия заменена более новой утверждённой того же id.</li>
+</ul>
+<p>Правка утверждённой версии невозможна: любое изменение — это <strong>новая версия</strong>
+того же id, проходящая цикл заново. Навыки ссылаются на id и всегда резолвятся
+в последнюю утверждённую версию.</p>
+<h3 id="32-происхождение-origin"><a class="anchor" href="#32-происхождение-origin" aria-label="Section link">#</a>3.2. Происхождение (origin)</h3><pre><code class="language-text">origin_type  human | agent
+origin_user  кто из людей (для human)
+origin_run   какой ран создал (для agent)
+</code></pre>
+<p>Происхождение пишется при создании и не меняется. Согласовывать агентский
+черновик может только человек; происхождение показывается в UI рядом с кнопкой
+утверждения — решающий должен видеть, что именно он заверяет.</p>
+<h3 id="33-запрос-на-согласование-review-request"><a class="anchor" href="#33-запрос-на-согласование-review-request" aria-label="Section link">#</a>3.3. Запрос на согласование (review request)</h3><pre><code class="language-text">workspace_artifact_review
+    id, artifact_id, artifact_version
+    reviewers  TEXT[]   -- user:ivanov | org:backend | role:admin | project_owner
+    mode       TEXT     -- all (по умолчанию) | any
+    status     TEXT     -- open | approved | rejected | cancelled
+    note       TEXT     -- комментарий отправителя
+    requested_by / requested_at
+    resolved_by / resolved_at / comment
+</code></pre>
+<p>Синтаксис получателей переиспользуется из <code>ask_human</code> (docs/inbound-messages.md
+§7): конкретный человек, подразделение, роль. <code>mode=any</code> закрывает согласование
+первым ответом (одобрение или отказ), <code>mode=all</code> собирает все решения и
+закрывается отказом при первом же «нет».</p>
+<h3 id="34-reference-документы-и-рабочие-продукты-kind"><a class="anchor" href="#34-reference-документы-и-рабочие-продукты-kind" aria-label="Section link">#</a>3.4. Reference-документы и рабочие продукты (kind)</h3><ul>
+<li><code>reference</code> — регламенты, инструкции, чек-листы: то, на что ссылаются навыки;</li>
+<li><code>work</code> — требования, спеки, проектные решения: то, что производится и
+реализуется в сагах.</li>
+</ul>
+<p>Один реестр, одна модель доступа; <code>kind</code> разделяет сценарии потребления и
+группировку в UI, а не права. Граница проницаема: реализованное и закреплённое
+требование может стать reference-документом нового навыка — той же записью с
+другим kind после нового круга согласования.</p>
+<h3 id="35-артефакт-в-саге"><a class="anchor" href="#35-артефакт-в-саге" aria-label="Section link">#</a>3.5. Артефакт в саге</h3><p><code>workspace_artifact.saga_id TEXT NULL</code> — артефакт, созданный внутри саги,
+наследует её идентификатор (сага регистрируется тулом <code>saga_register</code>,
+docs/sagas.md). Это не сужает видимость (орго-модель не меняется), но даёт
+трассировку: требование → согласование → раны реализации → фича. Обратная связь
+идёт через события: каждый ран, читавший артефакт, уже эмитит <code>artifact.read</code>;
+сага связывает их в сквозную историю.</p>
+<hr>
+<h2 id="4-принципы"><a class="anchor" href="#4-принципы" aria-label="Section link">#</a>4. Принципы</h2><ol>
+<li><strong>Утверждение человеком — единственная дверь в <code>approved</code>.</strong> Не сумма
+сигналов, не частота использования, не агентское ревью. Явное решение
+именованного человека.</li>
+<li><strong>Статус — ограничитель, а не слагаемое.</strong> Черновик можно читать, но нельзя
+выдавать за опору: <code>draft</code>/<code>rejected</code> никогда не резолвятся для навыков,
+а в ответе тулов всегда видны.</li>
+<li><strong>Агент предлагает — человек утверждает.</strong> Тот же контракт, что у
+<code>skill_propose</code> и эволюции агентов: агент делает черновик и запрос ревью,
+решение и ответственность остаются за человеком.</li>
+<li><strong>Иммутабельность утверждённого.</strong> Изменение одобренного документа — новая
+версия и новый круг согласования; воспроизводимость решений восстанавливается
+по <code>content_hash</code> в событиях чтения (docs/artifact-registry.md §3.2).</li>
+<li><strong>Черновики читаемы, но помечены.</strong> Переиспользование между агентами —
+половина ценности: разработчик читает требование аналитика. Ответ тулов
+несёт <code>status</code> и <code>version</code>; системный промпт прямо говорит: draft — это
+неподтверждённый материал.</li>
+<li><strong>Инвариант проверяется сервером.</strong> Валидация ссылок в манифесте навыка —
+на границе API (422), а не в соглашениях между агентами.</li>
+</ol>
+<hr>
+<h2 id="5-машина-состояний"><a class="anchor" href="#5-машина-состояний" aria-label="Section link">#</a>5. Машина состояний</h2><pre><code class="language-text">                 ┌──────────────────────────────────────────┐
+                 │                                          │ edit
+                 ▼                                          │
+создание ──► draft ──submit──► in_review ──approve──► approved
+(human/agent)   ▲                  │                        │
+                │ edit             │ reject                 │ новая версия
+                └──────────────────┘                        ▼
+                                                          draft(v+1)
+              approved(v) при approve(v+1) ──► superseded(v)
+</code></pre>
+<p>Правила переходов (проверяются в Store, не в клиентах):</p>
+<ul>
+<li><code>draft → draft</code>: правки полей/тела, пересчёт <code>content_hash</code> (кто угодно с
+правом записи; каждое изменение — событие аудита);</li>
+<li><code>draft → in_review</code>: <code>submit</code>, создаёт review-строку; повторный <code>submit</code> той
+же версии идемпотентно возвращает открытый review;</li>
+<li><code>in_review → approved</code>: решение по правилу <code>mode</code> (all/any); тело и метаданные
+фиксируются, <code>version</code> становится указателем «утверждённая»;</li>
+<li><code>in_review → rejected</code> / <code>rejected → draft</code>: возврат с комментарием и новый
+круг доработки — в том числе агентом (<code>artifact_update</code> + повторный <code>submit</code>);</li>
+<li><code>approved → superseded</code>: автоматический переход предыдущей утверждённой
+версии при утверждении следующей;</li>
+<li>правка approved (ребро «новая версия» на диаграмме): новая редакция —
+отдельный черновик в таблице версий (migration 0006/0007,
+<code>workspace_artifact_version</code>); утверждённая версия ОСТАЁТСЯ живой и
+обслуживает агентов, навыки и чтение, пока редакция не утверждена.
+Утверждение атомарно промотирует черновик в живую строку (v+1, approved) и
+штампует предыдущую версию superseded; отклонение возвращает редакцию в
+draft. Агентский тул <code>artifact_update</code> редактирует approved только через
+явный путь новой редакции: <code>new_version: true</code> → <code>POST /v1/workspace/artifacts/{id}/revision</code> открывает черновик-редакцию
+(утверждённая версия остаётся живой), после чего <code>artifact_submit</code> отдаёт её
+на повторное утверждение — решение остаётся за человеком; прямая правка
+approved (PUT без флага) по-прежнему 409.</li>
+<li>удаление: как сегодня — guard 409, пока на артефакт ссылаются навыки;
+черновики и rejected удаляются свободно (writer).</li>
+</ul>
+<hr>
+<h2 id="6-согласование-несколькими-людьми"><a class="anchor" href="#6-согласование-несколькими-людьми" aria-label="Section link">#</a>6. Согласование несколькими людьми</h2><ul>
+<li><strong>Получатели.</strong> Список в синтаксисе <code>ask_human</code>; <code>org:&lt;unit&gt;</code> раскрывается в
+активных людей подразделения на момент submit.</li>
+<li><strong>Режимы.</strong> <code>all</code> — решение принято, когда все ответили «за» (первое «против»
+закрывает отказом); <code>any</code> — первого ответа достаточно.</li>
+<li><strong>Уведомления.</strong> Каждому согласующему — уведомление в его включённые
+каналы (та же доставка, что у <code>ask_human</code>: preferred-канал, затем первый
+включённый и настроенный, иначе веб-инбокс без уведомления) со ссылкой на
+страницу артефактов. Реализовано в фазе 1 — текст + ссылка, best-effort,
+вне цикла запроса. Фаза 2: доставка через human_request (orphan-RunID
+<code>artifact-review/&lt;round&gt;</code>) — ответ в чате решает круг (ниже), пост в
+thread-транспортах становится корнем обсуждения, и тредматчится точно в
+этот круг даже при нескольких открытых ревью у одного согласующего.</li>
+<li><strong>Решение из канала (фаза 2).</strong> Первое слово ответа решает: <code>approve</code> /
+<code>approved</code> / <code>lgtm</code> / <code>ok</code> / <code>одобрить</code> / <code>одобряю</code> / <code>согласен</code> — за,
+<code>reject</code> / <code>rejected</code> / <code>отклонить</code> / <code>отклоняю</code> — против; остальная часть
+ответа становится комментарием. Решение проходит тот же переход стора и
+те же события/аудит, что и кнопка в UI («via: channel:&lt;тип&gt;» в событии);
+не-первое слово, «да»/«нет» и прочая неоднозначность круг не закрывают —
+бот просит ответить по форме. Явная «отмена» закрывает только строку
+канала (круг остаётся открытым для UI). Решивший не входит в список
+согласующих — бот отказывает, круг не меняется. Инлайн-кнопки
+(Telegram inline keyboard, Matrix-виджеты) — отдельная работа по
+драйверам, вне фазы 2.</li>
+<li><strong>Решение по групповой записи.</strong> Записи согласующих — синтаксис
+<code>ask_human</code>; решение принимается от имени записи (<code>org:core</code>, <code>role:lead</code>,
+<code>project_owner</code>) любым её участником с активным профилем: решение
+фиксируется под записью, <code>decided_by</code> называет конкретного принципала.
+Один принципал может закрыть несколько записей сразу (свой id + своя
+роль/подразделение) — <code>mode=all</code> считает записи, а не людей.</li>
+<li><strong>Доработка в цикле.</strong> Человек правит черновик сам (UI) или отвечает
+замечанием; агент вносит правки <code>artifact_update</code> и повторно отправляет.
+Круги не ограничены, каждый оставляет review-строку и события.</li>
+<li><strong>Анти-спам.</strong> Лимит submit-ов на агента в сутки (env
+<code>ARTIFACT_SUBMIT_PER_DAY</code>, по умолчанию 10) — как rate-limit intake: защита
+очереди согласующих от зафлудившего рана.</li>
+<li><strong>Напоминания и эскалация (фаза 2).</strong> Фоновый свип раз в 5 минут:
+открытый круг старше дедлайна (env <code>ARTIFACT_REVIEW_TIMEOUT</code>, по умолчанию
+72ч; <code>0</code> выключает свип) получает одно напоминание согласующим в каналы;
+ещё через один полный таймаут молчания — эскалация эффективному главе
+орг-единицы артефакта (снизу вверх: ближайший предок с назначенной
+головой; неактивная голова пропускается), без единицы/головы —
+администраторам инсталляции (семантика <code>project_owner</code>: у проектов пока
+нет владельца). Каждый шаг срабатывает один раз на круг (штампы
+<code>reminded_at</code>/<code>escalated_at</code> — и защита от повтора), события
+<code>artifact.review.reminded</code> / <code>artifact.review.escalated</code> идут в журнал.
+Решение из UI закрывает строку канала — чат не может решить круг дважды,
+и наоборот: ответ из канала закрывает круг для UI.</li>
+<li><strong>Идемпотентность.</strong> Повторный approve/reject того же review — 409 без
+изменения состояния; решение фиксируется один раз.</li>
+</ul>
+<hr>
+<h2 id="7-инструменты-агента"><a class="anchor" href="#7-инструменты-агента" aria-label="Section link">#</a>7. Инструменты агента</h2><p>Новые тулы (ядро ходит в workspace API от service-identity, как <code>artifact_search</code>;
+origin фиксируется сервером по RunID):</p>
+<pre><code class="language-text">artifact_create  { title, description, content?, mime_type?, kind=work,
+                   saga_id? }                    → draft
+artifact_update  { artifact_id, title?, description?, content?, … }
+                                               → только draft/rejected версии
+artifact_submit  { artifact_id, reviewers[], mode=all, note? }
+                                               → in_review + уведомления
+</code></pre>
+<p>Изменения существующих:</p>
+<ul>
+<li><code>artifact_search</code> — фильтр <code>status=</code> (по умолчанию все, как сегодня) и <code>kind=</code>;
+в выдаче добавляются <code>status</code>, <code>version</code>, <code>origin_type</code>;</li>
+<li><code>artifact_read</code> — в ответе <code>status</code> и <code>version</code>; чтение черновика разрешено
+(переиспользование), тело помечено статусом в метаданных ответа.</li>
+</ul>
+<p>Политика безопасности: три новых тула добавляются в <code>policySafeTools</code> — они не
+имеют внешних эффектов (черновик внутри реестра, submit — запрос к людям, не
+действие), ровно как <code>ask_human</code> и <code>skill_propose</code>.</p>
+<p>Системная секция промпта (рядом со Skills) дополняется: «рабочие продукты
+создавай как артефакты (kind=work), указывай saga_id; draft — не утверждён:
+не выдавай его за опору и не ссылайся на него в навыках».</p>
+<hr>
+<h2 id="8-связь-с-навыками-инвариант"><a class="anchor" href="#8-связь-с-навыками-инвариант" aria-label="Section link">#</a>8. Связь с навыками (инвариант)</h2><ul>
+<li><code>PUT /skills/{id}</code> (новая версия манифеста): каждая ссылка <code>artifacts[]</code>
+проверяется на <code>status=approved</code>; иначе — 422 <code>artifact_not_approved</code> со
+списком id и текущих статусов.</li>
+<li>Резолюция ссылок (<code>GET /skills/{id}</code>, digest, <code>skill_inspect</code>) отдаёт только
+утверждённые версии; артефакт, потерявший approved-версию (сверх редкий случай
+отката), помечается в <code>skill_inspect</code> предупреждением, навык не ломается.</li>
+<li>Существующие ссылки миграции не касаются: текущие артефакты становятся
+<code>approved</code> (v1) — их уже загрузили люди, см. §12 (миграция).</li>
+</ul>
+<hr>
+<h2 id="9-api"><a class="anchor" href="#9-api" aria-label="Section link">#</a>9. API</h2><pre><code class="language-text">POST   /v1/workspace/artifacts                         — создание (status по origin:
+                                                        human → approved, agent → draft)
+PUT    /v1/workspace/artifacts/{id}                    — правка draft/rejected;
+                                                        approved → 409 + подсказка о новой версии
+POST   /v1/workspace/artifacts/{id}/submit             — { reviewers[], mode, note } → 202
+                                                        (идемпотентно на версию)
+POST   /v1/workspace/artifacts/{id}/reviews/{rid}/approve  — { comment }
+POST   /v1/workspace/artifacts/{id}/reviews/{rid}/reject   — { comment }
+GET    /v1/workspace/artifacts?status=&amp;kind=&amp;saga=     — фильтры списков
+GET    /v1/workspace/artifacts/{id}/reviews            — история согласований
+</code></pre>
+<p>RBAC: создание/правка — writer (тул агента — service-identity с origin=agent);
+approve/reject — writer, но не сервисный токен рана (только человек);
+удаление — operator, как сегодня.</p>
+<hr>
+<h2 id="10-ui"><a class="anchor" href="#10-ui" aria-label="Section link">#</a>10. UI</h2><p>Страница «Артефакты» (уже в основном меню):</p>
+<ul>
+<li>чипы-фильтры статусов (draft / in_review / approved / rejected / superseded)
+и kind — по образцу bounded-чипов «Входящих», со счётчиками;</li>
+<li>карточка: бейдж статуса, версия, происхождение («создал: агент analyst,
+ран …» / «создал: ivanov»), сага;</li>
+<li>панель согласования для in_review: список согласующих, режим, кнопки
+«Утвердить» / «Отклонить» с комментарием; история кругов;</li>
+<li>редактор навыка: выбор артефактов ограничен approved (недоступные — с пояснением);</li>
+<li>уведомление согласующему кликабельно ведёт на карточку артефакта.</li>
+</ul>
+<hr>
+<h2 id="11-аудит-и-события"><a class="anchor" href="#11-аудит-и-события" aria-label="Section link">#</a>11. Аудит и события</h2><p>Журнал (outbox, durable — не best-effort, как <code>artifact.read</code>):</p>
+<pre><code class="language-text">artifact.proposed        { artifact_id, version, origin, kind, saga_id? }
+artifact.updated         { artifact_id, version, actor }
+artifact.review.requested{ artifact_id, version, reviewers, mode }
+artifact.review.approved { artifact_id, version, resolved_by }
+artifact.review.rejected { artifact_id, version, resolved_by, comment }
+artifact.superseded      { artifact_id, from_version, to_version }
+</code></pre>
+<p>API-действия дублируются в access audit (create/update/approve), как сегодня.</p>
+<hr>
+<h2 id="12-фазы-реализации"><a class="anchor" href="#12-фазы-реализации" aria-label="Section link">#</a>12. Фазы реализации</h2><h3 id="фаза-1-жизненный-цикл-и-создание-агентами-ядро-ценности"><a class="anchor" href="#фаза-1-жизненный-цикл-и-создание-агентами-ядро-ценности" aria-label="Section link">#</a>Фаза 1 — жизненный цикл и создание агентами (ядро ценности)</h3><p>Миграция (<code>status/kind/version/origin/saga_id</code>; существующие записи →
+<code>approved</code> v1, <code>kind=reference</code>, origin=human — они загружены людьми, это и
+есть их утверждение); машина состояний в Store; тулы <code>artifact_create / artifact_update / artifact_submit</code>; статус в <code>artifact_search/read</code>; guard
+навыков (422); review-таблица и approve/reject API; события; UI-минимум: чипы
+статусов, бейджи, кнопки решения, происхождение. Уведомление согласующим —
+текстовое со ссылкой.</p>
+<h3 id="фаза-2-согласование-в-каналах-реализовано"><a class="anchor" href="#фаза-2-согласование-в-каналах-реализовано" aria-label="Section link">#</a>Фаза 2 — согласование в каналах (реализовано)</h3><p>Обобщение human_requests на запросы вне рана (orphan-RunID
+<code>artifact-review/&lt;round&gt;</code>): уведомление согласующему создаёт строку
+human_request с выдачами (deliveries) по каналам; ответ в чате согласующего
+решает круг тем же переходом стора, что и кнопка в UI (первое слово ответа —
+решение, остальное — комментарий). Пост в thread-транспортах закрепляется
+как корень обсуждения — тредматчится точно в этот круг. Напоминания по
+дедлайну (env <code>ARTIFACT_REVIEW_TIMEOUT</code>, по умолчанию 72ч, <code>0</code> выключает) и
+эскалация эффективному главе орг-единицы артефакта (без головы/единицы —
+админам) после второго таймаута молчания; каждый шаг — один раз на круг.
+Настоящие инлайн-кнопки (Telegram/Matrix) — отдельная работа по драйверам.</p>
+<h3 id="фаза-3-версии-комплаенс-трассировка"><a class="anchor" href="#фаза-3-версии-комплаенс-трассировка" aria-label="Section link">#</a>Фаза 3 — версии, комплаенс, трассировка</h3><p>Полная история тел: снапшоты утверждённых версий при открытии новой редакции
+и просмотр архивных тел в UI — реализовано (таблица
+<code>workspace_artifact_version</code>, эндпоинт <code>GET /artifacts/{id}/versions</code>, блок
+«История версий» в карточке). Осталось: восстановление на дату — закрывает
+открытый вопрос docs/artifact-registry.md §12; UI-трассировка саги: артефакт
+→ круги согласования → раны реализации → итоговый PR/фича; пиннг версии в
+манифесте навыка (опционально, для комплаенса); конвертация work → reference
+как самостоятельный сценарий.</p>
+<hr>
+<h2 id="13-критерии-готовности"><a class="anchor" href="#13-критерии-готовности" aria-label="Section link">#</a>13. Критерии готовности</h2><h3 id="фаза-1"><a class="anchor" href="#фаза-1" aria-label="Section link">#</a>Фаза 1</h3><ul>
+<li>Агент создаёт требование в саге, человек утверждает; второй агент в ране той
+же саги читает его через <code>artifact_read</code> и видит <code>status=approved, version=1</code>.</li>
+<li>Манифест навыка со ссылкой на draft отклонён: 422 <code>artifact_not_approved</code>.</li>
+<li>Правка approved через API — 409; через тула — понятная ошибка агенту.</li>
+<li>Повторный approve того же review — 409, состояние не меняется.</li>
+<li>Все переходы дают события; в трейсе согласование читается как шаги с
+локализованными строками.</li>
+<li>Существующие до миграции навыки и артефакты работают без изменений.</li>
+</ul>
+<h3 id="фаза-2"><a class="anchor" href="#фаза-2" aria-label="Section link">#</a>Фаза 2</h3><ul>
+<li>Согласование закрывается ответом из канала; в UI виден тот же результат
+(те же решения, события и аудит; событие помечено via: channel:&lt;тип&gt;).</li>
+<li>Просроченный review получает одно напоминание согласующим, а после
+второго таймаута молчания эскалирует эффективному главе орг-единицы
+(иначе админам) — по одному разу на круг.</li>
+</ul>
+<h3 id="фаза-3"><a class="anchor" href="#фаза-3" aria-label="Section link">#</a>Фаза 3</h3><ul>
+<li>Содержимое любого артефакта восстанавливается на любую дату.</li>
+<li>Страница саги связывает требование → раны → фичу без ручного поиска.</li>
+</ul>
+<hr>
+<h2 id="14-открытые-вопросы"><a class="anchor" href="#14-открытые-вопросы" aria-label="Section link">#</a>14. Открытые вопросы</h2><ul>
+<li><strong>Ко-редактирование черновиков.</strong> Сейчас править draft может любой writer
+(и любой агент) — это позволяет доработку «с агентом», но не защищает от
+затирания. Вариант: черновик-владелец + явная передача права.</li>
+<li><strong>Обязательный ревью для человеческих reference-документов</strong> в строгих
+инсталляциях (сейчас создание человеком = утверждение).</li>
+<li><strong>Агентское предварительное ревью</strong> (reviewer-агент готовит сводку замечаний
+до человека) — снижает нагрузку на согласующих, но не заменяет их.</li>
+<li><strong>Пиннг версии в манифесте</strong> против always-latest-approved: нужно комплаенс-
+требование, чтобы выбрать.</li>
+<li><strong>Квоты на размер</strong> агентских черновиков (сейчас общий лимит 2 МиБ).</li>
+</ul>
+<hr>
+<h2 id="15-архитектурные-ограничения"><a class="anchor" href="#15-архитектурные-ограничения" aria-label="Section link">#</a>15. Архитектурные ограничения</h2><ul>
+<li>Граница с knowledge: артефакт — документ с телом; знание — утверждение с
+доказательной базой. Утверждение артефакта не создаёт knowledge; агент
+записывает выводы отдельным <code>remember</code>.</li>
+<li>Утверждение делает документ опорой для навыков, но не «истиной»: достоверность
+содержимого остаётся на человеке, поставившем подпись.</li>
+<li>Реестр остаётся сквозным ресурсом оргструктуры: <code>saga_id</code> — трассировка, не
+права; видимость определяется <code>org_unit_id</code>, как сегодня.</li>
+<li>Черновики не попадают в промпты неявно — прогрессивное раскрытие
+(docs/artifact-registry.md §3.4) не меняется.</li>
+<li>Согласование не блокирует раны: submit — асинхронный запрос к людям, ран
+продолжает работу (в отличие от <code>ask_human</code>), т.к. цикл доработки может
+занимать дни.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="architecture.html"><small>← Назад</small><strong>Agent Kernel and Temporality architecture</strong></a>
+    <a class="pager-next" href="artifact-registry.html"><small>Далее →</small><strong>Реестр артефактов (Artifact Registry)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

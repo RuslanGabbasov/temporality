@@ -52,7 +52,7 @@ description: Переменные окружения, порты, страниц
 | `KERNEL_BROWSER_CDP_URL` | lightpanda | Headless-браузер для `browser` (пусто = off) |
 | `KERNEL_CHANNEL__MATRIX__*`, `__TELEGRAM__*`, `__MATTERMOST__*`, `__SLACKBOT__*` | — | Транспорты каналов |
 
-Полный список с семантикой — в корневом `README.md` и `docs/runbook.md`.
+Полный список с семантикой — в корневом `README.md` и [docs/runbook.md](docs/runbook.md).
 
 ## Порты
 
@@ -100,11 +100,14 @@ description: Переменные окружения, порты, страниц
 
 ## Инженерные документы
 
-Архитектура и внутренние механизмы описаны в `docs/` репозитория: `architecture.md`
-(общая), `event-model.md`, `knowledge-model.md`, `agent-quality-loop.md`,
-`living-skills.md`, `agent-delegation.md`, `inbound-messages.md`,
-`org-structure.md` (оргструктура, политики, execution identity),
-`sandbox-security-matrix.md`, `failure-model.md`, `failure-reconciliation.md`,
-`resilience-and-scale.md` (отказоустойчивость и границы масштаба: replay,
-история воркфлоу, Continue-As-New), `runbook.md`
+Архитектура и внутренние механизмы описаны в `docs/` репозитория (на сайте —
+раздел [Инженерные документы](tech/index.md)): [architecture.md](docs/architecture.md)
+(общая), [event-model.md](docs/event-model.md), [knowledge-model.md](docs/knowledge-model.md),
+[agent-quality-loop.md](docs/agent-quality-loop.md), [living-skills.md](docs/living-skills.md),
+[agent-delegation.md](docs/agent-delegation.md), [inbound-messages.md](docs/inbound-messages.md),
+[org-structure.md](docs/org-structure.md) (оргструктура, политики, execution identity),
+[sandbox-security-matrix.md](docs/sandbox-security-matrix.md), [failure-model.md](docs/failure-model.md),
+[failure-reconciliation.md](docs/failure-reconciliation.md),
+[resilience-and-scale.md](docs/resilience-and-scale.md) (отказоустойчивость и границы масштаба: replay,
+история воркфлоу, Continue-As-New), [runbook.md](docs/runbook.md)
 (эксплуатация) и другие.

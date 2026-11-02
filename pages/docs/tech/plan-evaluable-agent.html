@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>План работ: Evaluable Agent — определение агента и компиляция системного промта — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/plan-evaluable-agent.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row active" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>План работ: Evaluable Agent — определение агента и компиляция системного промта</h1>
+
+<p>Source spec: <code>docs/evaluable-agent.md</code>.
+Статус: Фаза 1 (этапы 1–7) реализована; ревизия 2026-10-10 сверила план со спекой и кодом — расхождения устранены в тексте, пост-плановые изменения зафиксированы в §2.1. Фаза 2 реализована целиком: этап 8 (оценки агента), этап 9 (аналитика эволюции: pass rate на версию, подсветка регрессий при неизменном сьюте), этап 10 (evolution proposals: анатомия problem/change/effect + evidence, инструмент agent_propose, применение только человеком через штатный update-путь). CLI — опциональный хвост, не реализован. Legacy-конверсия — осознанно ручная: Rebuild/визард с человеком в цикле (автоматический проход при старте отвергнут: LLM-вызов на старте неработоспособен).</p>
+<h2 id="0-текущее-состояние-baseline"><a class="anchor" href="#0-текущее-состояние-baseline" aria-label="Section link">#</a>0. Текущее состояние (baseline)</h2><ul>
+<li><code>workspace_agent</code> хранит <code>system_prompt</code> как свободный текст (миграция 000021). Семантических полей (назначение, ограничения, критерии завершения) нет.</li>
+<li>В рантайме <code>applyAgentConfig</code> (<code>cmd/agent-kernel/main.go</code>) копирует <code>SystemPrompt</code> в <code>RunInput</code>; <code>AgentRun</code> (<code>kernel/agent/workflow.go</code>) использует его как есть, иначе — <code>systemPromptForRole</code> (базовый контракт + роль). Секция skills и knowledge-hints добавляются отдельно.</li>
+<li>UI: на табе «Основное» диалога агента — свободный textarea «System prompt». Шаблоны Coder/Reviewer/Researcher/DevOps захардкожены в <code>Agents.tsx</code> (<code>TEMPLATES</code>).</li>
+<li>У агентов нет версионирования (у скилов есть: <code>workspace_skill_version</code>, immutable).</li>
+<li>Есть переиспользуемые паттерны: skill builder (<code>kernel/agent/skillbuilder.go</code> + <code>POST /skills/draft</code>), визард с вопросами и provenance-бейджами (<code>Skills.tsx</code>).</li>
+</ul>
+<h2 id="1-целевая-модель"><a class="anchor" href="#1-целевая-модель" aria-label="Section link">#</a>1. Целевая модель</h2><h3 id="11-определение-агента-agentdefinition"><a class="anchor" href="#11-определение-агента-agentdefinition" aria-label="Section link">#</a>1.1 Определение агента (AgentDefinition)</h3><p>Хранится в <code>workspace_agent.definition</code> (JSONB), редактируется обычной формой, никогда — как YAML:</p>
+<pre><code class="language-json">{
+  &quot;capabilities&quot;: {
+    &quot;read_files&quot;: true,
+    &quot;modify_files&quot;: true,
+    &quot;run_commands&quot;: true,
+    &quot;network&quot;: false,
+    &quot;skills&quot;: true,
+    &quot;knowledge&quot;: true
+  },
+  &quot;constraints&quot;: [&quot;Не изменять инфраструктуру и не удалять файлы.&quot;],
+  &quot;completion&quot;: [&quot;Запустить соответствующие тесты.&quot;, &quot;Убедиться, что сборка проходит.&quot;],
+  &quot;prompt_override&quot;: &quot;&quot;
+}
+</code></pre>
+<ul>
+<li>Назначение агента — существующая колонка <code>description</code> (основное поле формы «Для каких задач нужен этот агент?»).</li>
+<li><code>capabilities</code> — намерение пользователя; эффективные возможности вычисляются из окружения (sandbox profile, tools, MCP) и прав. Выключение capability жёстко ограничивает агента (см. этап 2).</li>
+</ul>
+<h3 id="12-компиляция-промта"><a class="anchor" href="#12-компиляция-промта" aria-label="Section link">#</a>1.2 Компиляция промта</h3><p>Детерминированная функция ядра, не LLM:</p>
+<pre><code>CompileAgentPrompt(def, env) =
+    базовый контракт (доказательность §11, память §10, песочница)
+  + роль/идентичность (имя + purpose; ответственность, не стиль §12)
+  + ограничения (Never: ...)
+  + критерии завершения (Before declaring done, verify: ...)
+  + политика окружения (read-only / no network / ...)
+</code></pre>
+<p>Правила генератора (§7–§10, §17): без пошаговых инструкций; без дублирования tool-схем и skills; без «always use memories»; минимальная длина; проверяемые критерии завершения.</p>
+<h2 id="2-этапы-работ"><a class="anchor" href="#2-этапы-работ" aria-label="Section link">#</a>2. Этапы работ</h2><p>Порядок выбран так, чтобы ценность шла с первого этапа: компилятор и версионирование — ядро, UI и AI-формирование — поверх.</p>
+<h3 id="этап-1-модель-данных-и-миграция-s"><a class="anchor" href="#этап-1-модель-данных-и-миграция-s" aria-label="Section link">#</a>Этап 1. Модель данных и миграция — S — ✅</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Миграция <code>000030_agent_definition.up.sql</code> (<code>definition JSONB</code>, <code>definition_version</code>, таблица <code>workspace_agent_version</code>).</li>
+<li><input checked="" disabled="" type="checkbox"> <code>workspace/models.go</code>: <code>AgentDefinition</code> + <code>Capabilities</code> (<code>nil</code> = разрешено); <code>Agent.Definition</code>, <code>DefinitionVersion</code>, <code>AgentVersion</code>.</li>
+<li><input checked="" disabled="" type="checkbox"> <code>workspace/store.go</code>: create/update/list/get с новыми полями, <code>decodeAgentDefinition</code> (legacy ⇒ nil), <code>InsertAgentVersion</code>, <code>ListAgentVersions</code>.</li>
+</ul>
+<h3 id="этап-2-компилятор-промта-и-enforcement-m"><a class="anchor" href="#этап-2-компилятор-промта-и-enforcement-m" aria-label="Section link">#</a>Этап 2. Компилятор промта и enforcement — M — ✅</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>kernel/agent/prompt.go</code>: <code>CompileAgentPrompt</code> (§6–§12), <code>EffectiveSystemPrompt</code> (override &gt; legacy manual &gt; compiled).</li>
+<li><input checked="" disabled="" type="checkbox"> Юнит-тесты: golden, restricted caps, отсутствие дублирования/пошаговости, fallback&#39;и.</li>
+<li><input checked="" disabled="" type="checkbox"> Enforcement в <code>applyAgentConfig</code> + <code>RunInput.DenyTools/ReadOnly/SkipKnowledge</code>: <code>modify_files=false</code> → read-only sandbox; <code>run_commands=false</code> → <code>run_command</code> исключён (реклама + defense-in-depth в RunTool); <code>network=false</code> → без сети; <code>skills=false</code> → без инъекции скилов; <code>knowledge=false</code> → без prior hints. <code>advertisedTools</code> фильтрует deny-лист.</li>
+<li><input checked="" disabled="" type="checkbox"> <code>run.started</code> несёт <code>agent_id</code>/<code>agent_version</code>; <code>workspace_run.agent_version</code> (миграция 000031) — «Эволюция» сопоставляет точную версию.</li>
+</ul>
+<h3 id="этап-3-workspace-api-и-версионирование-s"><a class="anchor" href="#этап-3-workspace-api-и-версионирование-s" aria-label="Section link">#</a>Этап 3. Workspace API и версионирование — S — ✅</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>POST/PUT /v1/workspace/agents</code> принимают <code>definition</code> (+ <code>prompt_source</code>, <code>generator_model</code>); версия растёт только при изменении семантики (definition|purpose), снапшот в <code>workspace_agent_version</code> (author = субъект токена).</li>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /v1/workspace/agents/{id}/versions</code> — список версий.</li>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /v1/workspace/agents/{id}/prompt</code> — скомпилированный промт текущей версии (source: override|definition|legacy|role).</li>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /v1/workspace/agents/{id}/runs</code> — запуски агента (для «Эволюции»).</li>
+</ul>
+<h3 id="этап-4-ui-смысл-вместо-промта-визард-регенерация-l"><a class="anchor" href="#этап-4-ui-смысл-вместо-промта-визард-регенерация-l" aria-label="Section link">#</a>Этап 4. UI: смысл вместо промта, визард, регенерация — L — ✅</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Карточка агента — резюме по §5: Назначение / Может / Не может (выключенные capabilities + ограничения) / Перед завершением; скомпилированный промт с источником (override/definition/legacy/base).</li>
+<li><input checked="" disabled="" type="checkbox"> Форма: 7 табов — Основное (имя, назначение, провайдер/модель + Rebuild + restore builtin), Возможности (6 переключателей с пояснением жёсткого enforcement), Правила (ограничения + проверка результата), Параметры, Навыки и MCP, Инструменты, Системный промт (превью + override). Свободный textarea удалён.</li>
+<li><input checked="" disabled="" type="checkbox"> Визард: описание → <code>POST /agents/draft</code> → заполненная форма с provenance-бейджами (from agent / уточнить / verified) и вопросами билдера.</li>
+<li><input checked="" disabled="" type="checkbox"> Переформировать (§13): diff-диалог по полям, поля с ручными правками помечены, принять/отменить.</li>
+<li><input checked="" disabled="" type="checkbox"> Локализация en/ru.</li>
+</ul>
+<h3 id="этап-5-agent-builder-ai-формирование-m"><a class="anchor" href="#этап-5-agent-builder-ai-формирование-m" aria-label="Section link">#</a>Этап 5. Agent Builder (AI-формирование) — M — ✅</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>kernel/agent/agentbuilder.go</code> — <code>BuildAgentDraft</code>: NL → <code>{name, purpose, capabilities, constraints, completion, suggested, questions}</code>; промт билдера кодирует критерии §17; sandbox-подсказки валидируются.</li>
+<li><input checked="" disabled="" type="checkbox"> Эндпоинт <code>POST /v1/workspace/agents/draft</code> (gate writer).</li>
+<li><input checked="" disabled="" type="checkbox"> Тесты: парсинг fenced JSON, fallback имени из purpose, фильтрация пустых вопросов/значений, невалидный JSON.</li>
+</ul>
+<h3 id="этап-6-встроенные-агенты-s-пересобран-после-уточнения-спеки"><a class="anchor" href="#этап-6-встроенные-агенты-s-пересобран-после-уточнения-спеки" aria-label="Section link">#</a>Этап 6. Встроенные агенты — S — ✅ (пересобран после уточнения спеки)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <code>workspace/builtin.go</code> — курированные шаблоны Coder/Reviewer/Researcher/QA/DevOps (§7, §12, §17).</li>
+<li><input checked="" disabled="" type="checkbox"> Шаблоны никогда не создаются автоматически — ни при установке, ни при создании проекта (§16 в действующей редакции; исходный автосидинг при <code>POST /v1/workspace/projects</code> свёрнут в <code>d189e97</code>). Пользователь создаёт агента из галереи шаблонов одним действием и получает обычный редактируемый агент.</li>
+<li><input checked="" disabled="" type="checkbox"> <code>GET /v1/workspace/agents/builtins</code> — источник галереи «Создать из шаблона» и кнопки «восстановить встроенное».</li>
+<li><input checked="" disabled="" type="checkbox"> <code>TEMPLATES</code> удалены из <code>Agents.tsx</code>.</li>
+</ul>
+<h3 id="этап-7-вкладка-эволюция-m"><a class="anchor" href="#этап-7-вкладка-эволюция-m" aria-label="Section link">#</a>Этап 7. Вкладка «Эволюция» — M — ✅</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> Диалог «Эволюция» в карточке агента: версии (дата, автор, источник, модель-генератор), diff семантики с предыдущей версией, статистика запусков по версиям (runs/completed/failed) из <code>GET /agents/{id}/runs</code> с группировкой по <code>agent_version</code>.</li>
+<li><input checked="" disabled="" type="checkbox"> Legacy-агенты: промт «как есть», бейдж «ручной промт (legacy)» в превью.</li>
+<li>Аналитика качества/ошибок/траектории против версий — этап 9 (§2.2).</li>
+</ul>
+<h3 id="21-пост-плановые-изменения-ревизия-2026-10-10"><a class="anchor" href="#21-пост-плановые-изменения-ревизия-2026-10-10" aria-label="Section link">#</a>2.1. Пост-плановые изменения (ревизия 2026-10-10)</h3><p>Спека и смежные волны ушли вперёд исходного плана; зафиксировано, чтобы документ соответствовал коду:</p>
+<ul>
+<li><strong>Шаблоны вместо автосоздания builtin-агентов</strong> (<code>d189e97</code>) + курированный QA-шаблон (<code>385a99a</code>) — §16 в действующей редакции: «не создаются автоматически… создаются из галереи шаблонов одним действием».</li>
+<li><strong>Capability <code>delegation</code></strong> — «Делегировать другим агентам» в форме агента; инвертированный дефолт: nil/false ⇒ запрещено, делегирование выдаётся явно человеком (<code>51a2e50</code>, <code>docs/agent-delegation.md</code>).</li>
+<li><strong><code>workspace_agent.org_unit_id</code></strong> — видимость агентов наследуется по оргдереву (<code>docs/org-structure.md</code> §3.2); empty = вся инсталляция. Агенты остаются кросс-функциональными; опциональный <code>project_id</code> в модели сохранён как legacy-скоуп — кандидат на вычистку в волне миграции org-structure.</li>
+</ul>
+<h3 id="22-фаза-2-оценки-и-эволюция-агента-план-работ"><a class="anchor" href="#22-фаза-2-оценки-и-эволюция-агента-план-работ" aria-label="Section link">#</a>2.2. Фаза 2 — Оценки и эволюция агента (план работ)</h3><p>Спека §15: «Эволюция» должна сопоставлять изменения определения с результатами работы агента; в перспективе — связь с evaluation и накопленными свидетельствами. Evaluation-инфраструктура уже обкатана на скилах (living-skills Phase 2: suite/run таблицы, синхронный раннер, события, UI-таб, CLI) — фаза зеркалит её для агентов.</p>
+<p>Ключевое отличие от скилов: оценка pinned не к «текущему состоянию», а к конкретной <code>definition_version</code> — сравниваются версии определения, а не дрейф текущего промта.</p>
+<h4 id="этап-8-оценки-агента-suites-runner-m"><a class="anchor" href="#этап-8-оценки-агента-suites-runner-m" aria-label="Section link">#</a>Этап 8. Оценки агента (suites + runner) — M — ✅</h4><ul>
+<li><input checked="" disabled="" type="checkbox"> Миграция <code>000048_agent_evaluations</code>: <code>workspace_agent_evaluation_suite</code> (agent_id PK, cases JSONB, updated_at) и <code>workspace_agent_evaluation_run</code> (id BIGSERIAL, agent_id, agent_version INT, passed, failed, cases JSONB, created_at) — зеркало <code>000044_skill_evolution_phase2</code>.</li>
+<li><input checked="" disabled="" type="checkbox"> Стор <code>workspace/agentevals.go</code>: <code>Get/SaveAgentEvaluationSuite</code>, <code>RecordAgentEvaluationRun</code>, <code>ListAgentEvaluationRuns</code> (лимиты как у скилов).</li>
+<li><input checked="" disabled="" type="checkbox"> Эндпоинты: <code>GET/PUT /v1/workspace/agents/{id}/evaluation-suite</code> (reader/writer), <code>POST/GET /v1/workspace/agents/{id}/evaluations</code> (запуск — writer) + внутренний sink <code>POST .../evaluation-runs</code>; 404 на неизвестного агента.</li>
+<li><input checked="" disabled="" type="checkbox"> Раннер <code>kernel/agent/agenteval.go</code> — <code>RunAgentEvaluation(agentID, version)</code>: version=0 → эффективный промт (эндпоинт <code>/prompt</code>), version&gt;0 → <code>workspace_agent_version.compiled_prompt</code> снапшота; кейс = user-сообщение, один вызов модели на кейс, проверка <code>must_contain</code>/<code>must_not_contain</code>; запись run + событие <code>agent.evaluation.completed</code> (agent_id, agent_name, version, passed, failed).</li>
+<li><input checked="" disabled="" type="checkbox"> UI: в «Эволюции» секция «Оценки» — редактор сьюта, выбор версии для запуска (текущая / конкретная), история с детализацией кейсов (passed/missed/unexpected). Локализация en/ru.</li>
+<li><input disabled="" type="checkbox"> CLI (опционально, зеркало skill CLI): <code>temporality agent evals &lt;id&gt;</code> / <code>eval-run &lt;id&gt; --version N</code>.</li>
+<li><input checked="" disabled="" type="checkbox"> Тесты (<code>kernel/agent/agenteval_test.go</code>): текущая версия через эффективный промт, pinned-версия тестирует снапшот (не текущий промт), неизвестная версия/агент, пустой сьют, failed-case с missed/unexpected, запись run и событие.</li>
+</ul>
+<h4 id="этап-9-аналитика-эволюции-sm"><a class="anchor" href="#этап-9-аналитика-эволюции-sm" aria-label="Section link">#</a>Этап 9. Аналитика эволюции — S/M — ✅</h4><ul>
+<li><input checked="" disabled="" type="checkbox"> Агрегат на версию: runs (сгруппированы по <code>agent_version</code>, добавлены средние ходы) + eval pass rate (последний прогон версии); без новых таблиц — клиентская агрегация <code>debugger/src/agentEvolution.ts</code> поверх <code>workspace_agent_version</code> × eval-ранов × run-статистики.</li>
+<li><input checked="" disabled="" type="checkbox"> Строка версии в «Эволюции» получает pass rate и подсветку регрессии (падение pass rate против предыдущей версии при неизменном сьюте — оба сравниваемых прогона выполнены после <code>suite.updated_at</code>).</li>
+<li><input checked="" disabled="" type="checkbox"> Тесты: агрегация (<code>latestEvalByVersion</code>/<code>passRate</code>/<code>runsByVersion</code>), детект регрессии включая случай «сьют изменился между прогонами» (<code>agentEvolution.test.ts</code>).</li>
+</ul>
+<h4 id="этап-10-evolution-proposals-ml"><a class="anchor" href="#этап-10-evolution-proposals-ml" aria-label="Section link">#</a>Этап 10. Evolution proposals — M/L — ✅</h4><ul>
+<li><input checked="" disabled="" type="checkbox"> Анатомия как у скилов: observed problem / proposed change / expected effect + provenance (свидетельства: run ids, knowledge ids; ран/операция добавляются автоматически).</li>
+<li><input checked="" disabled="" type="checkbox"> Хранение: миграция <code>000049_agent_proposals</code> — <code>workspace_agent_proposal</code> (agent_id, base_version, definition JSONB, problem/change/effect, evidence JSONB, status pending|applied|rejected, author, created_at, decided_at/by); события <code>agent.definition.proposed/applied/rejected</code> (best-effort через journal, как у скилов).</li>
+<li><input checked="" disabled="" type="checkbox"> Применение — только человеком (writer), через штатный update-путь: bindings заморожены, версия растёт только при реальном semantic change, снапшот пишется с <code>prompt_source=&quot;proposal&quot;</code> (зеркало living-skills §26: агенты предлагают — люди применяют). Повторное применение/решение дважды — 409.</li>
+<li><input checked="" disabled="" type="checkbox"> Источники proposal: вручную из карточки агента (модалка без capabilities — предложение не даёт полномочий); из прогона — инструмент <code>agent_propose</code> (зеркало <code>skill_propose</code>, но без LLM-билдера: структурированные аргументы agent_id/problem/change/effect + constraints/completion/evidence). Capabilities не принимаются эндпоинтом вовсе — копируются из текущего определения (агент не может сам себе выписать полномочия).</li>
+<li><input checked="" disabled="" type="checkbox"> Эндпоинты: <code>GET/POST /v1/workspace/agents/{id}/proposals</code>, <code>POST .../proposals/{id}/apply|reject</code>; org-видимость агента проверяется (404 для чужих подразделений).</li>
+<li><input checked="" disabled="" type="checkbox"> UI: секция «Предложения» во вкладке «Эволюция» — список с проблемой/изменением/эффектом, evidence-чипами, diff definition к текущей версии, применить/отклонить с подтверждением; история решений видна. Локализация en/ru.</li>
+<li><input checked="" disabled="" type="checkbox"> Тесты: kernel-инструмент (<code>agentpropose_test.go</code> — провенанс, запрет capabilities, замена constraints/completion, валидация, неизвестный агент), агрегация/регрессия (<code>agentEvolution.test.ts</code>).</li>
+</ul>
+<h4 id="этап-11-p2-опционально-trajectory-level-оценки"><a class="anchor" href="#этап-11-p2-опционально-trajectory-level-оценки" aria-label="Section link">#</a>Этап 11 (P2, опционально). Trajectory-level оценки</h4><p>Кейс = полная задача → реальный <code>AgentRun</code>; критерии: завершение в бюджете, отсутствие реворков/эскалаций. Дорого; включать только если prompt-level оценки перестанут различать версии.</p>
+<h2 id="3-тестирование-и-приёмка"><a class="anchor" href="#3-тестирование-и-приёмка" aria-label="Section link">#</a>3. Тестирование и приёмка</h2><ul>
+<li>Юнит: компилятор (golden files), enforcement capabilities, билдер (парсинг/fallback), стор (версии immutable).</li>
+<li>API: create/update с definition → версия растёт только при реальном изменении; prompt endpoint.</li>
+<li>E2E/live: создать агента визардом из описания «нужен агент для code review…» → запустить run → в событиях <code>run.started</code> видна версия определения; сменить критерий завершения → версия 2; на «Эволюции» статистика разделена по версиям.</li>
+<li>Чек-лист спеки: §3 (нет YAML в UI), §5 (резюме, промт вторичен), §7–§10 (генератор не дублирует и не диктует шаги), §11 (evidence-контракт в базовой части), §13 (регенерация с diff), §14 (версии хранят всё перечисленное), §16 (builtin редактируются штатно).</li>
+</ul>
+<h2 id="4-принятые-решения"><a class="anchor" href="#4-принятые-решения" aria-label="Section link">#</a>4. Принятые решения</h2><ol>
+<li><strong>Enforcement — жёсткий.</strong> Capabilities реально режут инструменты и окружение, а не формулируют политику в промте: <code>modify_files=false</code> → read-only + без write-инструментов; <code>run_commands=false</code> → без <code>run_command</code>; <code>network=false</code> → без сети; <code>skills=false</code> → без инъекции скилов; <code>knowledge=false</code> → без prior knowledge hints. Иначе агент сам себе наделит полномочий через промт.</li>
+<li><strong>Компиляция — при каждом запуске.</strong> Промт всегда свежий; воспроизводимость обеспечивает текст, зафиксированный в <code>workspace_agent_version.compiled_prompt</code> (снимок той же детерминированной функции).</li>
+<li><strong>Legacy-миграция — ручная, через Rebuild/визард.</strong> Существующие агенты с <code>system_prompt</code> без definition конвертируются человеком через «Переформировать» (fallback — оставить старый промт как <code>prompt_override</code>). Автоматический проход при старте ядра отвергнут: LLM-вызов на старте неработоспособен. Legacy-агенты до конверсии работают как есть, с бейджем «ручной промт (legacy)».</li>
+<li><strong><code>purpose</code> = существующая колонка <code>description</code>.</strong> Отдельного поля в definition нет: «Назначение» в форме и резюме — это <code>workspace_agent.description</code>. Definition хранит только capabilities, constraints, completion, prompt_override.</li>
+</ol>
+<h2 id="5-не-цели"><a class="anchor" href="#5-не-цели" aria-label="Section link">#</a>5. Не-цели</h2><ul>
+<li>Автономное применение агентом изменений собственного определения: apply — только человек (этап 10 даёт агенту право предлагать, не применять).</li>
+<li>Marketplace/шаринг агентов между проектами.</li>
+<li>Trajectory-level оценки — до обоснования потребностью (этап 11, P2).</li>
+<li>Автовыбор агента под задачу / semantic routing.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="plan-agent-teams.html"><small>← Назад</small><strong>План работ: Команды агентов</strong></a>
+    <a class="pager-next" href="plan-org-structure.html"><small>Далее →</small><strong>План работ: Оргструктура и модель доступа</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

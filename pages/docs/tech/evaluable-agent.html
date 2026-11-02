@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Формирование системного промта агента — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/evaluable-agent.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента (research)</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row active" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="perf-audit-plan.html">План оптимизаций по итогам аудита производительности (ветка `perf/hot-path-audit`)</a>
+<a class="docs-nav-row" href="plan-agent-teams.html">План работ: Команды агентов</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-org-structure.html">План работ: Оргструктура и модель доступа</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="positioning.html">Позиционирование: варианты восприятия продукта на рынке</a>
+<a class="docs-nav-row" href="product-architecture.html">Архитектура Temporality — инвентаризация и расчистка (2026-09-25)</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="revision-2026-10-16.html">Ревизия планов: что не реализовано (2026-10-16)</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="screenshots-checklist.html">Чек-лист скриншотов для сайта и гайда</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Формирование системного промта агента</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Системный промт агента должен задавать его <strong>роль, ответственность, границы и критерии завершения работы</strong>, но не навязывать конкретную последовательность действий.</p>
+<p>Агент должен самостоятельно выбирать траекторию решения задачи на основании:</p>
+<ul>
+<li>поставленной задачи;</li>
+<li>доступных инструментов;</li>
+<li>окружения;</li>
+<li>подключённых skills;</li>
+<li>релевантных знаний Temporality;</li>
+<li>полученных в ходе работы свидетельств.</li>
+</ul>
+<p>Пользователь не должен вручную составлять сложный структурированный prompt или YAML-конфигурацию.</p>
+<hr>
+<h2 id="2-принцип-формирования"><a class="anchor" href="#2-принцип-формирования" aria-label="Section link">#</a>2. Принцип формирования</h2><p>Системный промт состоит из двух частей:</p>
+<h3 id="постоянная-часть"><a class="anchor" href="#постоянная-часть" aria-label="Section link">#</a>Постоянная часть</h3><p>Формируется из определения агента и меняется редко:</p>
+<ul>
+<li>кто такой агент;</li>
+<li>за что он отвечает;</li>
+<li>что ему разрешено и запрещено;</li>
+<li>что считается успешно выполненной работой.</li>
+</ul>
+<h3 id="контекстная-часть"><a class="anchor" href="#контекстная-часть" aria-label="Section link">#</a>Контекстная часть</h3><p>Формируется Temporality автоматически для конкретной операции:</p>
+<ul>
+<li>задача;</li>
+<li>ограничения окружения;</li>
+<li>доступные инструменты;</li>
+<li>релевантные skills;</li>
+<li>релевантные знания;</li>
+<li>необходимый контекст предыдущей работы;</li>
+<li>требования к подтверждению результата.</li>
+</ul>
+<p>Пользователь не редактирует контекстную часть системного промта напрямую.</p>
+<hr>
+<h1 id="3-пользовательский-интерфейс"><a class="anchor" href="#3-пользовательский-интерфейс" aria-label="Section link">#</a>3. Пользовательский интерфейс</h1><h2 id="31-не-использовать-yaml-как-пользовательский-интерфейс"><a class="anchor" href="#31-не-использовать-yaml-как-пользовательский-интерфейс" aria-label="Section link">#</a>3.1. Не использовать YAML как пользовательский интерфейс</h2><p>Необходимо исключить сценарий:</p>
+<pre><code class="language-yaml">role:
+  identity: ...
+  responsibilities:
+    - ...
+  constraints:
+    - ...
+  completion:
+    - ...
+</code></pre>
+<p>YAML или другая структурированная модель может использоваться внутри системы как формат хранения или компиляции.</p>
+<p>Для пользователя должна существовать обычная форма.</p>
+<hr>
+<h2 id="32-минимальная-форма-создания-агента"><a class="anchor" href="#32-минимальная-форма-создания-агента" aria-label="Section link">#</a>3.2. Минимальная форма создания агента</h2><p>Форма должна содержать:</p>
+<h3 id="название"><a class="anchor" href="#название" aria-label="Section link">#</a>Название</h3><p>Например:</p>
+<blockquote>
+<p>Coder</p>
+</blockquote>
+<h3 id="назначение"><a class="anchor" href="#назначение" aria-label="Section link">#</a>Назначение</h3><p>Одно обычное текстовое поле:</p>
+<blockquote>
+<p>Для каких задач нужен этот агент?</p>
+</blockquote>
+<p>Например:</p>
+<blockquote>
+<p>Реализует изменения в коде, исправляет ошибки и проверяет результат.</p>
+</blockquote>
+<p>Это основное поле.</p>
+<h3 id="возможности"><a class="anchor" href="#возможности" aria-label="Section link">#</a>Возможности</h3><p>Понятные переключатели:</p>
+<ul>
+<li>Читать файлы</li>
+<li>Изменять файлы</li>
+<li>Выполнять команды</li>
+<li>Использовать интернет</li>
+<li>Использовать подключённые skills</li>
+<li>Использовать накопленные знания</li>
+</ul>
+<p>При этом доступность отдельных возможностей определяется конфигурацией окружения и правами агента.</p>
+<h3 id="ограничения"><a class="anchor" href="#ограничения" aria-label="Section link">#</a>Ограничения</h3><p>Необязательное поле:</p>
+<blockquote>
+<p>Есть ли что-то, что агенту запрещено делать?</p>
+</blockquote>
+<p>Например:</p>
+<blockquote>
+<p>Не изменять инфраструктуру и не удалять файлы.</p>
+</blockquote>
+<h3 id="проверка-результата"><a class="anchor" href="#проверка-результата" aria-label="Section link">#</a>Проверка результата</h3><p>Необязательное поле:</p>
+<blockquote>
+<p>Что агент должен проверить перед завершением работы?</p>
+</blockquote>
+<p>Например:</p>
+<blockquote>
+<p>Запустить соответствующие тесты и убедиться, что сборка проходит.</p>
+</blockquote>
+<hr>
+<h1 id="4-ai-формирование"><a class="anchor" href="#4-ai-формирование" aria-label="Section link">#</a>4. AI-формирование</h1><p>Пользователь может просто описать агента естественным языком.</p>
+<p>Например:</p>
+<blockquote>
+<p>Нужен агент, который занимается backend-разработкой на C#. Может менять код и запускать тесты, но не должен трогать инфраструктуру.</p>
+</blockquote>
+<p>После нажатия <strong>«Сформировать агента»</strong> Temporality должен:</p>
+<ol>
+<li>интерпретировать описание;</li>
+<li>определить предполагаемую роль;</li>
+<li>предложить структурированное определение агента;</li>
+<li>сформировать системный промт;</li>
+<li>показать пользователю результат;</li>
+<li>дать возможность его скорректировать.</li>
+</ol>
+<p>Пользователь не обязан знать устройство системного промта.</p>
+<hr>
+<h1 id="5-пользователь-должен-видеть-не-prompt-а-смысл"><a class="anchor" href="#5-пользователь-должен-видеть-не-prompt-а-смысл" aria-label="Section link">#</a>5. Пользователь должен видеть не prompt, а смысл</h1><p>После формирования необходимо показывать человеку понятное резюме:</p>
+<h3 id="coder"><a class="anchor" href="#coder" aria-label="Section link">#</a>Coder</h3><p><strong>Назначение</strong></p>
+<p>Разработка и исправление backend-кода.</p>
+<p><strong>Может</strong></p>
+<ul>
+<li>читать и изменять код;</li>
+<li>выполнять команды;</li>
+<li>запускать тесты.</li>
+</ul>
+<p><strong>Не может</strong></p>
+<ul>
+<li>изменять инфраструктуру.</li>
+</ul>
+<p><strong>Перед завершением</strong></p>
+<ul>
+<li>проверяет изменённый код;</li>
+<li>запускает релевантные тесты;</li>
+<li>сообщает о непроверенных предположениях.</li>
+</ul>
+<p>И только при необходимости должна быть доступна вкладка:</p>
+<blockquote>
+<p><strong>Системный промт</strong></p>
+</blockquote>
+<p>для просмотра и ручной корректировки итогового текста.</p>
+<hr>
+<h1 id="6-системный-промт-должен-генерироваться-а-не-собираться-вручную"><a class="anchor" href="#6-системный-промт-должен-генерироваться-а-не-собираться-вручную" aria-label="Section link">#</a>6. Системный промт должен генерироваться, а не собираться вручную</h1><p>Внутренняя модель должна позволять компилировать системный промт из отдельных смысловых компонентов:</p>
+<pre><code class="language-text">Базовый контракт агента
+        +
+Роль
+        +
+Ответственность
+        +
+Ограничения
+        +
+Критерии завершения
+        +
+Политика окружения
+</code></pre>
+<p>Пользователь при этом работает с человеческими формулировками, а не с этими техническими компонентами.</p>
+<hr>
+<h1 id="7-не-превращать-системный-промт-в-инструкцию-по-шагам"><a class="anchor" href="#7-не-превращать-системный-промт-в-инструкцию-по-шагам" aria-label="Section link">#</a>7. Не превращать системный промт в инструкцию по шагам</h1><p>Генератор должен избегать инструкций вида:</p>
+<pre><code class="language-text">1. Сначала прочитай README.
+2. Затем найди нужный файл.
+3. Потом запусти тесты.
+4. После этого внеси изменения.
+5. Затем снова запусти тесты.
+</code></pre>
+<p>Вместо этого должны формироваться требования уровня поведения:</p>
+<blockquote>
+<p>Understand the existing implementation before modifying it.</p>
+</blockquote>
+<blockquote>
+<p>Prefer existing project conventions.</p>
+</blockquote>
+<blockquote>
+<p>Verify important changes using relevant available checks.</p>
+</blockquote>
+<p>Это позволяет сильной модели самостоятельно выбирать оптимальную траекторию.</p>
+<hr>
+<h1 id="8-не-дублировать-возможности-инструментов"><a class="anchor" href="#8-не-дублировать-возможности-инструментов" aria-label="Section link">#</a>8. Не дублировать возможности инструментов</h1><p>Системный промт не должен подробно описывать инструменты, если Temporality уже передаёт модели их схемы.</p>
+<p>Плохо:</p>
+<blockquote>
+<p>Для чтения файла используй инструмент X с параметром path...</p>
+</blockquote>
+<p>Хорошо:</p>
+<blockquote>
+<p>Use the available tools to inspect and modify the workspace.</p>
+</blockquote>
+<p>Конкретное описание инструментов должно приходить из tool definitions.</p>
+<hr>
+<h1 id="9-не-дублировать-skills"><a class="anchor" href="#9-не-дублировать-skills" aria-label="Section link">#</a>9. Не дублировать skills</h1><p>Системный промт не должен содержать инструкции конкретных skills.</p>
+<p>Например, Coder не должен иметь внутри системного промта:</p>
+<blockquote>
+<p>При работе с React используй...</p>
+</blockquote>
+<p>или:</p>
+<blockquote>
+<p>При работе с Directum RX обязательно...</p>
+</blockquote>
+<p>Такие знания должны находиться в skills и подключаться только тогда, когда они релевантны операции.</p>
+<hr>
+<h1 id="10-не-заставлять-агента-использовать-память"><a class="anchor" href="#10-не-заставлять-агента-использовать-память" aria-label="Section link">#</a>10. Не заставлять агента использовать память</h1><p>Не следует помещать в системный промт обязательную инструкцию:</p>
+<blockquote>
+<p>Always use available memories.</p>
+</blockquote>
+<p>Temporality сам выбирает релевантные знания и передаёт их агенту в подходящий момент.</p>
+<p>Агенту достаточно общего правила:</p>
+<blockquote>
+<p>Use provided prior knowledge when it is relevant, but prefer current evidence when the two conflict.</p>
+</blockquote>
+<p>Это предотвращает превращение памяти в обязательный RAG-контекст.</p>
+<hr>
+<h1 id="11-обязательный-контракт-доказательности"><a class="anchor" href="#11-обязательный-контракт-доказательности" aria-label="Section link">#</a>11. Обязательный контракт доказательности</h1><p>Для всех автономных агентов системный промт должен содержать общий принцип:</p>
+<blockquote>
+<p>Не утверждай, что результат достигнут, если это не подтверждено доступными свидетельствами.</p>
+</blockquote>
+<p>Агент должен различать:</p>
+<ul>
+<li>выполненное и проверенное;</li>
+<li>выполненное, но не проверенное;</li>
+<li>предполагаемое;</li>
+<li>невозможное для проверки.</li>
+</ul>
+<p>Это особенно важно для Reviewer, DevOps и агентов, работающих с долгими задачами.</p>
+<hr>
+<h1 id="12-роль-должна-определять-ответственность-а-не-стиль"><a class="anchor" href="#12-роль-должна-определять-ответственность-а-не-стиль" aria-label="Section link">#</a>12. Роль должна определять ответственность, а не стиль</h1><p>Например:</p>
+<h3 id="coder"><a class="anchor" href="#coder" aria-label="Section link">#</a>Coder</h3><p>Отвечает за изменение программного кода и проверку результата.</p>
+<h3 id="reviewer"><a class="anchor" href="#reviewer" aria-label="Section link">#</a>Reviewer</h3><p>Отвечает за поиск дефектов и оценку достаточности доказательств.</p>
+<h3 id="researcher"><a class="anchor" href="#researcher" aria-label="Section link">#</a>Researcher</h3><p>Отвечает за получение и синтезирование информации из доступных источников.</p>
+<h3 id="devops"><a class="anchor" href="#devops" aria-label="Section link">#</a>DevOps</h3><p>Отвечает за изменение, диагностику и проверку инфраструктуры.</p>
+<p>Не следует добавлять в role prompt инструкции вроде:</p>
+<blockquote>
+<p>Be extremely careful, thoughtful, proactive, concise and intelligent.</p>
+</blockquote>
+<p>Такие формулировки не должны заменять конкретные поведенческие требования.</p>
+<hr>
+<h1 id="13-предусмотреть-режим-сформировать-заново"><a class="anchor" href="#13-предусмотреть-режим-сформировать-заново" aria-label="Section link">#</a>13. Предусмотреть режим «Сформировать заново»</h1><p>Если пользователь существенно изменил описание агента, он должен иметь возможность нажать:</p>
+<blockquote>
+<p><strong>Переформировать</strong></p>
+</blockquote>
+<p>Temporality повторно анализирует описание и формирует новую версию определения.</p>
+<p>При этом ручные изменения пользователя не должны молча теряться.</p>
+<p>Перед заменой необходимо показать:</p>
+<ul>
+<li>что изменится;</li>
+<li>какие пользовательские настройки затронуты;</li>
+<li>возможность принять или отменить изменения.</li>
+</ul>
+<hr>
+<h1 id="14-версионирование"><a class="anchor" href="#14-версионирование" aria-label="Section link">#</a>14. Версионирование</h1><p>Каждое изменение системного промта должно создавать версию.</p>
+<p>Версия должна хранить:</p>
+<ul>
+<li>пользовательское описание;</li>
+<li>сформированное определение;</li>
+<li>итоговый системный промт;</li>
+<li>модель, которая выполняла формирование;</li>
+<li>дату изменения;</li>
+<li>автора изменения.</li>
+</ul>
+<p>Это необходимо для последующего анализа поведения агента.</p>
+<hr>
+<h1 id="15-эволюция-агента"><a class="anchor" href="#15-эволюция-агента" aria-label="Section link">#</a>15. Эволюция агента</h1><p>В карточке агента должна существовать отдельная вкладка:</p>
+<blockquote>
+<p><strong>Эволюция</strong></p>
+</blockquote>
+<p>Она должна позволять сопоставлять изменения определения агента с результатами его работы.</p>
+<p>Минимально:</p>
+<pre><code class="language-text">Версия 3
+↓
+изменён критерий завершения
+↓
+следующие операции
+↓
+изменение качества / ошибок / траектории
+</code></pre>
+<p>В дальнейшем это может быть связано с evaluation и накопленными свидетельствами Temporality.</p>
+<hr>
+<h1 id="16-встроенные-агенты"><a class="anchor" href="#16-встроенные-агенты" aria-label="Section link">#</a>16. Встроенные агенты</h1><p>Temporality поставляется с кураторскими шаблонами агентов:</p>
+<ul>
+<li>Coder</li>
+<li>Reviewer</li>
+<li>QA</li>
+<li>Researcher</li>
+<li>DevOps</li>
+</ul>
+<p>Они не создаются автоматически — ни при установке, ни при создании проекта.
+Пользователь создаёт нужных агентов из галереи шаблонов одним действием и
+получает обычный редактируемый агент; шаблон задаёт только начальные значения.</p>
+<p>Шаблоны полностью настроены разработчиками продукта, но созданные из них
+агенты редактируются тем же интерфейсом, что и пользовательские.</p>
+<p>Пользователь не должен видеть YAML или внутреннюю структуру определения.</p>
+<p>Агенты — кросс-функциональные и глобальные: они не привязываются к проектам.
+Специфика проекта не хранится в определении агента — она доставляется
+контекстной частью системного промта: релевантными знаниями (memory/knowledge),
+навыками и MCP-серверами того проекта, в котором происходит запуск.</p>
+<hr>
+<h1 id="17-требование-к-генератору"><a class="anchor" href="#17-требование-к-генератору" aria-label="Section link">#</a>17. Требование к генератору</h1><p>Генератор системного промта должен оптимизировать результат не по длине или полноте инструкции, а по следующим критериям:</p>
+<ol>
+<li>отсутствие противоречий;</li>
+<li>отсутствие дублирования инструментов и skills;</li>
+<li>отсутствие ненужных пошаговых инструкций;</li>
+<li>ясность ответственности агента;</li>
+<li>однозначность ограничений;</li>
+<li>наличие проверяемого критерия завершения;</li>
+<li>отсутствие требований, которые модель не может объективно выполнить;</li>
+<li>минимальная необходимая длина.</li>
+</ol>
+<hr>
+<h1 id="18-итоговая-концепция"><a class="anchor" href="#18-итоговая-концепция" aria-label="Section link">#</a>18. Итоговая концепция</h1><p>Пользователь должен думать:</p>
+<blockquote>
+<p><strong>«Я создаю специалиста и объясняю ему, чем он занимается».</strong></p>
+</blockquote>
+<p>а не:</p>
+<blockquote>
+<p><strong>«Я программирую YAML-конфигурацию автономного агента».</strong></p>
+</blockquote>
+<p>Temporality должен сам превратить человеческое описание в технический контракт агента и затем скомпилировать из него системный промт.</p>
+<p>Главная единица пользовательского интерфейса — <strong>агент и его ответственность</strong>, а не системный промт.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="dev-stack-runs.html"><small>← Назад</small><strong>Dev-стек: живучесть ранов при пересборках</strong></a>
+    <a class="pager-next" href="event-model.html"><small>Далее →</small><strong>Event model audit (Phase 2)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

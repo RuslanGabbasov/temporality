@@ -113,7 +113,7 @@ a 1-hour ceiling (<code>timeout_sec</code> up to 3600,
 <code>KERNEL_BG_TOOL_MAX_SECONDS</code>); ordinary commands stay at 300/900
 (<code>KERNEL_TOOL_MAX_SECONDS</code>).</li>
 </ul>
-<p>Details and delivery guarantees — <code>docs/agent-async-operations.md</code>.</p>
+<p>Details and delivery guarantees — <a href="../tech/agent-async-operations.html">docs/agent-async-operations.md</a>.</p>
 <h2 id="agent-evolution"><a class="anchor" href="#agent-evolution" aria-label="Section link">#</a>Agent evolution</h2><p><img src="../assets/agent-evolution.webp" alt="Evolution: versions, gate, regressions"></p>
 <p>The agent can propose changes to its own configuration (the <code>agent_propose</code>
 tool): the problem with evidence (run ids), the change and the expected
@@ -121,13 +121,13 @@ effect. The proposal lands in the agent&#39;s card as a draft.</p>
 <p>Applying it goes through the <strong>quality loop</strong>: a proposal is applied only on
 top of a fresh green evaluation run (golden cases from real runs, optionally a
 calibrated LLM judge). A human decides; a proposal can never widen the agent&#39;s
-powers. Details — <code>docs/agent-quality-loop.md</code>.</p>
+powers. Details — <a href="../tech/agent-quality-loop.html">docs/agent-quality-loop.md</a>.</p>
 <h2 id="teams"><a class="anchor" href="#teams" aria-label="Section link">#</a>Teams</h2><p>A team is a slot manifest: roles (Developer, Reviewer, QA…), their bindings to
 concrete agents, the execution protocol (pipeline/DAG), rework limits and a
 budget. Built from a description (&quot;A team with quality control: Developer
 implements, Security and QA review, Reviewer accepts&quot;) and versioned.</p>
 <p>Launching a team from chat or a trigger starts a DAG execution with review
-gates — see <code>docs/agent-teams.md</code>.</p>
+gates — see <a href="../tech/agent-teams.html">docs/agent-teams.md</a>.</p>
 <h2 id="proposals-and-versions"><a class="anchor" href="#proposals-and-versions" aria-label="Section link">#</a>Proposals and versions</h2><p>Every applied change creates a new version of the agent definition; the
 version history with who and why is in the agent&#39;s card. Rollback is picking
 a previous version.</p>
