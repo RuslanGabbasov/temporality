@@ -107,11 +107,28 @@ type supervisorReconcileReply struct {
 	} `json:"verdicts"`
 }
 
+// cleanVerdictStrings cleans every string of the list.
 func cleanVerdictStrings(list []string) []string {
 	out := make([]string, 0, len(list))
 	for _, s := range list {
 		if s = strings.TrimSpace(s); s != "" {
 			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// cleanLessonTopics brings the model's lesson topics to the publishable
+// shape: at most five topics, each one a tag (60 chars) rather than a
+// sentence — hint labels stay readable no matter what the model emitted.
+func cleanLessonTopics(topics []string) []string {
+	out := cleanVerdictStrings(topics)
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	for i, topic := range out {
+		if len(topic) > 60 {
+			out[i] = topic[:60]
 		}
 	}
 	return out
@@ -145,11 +162,7 @@ func parseSupervisorReconcileReply(content string, knownOps map[string]bool) (Su
 			proposition = proposition[:400]
 		}
 		if proposition != "" {
-			topics := cleanVerdictStrings(reply.Lesson.Topics)
-			if len(topics) > 5 {
-				topics = topics[:5]
-			}
-			verdict.Lesson = &SupervisorLesson{Proposition: proposition, Topics: topics}
+			verdict.Lesson = &SupervisorLesson{Proposition: proposition, Topics: cleanLessonTopics(reply.Lesson.Topics)}
 		}
 	}
 	// Every known op must be covered exactly once; unknown effects are the
@@ -195,10 +208,7 @@ func (a *Activities) PublishSupervisorLesson(ctx context.Context, runID, project
 		return nil
 	}
 	knowledgeID := "supervisor-" + shortHash(proposition)
-	topics := verdict.Lesson.Topics
-	if len(topics) > 5 {
-		topics = topics[:5]
-	}
+	topics := cleanLessonTopics(verdict.Lesson.Topics)
 	event := observation.Event{
 		Schema:     observation.Schema,
 		EventID:    fmt.Sprintf("supervisor-lesson/%s/%d", knowledgeID, time.Now().UnixNano()),

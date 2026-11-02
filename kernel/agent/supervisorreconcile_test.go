@@ -123,3 +123,20 @@ func TestParseSupervisorReconcileLessonBounds(t *testing.T) {
 		t.Fatalf("topics must be capped to 5, got %d", len(verdict.Lesson.Topics))
 	}
 }
+
+func TestCleanLessonTopicsCapsEachTag(t *testing.T) {
+	longTopic := strings.Repeat("y", 120)
+	out := cleanLessonTopics([]string{longTopic, "ok-topic", "", longTopic, "  ", longTopic})
+	// The empty and whitespace-only entries drop, so 4 topics survive.
+	if len(out) != 4 {
+		t.Fatalf("four topics expected after the empties dropped, got %d: %v", len(out), out)
+	}
+	for i, topic := range out {
+		if len(topic) > 60 {
+			t.Fatalf("topic %d exceeds 60 chars: %q", i, topic)
+		}
+	}
+	if out[1] != "ok-topic" {
+		t.Fatalf("a normal topic must pass through unchanged: %q", out[1])
+	}
+}
