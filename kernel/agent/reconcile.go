@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/temporality-project/temporality/observation"
@@ -123,6 +124,47 @@ func isOrchestrationTool(tool string) bool {
 	return !prefixed && (bare == "plan" || bare == "delegate")
 }
 
+// The uncertain-operations listing is polled by several clients at once
+// (the runs-page silent refresh, the layout badges) — every open browser
+// tab multiplied the same 6-type journal scan into a constant multi-core
+// burn on the journal. One result per project, single-flight: concurrent
+// callers of the same project share one scan, and a fresh-enough result is
+// served from the cache even to a solo caller. Reconciliation writes go
+// through RecordReconciliation, which bumps the generation and drops the
+// cached entry — a settled operation must not resurface for a full TTL.
+type opsCacheEntry struct {
+	result   []UncertainOperation
+	liveness WorkflowLiveness
+	at       time.Time
+}
+
+var opsCacheMu sync.Mutex
+var opsCache map[string]opsCacheEntry
+
+const opsCacheTTL = 10 * time.Second
+
+func (a *Activities) cachedOrScanUncertainOperations(ctx context.Context, project string, liveness WorkflowLiveness) ([]UncertainOperation, error) {
+	opsCacheMu.Lock()
+	if opsCache == nil {
+		opsCache = map[string]opsCacheEntry{}
+	}
+	if entry, ok := opsCache[project]; ok && time.Since(entry.at) < opsCacheTTL {
+		out := make([]UncertainOperation, len(entry.result))
+		copy(out, entry.result)
+		opsCacheMu.Unlock()
+		return out, nil
+	}
+	opsCacheMu.Unlock()
+	result, err := a.scanUncertainOperations(ctx, project, liveness)
+	if err != nil {
+		return result, err
+	}
+	opsCacheMu.Lock()
+	opsCache[project] = opsCacheEntry{result: result, liveness: liveness, at: time.Now()}
+	opsCacheMu.Unlock()
+	return result, nil
+}
+
 // UncertainOperations projects tool lifecycle events from the journal into
 // operations whose effect state is unresolved. The event stream stays the
 // source of truth — nothing is stored here. An empty project lists across
@@ -131,6 +173,13 @@ func isOrchestrationTool(tool string) bool {
 // visible projects, which it can do losslessly because every operation
 // carries its own project.
 func (a *Activities) UncertainOperations(ctx context.Context, project string, liveness WorkflowLiveness) ([]UncertainOperation, error) {
+	return a.cachedOrScanUncertainOperations(ctx, project, liveness)
+}
+
+// scanUncertainOperations is the uncached journal scan (single-flight entry
+// point above): tool.started joined with terminal events and reconciliations
+// over the operations window, liveness-filtered for the still-uncertain tail.
+func (a *Activities) scanUncertainOperations(ctx context.Context, project string, liveness WorkflowLiveness) ([]UncertainOperation, error) {
 	window := a.OperationsWindow
 	if window <= 0 {
 		window = defaultOperationsWindow
@@ -500,6 +549,11 @@ func (a *Activities) RecordReconciliation(ctx context.Context, request Reconcile
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return observation.Event{}, fmt.Errorf("Temporality event ingest returned HTTP %d", response.StatusCode)
 	}
+	// The operation is settled: drop the cached listing so the queues stop
+	// showing it for the rest of the cache TTL.
+	opsCacheMu.Lock()
+	delete(opsCache, request.Project)
+	opsCacheMu.Unlock()
 	return event, nil
 }
 

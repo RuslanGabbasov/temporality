@@ -290,12 +290,14 @@ export default function Layout({ children, activePage }: LayoutProps) {
       } catch { /* ignore */ }
       try {
         // Count unresolved approval requests and open questions in this project.
-        const collect = async (type: string): Promise<string[]> => {
+        // ONE journal query with an any-of types filter (the old version fired
+        // 6-8 separate scans per poll — every open tab, every 30 seconds).
+        const collectOpen = async (types: string[]): Promise<string[]> => {
           const ids: string[] = []
-          const resp = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=${type}&limit=50`, { headers: { ...authHeaders() } })
+          const resp = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&types=${types.join(',')}&limit=200`, { headers: { ...authHeaders() } })
           if (resp.ok) {
             const data = await resp.json()
-            for (const ev of (data.events ?? []) as { data?: { operation_id?: string } }[]) {
+            for (const ev of (data.events ?? []) as { event_id?: string; type?: string; data?: { operation_id?: string } }[]) {
               if (ev.data?.operation_id) ids.push(ev.data.operation_id)
             }
           }
@@ -306,34 +308,25 @@ export default function Layout({ children, activePage }: LayoutProps) {
         // the unscoped listing is server-side scoped to the caller's visible
         // projects (docs/activity-scoping.md §5), so the badge lights up for
         // asks from any visible project. Older kernels without the endpoint
-        // fall back to events.
+        // fall back to the combined events query.
         let openQuestions = 0
         try {
           const data = await workspaceApi.listHumanRequests({ onlyOpen: true, workflowOnly: true })
           openQuestions = (data.requests ?? []).length
         } catch {
-          try {
-            const data = await workspaceApi.listHumanRequests({ project, onlyOpen: true, workflowOnly: true })
-            openQuestions = (data.requests ?? []).length
-          } catch {
-            const asked = await collect('human.requested')
-            if (asked.length > 0) {
-              const answered = new Set<string>()
-              for (const type of ['human.answered', 'human.cancelled', 'human.timed_out']) {
-                for (const id of await collect(type)) answered.add(id)
-              }
-              openQuestions = asked.filter((id) => !answered.has(id)).length
-            }
+          const asked = await collectOpen(['human.requested'])
+          if (asked.length > 0) {
+            const answered = new Set<string>()
+            for (const id of await collectOpen(['human.answered', 'human.cancelled', 'human.timed_out'])) answered.add(id)
+            openQuestions = asked.filter((id) => !answered.has(id)).length
           }
         }
         // Tool approvals are not human_request rows — they still live in events.
+        const requestedApproval = await collectOpen(['approval.requested'])
         let openApprovals = 0
-        const requestedApproval = await collect('approval.requested')
         if (requestedApproval.length > 0) {
           const ended = new Set<string>()
-          for (const type of ['approval.granted', 'approval.rejected', 'approval.timed_out']) {
-            for (const id of await collect(type)) ended.add(id)
-          }
+          for (const id of await collectOpen(['approval.granted', 'approval.rejected', 'approval.timed_out'])) ended.add(id)
           openApprovals = requestedApproval.filter((id) => !ended.has(id)).length
         }
         setPendingApprovals(openQuestions + openApprovals)
@@ -347,7 +340,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
       } catch { /* ignore */ }
     }
     void poll()
-    const timer = window.setInterval(poll, 15000)
+    const timer = window.setInterval(poll, 30000)
     return () => window.clearInterval(timer)
   }, [project])
 

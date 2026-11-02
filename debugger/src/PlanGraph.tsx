@@ -447,7 +447,7 @@ export default function PlanGraph({ project, runId, agents, live = false, onOpen
   useEffect(() => {
     void refresh()
     if (!live && !hasRunning) return
-    const timer = window.setInterval(() => { void refresh() }, 5000)
+    const timer = window.setInterval(() => { void refresh() }, 10000)
     return () => window.clearInterval(timer)
   }, [refresh, live, hasRunning])
 

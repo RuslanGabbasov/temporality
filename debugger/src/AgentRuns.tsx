@@ -865,7 +865,7 @@ export default function AgentRuns({ project }: { project: string }) {
   }, [])
   useEffect(() => {
     if (!pageVisible) return
-    const timer = window.setInterval(() => { void loadRuns(true, true) }, 15000)
+    const timer = window.setInterval(() => { void loadRuns(true, true) }, 30000)
     // Wake-from-sleep (and tab switch back): one immediate refresh re-syncs
     // the list after the hidden gap (and the open run's tail pass follows on
     // its own 30s cadence).
@@ -895,7 +895,7 @@ export default function AgentRuns({ project }: { project: string }) {
     // still multiplies into a steady hum of journal queries. A HIDDEN tab
     // skips the poll entirely (its next visible tick resyncs) — several
     // opened trace tabs must not multiply into parallel request piles.
-    const timer = window.setInterval(() => { void loadRun(selected, true) }, 30000)
+    const timer = window.setInterval(() => { void loadRun(selected, true) }, 60000)
     return () => window.clearInterval(timer)
   }, [selected, loadRun, pageVisible])
   // Live journal tail: while the selected run is in flight, events arrive over

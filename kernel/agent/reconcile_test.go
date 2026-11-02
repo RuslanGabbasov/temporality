@@ -122,6 +122,7 @@ func runStartedEvent(project, run, agentID, parentRunID, title string, occurredA
 }
 
 func TestUncertainOperationsCrashWindow(t *testing.T) {
+	resetOpsCache()
 	old := time.Now().Add(-time.Hour)
 	recent := time.Now().Add(-time.Minute)
 	rejected := toolEvent("repo", "run-6", "op-rejected", "tool.failed", old)
@@ -184,6 +185,7 @@ func TestUncertainOperationsCrashWindow(t *testing.T) {
 // runs it must stay in flight; only a dead workflow without a terminal
 // event is a real crash-window question.
 func TestUncertainOperationsOrchestrationToolsAreNotStale(t *testing.T) {
+	resetOpsCache()
 	old := time.Now().Add(-time.Hour)
 	planStarted := toolEvent("repo", "run-1", "op-plan", "tool.started", old)
 	planStarted.Data["tool"] = "plan"
@@ -221,6 +223,7 @@ func TestUncertainOperationsOrchestrationToolsAreNotStale(t *testing.T) {
 // action) must never surface as operator reconciliation questions — including
 // legacy events recorded before the effect classification existed.
 func TestUncertainOperationsSkipsReadOnlyCalls(t *testing.T) {
+	resetOpsCache()
 	stamp := time.Now().UTC()
 
 	fetchStarted := toolEvent("repo", "run-1", "op-fetch", "tool.started", stamp)
@@ -258,6 +261,7 @@ func TestUncertainOperationsSkipsReadOnlyCalls(t *testing.T) {
 }
 
 func TestUncertainOperationsCarryRunHeader(t *testing.T) {
+	resetOpsCache()
 	stamp := time.Now().UTC()
 	failed := toolEvent("repo", "run-child", "op-x", "tool.failed", stamp)
 	server := journalStub(t,
@@ -281,6 +285,7 @@ func TestUncertainOperationsCarryRunHeader(t *testing.T) {
 // that single operation surfacing as uncertain — the listing itself must not
 // 500 and blank the panel for every other operation.
 func TestUncertainOperationsLivenessErrorDegrades(t *testing.T) {
+	resetOpsCache()
 	old := time.Now().Add(-time.Hour)
 	server := journalStub(t,
 		toolEvent("repo", "run-1", "op-degraded", "tool.started", old),
@@ -395,6 +400,7 @@ func TestSummarizeChildRun(t *testing.T) {
 }
 
 func TestUncertainOperationsCarryDelegationContext(t *testing.T) {
+	resetOpsCache()
 	stamp := time.Now().UTC()
 	failed := toolEvent("repo", "run-parent", "op-delegate", "tool.failed", stamp)
 	failed.Data["error_type"] = "delegated_run_failed"
@@ -420,6 +426,7 @@ func TestUncertainOperationsCarryDelegationContext(t *testing.T) {
 }
 
 func TestUncertainOperationsWindowExcludesAncientHistory(t *testing.T) {
+	resetOpsCache()
 	// Two identical unresolved crash-window operations: one recent, one far
 	// beyond the default 7d scan window. The ancient one must not surface —
 	// the window is what keeps the per-poll listing bounded (see
@@ -439,6 +446,7 @@ func TestUncertainOperationsWindowExcludesAncientHistory(t *testing.T) {
 }
 
 func TestUncertainOperationsWindowIsConfigurable(t *testing.T) {
+	resetOpsCache()
 	// A shorter configured window must exclude events the default would keep:
 	// proof the Activities field, not just the constant, drives the scan.
 	old := time.Now().UTC().Add(-72 * time.Hour)
@@ -467,4 +475,12 @@ func TestToolEventsStopsAtPageCap(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, events)
 	require.Equal(t, toolEventsMaxPages, requests)
+}
+
+// resetOpsCache isolates the shared uncertain-operations cache between tests:
+// the cache is process-global, and every test uses the same "repo" project.
+func resetOpsCache() {
+	opsCacheMu.Lock()
+	opsCache = map[string]opsCacheEntry{}
+	opsCacheMu.Unlock()
 }

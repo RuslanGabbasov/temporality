@@ -186,7 +186,7 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
     if (!open) return
     void load()
     if (!live) return
-    const timer = window.setInterval(() => { void load() }, 5000)
+    const timer = window.setInterval(() => { void load() }, 10000)
     return () => window.clearInterval(timer)
   }, [open, live, load])
 
@@ -310,7 +310,7 @@ export default function DelegationTree({ project, runId, agents, live = false, o
   useEffect(() => {
     void refresh()
     if (!live && !hasRunning) return
-    const timer = window.setInterval(() => { void refresh() }, 5000)
+    const timer = window.setInterval(() => { void refresh() }, 10000)
     return () => window.clearInterval(timer)
   }, [refresh, live, hasRunning])
 
