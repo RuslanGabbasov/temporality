@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -115,25 +116,43 @@ func (d *Docker) OperationState(scratchKey, operationID string) (OperationState,
 		state.StartedAt = info.ModTime()
 	}
 	if raw, err := os.ReadFile(d.opHostFile(scratchKey, token+opCodeSuffix)); err == nil {
+		// The file existing is necessary but not sufficient: a truncated or
+		// clobbered code file (an interrupted truncate-write, ENOSPC, an
+		// external stomp) must never parse as exit 0 — that would turn a
+		// corrupted result into a false success. An unreadable code degrades
+		// to the liveness probe below: a still-alive process keeps the attach
+		// waiting, a vanished one lands in the standard lost/uncertain path.
+		code, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if parseErr != nil {
+			return d.probeOperationAlive(&state, scratchKey, operationID)
+		}
 		state.Finished = true
-		fmt.Sscanf(strings.TrimSpace(string(raw)), "%d", &state.ExitCode)
+		state.ExitCode = code
 		return state, nil
 	}
+	return d.probeOperationAlive(&state, scratchKey, operationID)
+}
+
+// probeOperationAlive fills the state from the container liveness check —
+// the fallback when the exit-code file is absent or unreadable. StartedAt
+// already carried over in state survives: the pid marker still dates the
+// operation even when its result did not land.
+func (d *Docker) probeOperationAlive(state *OperationState, scratchKey, operationID string) (OperationState, error) {
 	rc := d.lookupRunForHelper(scratchKey)
 	if rc == nil {
-		return state, fmt.Errorf("run container not found for %s", scratchKey)
+		return *state, fmt.Errorf("run container not found for %s", scratchKey)
 	}
 	defer d.releaseRunContainer(rc)
 	alive, err := d.opProbeAliveIn(rc.name, operationID)
 	if err != nil {
-		return state, err
+		return *state, err
 	}
 	if alive {
 		state.Running = true
 		state.Alive = true
 	}
-	// pid gone and no exit code: killed unnaturally, crashed or lost.
-	return state, nil
+	// pid gone and no (readable) exit code: killed unnaturally, crashed or lost.
+	return *state, nil
 }
 
 // KillOperation terminates the process tree of one background operation
