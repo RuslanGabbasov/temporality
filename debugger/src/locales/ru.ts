@@ -1632,7 +1632,7 @@ export const ru: Record<string, string> = {
     'artifacts.inbox_mode_any': 'любой рецензент',
     'artifacts.inbox_matched': 'ты рецензент как',
     'artifacts.filter_author_label': 'Автор…',
-    'artifacts.contributors': 'Прикладывали руку',
+    'artifacts.contributors': 'Принимали участие в разработке',
     'artifacts.filter_status_label': 'Статус',
     'artifacts.filter_status_all': 'Статус — все',
     'artifacts.filter_tags_label': 'Теги',

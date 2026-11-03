@@ -789,7 +789,7 @@ export default function Artifacts() {
                     set, so a name from here is one click to pin. */}
                 {(selected.contributors ?? []).length > 0 && (
                   <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.45rem', display: 'flex', gap: '0.3rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                    <span>{t('artifacts.contributors') ?? 'Прикладывали руку'}:</span>
+                    <span>{t('artifacts.contributors') ?? 'Принимали участие в разработке'}:</span>
                     {(selected.contributors ?? []).map((person) => (
                       <button
                         key={person}
