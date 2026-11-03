@@ -259,8 +259,6 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [newMemberUser, setNewMemberUser] = useState('')
   const [newMemberRole, setNewMemberRole] = useState('viewer')
 
-  // Pending operations badge
-  const [pendingOps, setPendingOps] = useState(0)
   // Pending approvals badge (for Runs tab)
   const [pendingApprovals, setPendingApprovals] = useState(0)
   // Artifact approvals inbox (the artifacts page's «На моём согласовании»):
@@ -281,13 +279,6 @@ export default function Layout({ children, activePage }: LayoutProps) {
   useEffect(() => {
     if (!authToken()) return
     const poll = async () => {
-      try {
-        const resp = await fetch(`${KERNEL_API}/v1/agent/operations?project=${encodeURIComponent(project)}`, { headers: { ...authHeaders() } })
-        if (resp.ok) {
-          const data = await resp.json()
-          setPendingOps(data.count ?? (data.operations ?? []).length)
-        }
-      } catch { /* ignore */ }
       try {
         // Count unresolved approval requests and open questions in this project.
         // ONE journal query with an any-of types filter (the old version fired
@@ -599,9 +590,6 @@ export default function Layout({ children, activePage }: LayoutProps) {
               {path === '/agents' && pendingApprovals > 0 && (
                 <span className="nav-badge" style={{ background: '#e6b85c' }}>{pendingApprovals}</span>
               )}
-              {path === '/agents' && pendingOps > 0 && (
-                <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
-              )}
               {path === '/artifacts' && artifactInboxCount > 0 && (
                 <span className="nav-badge" style={{ background: '#e6b85c' }}>{artifactInboxCount}</span>
               )}
@@ -836,9 +824,6 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 {t(label)}
                 {path === '/agents' && pendingApprovals > 0 && (
                   <span className="nav-badge" style={{ background: '#e6b85c' }}>{pendingApprovals}</span>
-                )}
-                {path === '/agents' && pendingOps > 0 && (
-                  <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
                 )}
                 {path === '/artifacts' && artifactInboxCount > 0 && (
                   <span className="nav-badge" style={{ background: '#e6b85c' }}>{artifactInboxCount}</span>
