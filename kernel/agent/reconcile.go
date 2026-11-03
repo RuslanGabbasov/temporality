@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
 )
 
@@ -92,6 +93,28 @@ type ReconcileRequest struct {
 // activity's StartToClose timeout is 4 minutes, so anything older than this
 // means the workflow is stuck or the worker died without the timeout firing.
 const staleInFlightAfter = 10 * time.Minute
+
+// staleInFlightBound is how long a tool.started may stay open inside a running
+// workflow before it counts as uncertain. Background run_command schedules its
+// activity with its own budget — the sandbox-clamped timeout_sec plus the
+// 15-minute scheduling slack (docs/agent-async-operations.md) — so a detached
+// build legitimately outlives the 4-minute tool-activity heuristic that
+// staleInFlightAfter encodes; flagging it at ten minutes manufactures an
+// operator question out of a live process. The flags are read from the bounded
+// tool arguments; when truncation dropped them the regular bound applies —
+// conservative: the operation may surface early, never late.
+func staleInFlightBound(tool, argsJSON string) time.Duration {
+	if bare, prefixed := bareToolName(tool); !prefixed && bare == "run_command" {
+		var args struct {
+			Background bool    `json:"background"`
+			TimeoutSec float64 `json:"timeout_sec"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &args) == nil && args.Background {
+			return time.Duration(sandbox.CommandTimeoutBackground(int(args.TimeoutSec)))*time.Second + 20*time.Minute
+		}
+	}
+	return staleInFlightAfter
+}
 
 // defaultOperationsWindow bounds how far back the uncertain-operations
 // listing scans the journal (overridable via TEMPORALITY_OPERATIONS_WINDOW).
@@ -283,7 +306,7 @@ func (a *Activities) scanUncertainOperations(ctx context.Context, project string
 		}
 		operation.State = OperationStateInFlight
 		operation.Reason = "workflow_running"
-		if running && time.Since(event.OccurredAt) > staleInFlightAfter && !isOrchestrationTool(operation.Tool) {
+		if running && time.Since(event.OccurredAt) > staleInFlightBound(operation.Tool, operation.Arguments) && !isOrchestrationTool(operation.Tool) {
 			operation.State = OperationStateUncertain
 			operation.Reason = "stale_in_flight"
 		} else if !running {
@@ -361,8 +384,15 @@ func (a *Activities) toolEvents(ctx context.Context, project, eventType string, 
 	return collected, nil
 }
 
+// eventKey identifies one operation across its lifecycle events. The identity
+// is (project, run, operation_id) — deliberately NOT the event source: tool
+// events carry the run's own journal source (external agents report under
+// their own source id, docs/external-agents.md) while operation.reconciled is
+// always recorded by the kernel actor. A source-qualified key stranded every
+// verdict recorded over a foreign-source operation — it could never settle and
+// resurfaced in the uncertain listing forever.
 func eventKey(event observation.Event) string {
-	return event.Source.ID + "\x00" + event.Context.Run + "\x00" + dataString(event.Data, "operation_id")
+	return event.Context.Project + "\x00" + event.Context.Run + "\x00" + dataString(event.Data, "operation_id")
 }
 
 func operationFromEvent(event observation.Event) (UncertainOperation, bool) {

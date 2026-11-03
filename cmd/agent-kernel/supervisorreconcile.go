@@ -16,22 +16,25 @@ package main
 //
 // No size threshold and no per-pass cap: EVERY wall goes to the supervisor
 // (a one-operation wall is still a question the model answers better than a
-// human skims), and the pass drains every pending wall in one go. Budget is
-// bounded by the dedup below — one verdict per run, ever — not by pacing.
+// human skims), and the pass drains every pending wall in one go. The wall
+// itself is the budget bound: a settled operation leaves the uncertain listing
+// (operation.reconciled is terminal), so a run reaches the supervisor exactly
+// while unsettled operations remain — fresh ones that appeared after an
+// earlier verdict included. The old "one verdict per run, ever" guard stranded
+// those forever: behind an already-closed card the wall kept growing while the
+// run could never reach the supervisor again.
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/llm"
 )
 
-func runSupervisorReconcilePass(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string, liveness agent.WorkflowLiveness, modelClient func(ctx context.Context) (*llm.Client, error)) {
-	journalToken := os.Getenv("TEMPORALITY_API_TOKEN")
+func runSupervisorReconcilePass(ctx context.Context, log *slog.Logger, activities *agent.Activities, liveness agent.WorkflowLiveness, modelClient func(ctx context.Context) (*llm.Client, error)) {
 	// The operations endpoint is on THIS process; calling it through HTTP
 	// would need a self-issued token — go straight to the activity, it is the
 	// same code path the HTTP handler serves.
@@ -52,29 +55,12 @@ func runSupervisorReconcilePass(ctx context.Context, log *slog.Logger, activitie
 		}
 		walls[op.RunID] = append(walls[op.RunID], op)
 	}
-	// Runs already carrying a reconciliation verdict are skipped.
-	verdicts, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "supervisor.verdict", 100)
-	if err != nil {
-		log.Warn("supervisor reconcile: list verdicts", "error", err.Error())
-		return
-	}
-	done := map[string]bool{}
-	for _, event := range verdicts {
-		if event.Data["kind"] == "reconciliation" {
-			if runID, _ := event.Data["run_id"].(string); runID != "" {
-				done[runID] = true
-			}
-		}
-	}
 	client, err := modelClient(ctx)
 	if err != nil {
 		return // judge off — stay quiet
 	}
 	analyzed := 0
 	for _, runID := range runOrder {
-		if done[runID] {
-			continue
-		}
 		ops := walls[runID]
 		ids := make([]string, 0, len(ops))
 		for _, op := range ops {

@@ -56,7 +56,7 @@ func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities
 			runSupervisorCasesPass(ctx, log, activities, ws, observationURL, modelClient)
 			// Reconciliation walls: a long run's pile of uncertain operations
 			// gets one integrated supervisor verdict instead of a human wall.
-			runSupervisorReconcilePass(ctx, log, activities, observationURL, liveness, modelClient)
+			runSupervisorReconcilePass(ctx, log, activities, liveness, modelClient)
 			select {
 			case <-ctx.Done():
 				return

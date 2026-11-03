@@ -178,6 +178,57 @@ func TestUncertainOperationsCrashWindow(t *testing.T) {
 	require.Equal(t, "context deadline exceeded", ids["op-failed"].ErrorDetail)
 }
 
+// A kernel-recorded verdict settles an operation whose tool events carry a
+// foreign journal source (external agents, docs/external-agents.md): the
+// operation identity is (project, run, operation_id), not the event source —
+// a source-qualified match stranded foreign-source verdicts forever.
+func TestUncertainOperationsForeignSourceReconciliationSettles(t *testing.T) {
+	resetOpsCache()
+	started := toolEvent("repo", "run-1", "op-foreign", "tool.started", time.Now().Add(-time.Hour))
+	started.Source.ID = "external-sdk"
+	reconciled := toolEvent("repo", "run-1", "op-foreign", "operation.reconciled", time.Now().Add(-time.Minute))
+	reconciled.Source.ID = "temporality-agent-kernel"
+	server := journalStub(t, started, reconciled)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "writer"}
+
+	operations, err := activities.UncertainOperations(context.Background(), "repo", stubLiveness{running: map[string]bool{}})
+	require.NoError(t, err)
+	for _, operation := range operations {
+		require.NotEqual(t, "op-foreign", operation.OperationID, "a verdict recorded under the kernel source settles a foreign-source operation")
+	}
+}
+
+// A detached background run_command carries its own activity budget
+// (timeout_sec + the scheduling slack, docs/agent-async-operations.md): inside
+// a running workflow it is progress, not a stale question, until that budget
+// is genuinely exceeded. The 10-minute heuristic stays for regular calls.
+func TestUncertainOperationsBackgroundCommandGetsItsOwnStalenessBound(t *testing.T) {
+	resetOpsCache()
+	live := toolEvent("repo", "run-1", "op-bg-live", "tool.started", time.Now().Add(-30*time.Minute))
+	live.Data["tool"] = "run_command"
+	live.Data["arguments"] = `{"command":"npm run build","background":true,"timeout_sec":3600}`
+	overBudget := toolEvent("repo", "run-1", "op-bg-dead", "tool.started", time.Now().Add(-2*time.Hour))
+	overBudget.Data["tool"] = "run_command"
+	overBudget.Data["arguments"] = `{"command":"npm run build","background":true,"timeout_sec":3600}`
+	regular := toolEvent("repo", "run-1", "op-regular", "tool.started", time.Now().Add(-30*time.Minute))
+	regular.Data["tool"] = "run_command"
+	regular.Data["arguments"] = `{"command":"npm test"}`
+	server := journalStub(t, live, overBudget, regular)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "operator"}
+
+	operations, err := activities.UncertainOperations(context.Background(), "repo", stubLiveness{running: map[string]bool{"run-1": true}})
+	require.NoError(t, err)
+	ids := map[string]UncertainOperation{}
+	for _, operation := range operations {
+		ids[operation.OperationID] = operation
+	}
+	require.NotContains(t, ids, "op-bg-live", "a detached build inside its own timeout budget is still in flight")
+	require.Contains(t, ids, "op-bg-dead", "a background command past its budget is a stale question")
+	require.Equal(t, "stale_in_flight", ids["op-bg-dead"].Reason)
+	require.Contains(t, ids, "op-regular", "a regular tool call keeps the 10-minute heuristic")
+	require.Equal(t, "stale_in_flight", ids["op-regular"].Reason)
+}
+
 // A long-running plan/delegate call is orchestration, not a stuck tool
 // activity: the DAG (rework rounds, review gates) legitimately outlives the
 // tool-activity timeout the staleness heuristic assumes, and its effect —

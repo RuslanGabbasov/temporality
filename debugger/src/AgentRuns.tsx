@@ -1061,13 +1061,18 @@ export default function AgentRuns({ project }: { project: string }) {
   const ownEvents = useMemo(
     () => timeline.filter((event) => runID(event) === selected),
     [timeline, selected])
-  // The supervisor's integrated reconciliation verdict for this run: when it
-  // exists, the uncertain-operations wall is replaced by ONE card (causes,
-  // remedies, what was auto-closed) — the cognitive load the wall created is
-  // the supervisor's job now.
-  const reconcileVerdict = useMemo(
-    () => ownEvents.find((event) => event.type === 'supervisor.verdict' && event.data?.kind === 'reconciliation') ?? null,
-    [ownEvents])
+  // The supervisor's integrated reconciliation verdict for this run: the
+  // settled wall is replaced by ONE card (causes, remedies, what was
+  // auto-closed) — the cognitive load the wall created is the supervisor's job
+  // now. Re-triage records a new verdict whenever operations appear after an
+  // earlier one; the newest verdict carries the current counts.
+  const reconcileVerdict = useMemo(() => {
+    for (let i = ownEvents.length - 1; i >= 0; i--) {
+      const event = ownEvents[i]
+      if (event.type === 'supervisor.verdict' && event.data?.kind === 'reconciliation') return event
+    }
+    return null
+  }, [ownEvents])
   // The last rejected provider call of this run (route, masked credential,
   // request/response pair) — the overview's «запрос → ответ» button reads it.
   const callFailedEvent = useMemo(() => {
@@ -1437,7 +1442,7 @@ export default function AgentRuns({ project }: { project: string }) {
                   )
                 })()}
 
-                {selectedOps.length > 0 && !reconcileVerdict && (() => {
+                {selectedOps.length > 0 && (() => {
                   const signature = (op: UncertainOperation) => `${op.reason}|${op.tool}|${op.agent_id ?? ''}|${op.error_type ?? ''}`
                   const groups = new Map<string, UncertainOperation[]>()
                   for (const op of selectedOps) {

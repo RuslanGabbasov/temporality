@@ -655,7 +655,7 @@ export const en: Record<string, string> = {
     'runs.reconcile_causes': 'Causes',
     'runs.reconcile_remedies': 'Remedies',
     'runs.reconcile_closed': 'Auto-closed: {{applied}} of {{total}} operations (supervisor verdicts recorded in the trace)',
-    'runs.reconcile_fresh': '{{count}} more uncertain operations appeared after the verdict — the wall returns below if the supervisor triages them again.',
+    'runs.reconcile_fresh': '{{count}} more uncertain operations appeared after the verdict — the supervisor triages them on the next pass, or close them manually in the wall below.',
     'runs.ops_filter': 'Only runs with unresolved operations',
     'runs.ops_tag_title': 'Has operations with uncertain effect',
     'runs.ops_in_flight': 'in flight',
