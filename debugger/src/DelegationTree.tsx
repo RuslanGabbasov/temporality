@@ -4,7 +4,7 @@ import { ChevronRight } from '@carbon/icons-react'
 import { observationApi, runEvents, type ObservationEvent } from './observationApi'
 import { type Agent } from './workspaceApi'
 import Markdown from './Markdown'
-import { useT } from './i18n'
+import { useT, useI18n } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines } from './eventSummary'
 import { collapseRouteMarkers } from './traceModel'
 
@@ -159,7 +159,7 @@ interface DelegationNodeProps {
 }
 
 function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationNodeProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [open, setOpen] = useState(false)
   const [payload, setPayload] = useState<ChildPayload | null>(null)
   const [loading, setLoading] = useState(false)
@@ -253,7 +253,7 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
               <div className="chat-delegation-activity-title">{t('chat.delegation.activity')}</div>
               <div className="chat-delegation-trace" ref={traceRef}>
                 {traceEvents.map((event) => {
-                  const line = eventSummary(event, t)
+                  const line = eventSummary(event, t, undefined, locale)
                   return (
                     <div key={`${event.source.id}:${event.event_id}`} className="chat-delegation-trace-row">
                       <span className="chat-delegation-trace-icon" style={{ color: line.color }}>{line.icon}</span>

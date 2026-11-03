@@ -611,6 +611,21 @@ describe('raw types never leak into the summary label', () => {
   }
 })
 
+// A type without a hand-written summary still gets a human name: the event
+// catalog carries localized titles for the whole vocabulary — the raw type
+// name is details-layer material, never a label.
+describe('catalog fallback for unhandled types', () => {
+  const id = (key: string) => key
+  it('labels raw types from the localized catalog', () => {
+    expect(eventSummary(event('run.queued', {}), id, undefined, 'ru').label).toBe('Ран в очереди')
+    expect(eventSummary(event('run.queued', {}), id, undefined, 'en').label).toBe('Run queued')
+  })
+
+  it('keeps the raw name only for a type the catalog does not know', () => {
+    expect(eventSummary(event('weird.unknown_type', {}), id, undefined, 'ru').label).toBe('weird.unknown_type')
+  })
+})
+
 // Stream event types must read as words in every human surface — the raw
 // type name (model.reasoning) is details-layer material.
 describe('model stream summaries', () => {

@@ -1612,7 +1612,7 @@ export default function AgentRuns({ project }: { project: string }) {
                       </p>
                     )}
                     {overviewLast && (() => {
-                      const info = eventSummary(overviewLast, t, (id) => knowledgeItems.get(id)?.proposition)
+                      const info = eventSummary(overviewLast, t, (id) => knowledgeItems.get(id)?.proposition, locale)
                       const liveModel = overviewRunning && overviewLast.type === 'model.started' && tokenMetrics
                       return (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', padding: '0.5rem 0.75rem', background: 'var(--tm-raised)', borderRadius: '6px', fontSize: '0.8rem', marginBottom: '0.75rem' }}>

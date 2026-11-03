@@ -1,4 +1,6 @@
 import type { ObservationEvent } from './observationApi'
+import { eventInfo } from './eventCatalog'
+import type { Locale } from './locales'
 
 export type TranslateFn = (key: string, vars?: Record<string, string>) => string
 
@@ -226,8 +228,9 @@ function evalGateDetail(d: Record<string, unknown>): string {
 
 /** Format an event into a human-readable summary line. `propositionOf` resolves
  * knowledge ids to their text for events recorded before propositions were
- * embedded (historical runs still carry bare ids). */
-export function eventSummary(event: ObservationEvent, t: TranslateFn, propositionOf?: (knowledgeID: string) => string | undefined): EventSummaryInfo {
+ * embedded (historical runs still carry bare ids). Pass the active locale:
+ * types without a hand-written summary label from the event catalog. */
+export function eventSummary(event: ObservationEvent, t: TranslateFn, propositionOf?: (knowledgeID: string) => string | undefined, locale?: Locale): EventSummaryInfo {
   const d = event.data ?? {}
   // Prefer the proposition embedded in the event; fall back to resolving the
   // knowledge id; bare ids are the last resort for unresolvable history.
@@ -775,7 +778,13 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
         color: '#f7768e',
       }
     }
-    default:
-      return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }
+    default: {
+      // A type without a hand-written summary still deserves a human name:
+      // the event catalog carries localized titles for the whole vocabulary,
+      // and the raw type name is details-layer material.
+      const meta = eventInfo(event.type)
+      const label = meta ? (locale === 'ru' ? meta.ru.title : meta.en.title) : event.type
+      return { icon: '•', label, detail: '', color: 'var(--tm-text-3)' }
+    }
   }
 }
