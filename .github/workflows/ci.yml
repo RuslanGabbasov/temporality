@@ -49,8 +49,14 @@ jobs:
   docs:
     name: Docs site builds
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The self-heal commit below pushes to the same ref; a shallow
+          # clone is enough for the build and the diff.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -58,5 +64,30 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run build:docs
-      - name: Generated docs are committed
-        run: git diff --exit-code pages/docs
+      # The generated pages/docs tree is COMMITTED, and contributors keep
+      # editing docs/*.md without regenerating — the old «diff --exit-code»
+      # turned every such push red until someone ran the build by hand.
+      # Self-heal instead: on a push to main the job regenerates and commits
+      # the pages itself; on a PR (where pushing to the head branch may be
+      # impossible) it fails with the exact command to run.
+      - name: Commit regenerated docs (push to main)
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "temporality-docs-bot"
+          git config user.email "actions@github.com"
+          if ! git diff --quiet pages/docs; then
+            git add pages/docs
+            git commit -m "docs: regenerate pages (CI self-heal)"
+            git push
+            echo "Regenerated docs committed by CI."
+          else
+            echo "Generated docs are up to date."
+          fi
+      - name: Generated docs are committed (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git diff --quiet pages/docs; then
+            echo "Generated docs are stale. Run 'npm run build:docs' at the repository root and commit pages/ with your change." >&2
+            git diff --stat pages/docs >&2
+            exit 1
+          fi
