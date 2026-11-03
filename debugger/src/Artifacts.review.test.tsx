@@ -26,7 +26,7 @@ vi.mock('./workspaceApi', async (importOriginal) => {
       ...actual.workspaceApi,
       listUsers: vi.fn(async () => ({ users: [] })),
       listArtifacts: vi.fn(async () => ({ artifacts: [artifact] })),
-      artifactInbox: vi.fn(async () => ({ inbox: [] })),
+      artifactInbox: vi.fn(async () => ({ entries: [] })),
       artifactTags: vi.fn(async () => ({ tags: [] })),
       getArtifact: vi.fn(async () => ({ artifact: { ...artifact, content: 'APPROVED BODY' }, truncated: false })),
       getArtifactRevision: vi.fn(async () => ({
@@ -106,5 +106,28 @@ describe('approved artifact with a revision in review', () => {
     // …with the word-level story and the added/removed accounting visible.
     expect(text).toMatch(/(What changed|Что изменилось)/)
     expect(text).toMatch(/[+~−-][0-9]/)
+  })
+})
+
+describe('my approvals tab', () => {
+  it('stays put on a hand-picked tab when the queue is empty', async () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root.render(<I18nProvider><Artifacts /></I18nProvider>) })
+    await settle()
+    // The mount probe falls back to the catalog when the queue is empty…
+    expect(container.textContent ?? '').not.toMatch(/(No open approvals|Открытых согласований)/)
+    const tab = [...container.querySelectorAll('button')]
+      .find((b) => /(My approvals|На моём согласовании)/.test(b.textContent ?? ''))
+    expect(tab).toBeTruthy()
+    // …but a hand-picked tab stays put and explains the empty queue instead
+    // of bouncing back.
+    await act(async () => { tab!.click() })
+    await settle()
+    expect(container.textContent ?? '').toMatch(/(No open approvals addressed to you|Открытых согласований на тебя нет)/)
+    await act(async () => { tab!.click() })
+    await settle()
+    expect(container.textContent ?? '').toMatch(/(No open approvals addressed to you|Открытых согласований на тебя нет)/)
   })
 })

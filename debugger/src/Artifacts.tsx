@@ -77,9 +77,10 @@ export default function Artifacts() {
   const [ageFilter, setAgeFilter] = useState<'' | 'week' | 'month' | 'quarter'>('')
   // Approvals inbox: open review rounds addressed to the caller, one tab.
   // It OPENS by default when there is anything to decide (the reader came
-  // for their queue; the catalog is the browsing surface) — the inbox loads
-  // once at mount for the count, and the tab flips back to the catalog as
-  // soon as the user makes a choice or the queue turns out empty.
+  // for their queue; the catalog is the browsing surface) — if the mount
+  // probe finds the queue empty (or broken), the default falls back to the
+  // catalog instead of opening on a dead end. A tab picked by hand always
+  // stays put: the empty state is information, not a bounce.
   const [inboxMode, setInboxMode] = useState(true)
   const [inbox, setInbox] = useState<ArtifactInboxEntry[] | null>(null)
   const [inboxBusy, setInboxBusy] = useState(false)
@@ -199,21 +200,25 @@ export default function Artifacts() {
   // failure lands in the shared error banner: an empty inbox must be
   // distinguishable from a broken one (the ambiguous-column SQL bug read as
   // «you have nothing to review» for weeks).
+  const inboxDefaultRef = useRef(true)
   const loadInbox = useCallback(async () => {
+    // The auto-flip below belongs to the default-tab probe only: a tab the
+    // user picked by hand always stays put, empty queue or not.
+    const defaultProbe = inboxDefaultRef.current
+    inboxDefaultRef.current = false
     setInboxBusy(true)
     try {
       const page = await workspaceApi.artifactInbox()
       setInbox(page.entries ?? [])
       setError('')
       // The inbox is the default tab ONLY while there is something to decide:
-      // an empty queue flips back to the catalog automatically (once per
-      // load — a manual switch back to the inbox stays put until reload).
-      if ((page.entries ?? []).length === 0) setInboxMode(false)
+      // an empty queue falls back to the catalog instead of opening there.
+      if (defaultProbe && (page.entries ?? []).length === 0) setInboxMode(false)
     } catch (f) {
       setInbox([])
       setError(message(f))
       // A broken inbox must not hold the default tab hostage either.
-      setInboxMode(false)
+      if (defaultProbe) setInboxMode(false)
     } finally { setInboxBusy(false) }
   }, [])
   // Load on mount (the default tab is the inbox) and on every manual switch
