@@ -822,6 +822,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     // prefixes, and each turn's text fragment — flushed as an intermediate-
     // answer line only when the turn turns out to have tools after it.
     const runStartAt: { at?: number } = {}
+    // Routes already shown in this run's activity feed: a repeat is not news
+    // (the run pins its provider), only a change is.
+    const shownRoutes: string[] = []
     const turnStats: Record<number, { reasoningAt?: number; textAt?: number }> = {}
     const fragments: Record<number, string> = {}
     const elapsedFor = (outer: any): number | undefined => {
@@ -979,7 +982,22 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         delete fragments[turn]
       } catch { /* ignore */ }
     })
-    es.addEventListener('model.attempt', handleEvent('model.attempt'))
+    es.addEventListener('model.attempt', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        // Routing marker: the run pins its model and provider, so the only
+        // news is a CHANGE of route — identical repeats (activity retries,
+        // stream fallbacks re-running routing) are noise in the chat.
+        if (d.reason === 'routed') {
+          const route = String(d.route ?? '')
+          if (route && route === shownRoutes[shownRoutes.length - 1]) return
+          if (route) shownRoutes.push(route)
+        }
+        const line = formatStreamEvent('model.attempt', outer, t, locale)
+        if (line) pushLine(line)
+      } catch { /* ignore */ }
+    })
     es.addEventListener('knowledge.proposed', handleEvent('knowledge.proposed'))
 
     // model.text_delta (journal) carries the authoritative full text of the
@@ -1369,7 +1387,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             const task = taskCostResult
             if (task && task.run_count > 1) {
               const parts: string[] = [pluralT(t, locale, 'chat.task_totals.runs_n', task.run_count), pluralT(t, locale, 'chat.task_totals.agents_n', task.agents.length)]
-              if (task.elapsed_ms > 0) parts.push(`⏱ ${formatDuration(task.elapsed_ms)}`)
+              if (task.elapsed_ms > 0) parts.push(`⏱ ${formatDuration(task.elapsed_ms, t)}`)
               if (task.total_tokens > 0) parts.push(t('chat.totals.tokens', { count: task.total_tokens.toLocaleString(locale) }))
               if ((task.total_cached_tokens ?? 0) > 0) parts.push(t('chat.totals.cached', { count: (task.total_cached_tokens ?? 0).toLocaleString(locale) }))
               if (task.total_cost_usd > 0) parts.push(`$${task.total_cost_usd.toFixed(4)}`)

@@ -71,6 +71,27 @@ export const operationKey = (event: ObservationEvent): string => {
   return (typeof id === 'string' && id) ? id : event.event_id
 }
 
+/** Collapse repeated route markers (model.attempt, reason=routed). The run
+ *  pins its model and provider — a marker's only news is a CHANGE of route —
+ *  so identical repeats (activity retries and stream fallbacks re-run
+ *  routing on every call) must not stack rows in the trace or lines in the
+ *  chat. The first marker and every later change stay; the journal keeps
+ *  every occurrence. */
+export function collapseRouteMarkers(events: ObservationEvent[]): ObservationEvent[] {
+  let lastRoute: string | null = null
+  const out: ObservationEvent[] = []
+  for (const event of events) {
+    const d = event.data as Record<string, unknown> | undefined
+    if (event.type === 'model.attempt' && d?.reason === 'routed') {
+      const route = typeof d.route === 'string' ? d.route : ''
+      if (route !== '' && route === lastRoute) continue
+      if (route !== '') lastRoute = route
+    }
+    out.push(event)
+  }
+  return out
+}
+
 /** Fold the trace window into render items (§5). Order preserved: items come
  *  out in the order of their first member event. */
 export function foldTrace(events: ObservationEvent[], locale: Locale, t: TranslateFn): TraceItem[] {

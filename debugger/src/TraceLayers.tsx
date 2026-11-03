@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react'
 import type { ObservationEvent } from './observationApi'
 import { eventDetails, timelineRow, rawEnvelope } from './eventPresentation'
 import { shortTime } from './eventSummary'
-import { foldTrace, foldTraceTree, groupSummary, matchesChip, operationKey, type TraceChip, type TraceItem, type TurnNode } from './traceModel'
+import { collapseRouteMarkers, foldTrace, foldTraceTree, groupSummary, matchesChip, operationKey, type TraceChip, type TraceItem, type TurnNode } from './traceModel'
 import { filterTraceItems, isTraceStateEmpty, searchItems, type TraceUrlState } from './traceFilters'
 import TraceFiltersPanel, { consoleSearchIndex, type ConsoleStateLike } from './TraceFiltersPanel'
 import type { ConsoleState } from './consoleStream'
@@ -292,8 +292,13 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   const [chip, setChip] = useState<TraceChip>('all')
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [pinnedTurns, setPinnedTurns] = useState<Map<number, boolean>>(new Map())
-  const allItems = foldTrace(events, locale, t)
-  const tree = useMemo(() => foldTraceTree(events), [events])
+  // Route markers repeat per model call; the run pins its model/provider,
+  // so identical repeats are noise. Collapsing BEFORE any folding keeps both
+  // the flat list and the per-turn tree on the same run-wide rule: one marker
+  // per route, re-shown only when the route changes.
+  const traceEvents = useMemo(() => collapseRouteMarkers(events), [events])
+  const allItems = foldTrace(traceEvents, locale, t)
+  const tree = useMemo(() => foldTraceTree(traceEvents), [traceEvents])
   // Alias for the legacy chips row and the render loop below.
   const items = allItems
   // §8: with no filter state the trace renders as the turn tree (the spine of

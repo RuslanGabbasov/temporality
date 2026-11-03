@@ -6,6 +6,7 @@ import { type Agent } from './workspaceApi'
 import Markdown from './Markdown'
 import { useT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines } from './eventSummary'
+import { collapseRouteMarkers } from './traceModel'
 
 export interface DelegationNodeInfo {
   childRunId: string
@@ -214,7 +215,7 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
     else window.location.assign(`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(info.childRunId)}`)
   }
 
-  const traceEvents = (payload?.events ?? []).filter((event) => !TRACE_SKIP.has(event.type))
+  const traceEvents = collapseRouteMarkers((payload?.events ?? []).filter((event) => !TRACE_SKIP.has(event.type)))
 
   return (
     <div className={depth > 0 ? 'chat-delegation-nested' : undefined}>
