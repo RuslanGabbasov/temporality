@@ -997,6 +997,47 @@ func (s *Store) RunTerminalStatuses(ctx context.Context, runIDs []string) (map[s
 	return statuses, rows.Err()
 }
 
+// RunRef is a journal-known run identity (id + project) for runs that may
+// carry no workspace_run row (continuations and delegated children).
+type RunRef struct {
+	RunID     string
+	ProjectID string
+}
+
+// RunsMissingTerminal lists journal-known runs (run.started or run.restarted
+// seen) that never journaled a terminal event, newest activity first and
+// capped — the lifecycle sweep's journal-side candidate set (cmd/agent-
+// kernel/orphansweep.go). A turn-limit continuation returns its outcome
+// through its child run, so until the workflow journals chain outcomes the
+// head projects as «running» forever no matter what the workflow result says.
+func (s *Store) RunsMissingTerminal(ctx context.Context, limit int) ([]RunRef, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT r.run_id, r.project_id FROM observation_events r
+		 WHERE r.type IN ('run.started', 'run.restarted')
+		   AND NOT EXISTS (
+		       SELECT 1 FROM observation_events t
+		       WHERE t.run_id = r.run_id
+		         AND t.type IN ('run.completed', 'run.failed', 'run.cancelled'))
+		 GROUP BY r.run_id, r.project_id
+		 ORDER BY MAX(r.occurred_at) DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []RunRef
+	for rows.Next() {
+		var ref RunRef
+		if err := rows.Scan(&ref.RunID, &ref.ProjectID); err != nil {
+			return nil, err
+		}
+		result = append(result, ref)
+	}
+	return result, rows.Err()
+}
+
 // Triggers
 
 func (s *Store) CreateTrigger(ctx context.Context, t *Trigger) error {

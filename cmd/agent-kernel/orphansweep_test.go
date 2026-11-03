@@ -18,6 +18,7 @@ import (
 // sweepStore fakes the store face the sweep needs.
 type sweepStore struct {
 	runs     []workspace.Run
+	missing  []workspace.RunRef
 	terminal map[string]string
 	sources  map[string]string
 	updated  map[string]string
@@ -26,6 +27,10 @@ type sweepStore struct {
 
 func (s *sweepStore) ListStartedRuns(ctx context.Context, limit int) ([]workspace.Run, error) {
 	return s.runs, nil
+}
+
+func (s *sweepStore) RunsMissingTerminal(ctx context.Context, limit int) ([]workspace.RunRef, error) {
+	return s.missing, nil
 }
 
 func (s *sweepStore) RunTerminalStatuses(ctx context.Context, runIDs []string) (map[string]string, error) {
@@ -46,17 +51,24 @@ func (s *sweepStore) UpdateRunStatus(ctx context.Context, id, status, answer str
 	return nil
 }
 
-// sweepLiveness fakes the Temporal liveness probe.
+// sweepLiveness fakes the Temporal outcome resolution.
 type sweepLiveness struct {
 	running map[string]bool
 	errOn   map[string]bool
+	results map[string]runOutcome
 }
 
-func (l *sweepLiveness) IsWorkflowRunning(ctx context.Context, sourceID, project, runID string) (bool, error) {
+func (l *sweepLiveness) ResolveRunOutcome(ctx context.Context, sourceID, project, runID string) (runOutcome, error) {
 	if l.errOn[runID] {
-		return false, errors.New("temporal rpc deadline")
+		return runOutcome{}, errors.New("temporal rpc deadline")
 	}
-	return l.running[runID], nil
+	if outcome, ok := l.results[runID]; ok {
+		return outcome, nil
+	}
+	if l.running[runID] {
+		return runOutcome{Found: true, Running: true}, nil
+	}
+	return runOutcome{}, nil // not found — the workflow is gone
 }
 
 func TestSweepOrphanedRuns(t *testing.T) {
@@ -109,6 +121,96 @@ func TestSweepOrphanedRuns(t *testing.T) {
 	require.Equal(t, true, data["orphaned"])
 	require.Contains(t, data["error"], "restart")
 	require.Equal(t, "lost-run", event["context"].(map[string]any)["run"])
+}
+
+// A turn-limit continuation chain head whose workflow FINISHED (the outcome
+// arrived through its child run) must be journaled with the honest outcome —
+// declaring it lost would fail a run that actually completed.
+func TestSweepOrphanedRunsRepairsContinuationChain(t *testing.T) {
+	var mu sync.Mutex
+	var events []map[string]any
+	journal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Events []map[string]any `json:"events"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		mu.Lock()
+		events = append(events, payload.Events...)
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer journal.Close()
+
+	store := &sweepStore{
+		missing:  []workspace.RunRef{{RunID: "chain-head", ProjectID: "proj"}},
+		terminal: map[string]string{},
+		sources:  map[string]string{"chain-head": "kernel-source"},
+		updated:  map[string]string{},
+	}
+	liveness := &sweepLiveness{results: map[string]runOutcome{
+		"chain-head": {Found: true, Status: "completed", Answer: "the tail's final answer", Turns: 42, Tokens: 900, CostUSD: 1.5},
+	}}
+	sweepOrphanedRuns(context.Background(), store, liveness, journal.URL, "token", "kernel-source", slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	require.Equal(t, map[string]string{"chain-head": "completed"}, store.updated)
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, events, 1)
+	event := events[0]
+	require.Equal(t, "run.completed", event["type"])
+	data := event["data"].(map[string]any)
+	require.Equal(t, "completed", data["status"])
+	require.Equal(t, true, data["derived"])
+	require.Equal(t, float64(900), data["total_tokens"])
+}
+
+// A finished workflow is never declared lost: the sweep used to mark every
+// not-running workflow failed, which failed chain heads that had actually
+// completed through their continuation.
+func TestSweepOrphanedRunsResolvesFinishedRunsHonestly(t *testing.T) {
+	var mu sync.Mutex
+	var events []map[string]any
+	journal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Events []map[string]any `json:"events"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		mu.Lock()
+		events = append(events, payload.Events...)
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer journal.Close()
+
+	store := &sweepStore{
+		runs: []workspace.Run{
+			{ID: "done-run", ProjectID: "proj", Status: "started"},
+			{ID: "limit-run", ProjectID: "proj", Status: "started"},
+		},
+		terminal: map[string]string{},
+		sources: map[string]string{
+			"done-run":  "kernel-source",
+			"limit-run": "kernel-source",
+		},
+		updated: map[string]string{},
+	}
+	liveness := &sweepLiveness{results: map[string]runOutcome{
+		"done-run":  {Found: true, Status: "completed", Answer: "done", Turns: 3},
+		"limit-run": {Found: true, Status: "turn_limit", Answer: "partial report", Turns: 21},
+	}}
+	sweepOrphanedRuns(context.Background(), store, liveness, journal.URL, "token", "kernel-source", slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	require.Equal(t, map[string]string{"done-run": "completed", "limit-run": "turn_limit"}, store.updated)
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, events, 2)
+	for _, event := range events {
+		require.Equal(t, "run.completed", event["type"], "a finished workflow must never be declared lost")
+		data := event["data"].(map[string]any)
+		require.Equal(t, true, data["derived"])
+	}
 }
 
 // A sweep round with zero started runs must not touch the journal or liveness.

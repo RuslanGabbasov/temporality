@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -44,6 +45,15 @@ func registerPolicyEnv(t *testing.T, model func(call int, request ModelRequest) 
 func eventByType(events []observation.Event, kind string) (observation.Event, bool) {
 	for _, event := range events {
 		if event.Type == kind {
+			return event, true
+		}
+	}
+	return observation.Event{}, false
+}
+
+func eventByTypeForRun(events []observation.Event, kind, runID string) (observation.Event, bool) {
+	for _, event := range events {
+		if event.Type == kind && event.Context.Run == runID {
 			return event, true
 		}
 	}
@@ -159,6 +169,12 @@ func TestAgentRunTurnLimitRestartsIntoChildCompletion(t *testing.T) {
 	// No policy stop fired: only the pure turn_limit case restarts.
 	_, limitFired := eventByType(events, "policy.limit")
 	require.False(t, limitFired)
+	// The chain head journals ITS terminal event too: the head's result is the
+	// continuation's result, and without this run.completed its row stays
+	// «running» in the runs list and the chat stream never sees a done signal.
+	headDone, ok := eventByTypeForRun(events, "run.completed", "restart-root")
+	require.True(t, ok, "the chain head must journal its own terminal event")
+	require.Equal(t, "completed", headDone.Data["status"])
 }
 
 // The continuation chain is finite: when the config allows one restart and
@@ -187,6 +203,33 @@ func TestAgentRunTurnLimitRestartsChainExhaustsHonestly(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, spawns)
+	// The head mirrors the chain's honest limit outcome in its own journal.
+	headDone, ok := eventByTypeForRun(*recorded, "run.completed", "chain-root")
+	require.True(t, ok, "the chain head must journal its own terminal event")
+	require.Equal(t, "turn_limit", headDone.Data["status"])
+}
+
+// A crashed continuation fails the chain honestly: the parent reports the
+// failure — with its own run.failed in the journal, or the head's row hangs
+// «running» forever (the workspace row is only lazily reconciled).
+func TestAgentRunTurnLimitContinuationFailureJournalsHeadFailure(t *testing.T) {
+	env, recorded, _ := registerPolicyEnv(t, func(_ int, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[len(request.Messages)-1].Content, "Auto-continuation") {
+			return llm.Completion{}, errors.New("model exploded")
+		}
+		return llm.Completion{
+			Usage:     llm.Usage{TotalTokens: 15},
+			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_command", Args: map[string]any{"command": []any{"ls"}}}},
+		}, nil
+	})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "fail-root", Project: "repo-a", Prompt: "big task", MaxTurns: 1, TurnLimitRestarts: 1})
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "failed", result.Status)
+	failed, ok := eventByTypeForRun(*recorded, "run.failed", "fail-root")
+	require.True(t, ok, "the chain head must journal its own run.failed")
+	require.Equal(t, "continuation_failed", failed.Data["error_type"])
 }
 
 // Policy stops never restart: the resource is gone, a fresh run would

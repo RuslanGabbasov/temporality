@@ -8392,6 +8392,61 @@ func (t *temporalLiveness) IsWorkflowRunning(ctx context.Context, sourceID, proj
 	return status == enums.WORKFLOW_EXECUTION_STATUS_RUNNING, nil
 }
 
+// ResolveRunOutcome resolves the honest terminal truth of a run's workflow
+// for the lifecycle sweep (cmd/agent-kernel/orphansweep.go): a finished
+// workflow reports its RunResult (a turn-limit continuation chain reports
+// the tail's outcome — that IS the chain head's outcome), a lost workflow
+// reports Found=false, and a live one reports Running.
+func (t *temporalLiveness) ResolveRunOutcome(ctx context.Context, sourceID, project, runID string) (runOutcome, error) {
+	rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+	description, err := t.client.DescribeWorkflowExecution(rpcCtx, workflowIDFor(sourceID, project, runID), "")
+	cancel()
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return runOutcome{}, nil // the workflow is gone entirely
+		}
+		return runOutcome{}, err
+	}
+	status := description.GetWorkflowExecutionInfo().GetStatus()
+	if status == enums.WORKFLOW_EXECUTION_STATUS_RUNNING {
+		return runOutcome{Found: true, Running: true}, nil
+	}
+	if status != enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
+		if status == enums.WORKFLOW_EXECUTION_STATUS_TERMINATED || status == enums.WORKFLOW_EXECUTION_STATUS_CANCELED {
+			return runOutcome{Found: true, Status: "cancelled"}, nil
+		}
+		return runOutcome{Found: true, Running: true}, nil // unknown — treat as in flight
+	}
+	var result agent.RunResult
+	getCtx, cancelGet := context.WithTimeout(ctx, temporalRPCTimeout())
+	gErr := t.client.GetWorkflow(getCtx, workflowIDFor(sourceID, project, runID), "").Get(getCtx, &result)
+	cancelGet()
+	if isTemporalRPCDeadline(gErr) {
+		return runOutcome{}, gErr
+	}
+	if gErr != nil {
+		detail := gErr.Error()
+		if len(detail) > 500 {
+			detail = detail[:500]
+		}
+		return runOutcome{Found: true, Status: "failed", Error: detail}, nil
+	}
+	outcome := runOutcome{Found: true, Answer: result.Answer, Turns: result.Turns, Tokens: result.TotalTokens, CostUSD: result.CostUSD}
+	switch result.Status {
+	case "failed":
+		outcome.Status, outcome.Error = "failed", result.Answer
+	case "cancelled":
+		outcome.Status = "cancelled"
+	case "":
+		outcome.Status = "completed"
+	default:
+		// completed, or a forced-finale limit status (turn_limit & co) that
+		// still delivered an answer.
+		outcome.Status = result.Status
+	}
+	return outcome, nil
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
