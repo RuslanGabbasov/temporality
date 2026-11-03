@@ -222,13 +222,21 @@ func TestAgentMessageFraming(t *testing.T) {
 // The relay ask-run is woken purely by its prompt: it must carry the answer
 // handle (request_id), the original run to ground on, and the Q&A-only
 // framing — or the woken agent would treat the ask as new work.
-func TestAgentAskRelayPrompt(t *testing.T) {
+// The continue run is woken purely by its prompt: it must carry the
+// request, the original run to ground on, and the resume framing — the
+// run's completion message IS the reply (no answer_agent handles).
+func TestAgentContinuePrompt(t *testing.T) {
 	msg := AgentMessage{RequestID: "req-relay", FromRunID: "run-lead", FromAgentID: "writer-01", Type: "compatibility.check", Payload: `{"api_change":"x"}`}
-	prompt := agentAskRelayPrompt(msg, "run-coder/original", "task-9")
-	for _, want := range []string{"req-relay", "answer_agent", "run-coder/original", "task-9", "writer-01", "compatibility.check", "trace_read run_id=run-coder/original"} {
+	prompt := agentContinuePrompt(msg, "run-coder/original", "task-9")
+	for _, want := range []string{"run-coder/original", "task-9", "writer-01", "compatibility.check", "trace_read run_id=run-coder/original"} {
 		if !strings.Contains(prompt, want) {
-			t.Fatalf("relay prompt missing %q:\n%s", want, prompt)
+			t.Fatalf("continue prompt missing %q:\n%s", want, prompt)
 		}
+	}
+	// No answer_agent in the continue semantics: the completion message is
+	// the reply, delivered by the workflow machinery.
+	if strings.Contains(prompt, "answer_agent") {
+		t.Fatalf("continue prompt must not route through answer_agent:\n%s", prompt)
 	}
 }
 
