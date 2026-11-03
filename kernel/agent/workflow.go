@@ -2268,13 +2268,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 								// A Q&A run must stay short: the delegated-turns floor exists to
 								// protect subtask work, an answer needs a couple of turns.
 								relayInput.MaxTurns = askRunMaxTurns
-								// The turn-limit auto-continuation is the chain-maker: without
-								// this zero the resolve step injects the agent's restart budget,
-								// every exhausted ask-run spawns «-rN» with the same relay prompt
-								// and IncomingAsks, answers again, and the chain churns for a
-								// day (observed: 5 hops × 30–45 min). An ask-run that runs out
-								// of turns finishes honestly instead.
-								relayInput.TurnLimitRestarts = 0
+								// Turn-limit continuations stay enabled for relay runs
+								// (the agent's restart budget is inherited — a long answer
+								// legitimately spans several runs); the ANSWER itself closes
+								// the relay run the moment answer_agent delivers it.
 								relayInput.ParentRunID = target.RunID
 								relayInput.TeamRootRunID = input.TeamRootRunID
 								relayInput.SourceID = input.SourceID
@@ -2373,19 +2370,43 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 					// Same-kernel source: every run of this kernel shares one
 					// SourceID, so the asker's workflow resolves from input.SourceID.
+					noticeCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 					signalErr := workflow.SignalExternalWorkflow(ctx, WorkflowID(input.SourceID, input.Project, original.FromRunID), "", AgentReplySignal, reply).Get(ctx, nil)
 					answeredAsks[requestID] = true
+					// The answer IS the relay run's deliverable (docs/temporality-
+					// agent-collaboration-spec.md): deliver and FINISH — a Q&A run that
+					// lingers for its remaining turns hits the turn limit and spawns
+					// continuations that re-answer the same ask for days.
 					if signalErr != nil {
 						// The asker finished before the answer: the reply is already
-						// journaled (agent.replied) — the audit trail keeps it even
-						// though no workflow is left to receive it.
-						toolResult.Content = fmt.Sprintf("The answer to %s was recorded, but the asking run %s already finished — it can no longer receive replies.", requestID, original.FromRunID)
+						// journaled (agent.replied), and the HUMAN still gets it — the
+						// answer rides their channels (this is the case the user hit:
+						// the chain finished the work a day later, the asker was long
+						// gone, and nobody ever learned the outcome).
+						_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: fmt.Sprintf("The answer to agent request %s (from %s):\n%s", requestID, original.FromRunID, replyPayload)}).Get(ctx, nil)
+						toolResult.Content = fmt.Sprintf("The answer to %s was recorded and sent to the requester's channels, but the asking run %s already finished — it could not receive the signal.", requestID, original.FromRunID)
 					} else {
 						toolResult.Content = fmt.Sprintf("Answer delivered to %s for request %s.", original.FromRunID, requestID)
 					}
 					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000)}); err != nil {
 						return result, err
 					}
+					// Finish at once — the answer closes the relay run. Emit the
+					// completion the normal finale would, hand back the memory budget,
+					// run knowledge extraction over the answer, and return: no
+					// lingering turns, no turn-limit continuation of an answered ask.
+					result.Answer = replyPayload
+					result.Status = "completed"
+					result.TotalTokens = usedTokens
+					result.CostUSD = usedCostUSD
+					if err := emit(activityCtx, state, "run.completed", runCompletedTotals(turn, result.TotalTokens, result.CostUSD)); err != nil {
+						return result, err
+					}
+					if modelGate == 1 && gateMemoryMB > 0 {
+						_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, nil)
+					}
+					startKnowledgeExtraction(ctx, activityCtx, state, input)
+					return result, nil
 				}
 			} else if call.Name == "submit_review" && len(input.ReviewOf) > 0 {
 				// Acceptance-gate verdict (docs/agent-delegation.md): the plan
