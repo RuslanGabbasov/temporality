@@ -2275,6 +2275,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 								// turns and turn-limit restarts apply (a 100-turn agent spans several
 								// runs — expected). The answer is the run's completion message.
 								continueInput.ParentRunID = target.RunID
+								// A visible title: continue runs nest under an old parent in the
+								// runs list — without a title they read as a bare agent name and
+								// nobody finds «the run that prepared the answer».
+								askerLabel := input.RunID
+								if len(askerLabel) > 40 {
+									askerLabel = askerLabel[:40] + "…"
+								}
+								continueInput.Title = fmt.Sprintf("Ответ на запрос от %s", askerLabel)
 								continueInput.TeamRootRunID = input.TeamRootRunID
 								continueInput.SourceID = input.SourceID
 								continueInput.ContinueOf = target.RunID
@@ -2313,10 +2321,38 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 										selector.Select(ctx)
 									}
 									if childDone {
-										toolResult.Content = fmt.Sprintf("Result of the continue run %s:\n%s", continueRunID, childResult.Answer)
+										if strings.TrimSpace(childResult.Answer) != "" || childResult.Status == "failed" {
+											toolResult.Content = fmt.Sprintf("Result of the continue run %s:\n%s", continueRunID, childResult.Answer)
+										} else {
+											// The continue run ended without an answer (turn_limit
+											// chain ran dry with an empty finale). ONE more attempt —
+											// a fresh continuation with a shorter, answer-focused
+											// prompt; if that also comes back empty, report the
+											// problem honestly to the asker instead of silence.
+											continueRetry := fmt.Sprintf("%s/continue/%02d", target.RunID, continues+1)
+											continues++
+											retryInput := continueInput
+											retryInput.RunID = continueRetry
+											retryInput.Prompt = agentContinuePrompt(message, target.RunID, input.TaskID) + "\n\nIMPORTANT: your previous continuation ran out of turns without producing a final answer. Work ONLY on producing the answer now — no exploration, no new tool calls unless strictly necessary. Finish with the final answer as your completion message."
+											retryCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, continueRetry), ParentClosePolicy: enums.PARENT_CLOSE_POLICY_ABANDON})
+											retryFuture := workflow.ExecuteChildWorkflow(retryCtx, "AgentRun", retryInput)
+											if retryErr := retryFuture.GetChildWorkflowExecution().Get(ctx, nil); retryErr == nil {
+												var retryResult RunResult
+												if err := retryFuture.Get(ctx, &retryResult); err == nil && strings.TrimSpace(retryResult.Answer) != "" {
+													toolResult.Content = fmt.Sprintf("Result of the continue run %s:\n%s", continueRetry, retryResult.Answer)
+													asked["continue_run"] = continueRetry
+													if err := emit(activityCtx, state, "agent.asked", asked); err != nil {
+														return result, err
+													}
+													goto askDone
+												}
+											}
+											toolResult.Content = fmt.Sprintf("The continue runs %s (and its retry) finished without a final answer (status: %s, %d turns spent). The work may be done but no report was produced — check that run's trace in the runs list.", continueRunID, childResult.Status, childResult.Turns)
+										}
 									} else {
 										toolResult.Content = fmt.Sprintf("No result within %d seconds. The continue run %s keeps working — its final answer lands as that run's result (visible in the runs list).", timeoutSeconds, continueRunID)
 									}
+								askDone:
 								} else {
 									toolResult.Content = fmt.Sprintf("A continue run %s of %s is working on the ask (the run had already finished). Its final answer lands as that run's result — check the runs list.", continueRunID, target.AgentID)
 								}
@@ -2324,7 +2360,6 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 							if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000)}); err != nil {
 								return result, err
 							}
-							return result, err
 						}
 					}
 				}
@@ -2866,6 +2901,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			child.TotalTokens += result.TotalTokens
 			child.CostUSD += result.CostUSD
 			child.Turns += result.Turns
+			// Mirror the outcome into THIS run's journal as well: the workspace
+			// row is only reconciled lazily from the workflow result, so without
+			// a terminal event here every journal consumer (the runs list, the
+			// chat stream's done signal, the dashboards) keeps this attempt
+			// «running» forever.
+			if err := emitChainOutcome(activityCtx, state, *child); err != nil {
+				return result, err
+			}
 			return *child, nil
 		}
 	}
@@ -3943,6 +3986,33 @@ const cachedPriceFactor = 0.5
 // included) so UIs can show what the run spent without replaying events.
 func runCompletedTotals(turns, totalTokens int, costUSD float64) map[string]any {
 	return map[string]any{"turns": turns, "total_tokens": totalTokens, "cost_usd": costUSD}
+}
+
+// emitChainOutcome journals the terminal event of a run whose outcome arrived
+// through its turn-limit continuation (run.restarted): the chain head's
+// result IS the tail's result, so the journal must record how the chain
+// ended. Without this event every journal consumer (the runs list, the chat
+// stream's done signal, the dashboards) keeps the head «running» forever —
+// the workspace row is only reconciled lazily from the workflow result.
+func emitChainOutcome(activityCtx workflow.Context, state *eventState, result RunResult) error {
+	switch result.Status {
+	case "failed":
+		detail := strings.TrimSpace(result.Answer)
+		if detail == "" {
+			detail = "the continuation run failed"
+		}
+		return emit(activityCtx, state, "run.failed", map[string]any{
+			"turn": result.Turns, "error_type": "continuation_failed", "error": detail,
+		})
+	case "cancelled":
+		return emit(activityCtx, state, "run.cancelled", nil)
+	default:
+		// completed, or a forced-finale limit status (turn_limit & co) that
+		// still delivered an answer.
+		data := runCompletedTotals(result.Turns, result.TotalTokens, result.CostUSD)
+		data["status"] = result.Status
+		return emit(activityCtx, state, "run.completed", data)
+	}
 }
 
 // sandboxAutoApprovedTools are consequential workspace tools covered by the
