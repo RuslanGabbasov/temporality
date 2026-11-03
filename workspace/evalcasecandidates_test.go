@@ -3,6 +3,7 @@ package workspace
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -57,17 +58,75 @@ func TestEvalCandidateSelection(t *testing.T) {
 	}
 }
 
-// TestEvalProjectShareAllows pins the §4.5 70 % anti-contamination rule,
-// including the bootstrap exception and the exact boundary (70 % passes).
+// TestEvalProjectShareAllows pins the §4.5 anti-contamination rule: the 70 %
+// ceiling with its exact boundary (70 % passes) plus the
+// evalProjectShareFloor bootstrap — without the floor a single-project agent
+// could accept exactly ONE golden (2 of 2 is 100 %) and the review flow died
+// on 422s after the first accept.
 func TestEvalProjectShareAllows(t *testing.T) {
 	require.True(t, evalProjectShareAllows(nil, "p1"), "first golden must always be acceptable")
 	require.True(t, evalProjectShareAllows(map[string]int{"p1": 1}, "p2"))
-	require.False(t, evalProjectShareAllows(map[string]int{"p1": 1}, "p1"), "2 of 2 from one project exceeds 70%")
+	// The floor: a single project freely fills its first evalProjectShareFloor
+	// slots — a share over a handful of cases is noise.
+	for n := 0; n < evalProjectShareFloor; n++ {
+		require.True(t, evalProjectShareAllows(map[string]int{"p1": n}, "p1"), "golden %d of one project must pass the floor", n+1)
+	}
+	// The floor is not a licence: golden 11 of a single project is over both
+	// the floor and any share.
+	require.False(t, evalProjectShareAllows(map[string]int{"p1": evalProjectShareFloor}, "p1"))
 	// 6 of 9 already from p1: the 7th makes 7 of 10 — exactly 70 %, allowed.
 	require.True(t, evalProjectShareAllows(map[string]int{"p1": 6, "p2": 3}, "p1"))
 	// 7 of 9 already from p1: the 8th makes 8 of 10 — over the ceiling.
 	require.False(t, evalProjectShareAllows(map[string]int{"p1": 7, "p2": 3}, "p1"))
 	require.True(t, evalProjectShareAllows(map[string]int{"p1": 6, "p2": 3}, "p2"))
+}
+
+// TestEvalCandidateSameTask pins the replay-dedup relation: one task re-run
+// with junk in its tail (retries, relays) stays ONE task, different tasks
+// stay apart, and toy-short inputs are never merged.
+func TestEvalCandidateSameTask(t *testing.T) {
+	base := "User: создай новое знание — разработка и ревью SynapsePlugin"
+	replay := base + " (retry 2): context deadline exceeded @073eb7d1d63d"
+	require.True(t, evalCandidateSameTask(base, replay), "a replay's junk tail keeps the task identity")
+	require.True(t, evalCandidateSameTask(replay, base), "the relation is symmetric")
+	require.False(t, evalCandidateSameTask(base, "User: создай новое знание — разработка и ревью SungeroPlugin"))
+	require.False(t, evalCandidateSameTask("ok", "ok, done"), "a toy-short head is no evidence")
+}
+
+// TestEvalCandidateQueue pins the §4.2 «самые показателные» selection: one
+// slot per task (replays compete), decided tasks locked out, tier order
+// (human correction > human-verified > plain) and the queue cap.
+func TestEvalCandidateQueue(t *testing.T) {
+	base := func(runID, input, source string, verified bool, at time.Time) evalCandidatePoolEntry {
+		return evalCandidatePoolEntry{
+			EvalCaseCandidate: EvalCaseCandidate{RunID: runID, Input: input, Source: source},
+			HumanVerified:     verified,
+			RunCreatedAt:      at,
+		}
+	}
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	pool := []evalCandidatePoolEntry{
+		base("r-plain-old", "Задача А: проанализируй сервис присутствия", EvalCandidateSourceSucceededRun, false, now.Add(-48*time.Hour)),
+		base("r-verified", "Задача Б: проверь работу codanna MCP", EvalCandidateSourceSucceededRun, true, now.Add(-24*time.Hour)),
+		base("r-corrected", "Задача В: пересли отчёт lead-агенту", EvalCandidateSourceHumanCorrected, false, now.Add(-72*time.Hour)),
+		// Replays of task Б — junk tails, one carries an even better signal.
+		base("r-replay-1", "Задача Б: проверь работу codanna MCP (retry): context deadline exceeded", EvalCandidateSourceSucceededRun, false, now.Add(-12*time.Hour)),
+		base("r-replay-2", "Задача Б: проверь работу codanna MCP (attempt 3)", EvalCandidateSourceSucceededRun, true, now.Add(-6*time.Hour)),
+		// A decided task — its replays are locked out.
+		base("r-decided-replay", "Задача Г: настрой триггеры (retry 2)", EvalCandidateSourceSucceededRun, true, now.Add(-1*time.Hour)),
+	}
+	keep := evalCandidateQueue(pool, []string{"Задача Г: настрой триггеры"}, 10)
+	require.Len(t, keep, 3, "three task groups survive: А, Б, В — the decided Г is locked out")
+	// Tier order: corrected В first, then verified runs, then plain.
+	require.Equal(t, "r-corrected", keep[0].RunID)
+	require.Equal(t, "r-replay-2", keep[1].RunID, "the best realization of the replayed task wins its slot")
+	require.Equal(t, "r-plain-old", keep[2].RunID)
+
+	// The cap keeps the most instructive slots only.
+	capped := evalCandidateQueue(pool, []string{"Задача Г: настрой триггеры"}, 2)
+	require.Len(t, capped, 2)
+	require.Equal(t, "r-corrected", capped[0].RunID)
+	require.Equal(t, "r-replay-2", capped[1].RunID)
 }
 
 // TestGoldenCaseName pins the §4.4 suite naming: golden/<run_id-prefix>.

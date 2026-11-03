@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -49,6 +51,19 @@ const evalCandidateRetentionDays = 90
 // evalProjectSharePercentMax is the §4.5 anti-contamination ceiling: at most
 // 70 % of an agent's accepted goldens may come from one project.
 const evalProjectSharePercentMax = 70
+
+// evalProjectShareFloor is the §4.5 single-project bootstrap: while the
+// accepted set spans ONE project, shares are meaningless (100 % is
+// structurally unavoidable) and one project may freely fill its first floor
+// slots. Without it a single-client agent could accept exactly ONE golden
+// (2 of 2 is 100 %) and the review flow died on 422s after the first accept.
+const evalProjectShareFloor = 10
+
+// evalCandidateQueueCap is the §4.2 review-queue cap per agent: the harvest
+// keeps the queue on the most instructive candidates («в пределах десятка
+// самые показателные»), not on every finished run. Surplus pending rows are
+// trimmed; their runs may return to the queue when capacity frees.
+const evalCandidateQueueCap = 10
 
 // Candidate review outcomes the API layer maps to §8.2 codes (409/422).
 var (
@@ -155,18 +170,23 @@ func evalCandidateSelection(runStatus, answer string, verdicts []HITLVerdict) (s
 }
 
 // evalProjectShareAllows implements the §4.5 anti-contamination rule over the
-// accepted-candidate counts per project: after accepting a candidate from
-// project, no single project may hold more than 70 % of the agent's accepted
-// goldens. Integer arithmetic keeps the boundary exact (exactly 70 % passes);
-// an agent without accepted goldens always accepts its first candidate — the
-// rule must not block the bootstrap.
+// accepted-candidate counts per project: once the accepted set spans multiple
+// projects, a project's goldens may never exceed 70 % of it (integer
+// arithmetic keeps the boundary exact — exactly 70 % passes). While the set
+// is single-project there is no diversity to protect, so the
+// evalProjectShareFloor bootstrap applies instead: one project freely fills
+// its first floor slots and the review flow of a single-client agent is not
+// killed by 422s after its first accept.
 func evalProjectShareAllows(counts map[string]int, project string) bool {
-	total := 0
+	total, distinct := 0, 0
 	for _, n := range counts {
 		total += n
+		if n > 0 {
+			distinct++
+		}
 	}
-	if total == 0 {
-		return true
+	if distinct <= 1 {
+		return counts[project]+1 <= evalProjectShareFloor
 	}
 	return (counts[project]+1)*100 <= evalProjectSharePercentMax*(total+1)
 }
@@ -713,6 +733,7 @@ type HarvestableRun struct {
 	Status       string
 	Answer       string
 	TaskPrompt   string
+	CreatedAt    time.Time
 }
 
 // harvestableEvalRuns lists finished runs without a candidate yet: terminal
@@ -720,7 +741,7 @@ type HarvestableRun struct {
 // and past the journal settle window.
 func (s *Store) harvestableEvalRuns(ctx context.Context) ([]HarvestableRun, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT r.run_id, r.task_id, r.project_id, r.agent_id, r.agent_version, r.status, r.answer, t.prompt
+		`SELECT r.run_id, r.task_id, r.project_id, r.agent_id, r.agent_version, r.status, r.answer, t.prompt, r.created_at
 		 FROM workspace_run r
 		 JOIN workspace_task t ON t.id = r.task_id
 		 LEFT JOIN workspace_eval_case_candidate c ON c.run_id = r.run_id
@@ -740,7 +761,7 @@ func (s *Store) harvestableEvalRuns(ctx context.Context) ([]HarvestableRun, erro
 	for rows.Next() {
 		var run HarvestableRun
 		if err := rows.Scan(&run.RunID, &run.TaskID, &run.ProjectID, &run.AgentID,
-			&run.AgentVersion, &run.Status, &run.Answer, &run.TaskPrompt); err != nil {
+			&run.AgentVersion, &run.Status, &run.Answer, &run.TaskPrompt, &run.CreatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, run)
@@ -748,30 +769,237 @@ func (s *Store) harvestableEvalRuns(ctx context.Context) ([]HarvestableRun, erro
 	return result, rows.Err()
 }
 
-// HarvestEvalCaseCandidates is the §4.2 selection pass: for every eligible
-// finished run it loads the M1 verdicts, checks the effect=uncertain
-// exclusion and, when the rules select the run, inserts one candidate
-// (redacted, idempotent by run_id). Returns the candidates actually created
-// so the caller emits eval.case_candidate.created exactly once per candidate;
-// on a mid-batch error the already-created slice is returned together with
-// the error so their events are not lost.
+// evalCandidateTaskWindowRunes bounds the same-task comparison: two long
+// inputs are one task when their heads match inside this window, and a
+// shorter input must be the other's head (a replay tail carries run-specific
+// junk — error traces, ids — beyond the shared task statement).
+// evalCandidateTaskHeadRunes is the evidence floor: a shared head shorter
+// than that says nothing about task identity.
+const (
+	evalCandidateTaskWindowRunes = 80
+	evalCandidateTaskHeadRunes   = 20
+)
+
+// evalCandidateNormalize folds an input into its comparison form: lowercase,
+// punctuation collapsed — casing and separators never change task identity.
+func evalCandidateNormalize(input string) string {
+	normalized := make([]rune, 0, len(input))
+	space := false
+	for _, r := range strings.ToLower(input) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			normalized = append(normalized, r)
+			space = false
+		} else if !space && len(normalized) > 0 {
+			normalized = append(normalized, ' ')
+			space = true
+		}
+	}
+	return strings.TrimSpace(string(normalized))
+}
+
+// evalCandidateSameTask reports one task re-run: the normalized inputs share
+// a long head — equal inside the comparison window, or one being the other's
+// head (retries and relays re-state the task and append junk).
+func evalCandidateSameTask(a, b string) bool {
+	ra := []rune(evalCandidateNormalize(a))
+	rb := []rune(evalCandidateNormalize(b))
+	if len(ra) > len(rb) {
+		ra, rb = rb, ra
+	}
+	n := len(ra)
+	if n > evalCandidateTaskWindowRunes {
+		n = evalCandidateTaskWindowRunes
+	}
+	if n < evalCandidateTaskHeadRunes {
+		return false // shared head too short to be evidence
+	}
+	return string(ra[:n]) == string(rb[:n])
+}
+
+// evalCandidatePoolEntry is one judged queue member: an existing pending row
+// or a freshly selected run.
+type evalCandidatePoolEntry struct {
+	EvalCaseCandidate
+	HumanVerified bool      // an accepted HITL verdict — the human was in the loop
+	PendingID     int64     // >0: already in the queue as this row
+	RunCreatedAt  time.Time // the run's own timestamp — the stable recency signal
+}
+
+// evalRunHumanVerified reports an accepted HITL verdict — the human was in
+// the loop on this run and agreed (an approval, a picked option).
+func evalRunHumanVerified(verdicts []HITLVerdict) bool {
+	for _, verdict := range verdicts {
+		if verdict.Type == VerdictAccepted {
+			return true
+		}
+	}
+	return false
+}
+
+// evalCandidateTier orders «показательность»: the human's curated correction
+// beats a run the human verified, which beats a plain succeeded run.
+func evalCandidateTier(entry evalCandidatePoolEntry) int {
+	if entry.Source == EvalCandidateSourceHumanCorrected {
+		return 0
+	}
+	if entry.HumanVerified {
+		return 1
+	}
+	return 2
+}
+
+// evalCandidateLess orders the queue: tier first, freshest run wins ties
+// (the current workload is the most representative), run id keeps the order
+// deterministic.
+func evalCandidateLess(a, b evalCandidatePoolEntry) bool {
+	if ta, tb := evalCandidateTier(a), evalCandidateTier(b); ta != tb {
+		return ta < tb
+	}
+	if !a.RunCreatedAt.Equal(b.RunCreatedAt) {
+		return a.RunCreatedAt.After(b.RunCreatedAt)
+	}
+	return a.RunID < b.RunID
+}
+
+// evalCandidateQueue picks the review queue (§4.2) from the judged pool:
+// replays of one task compete for one slot, tasks a human already decided
+// are locked out forever, and the most instructive cap entries win.
+func evalCandidateQueue(pool []evalCandidatePoolEntry, decided []string, cap int) []evalCandidatePoolEntry {
+	groups := [][]evalCandidatePoolEntry{}
+	for _, entry := range pool {
+		matched := false
+		for i, group := range groups {
+			if evalCandidateSameTask(group[0].Input, entry.Input) {
+				groups[i] = append(group, entry)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			groups = append(groups, []evalCandidatePoolEntry{entry})
+		}
+	}
+	keep := []evalCandidatePoolEntry{}
+	for _, group := range groups {
+		if evalCandidateGroupDecided(group, decided) {
+			continue // the task is decided — its replays never come back
+		}
+		best := group[0]
+		for _, entry := range group[1:] {
+			if evalCandidateLess(entry, best) {
+				best = entry
+			}
+		}
+		keep = append(keep, best)
+	}
+	sort.Slice(keep, func(i, j int) bool { return evalCandidateLess(keep[i], keep[j]) })
+	if len(keep) > cap {
+		keep = keep[:cap]
+	}
+	return keep
+}
+
+// evalCandidateGroupDecided reports a task group a human already decided on:
+// any decided candidate whose task matches any group member locks the whole
+// group (§10.1: repeated harvesting of a decided task is excluded).
+func evalCandidateGroupDecided(group []evalCandidatePoolEntry, decided []string) bool {
+	for _, fingerprint := range decided {
+		for _, entry := range group {
+			if evalCandidateSameTask(fingerprint, entry.Input) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// candidateQueueRow is a candidate row plus the run's own timestamp — the
+// row carries its harvest time instead, which a trim/re-insert would shift.
+type candidateQueueRow struct {
+	EvalCaseCandidate
+	RunCreatedAt time.Time
+}
+
+const evalCaseCandidateColumnsQualified = `c.id, c.agent_id, c.run_id, c.task_id, c.project_id, c.agent_version, c.input,
+	c.expected_output, c.source, c.verdict, c.redaction_applied, c.redactions, c.reviewed_by, c.reviewed_at, c.created_at`
+
+// listCandidateQueueRows loads every candidate row of an agent (any verdict)
+// plus the run timestamps the rank needs; bounded by the retention reality
+// (rejected rows are reaped after 90 days, §10.2).
+func (s *Store) listCandidateQueueRows(ctx context.Context, agentID string) ([]candidateQueueRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+evalCaseCandidateColumnsQualified+`, COALESCE(r.created_at, c.created_at)
+		 FROM workspace_eval_case_candidate c
+		 LEFT JOIN workspace_run r ON r.run_id = c.run_id
+		 WHERE c.agent_id = $1
+		 ORDER BY c.created_at DESC LIMIT 500`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []candidateQueueRow{}
+	for rows.Next() {
+		var row candidateQueueRow
+		var reviewedAt *time.Time
+		if err := rows.Scan(&row.ID, &row.AgentID, &row.RunID, &row.TaskID, &row.ProjectID, &row.AgentVersion,
+			&row.Input, &row.ExpectedOutput, &row.Source, &row.Verdict, &row.RedactionApplied, &row.Redactions,
+			&row.ReviewedBy, &reviewedAt, &row.CreatedAt, &row.RunCreatedAt); err != nil {
+			return nil, err
+		}
+		row.ReviewedAt = reviewedAt
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
+// agentsWithPendingCandidates lists agents whose review queue may overflow
+// without any fresh run arriving — the trim half of the §4.2 reconcile.
+func (s *Store) agentsWithPendingCandidates(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT agent_id FROM workspace_eval_case_candidate WHERE verdict = 'pending'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var agents []string
+	for rows.Next() {
+		var agentID string
+		if err := rows.Scan(&agentID); err != nil {
+			return nil, err
+		}
+		agents = append(agents, agentID)
+	}
+	return agents, rows.Err()
+}
+
+// HarvestEvalCaseCandidates is the §4.2 selection pass: eligible finished
+// runs are judged (M1 verdicts, the effect=uncertain exclusion, the
+// selection rules) and then every agent's review queue is RECONCILED to the
+// most instructive evalCandidateQueueCap candidates — replay runs compete
+// for one slot, decided tasks are locked out, surplus pending rows are
+// trimmed (their runs may return when capacity frees). Returns the
+// candidates actually created so the caller emits
+// eval.case_candidate.created exactly once per candidate; on a mid-batch
+// error the already-created slice is returned together with the error so
+// their events are not lost.
 func (s *Store) HarvestEvalCaseCandidates(ctx context.Context) ([]EvalCaseCandidate, error) {
 	runs, err := s.harvestableEvalRuns(ctx)
 	if err != nil {
 		return nil, err
 	}
-	created := []EvalCaseCandidate{}
+	fresh := []evalCandidatePoolEntry{}
+	agents := map[string]bool{}
 	for _, run := range runs {
 		if strings.TrimSpace(run.TaskPrompt) == "" {
 			continue
 		}
 		verdicts, err := s.RunVerdicts(ctx, run.ProjectID, run.RunID)
 		if err != nil {
-			return created, err
+			return nil, err
 		}
 		uncertain, err := s.runHasUncertainEffect(ctx, run.ProjectID, run.RunID)
 		if err != nil {
-			return created, err
+			return nil, err
 		}
 		if uncertain {
 			continue // §4.2: unreconciled operations never become goldens
@@ -785,12 +1013,94 @@ func (s *Store) HarvestEvalCaseCandidates(ctx context.Context) ([]EvalCaseCandid
 			ProjectID: run.ProjectID, AgentVersion: run.AgentVersion,
 			Input: run.TaskPrompt, ExpectedOutput: expected, Source: source,
 		}
-		inserted, err := s.CreateEvalCaseCandidate(ctx, &candidate)
+		// Redact now: the replay fingerprint and the insert must share the
+		// exact text of the pending rows' stored (redacted) inputs.
+		prepareEvalCaseCandidateForInsert(&candidate)
+		fresh = append(fresh, evalCandidatePoolEntry{
+			EvalCaseCandidate: candidate,
+			HumanVerified:     evalRunHumanVerified(verdicts),
+			RunCreatedAt:      run.CreatedAt,
+		})
+		agents[run.AgentID] = true
+	}
+	pendingAgents, err := s.agentsWithPendingCandidates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, agentID := range pendingAgents {
+		agents[agentID] = true
+	}
+	return s.reconcileCandidateQueues(ctx, agents, fresh)
+}
+
+// reconcileCandidateQueues materializes one agent's queue from the judged
+// pool (§4.2 «самые показателные»): insert the kept entries that are not
+// rows yet, trim the pending rows that fell out of the top-N. Trims delete
+// pending rows only — decided rows lock their tasks forever — and a trimmed
+// run becomes harvestable again, so the queue refills with the best
+// available when the user accepts or rejects.
+func (s *Store) reconcileCandidateQueues(ctx context.Context, agents map[string]bool, fresh []evalCandidatePoolEntry) ([]EvalCaseCandidate, error) {
+	created := []EvalCaseCandidate{}
+	agentIDs := make([]string, 0, len(agents))
+	for agentID := range agents {
+		agentIDs = append(agentIDs, agentID)
+	}
+	sort.Strings(agentIDs) // deterministic sweep order
+	for _, agentID := range agentIDs {
+		rows, err := s.listCandidateQueueRows(ctx, agentID)
 		if err != nil {
 			return created, err
 		}
-		if inserted {
-			created = append(created, candidate)
+		decided := []string{}
+		pending := []evalCandidatePoolEntry{}
+		for _, row := range rows {
+			if row.Verdict != EvalCandidateVerdictPending {
+				decided = append(decided, row.Input)
+				continue
+			}
+			pending = append(pending, evalCandidatePoolEntry{
+				EvalCaseCandidate: row.EvalCaseCandidate,
+				PendingID:         row.ID,
+				RunCreatedAt:      row.RunCreatedAt,
+			})
+		}
+		for i := range pending {
+			verdicts, err := s.RunVerdicts(ctx, pending[i].ProjectID, pending[i].RunID)
+			if err != nil {
+				return created, err
+			}
+			pending[i].HumanVerified = evalRunHumanVerified(verdicts)
+		}
+		pool := append([]evalCandidatePoolEntry{}, pending...)
+		for _, entry := range fresh {
+			if entry.AgentID == agentID {
+				pool = append(pool, entry)
+			}
+		}
+		keep := evalCandidateQueue(pool, decided, evalCandidateQueueCap)
+		keptIDs := map[int64]bool{}
+		for _, entry := range keep {
+			if entry.PendingID > 0 {
+				keptIDs[entry.PendingID] = true
+				continue
+			}
+			candidate := entry.EvalCaseCandidate
+			inserted, err := s.CreateEvalCaseCandidate(ctx, &candidate)
+			if err != nil {
+				return created, err
+			}
+			if inserted {
+				created = append(created, candidate)
+			}
+		}
+		for _, row := range pending {
+			if keptIDs[row.ID] {
+				continue
+			}
+			if _, err := s.pool.Exec(ctx,
+				`DELETE FROM workspace_eval_case_candidate WHERE id = $1 AND verdict = 'pending'`, row.ID); err != nil {
+				return created, err
+			}
 		}
 	}
 	return created, nil
