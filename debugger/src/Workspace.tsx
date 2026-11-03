@@ -190,7 +190,7 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
 	const d = outer.data ?? outer
 	// Timeline prefix: seconds since run start, when the caller knows it.
 	const elapsed = Number(d.elapsed_s)
-	const prefix = Number.isFinite(elapsed) && elapsed >= 5 ? `+${formatDuration(elapsed * 1000)} ` : ''
+	const prefix = Number.isFinite(elapsed) && elapsed >= 5 ? `+${formatDuration(elapsed * 1000, t)} ` : ''
 	switch (type) {
 		case 'run.started':
 			return t('chat.stream.run_started') + (d.model ? t('chat.stream.model_suffix', { model: String(d.model) }) : '')
@@ -976,7 +976,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         // bubble already shows.
         if (fragment && Number(d.tool_calls ?? 0) > 0) {
           const elapsed = elapsedFor(outer)
-          const prefix = elapsed !== undefined && elapsed >= 5 ? `+${formatDuration(elapsed * 1000)} ` : ''
+          const prefix = elapsed !== undefined && elapsed >= 5 ? `+${formatDuration(elapsed * 1000, t)} ` : ''
           pushLine(prefix + t('chat.stream.fragment', { text: squashQuestion(fragment) }))
         }
         delete fragments[turn]

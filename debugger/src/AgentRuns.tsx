@@ -570,7 +570,7 @@ export default function AgentRuns({ project }: { project: string }) {
   const liveModelParts = useMemo(() => {
     if (!selectedLive || !tokenMetrics || !liveModelEvent) return []
     const elapsedMs = Math.max(0, nowTick - Date.parse(liveModelEvent.occurred_at))
-    const parts = [formatDuration(elapsedMs)]
+    const parts = [formatDuration(elapsedMs, t)]
     if (!tokenMetrics.connected) {
       parts.push(tokenMetrics.reconnects > 0
         ? t('runs.live.sse_reconnecting', { count: String(tokenMetrics.reconnects) })
@@ -1608,7 +1608,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     </div>
                     {overviewRunning && overviewStartedAt && (
                       <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0 0 0.5rem' }}>
-                        ⏱ {t('runs.overview.elapsed', { time: formatDuration(Math.max(0, nowTick - Date.parse(overviewStartedAt))) })}
+                        ⏱ {t('runs.overview.elapsed', { time: formatDuration(Math.max(0, nowTick - Date.parse(overviewStartedAt)), t) })}
                       </p>
                     )}
                     {overviewLast && (() => {
@@ -1623,8 +1623,8 @@ export default function AgentRuns({ project }: { project: string }) {
                           {liveModel && tokenMetrics.approxTokens > 0 && <span style={{ color: 'var(--tm-text-3)' }}>~{tokenMetrics.approxTokens} tok</span>}
                           {liveModel && tokenMetrics.tps > 0 && <span style={{ color: 'var(--tm-text-3)' }}>{tokenMetrics.tps} tok/s</span>}
                           {liveModel && tokenMetrics.streaming && <Tag type="green" size="sm">{t('runs.live.alive')}</Tag>}
-                          <Tag type="gray" size="sm">{t('runs.events_count', { count: String(ownEvents.length) })}</Tag>
-                          {overviewTurns > 0 && <Tag type="gray" size="sm">{overviewTurns} {t('runs.turns')}</Tag>}
+                          <Tag type="gray" size="sm">{pluralT(t, locale, 'runs.events_n', ownEvents.length)}</Tag>
+                          {overviewTurns > 0 && <Tag type="gray" size="sm">{pluralT(t, locale, 'runs.turns_n', overviewTurns)}</Tag>}
                         </div>
                       )
                     })()}
@@ -1802,10 +1802,10 @@ export default function AgentRuns({ project }: { project: string }) {
                         <span>↻ <strong>{(runCostData.total_cached_tokens ?? 0).toLocaleString()}</strong> {t('runs.cached') ?? 'cached'}</span>
                       )}
                       {humanFactors && humanFactors.hwtSeconds > 0 && (
-                        <span title={t('runs.hwt_hint') ?? 'Wall-clock time the run spent waiting for a human (HWT)'}>⏳ <strong>{formatDuration(humanFactors.hwtSeconds * 1000)}</strong> {t('runs.hwt') ?? 'human wait'}</span>
+                        <span title={t('runs.hwt_hint') ?? 'Wall-clock time the run spent waiting for a human (HWT)'}>⏳ <strong>{formatDuration(humanFactors.hwtSeconds * 1000, t)}</strong> {t('runs.hwt') ?? 'human wait'}</span>
                       )}
                       {humanFactors && humanFactors.habSeconds > 0 && (
-                        <span title={t('runs.hab_hint') ?? 'Estimated human attention: decisions, answers and reading (HAB, estimate)'}>👁 <strong>{formatDuration(humanFactors.habSeconds * 1000)}</strong> {t('runs.hab') ?? 'human attention'}</span>
+                        <span title={t('runs.hab_hint') ?? 'Estimated human attention: decisions, answers and reading (HAB, estimate)'}>👁 <strong>{formatDuration(humanFactors.habSeconds * 1000, t)}</strong> {t('runs.hab') ?? 'human attention'}</span>
                       )}
                       {humanFactors && humanFactors.approvalDecisions + humanFactors.askHumanAnswered > 0 && (
                         <span>✋ <strong>{humanFactors.approvalDecisions + humanFactors.askHumanAnswered}</strong> {t('runs.decisions') ?? 'human decisions'}</span>
@@ -1911,8 +1911,8 @@ export default function AgentRuns({ project }: { project: string }) {
                       title={taskCostData.first_started_at ? `${taskCostData.first_started_at} → ${taskCostData.last_ended_at ?? '…'}` : undefined}>
                       <span><strong>{taskCostData.run_count}</strong> {pluralT(t, locale, 'runs.task_runs_n', taskCostData.run_count)}</span>
                       <span><strong>{taskCostData.agents.length}</strong> {pluralT(t, locale, 'runs.task_agents_n', taskCostData.agents.length)}</span>
-                      <span>⏱ <strong>{formatDuration(taskCostData.elapsed_ms)}</strong> {t('runs.task_elapsed') ?? 'elapsed'}</span>
-                      <span>⚒ <strong>{formatDuration(taskCostData.active_ms)}</strong> {t('runs.task_active') ?? 'active'}</span>
+                      <span>⏱ <strong>{formatDuration(taskCostData.elapsed_ms, t)}</strong> {t('runs.task_elapsed') ?? 'elapsed'}</span>
+                      <span>⚒ <strong>{formatDuration(taskCostData.active_ms, t)}</strong> {t('runs.task_active') ?? 'active'}</span>
                       <span><strong>{taskCostData.total_tokens.toLocaleString()}</strong> {t('runs.tokens') ?? 'tokens'}</span>
                       {(taskCostData.total_cached_tokens ?? 0) > 0 && (
                         <span>↻ <strong>{(taskCostData.total_cached_tokens ?? 0).toLocaleString()}</strong> {t('runs.cached') ?? 'cached'}</span>
@@ -1922,12 +1922,12 @@ export default function AgentRuns({ project }: { project: string }) {
                       )}
                       {taskCostData.approvals && taskCostData.approvals.requested > 0 && (
                         <span title={approvalHint(t, taskCostData.approvals)} style={{ cursor: 'help' }}>
-                          👤 <strong>{taskCostData.approvals.granted + taskCostData.approvals.rejected}/{taskCostData.approvals.requested}</strong> {t('runs.approvals_col') ?? 'approvals'} · {formatDuration(taskCostData.approvals.wait_ms)}
+                          👤 <strong>{taskCostData.approvals.granted + taskCostData.approvals.rejected}/{taskCostData.approvals.requested}</strong> {t('runs.approvals_col') ?? 'approvals'} · {formatDuration(taskCostData.approvals.wait_ms, t)}
                         </span>
                       )}
                       {taskCostData.human && taskCostData.human.hab_seconds > 0 && (
                         <span title={t('runs.human_hint') ?? undefined} style={{ cursor: 'help' }}>
-                          🧠 <strong>{formatDuration(taskCostData.human.hab_seconds * 1000)}</strong> {t('runs.hab') ?? 'attention'} · {formatDuration(taskCostData.human.hwt_seconds * 1000)} {t('runs.hwt') ?? 'wait'}
+                          🧠 <strong>{formatDuration(taskCostData.human.hab_seconds * 1000, t)}</strong> {t('runs.hab') ?? 'attention'} · {formatDuration(taskCostData.human.hwt_seconds * 1000, t)} {t('runs.hwt') ?? 'wait'}
                         </span>
                       )}
                     </div>
@@ -1944,7 +1944,7 @@ export default function AgentRuns({ project }: { project: string }) {
                             <Fragment key={a.agent_id}>
                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.agent_id}>{agentLabel(a.agent_id)}</span>
                               <span>{a.runs}</span>
-                              <span>{formatDuration(a.active_ms)}</span>
+                              <span>{formatDuration(a.active_ms, t)}</span>
                               <span>{a.total_tokens.toLocaleString()}{(a.cached_tokens ?? 0) > 0 ? <span style={{ color: 'var(--tm-text-3)' }}> ↻{((a.cached_tokens ?? 0) / a.total_tokens * 100).toFixed(0)}%</span> : null}</span>
                               {anyCost && <span>{a.cost_usd > 0 ? `$${a.cost_usd.toFixed(4)}` : '—'}</span>}
                             </Fragment>

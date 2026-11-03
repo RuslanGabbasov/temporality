@@ -611,6 +611,20 @@ describe('raw types never leak into the summary label', () => {
   }
 })
 
+// Stream event types must read as words in every human surface — the raw
+// type name (model.reasoning) is details-layer material.
+describe('model stream summaries', () => {
+  const ruT = (key: string) => (ru as Record<string, string>)[key] ?? key
+  it('localizes model.reasoning and model.text_delta', () => {
+    for (const type of ['model.reasoning', 'model.text_delta']) {
+      const summary = eventSummary(event(type, { text: 'draft thinking' }), ruT)
+      expect(summary.label).not.toBe(type)
+      expect(summary.label).not.toMatch(/^[a-z_]+(\.[a-z_]+)+$/)
+      expect(summary.detail).toContain('draft thinking')
+    }
+  })
+})
+
 describe('friendlyRunFailure', () => {
   const tr = (key: string, vars?: Record<string, string>) => {
     let s = (ru as Record<string, string>)[key] ?? key

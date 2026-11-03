@@ -76,10 +76,17 @@ export function shortTime(iso: string) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
 }
 
-/** Compact human duration for budget tiles: 2h 5m / 4m 30s / 12s / 900ms. */
-export function formatDuration(ms: number): string {
-	if (!Number.isFinite(ms) || ms <= 0) return '0s'
-	if (ms < 1000) return `${Math.round(ms)}ms`
+/** Compact human duration for budget tiles: 2h 5m / 4m 30s / 12s / 900ms —
+ *  units ride the active locale when a translate fn is given («2ч 5м»);
+ *  without one the English abbreviations stay (tests, logs). */
+export function formatDuration(ms: number, t?: TranslateFn): string {
+	const unit = (key: string, fallback: string) => {
+		if (!t) return fallback
+		const label = t(key)
+		return label !== key ? label : fallback
+	}
+	if (!Number.isFinite(ms) || ms <= 0) return `0${unit('runs.time.s', 's')}`
+	if (ms < 1000) return `${Math.round(ms)}${unit('runs.time.ms', 'ms')}`
 	const totalSeconds = Math.floor(ms / 1000)
 	const d = Math.floor(totalSeconds / 86400)
 	const h = Math.floor((totalSeconds % 86400) / 3600)
@@ -87,10 +94,10 @@ export function formatDuration(ms: number): string {
 	const s = totalSeconds % 60
 	// Day-scale work (a long-lived project's totals) reads as «сутки», not as
 	// four-digit hour counts.
-	if (d > 0) return h > 0 ? `${d}d ${h}h` : `${d}d`
-	if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`
-	if (m > 0) return s > 0 ? `${m}m ${s}s` : `${m}m`
-	return `${s}s`
+	if (d > 0) return h > 0 ? `${d}${unit('runs.time.d', 'd')} ${h}${unit('runs.time.h', 'h')}` : `${d}${unit('runs.time.d', 'd')}`
+	if (h > 0) return m > 0 ? `${h}${unit('runs.time.h', 'h')} ${m}${unit('runs.time.m', 'm')}` : `${h}${unit('runs.time.h', 'h')}`
+	if (m > 0) return s > 0 ? `${m}${unit('runs.time.m', 'm')} ${s}${unit('runs.time.s', 's')}` : `${m}${unit('runs.time.m', 'm')}`
+	return `${s}${unit('runs.time.s', 's')}`
 }
 
 /** Human-approval budget tooltip: the full breakdown behind a compact cell.
@@ -104,12 +111,12 @@ export function approvalHint(t: TranslateFn, ap: { requested: number; granted: n
 		rejected: String(ap.rejected),
 		timed_out: String(ap.timed_out),
 		pending: String(ap.pending ?? 0),
-		wait: formatDuration(ap.wait_ms),
+		wait: formatDuration(ap.wait_ms, t),
 	})
 	if (!human || (human.hab_seconds <= 0 && human.hwt_seconds <= 0)) return base
 	return base + '\n' + t('runs.human_hint', {
-		hab: formatDuration(human.hab_seconds * 1000),
-		hwt: formatDuration(human.hwt_seconds * 1000),
+		hab: formatDuration(human.hab_seconds * 1000, t),
+		hwt: formatDuration(human.hwt_seconds * 1000, t),
 		flow: String(human.flow_efficiency),
 	})
 }
@@ -240,8 +247,14 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
     case 'run.cancelled':
       // Journaled by the terminate heal path and by workflow cancellation:
       // the actor field names who stopped it, when present.
-      return { icon: '■', label: t('runs.event.run_cancelled'), detail: String(d.actor ?? ''), color: 'var(--tm-text-3)' }
-    case 'run.user_note':
+      		return { icon: '■', label: t('runs.event.run_cancelled'), detail: String(d.actor ?? ''), color: 'var(--tm-text-3)' }
+	    case 'model.reasoning':
+	      // The turn's thinking stream (journal carries the full text of the
+	      // finished turn) — never the raw type name in a human surface.
+	      return { icon: '◌', label: t('runs.reasoning'), detail: String(d.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 120), color: 'var(--tm-text-3)' }
+	    case 'model.text_delta':
+	      return { icon: '✎', label: t('runs.event.model_text'), detail: String(d.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 120), color: 'var(--tm-text-3)' }
+	    case 'run.user_note':
       // Mid-run chat addendum drained into the conversation (kernel.user_note).
       return { icon: '⤳', label: t('runs.event.user_note'), detail: t('runs.event.user_note_detail', { turn: String(d.turn ?? '?') }), color: 'var(--tm-teal)' }
     case 'run.note_dropped':

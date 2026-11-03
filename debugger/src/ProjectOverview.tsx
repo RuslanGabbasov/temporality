@@ -217,13 +217,13 @@ export default function ProjectOverview({ project }: Props) {
                 in rollup rows) — the strip already prints the number, so reuse
                 would duplicate it. Plural word keys instead. */}
             <span><strong style={{ color: 'var(--tm-text)' }}>{budget.run_count}</strong> {pluralT(t, locale, 'project.runs_word', budget.run_count)}</span>
-            <span>⏱ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration(budget.elapsed_ms)}</strong> {t('runs.task_elapsed') ?? 'elapsed'}</span>
-            <span>⚒ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration(budget.active_ms)}</strong> {t('runs.task_active') ?? 'active'}</span>
+            <span>⏱ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration(budget.elapsed_ms, t)}</strong> {t('runs.task_elapsed') ?? 'elapsed'}</span>
+            <span>⚒ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration(budget.active_ms, t)}</strong> {t('runs.task_active') ?? 'active'}</span>
             <span><strong style={{ color: 'var(--tm-text)' }}>{budget.total_tokens.toLocaleString()}</strong> {t('runs.tokens') ?? 'tokens'}</span>
             {budget.total_cost_usd > 0 && <span><strong style={{ color: 'var(--tm-text)' }}>${budget.total_cost_usd.toFixed(2)}</strong></span>}
             {(budget.human?.hab_seconds ?? 0) > 0 || (budget.human?.hwt_seconds ?? 0) > 0 ? (
               <span title={t('dashboard.human_col_hint') ?? undefined}>
-                🧠 <strong style={{ color: 'var(--tm-text)' }}>{formatDuration((budget.human?.hab_seconds ?? 0) * 1000)}</strong> · ⏳ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration((budget.human?.hwt_seconds ?? 0) * 1000)}</strong>
+                🧠 <strong style={{ color: 'var(--tm-text)' }}>{formatDuration((budget.human?.hab_seconds ?? 0) * 1000, t)}</strong> · ⏳ <strong style={{ color: 'var(--tm-text)' }}>{formatDuration((budget.human?.hwt_seconds ?? 0) * 1000, t)}</strong>
               </span>
             ) : null}
             {budget.approvals.requested > 0 && (
@@ -307,18 +307,18 @@ export default function ProjectOverview({ project }: Props) {
                       <span>{saga.task_ids.length}</span>
                       <span>{saga.run_count}</span>
                       <span>{saga.agent_count}</span>
-                      <span>{formatDuration(saga.elapsed_ms)}</span>
-                      <span>{formatDuration(saga.active_ms)}</span>
+                      <span>{formatDuration(saga.elapsed_ms, t)}</span>
+                      <span>{formatDuration(saga.active_ms, t)}</span>
                       <span>{saga.total_tokens.toLocaleString()}</span>
                       <span>{saga.total_cost_usd > 0 ? `$${saga.total_cost_usd.toFixed(2)}` : '—'}</span>
                       <span title={t('dashboard.human_col_hint') ?? undefined} style={{ whiteSpace: 'nowrap' }}>
                         {(saga.human?.hab_seconds ?? 0) > 0 || (saga.human?.hwt_seconds ?? 0) > 0
-                          ? <>🧠 {formatDuration((saga.human?.hab_seconds ?? 0) * 1000)} · ⏳ {formatDuration((saga.human?.hwt_seconds ?? 0) * 1000)}</>
+                          ? <>🧠 {formatDuration((saga.human?.hab_seconds ?? 0) * 1000, t)} · ⏳ {formatDuration((saga.human?.hwt_seconds ?? 0) * 1000, t)}</>
                           : '—'}
                       </span>
                       <span title={approvalHint(t, saga.approvals, saga.human)} style={{ whiteSpace: 'nowrap' }}>
                         {saga.approvals.requested > 0
-                          ? <>✓{saga.approvals.granted} ✗{saga.approvals.rejected}{saga.approvals.timed_out > 0 ? ` ⏱${saga.approvals.timed_out}` : ''}{(saga.approvals.pending ?? 0) > 0 ? ` …${saga.approvals.pending}` : ''} · {formatDuration(saga.approvals.wait_ms)}</>
+                          ? <>✓{saga.approvals.granted} ✗{saga.approvals.rejected}{saga.approvals.timed_out > 0 ? ` ⏱${saga.approvals.timed_out}` : ''}{(saga.approvals.pending ?? 0) > 0 ? ` …${saga.approvals.pending}` : ''} · {formatDuration(saga.approvals.wait_ms, t)}</>
                           : '—'}
                       </span>
                     </div>
@@ -332,7 +332,7 @@ export default function ProjectOverview({ project }: Props) {
                             </span>
                             <span>{pluralT(t, locale, 'runs.task_runs_n', task.run_count)}</span>
                             <span>{pluralT(t, locale, 'runs.task_agents_n', task.agent_count)}</span>
-                            <span>⏱ {formatDuration(task.elapsed_ms)}</span>
+                            <span>⏱ {formatDuration(task.elapsed_ms, t)}</span>
                             <span>{task.total_tokens.toLocaleString()} {t('runs.tokens') ?? 'tokens'}</span>
                             {task.total_cost_usd > 0 && <span>${task.total_cost_usd.toFixed(2)}</span>}
                             <button
@@ -412,18 +412,18 @@ export default function ProjectOverview({ project }: Props) {
                   </span>
                   <span>{task.run_count}</span>
                   <span>{task.agent_count}</span>
-                  <span>{formatDuration(task.elapsed_ms)}</span>
-                  <span>{formatDuration(task.active_ms)}</span>
+                  <span>{formatDuration(task.elapsed_ms, t)}</span>
+                  <span>{formatDuration(task.active_ms, t)}</span>
                   <span>{task.total_tokens.toLocaleString()}</span>
                   <span>{task.total_cost_usd > 0 ? `$${task.total_cost_usd.toFixed(2)}` : '—'}</span>
                   <span title={t('dashboard.human_col_hint') ?? undefined} style={{ whiteSpace: 'nowrap' }}>
                         {(task.human?.hab_seconds ?? 0) > 0 || (task.human?.hwt_seconds ?? 0) > 0
-                          ? <>🧠 {formatDuration((task.human?.hab_seconds ?? 0) * 1000)} · ⏳ {formatDuration((task.human?.hwt_seconds ?? 0) * 1000)}</>
+                          ? <>🧠 {formatDuration((task.human?.hab_seconds ?? 0) * 1000, t)} · ⏳ {formatDuration((task.human?.hwt_seconds ?? 0) * 1000, t)}</>
                           : '—'}
                   </span>
                   <span title={approvalHint(t, task.approvals, task.human)} style={{ whiteSpace: 'nowrap' }}>
                         {task.approvals.requested > 0
-                          ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms)}</>
+                          ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms, t)}</>
                           : '—'}
                   </span>
                 </div>

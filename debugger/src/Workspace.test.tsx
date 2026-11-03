@@ -50,14 +50,14 @@ describe('pluralT', () => {
 describe('formatStreamEvent', () => {
   it('renders the compact per-turn model line: tokens, latency, elapsed', () => {
     expect(formatStreamEvent('model.completed', { data: { turn: 2, total_tokens: 1248, latency_ms: 23300, elapsed_s: 755 } }, ruT, 'ru'))
-      .toBe('+12m 35s Ход 2 · 1.2k ток · 23.3с')
+      .toBe('+12м 35с Ход 2 · 1.2k ток · 23.3с')
     expect(formatStreamEvent('model.completed', { data: { turn: 2, total_tokens: 980, latency_ms: 4200 } }, enT, 'en'))
       .toBe('Turn 2 · 980 tok · 4.2s')
   })
 
   it('adds the live-measured thinking time when reasoning deltas were seen', () => {
     expect(formatStreamEvent('model.completed', { data: { turn: 3, total_tokens: 2100, latency_ms: 14000, thinking_s: 6.38, elapsed_s: 20 } }, ruT, 'ru'))
-      .toBe('+20s Ход 3 · 💭 6.4с · 2.1k ток · 14.0с')
+      .toBe('+20с Ход 3 · 💭 6.4с · 2.1k ток · 14.0с')
     expect(formatStreamEvent('model.completed', { data: { turn: 3, total_tokens: 2100, latency_ms: 14000, thinking_s: 6.38 } }, enT, 'en'))
       .toBe('Turn 3 · 💭 6.4s · 2.1k tok · 14.0s')
   })
@@ -77,7 +77,7 @@ describe('formatStreamEvent', () => {
   it('tool.started shows what the call is doing; failures are visible', () => {
     const args = JSON.stringify({ command: ['go', 'test', './...'] })
     expect(formatStreamEvent('tool.started', { data: { tool: 'run_command', arguments: args, elapsed_s: 61 } }, ruT, 'ru'))
-      .toBe('+1m 1s ⚙ run_command: go test ./...')
+      .toBe('+1м 1с ⚙ run_command: go test ./...')
     expect(formatStreamEvent('tool.started', { data: { tool: 'read_file', arguments: JSON.stringify({ path: '/workspace/report.md' }) } }, enT, 'en'))
       .toBe('⚙ read_file: /workspace/report.md')
     expect(formatStreamEvent('tool.failed', { data: { tool: 'run_command', error: 'exit_code=1 build failed' } }, ruT, 'ru'))

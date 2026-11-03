@@ -415,7 +415,7 @@ export default function Dashboard({ project, setProject }: Props) {
                 <HealthChip
                   value={health?.approvals.pending ?? 0}
                   label={pluralT(t, locale, 'dashboard.approvals_n', health?.approvals.pending ?? 0)}
-                  title={health?.approvals.wait_ms_avg ? `${t('dashboard.wait_avg') ?? 'avg wait'}: ${formatDuration(health.approvals.wait_ms_avg)}` : undefined}
+                  title={health?.approvals.wait_ms_avg ? `${t('dashboard.wait_avg') ?? 'avg wait'}: ${formatDuration(health.approvals.wait_ms_avg, t)}` : undefined}
                   onClick={() => navigate('/agents')}
                 />
                 {opsCount !== null && (
@@ -562,11 +562,11 @@ export default function Dashboard({ project, setProject }: Props) {
                 <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem', textAlign: 'center' }}>
                     <div title={t('dashboard.human_read_hab') ?? ''}>
-                      <div style={{ fontSize: '1.05rem', fontWeight: 650 }}>{formatDuration(health.human.hab_seconds * 1000)}</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 650 }}>{formatDuration(health.human.hab_seconds * 1000, t)}</div>
                       <div style={{ fontSize: '0.62rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.human_hab') ?? 'attention (HAB)'}</div>
                     </div>
                     <div title={t('dashboard.human_read_hwt') ?? ''}>
-                      <div style={{ fontSize: '1.05rem', fontWeight: 650 }}>{formatDuration(health.human.hwt_seconds * 1000)}</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 650 }}>{formatDuration(health.human.hwt_seconds * 1000, t)}</div>
                       <div style={{ fontSize: '0.62rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.human_hwt') ?? 'wait (HWT)'}</div>
                     </div>
                     <div title={t('dashboard.human_flow_hint') ?? ''}>
@@ -643,7 +643,7 @@ export default function Dashboard({ project, setProject }: Props) {
                   <span style={{ color: m.in_flight > 0 ? 'var(--tm-text)' : 'var(--tm-text-3)' }}>{m.in_flight}</span>
                   <span style={{ color: m.failed > 0 ? 'var(--tm-danger)' : 'var(--tm-text-3)' }}>{m.failed}</span>
                   <span style={{ color: 'var(--tm-text-3)' }}>{[m.retries, m.nudged].some((n) => n > 0) ? `${m.retries}${m.nudged > 0 ? ` +${m.nudged}⚡` : ''}` : '—'}</span>
-                  <span style={{ color: 'var(--tm-text-3)' }}>{m.p50_latency_ms ? formatDuration(m.p50_latency_ms) : '—'} / {m.p95_latency_ms ? formatDuration(m.p95_latency_ms) : '—'}</span>
+                  <span style={{ color: 'var(--tm-text-3)' }}>{m.p50_latency_ms ? formatDuration(m.p50_latency_ms, t) : '—'} / {m.p95_latency_ms ? formatDuration(m.p95_latency_ms, t) : '—'}</span>
                   <span>{m.total_tokens.toLocaleString()}</span>
                 </div>
               ))}
@@ -764,8 +764,8 @@ export function UsersTableRow({ row, expanded, onOpen }: { row: UserMetricsRow; 
       <span style={row.asks_open > 0 ? { color: 'var(--tm-warning)', fontWeight: 600 } : undefined}>{row.asks_open > 0 ? row.asks_open : '—'}</span>
       <span style={{ color: 'var(--tm-text-2)' }}>{row.last_run_at ? new Date(row.last_run_at).toLocaleString() : '—'}</span>
       <span>{row.asks_total}</span>
-      <span title={t('dashboard.users_wait_hint') ?? undefined}>{row.wait_seconds > 0 ? formatDuration(row.wait_seconds * 1000) : '—'}</span>
-      <span title={t('dashboard.users_hab_hint') ?? undefined}>{row.hab_seconds > 0 ? formatDuration(row.hab_seconds * 1000) : '—'}</span>
+      <span title={t('dashboard.users_wait_hint') ?? undefined}>{row.wait_seconds > 0 ? formatDuration(row.wait_seconds * 1000, t) : '—'}</span>
+      <span title={t('dashboard.users_hab_hint') ?? undefined}>{row.hab_seconds > 0 ? formatDuration(row.hab_seconds * 1000, t) : '—'}</span>
       <span style={(row.failed_runs > 0 || row.timed_out_asks > 0) ? { color: 'var(--tm-danger)', fontWeight: 600 } : undefined}>{(row.failed_runs + row.timed_out_asks) > 0 ? row.failed_runs + row.timed_out_asks : '—'}</span>
       <span style={{ color: 'var(--tm-text-2)' }}>{row.last_ask_at ? new Date(row.last_ask_at).toLocaleString() : '—'}</span>
     </div>
