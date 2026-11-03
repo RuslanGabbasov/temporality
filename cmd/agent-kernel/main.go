@@ -3926,7 +3926,13 @@ func main() {
 			writeEvent(snapshot)
 		}
 		ctx := r.Context()
-		statusTicker := time.NewTicker(5 * time.Second)
+		// Probe cadence: a DescribeWorkflowExecution is a heavy Temporal RPC.
+		// Under host memory pressure it can miss its deadline for a while —
+		// killing the token channel on the FIRST miss turned one slow tick
+		// into a reconnect storm (the client counts attempts) while the model
+		// itself was streaming fine. Tolerate a streak of misses before the
+		// hangup; the bus closure still ends finished runs immediately.
+		statusTicker := time.NewTicker(15 * time.Second)
 		defer statusTicker.Stop()
 		// Keepalive comments: proxies and load balancers see traffic on an
 		// otherwise silent connection (a thinking model can stream nothing for
@@ -3934,12 +3940,13 @@ func main() {
 		keepaliveTicker := time.NewTicker(15 * time.Second)
 		defer keepaliveTicker.Stop()
 		// hangup is armed by the dErr path below when the describe's own R1
-		// deadline expired. Headers were sent long ago, so there is no HTTP
-		// status to rewrite mid-stream — the stream ends on this tick through
-		// the same terminal-event path a finished run takes, instead of
-		// probing a wedged Temporal forever (the R2-exemption promise: hang
-		// safety comes from the per-RPC deadlines (R1)).
+		// deadline expired THREE ticks in a row. Headers were sent long ago, so
+		// there is no HTTP status to rewrite mid-stream — the stream ends on
+		// this tick through the same terminal-event path a finished run takes,
+		// instead of probing a wedged Temporal forever (the R2-exemption
+		// promise: hang safety comes from the per-RPC deadlines (R1)).
 		hangup := false
+		deadlineMisses := 0
 		terminal := func() bool {
 			// R1 (kernel-wedge-2026-10-21): the status probe is a Temporal-RPC
 			// like any other — it rides its own deadline even though the SSE
@@ -3948,9 +3955,11 @@ func main() {
 			defer cancelRPC()
 			description, dErr := temporalClient.DescribeWorkflowExecution(rpcCtx, workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
 			if dErr != nil {
-				hangup = isTemporalRPCDeadline(dErr) || rpcCtx.Err() == context.DeadlineExceeded
+				deadlineMisses += 1
+				hangup = (isTemporalRPCDeadline(dErr) || rpcCtx.Err() == context.DeadlineExceeded) && deadlineMisses >= 3
 				return false
 			}
+			deadlineMisses = 0
 			hangup = false
 			if description.WorkflowExecutionInfo == nil {
 				return false

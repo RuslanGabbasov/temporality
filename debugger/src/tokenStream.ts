@@ -176,14 +176,17 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
       // queuing the request (HTTP/1.1 caps ~6 connections per origin; a few
       // open SSE tabs eat that) — without a watchdog the channel sits silent
       // forever showing «канал не подключился». If the socket has not opened
-      // within 5s, tear it down and re-enter the backoff loop: the retry
-      // either catches a freed slot or keeps the label honest.
+      // within 15s, tear it down and re-enter the backoff loop: the retry
+      // either catches a freed slot or keeps the label honest. The long wait
+      // matters: tearing down a queued connection every 5s churns the slot
+      // budget — the queued channels flap forever and the attempt counter
+      // climbs while the streams that DID get slots stream fine.
       if (openWatchdog) window.clearTimeout(openWatchdog)
       openWatchdog = window.setTimeout(() => {
         if (disposed || connectedRef.current) return
         teardown()
         schedule()
-      }, 5000)
+      }, 15000)
       es.addEventListener('snapshot', onFrame)
       es.addEventListener('delta', onFrame)
       es.addEventListener('done', () => {
@@ -230,7 +233,9 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
         })
         return
       }
-      retryTimer = window.setTimeout(connect, backoff)
+      // After a few failed reconnects settle into a slow 60s cadence: the
+      // climbing-attempt parade every few seconds helps nobody.
+      retryTimer = window.setTimeout(connect, reconnectsRef.current >= 3 ? 60_000 : backoff)
       backoff = Math.min(backoff * 2, 30_000)
     }
     connect()
