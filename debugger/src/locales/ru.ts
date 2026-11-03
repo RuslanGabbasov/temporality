@@ -1607,6 +1607,8 @@ export const ru: Record<string, string> = {
     'artifacts.versions_empty': 'Архивных редакций пока нет — история появляется, когда открывается новая редакция утверждённого артефакта.',
     'artifacts.versions_superseded': 'заменена',
     'artifacts.edit_locked_review': 'Пока идёт согласование, версия заблокирована',
+    'artifacts.body_current_version': 'v{{version}} · текущая',
+    'artifacts.body_revision': 'v{{version}} · редакция',
     'artifacts.delete_confirm': 'Удалить артефакт «{{name}}»? Навыки, ссылающиеся на него, потеряют документ.',
     'artifacts.empty': 'Пока нет справочных артефактов',
     'artifacts.empty_hint': 'Здесь живут регламенты, утверждённые инструкции и чек-листы. Навыки ссылаются на них из манифеста; агент подгружает тело по требованию вместо постоянного присутствия в промпте.',

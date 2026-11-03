@@ -1607,6 +1607,8 @@ export const en: Record<string, string> = {
     'artifacts.versions_empty': 'No archived revisions yet — history appears when a new revision of an approved artifact opens.',
     'artifacts.versions_superseded': 'superseded',
     'artifacts.edit_locked_review': 'Locked while a review is open',
+    'artifacts.body_current_version': 'v{{version}} · current',
+    'artifacts.body_revision': 'v{{version}} · revision',
     'artifacts.delete_confirm': 'Delete artifact "{{name}}"? Skills referencing it will lose the document.',
     'artifacts.empty': 'No reference artifacts yet',
     'artifacts.empty_hint': 'Regulations, approved instructions and checklists live here. Skills reference them from the manifest; agents load the body on demand instead of keeping it in the prompt.',

@@ -131,6 +131,10 @@ export default function Artifacts() {
   // §5): while it exists the approved version stays live and the card shows
   // the revision state — edit/review actions target the revision.
   const [revision, setRevision] = useState<ArtifactVersion | null>(null)
+  // Which version the body pane reads: the live approved one or the open
+  // revision. A revision under review IS the document being decided — the
+  // pane defaults to it, with the approved text one click away.
+  const [showRevisionBody, setShowRevisionBody] = useState(false)
 
   // Deep link (/artifacts?project=…&id=…): the linked artifact opens even
   // when the server page does not include it. Applied once, after the first
@@ -281,6 +285,7 @@ export default function Artifacts() {
     setReviewsOpen(false)
     setDecisionComment('')
     setRevision(null)
+    setShowRevisionBody(false)
     if (!selected) return
     if (selected.provider === 'url') return
     let stale = false
@@ -293,7 +298,18 @@ export default function Artifacts() {
       .catch((f) => { if (!stale) setError(message(f)) })
     if (selected.status === 'approved') {
       workspaceApi.getArtifactRevision(selected.id)
-        .then((page) => { if (!stale) setRevision(page.revision ?? null) })
+        .then((page) => {
+          if (stale) return
+          setRevision(page.revision ?? null)
+          // The pending revision is what the decision is about — read it by
+          // default, and surface the review panel without a hunt for buttons.
+          if (page.revision?.status === 'in_review') {
+            setShowRevisionBody(true)
+            void workspaceApi.listArtifactReviews(selected.id)
+              .then((rPage) => { if (!stale) { setReviews(rPage.reviews ?? []); setReviewsOpen(true) } })
+              .catch(() => {})
+          }
+        })
         .catch(() => { if (!stale) setRevision(null) })
     }
     return () => { stale = true }
@@ -701,11 +717,19 @@ export default function Artifacts() {
           {selected && (() => {
             const usedBy = references[selected.id] ?? []
             const reviewable = selected.status === 'draft' || selected.status === 'rejected'
-            const openReview = (selected.status ?? '') === 'in_review'
+            // The review surface follows the VERSION under review: an open
+            // revision keeps the approved row alive, and its review round must
+            // stay reachable — the decision is about the pending version, not
+            // the status of the live row.
+            const revisionInReview = selected.status === 'approved' && revision?.status === 'in_review'
+            const openReview = (selected.status ?? '') === 'in_review' || revisionInReview
             // An open revision keeps the approved version live: edit/review
             // actions target the revision, the card keeps showing approved.
             const revisionOpen = selected.status === 'approved' && revision !== null
             const revisionEditable = revision?.status === 'draft' || revision?.status === 'rejected'
+            // The body pane reads the version being decided: a pending
+            // revision is what an approver must actually read.
+            const bodyText = showRevisionBody && revision ? (revision.content ?? '') : selectedBody
             return (
               <Tile style={{ padding: '1rem 1.1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -734,14 +758,14 @@ export default function Artifacts() {
                   					 rejected edits in place. The two pencil buttons that used to sit
                   					 here said different things for the same gesture — the dialog
                   					 now carries the state-specific wording instead. */}
-                  					<Button
-                  						size="sm"
-                  						kind="secondary"
-                  						renderIcon={Edit}
-                  						disabled={(selected.status ?? '') === 'in_review'}
-                  						title={(selected.status ?? '') === 'in_review' ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
-                  						onClick={() => void startEdit(selected)}
-					>{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
+					                  <Button
+					                    size="sm"
+					                    kind="secondary"
+					                    renderIcon={Edit}
+					                    disabled={(selected.status ?? '') === 'in_review' || revisionInReview}
+					                    title={((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+					                    onClick={() => void startEdit(selected)}
+					                  >{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
 					<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
                   				</Stack>
                 </div>
@@ -880,8 +904,20 @@ export default function Artifacts() {
                   </div>
                 )}
 
-                {/* The body: the document itself, rendered for reading. */}
+                {/* The body: the document itself, rendered for reading. A
+                    pending revision adds a version switch — the decision is
+                    about the revision, so its text must be readable here. */}
                 <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
+                  {revisionOpen && revision && (
+                    <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.65rem', flexWrap: 'wrap' }}>
+                      <Button size="sm" kind={showRevisionBody ? 'ghost' : 'primary'} onClick={() => setShowRevisionBody(false)}>
+                        {t('artifacts.body_current_version', { version: String(selected.version ?? 1) }) ?? `v${selected.version ?? 1} · current`}
+                      </Button>
+                      <Button size="sm" kind={showRevisionBody ? 'primary' : 'ghost'} onClick={() => setShowRevisionBody(true)}>
+                        {t('artifacts.body_revision', { version: String(revision.version) }) ?? `v${revision.version} · revision`}{revision.status === 'in_review' ? ` — ${t('artifacts.status_in_review') ?? 'in review'}` : ''}
+                      </Button>
+                    </div>
+                  )}
                   {selected.provider === 'url' ? (
                     selected.external_ref
                       ? <p style={{ fontSize: '0.85rem', wordBreak: 'break-all' }}>
@@ -889,12 +925,12 @@ export default function Artifacts() {
                           <a href={selected.external_ref} target="_blank" rel="noreferrer">{selected.external_ref}</a>
                         </p>
                       : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.external_body_missing') ?? 'No external reference set.'}</p>
-                  ) : selectedBody ? (
+                  ) : bodyText ? (
                     <>
                       <div className="artifact-body">
-                        <Markdown content={selectedBody} />
+                        <Markdown content={bodyText} />
                       </div>
-                      {bodyTruncated && (
+                      {bodyTruncated && !showRevisionBody && (
                         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', marginTop: '0.5rem' }}>
                           {t('artifacts.body_truncated') ?? 'The body is shown partially; agents read it in 32 KiB chunks.'}
                         </p>
