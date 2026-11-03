@@ -1,6 +1,6 @@
 import type { Locale } from './locales'
 import { eventInfo, type EventMeta } from './eventCatalog'
-import { explainKernelError } from './eventSummary'
+import { explainKernelError, unwrapJsonString } from './eventSummary'
 import type { ObservationEvent } from './observationApi'
 
 /**
@@ -95,6 +95,21 @@ const textOf = (value: unknown): string => {
   return JSON.stringify(value)
 }
 
+/** Human-form tool result: legacy journal rows carry the output double-
+ *  encoded (the kernel used to re-marshal string content), so unwrap the
+ *  string layers first; JSON answers pretty-print — the reader wants fields,
+ *  not one escaped line. */
+function humanResult(value: unknown): string {
+  const text = typeof value === 'string' ? value.trim() : textOf(value)
+  if (!text) return ''
+  const unwrapped = unwrapJsonString(text).trim()
+  try {
+    const parsed: unknown = JSON.parse(unwrapped)
+    if (parsed && typeof parsed === 'object') return JSON.stringify(parsed, null, 2)
+  } catch { /* plain text passes through */ }
+  return unwrapped
+}
+
 /** Human byte size: 512 B / 244.1 KB. */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return ''
@@ -165,7 +180,7 @@ function toolFact(d: Record<string, unknown>): string {
       return `→ ${String(args.agent_id)}${gist ? ` · ${gist}` : ''}`
     }
   }
-  return squash(d.output ?? d.path ?? d.query ?? d.title ?? d.tool)
+  return squash(typeof d.output === 'string' ? unwrapJsonString(d.output) : (d.output ?? d.path ?? d.query ?? d.title ?? d.tool))
 }
 
 /** A duration marker from the latency fields the kernel actually journals. */
@@ -302,7 +317,7 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
     const parts = [
       toolFact({ ...d, output: '' }),
       d.exit_code !== undefined ? `exit ${squash(d.exit_code)}` : '',
-      typeof d.output === 'string' ? squash(d.output).slice(0, 60) : '',
+      typeof d.output === 'string' ? squash(unwrapJsonString(d.output)).slice(0, 60) : '',
     ].filter(Boolean).join(' · ')
     return { title: toolTitle(d, t), fact: parts, status: failed ? 'error' : 'ok' }
   },
@@ -698,7 +713,7 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   return {
     actor: tool || squash(d.model) || squash(d.agent_id) || '',
     argumentLines,
-    result: (typeof resultValue === 'string' ? resultValue.trim() : textOf(resultValue)).slice(0, 400),
+    result: humanResult(resultValue).slice(0, 400),
     failureCause: rawError ? explained.cause.slice(0, 200) : '',
     timeout: rawError ? explained.timeout : false,
     links,

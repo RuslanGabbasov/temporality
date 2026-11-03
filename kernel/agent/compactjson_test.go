@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // compactJSON backs the tool.started arguments fragment: every trace-side
@@ -90,4 +91,53 @@ func TestCompactJSONMultibyteBoundaryNeverBreaksEncoding(t *testing.T) {
 func TestCompactJSONTinyCapStillValid(t *testing.T) {
 	got := compactJSON(map[string]any{"a": strings.Repeat("b", 100)}, 8)
 	mustParse(t, got)
+}
+
+// A tool's STRING answer is content, not structure: re-marshaling it wrapped
+// the JSON answers of saga_*/MCP tools into quoted, escaped noise
+// ("{\"saga_id\":…}") in every trace row.
+
+func TestCompactJSONStringContentNotQuoted(t *testing.T) {
+	got := compactJSON(`{"saga_id":"saga-x","status":"registered"}`, 1000)
+	if got != `{"saga_id":"saga-x","status":"registered"}` {
+		t.Fatalf("string content must ride through unquoted and unescaped, got %s", got)
+	}
+}
+
+func TestCompactJSONStringEnvelopeUnwraps(t *testing.T) {
+	// Some MCP servers answer with a JSON string wrapping the real payload.
+	got := compactJSON(`"{\"connected\":true,\"mapId\":\"2\"}"`, 1000)
+	if got != `{"connected":true,"mapId":"2"}` {
+		t.Fatalf("a JSON-string envelope must unwrap to its payload, got %s", got)
+	}
+}
+
+func TestCompactJSONStringLongJSONStaysParseable(t *testing.T) {
+	doc := `{"content":"` + strings.Repeat("абвгд ", 200) + `","path":"/w/f.ts"}`
+	got := compactJSON(doc, 300)
+	if strings.HasPrefix(got, `"`) {
+		t.Fatalf("the content must not be re-quoted, got %s", got)
+	}
+	parsed := mustParse(t, got)
+	if parsed["path"] != "/w/f.ts" {
+		t.Fatalf("untouched sibling keys must survive truncation, got %s", got)
+	}
+	content, _ := parsed["content"].(string)
+	if !strings.Contains(content, "…") {
+		t.Fatalf("the ellipsis must ride inside the truncated string, got %s", got)
+	}
+}
+
+func TestCompactJSONStringPlainTextCutsOnRuneBoundary(t *testing.T) {
+	long := strings.Repeat("щ", 100) // multibyte, not JSON
+	got := compactJSON(long, 50)
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("the cut must end with a visible ellipsis, got %q", got)
+	}
+	if !strings.HasPrefix(got, strings.Repeat("щ", 10)) {
+		t.Fatalf("the fragment must keep the content head, got %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("the cut must not break multibyte runes, got %q", got)
+	}
 }

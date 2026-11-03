@@ -3500,8 +3500,13 @@ func resultContentRef(content string) string {
 // to the content fragment); when that cannot fit (dozens of mid-length
 // strings), the valid prefix cut closes the open string and brackets with a
 // visible … inside. Both results always parse. Returns empty string if
-// marshaling fails.
+// marshaling fails. STRING inputs are content, not structure — they ride
+// compactContent: marshaling a tool's answer would wrap it in quotes and
+// escape it into "{\"key\":...}", unreadable in every trace.
 func compactJSON(v any, maxLen int) string {
+	if s, ok := v.(string); ok {
+		return compactContent(s, maxLen)
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return ""
@@ -3531,6 +3536,51 @@ func compactJSON(v any, maxLen int) string {
 // compactJSONStringFloor is the shrink floor: strings at or below it keep
 // their full text (structure and short fields survive untouched).
 const compactJSONStringFloor = 48
+
+// compactContent bounds a tool's textual content for the journal. The
+// content is ALREADY serialized text (often a JSON answer like
+// {"saga_id":…}) and must never be re-marshaled — legacy rows that did read
+// as "{\"key\":…}" in every trace. A JSON-encoded string envelope unwraps
+// first (bounded — some MCP servers answer that way), JSON documents get
+// the repair shrink so they stay parseable, plain text cuts on a rune
+// boundary with a visible ellipsis.
+func compactContent(s string, maxLen int) string {
+	for i := 0; i < 3; i++ {
+		var inner string
+		if err := json.Unmarshal([]byte(s), &inner); err != nil {
+			break
+		}
+		s = inner
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	if tree, perr := jsonParseTree([]byte(s)); perr == nil {
+		b := []byte(s)
+		for i := 0; i < 64; i++ {
+			if !shrinkLongestString(tree) {
+				break
+			}
+			marshaled, merr := json.Marshal(tree)
+			if merr != nil {
+				break
+			}
+			b = marshaled
+			if len(b) <= maxLen {
+				return string(b)
+			}
+		}
+		return truncateJSON(b, maxLen)
+	}
+	cut := maxLen - 1
+	if cut < 1 {
+		cut = 1
+	}
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
 
 // jsonParseTree parses a marshaled document back into the mutable tree
 // compactJSON shrinks; anything non-generic fails the pass.

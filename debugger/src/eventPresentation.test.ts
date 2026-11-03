@@ -317,3 +317,33 @@ describe('runningBackgroundOps (docs/agent-async-operations.md trace panel)', ()
     expect(ops).toEqual([{ operationId: 'op-legacy', command: 'bash -lc npm install --no-audit >> /scratch/npm.log 2>&1' }])
   })
 })
+
+describe('tool result human form', () => {
+  it('unwraps legacy double-encoded output and pretty-prints JSON answers', () => {
+    // The kernel used to re-marshal string content, so the journal carries
+    // "{\"saga_id\":…}" — the reader must see fields, not one escaped line.
+    const event = modelEvent('tool.completed', {
+      tool: 'saga_register',
+      output: '"{\\"saga_id\\":\\"saga-x\\",\\"status\\":\\"registered\\"}"',
+    })
+    const details = eventDetails(event as never, t)
+    expect(details.result).toContain('"saga_id": "saga-x"')
+    expect(details.result).not.toContain('\\"')
+    const row = timelineRow(event, RU, t)
+    expect(row.fact).toContain('saga_id')
+    expect(row.fact).not.toContain('\\"')
+  })
+
+  it('plain-text output passes through unchanged', () => {
+    const event = modelEvent('tool.completed', { tool: 'run_command', output: 'exit 0, 3 passed' })
+    const details = eventDetails(event as never, t)
+    expect(details.result).toBe('exit 0, 3 passed')
+  })
+
+  it('a once-encoded JSON answer stays readable without pretty-print loss', () => {
+    const event = modelEvent('tool.completed', { tool: 'mcp__graphmap__connect', output: '{"connected":true}' })
+    const details = eventDetails(event as never, t)
+    expect(details.result).toContain('"connected": true')
+    expect(details.result).not.toContain('\\"')
+  })
+})
