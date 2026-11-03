@@ -110,4 +110,3 @@ The mechanism above is implemented; what remains open on this front:
 automated downstream read-after-write probes (the supervisor's verdicts are
 inferences, not probes). Do not call this exactly-once. Do not infer successful
 execution from an agent-authored final answer.
-answer.

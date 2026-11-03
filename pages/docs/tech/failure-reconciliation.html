@@ -72,7 +72,7 @@
 <h2 id="current-guarantee"><a class="anchor" href="#current-guarantee" aria-label="Section link">#</a>Current guarantee</h2><p>The Kernel persists event intent to <code>kernel_event_outbox</code> before the workflow advances past each <code>ActivityRecordEvent</code>. Outbox rows are unique by <code>(source_id,event_id)</code>. The publisher retries Temporality delivery, accepts <code>accepted</code> and <code>repeated</code>, and marks rows delivered only after acknowledgement. Temporality&#39;s idempotency key makes same-payload redelivery a semantic no-op; a different payload under the same key is a conflict. This is at-least-once publication with idempotent ingestion, not exactly-once transport.</p>
 <p>For a tool side effect, <code>tool.started</code> is committed to the local outbox before <code>ActivityRunTool</code> is scheduled. The workflow configures one attempt for that activity. On a normal returned error it records <code>tool.failed</code> and, for MCP, marks the outcome uncertain. A successful Activity result is held in Temporal history; then <code>tool.completed</code> is enqueued.</p>
 <h2 id="unresolved-crash-window"><a class="anchor" href="#unresolved-crash-window" aria-label="Section link">#</a>Unresolved crash window</h2><p>A worker can lose contact after a remote effect commits but before Temporal records the Activity completion. The tool may have executed even though the Activity is retried/timed out and no <code>tool.completed</code> event exists. The outbox can prove intent, not the remote outcome. MCP currently has no generic idempotency/read-after-write contract, and <code>ToolRequest.OperationID</code> is not passed as a standardized idempotency key to every MCP server. Docker command effects are confined to the mounted workspace but are not transactionally rolled back.</p>
-<p>Therefore the current policy is: do not automatically retry a consequential operation; preserve <code>tool.started</code> plus failed/uncertain status when observable; require operator reconciliation before repeating. This is not yet a complete reconciliation mechanism: after a hard worker crash, an automated reconciler does not query the downstream service or create a durable <code>operation.reconciled</code> event.</p>
+<p>Therefore the current policy is: do not automatically retry a consequential operation; preserve <code>tool.started</code> plus failed/uncertain status when observable; require operator reconciliation before repeating. This is not yet a complete reconciliation mechanism: nothing queries the downstream service automatically. The supervisor wall pass does close piles of unverifiable operations on its own — it records best-effort <code>operation.reconciled</code> effect verdicts for every operation in a run&#39;s wall and re-triages the run whenever new uncertain operations appear — but those verdicts are the model&#39;s most plausible inference, not a read-after-write probe.</p>
 <h2 id="failure-matrix"><a class="anchor" href="#failure-matrix" aria-label="Section link">#</a>Failure matrix</h2><table>
 <thead>
 <tr>
@@ -171,7 +171,22 @@ a durable derived <code>operation.reconciled</code> event: <code>effect</code> i
 vocabulary <code>none|occurred|unknown</code> (<code>unknown</code> is a legitimate terminal
 record), the note is bounded to 2000 bytes, and provenance links back to the
 <code>tool.started</code> event via <code>parent_event_id</code>. A recorded verdict settles the
-operation — including verdicts over previously uncertain failures.</li>
+operation — including verdicts over previously uncertain failures. Settling
+matches operations by <code>(project, run, operation_id)</code>, deliberately not by
+event source: tool events carry the run&#39;s own journal source (external
+agents report under their own source id) while <code>operation.reconciled</code> is
+recorded under the kernel&#39;s, and a source-qualified match stranded those
+verdicts forever.</li>
+<li><strong>Supervisor wall reconciliation</strong> — a run&#39;s pile of uncertain operations
+goes to the supervisor model as ONE wall: the integrated conclusion
+(needs_attention, causes, remedies, a durable lesson) is journaled as
+<code>supervisor.verdict(kind=reconciliation)</code>, and the per-operation effect
+verdicts are recorded as supervisor-actor reconciliations — the same code
+path a human verdict takes. The wall itself is the budget bound and the
+dedup: settled operations leave the listing, so a run is re-triaged exactly
+while unsettled operations remain — including fresh ones that appeared
+after an earlier verdict. (The previous &quot;one verdict per run, ever&quot; guard
+stranded those behind an already-closed card.)</li>
 <li><strong>Fault injection</strong> — <code>KERNEL_FAULT_AFTER_EFFECT</code> arms a live drill. The value
 is either an exact operation id or a tool name (<code>run_command</code>,
 <code>mcp__create_issue</code>), which faults the first matching execution per run —
@@ -185,10 +200,9 @@ retried the command under a new operation id (success), and completed. The
 operator then verified the file, recorded <code>operation.reconciled(effect=occurred)</code>
 with the workspace file as evidence, and the listing cleared.</p>
 <h2 id="phase-2-remaining-work"><a class="anchor" href="#phase-2-remaining-work" aria-label="Section link">#</a>Phase 2 remaining work</h2><p>The mechanism above is implemented; what remains open on this front:
-automated downstream read-after-write probes (the operator still decides),
-and surfacing uncertain operations in the debugger UI. Do not call this
-exactly-once. Do not infer successful execution from an agent-authored final
-answer.</p>
+automated downstream read-after-write probes (the supervisor&#39;s verdicts are
+inferences, not probes). Do not call this exactly-once. Do not infer successful
+execution from an agent-authored final answer.</p>
 
 
   <nav class="docs-pager">
