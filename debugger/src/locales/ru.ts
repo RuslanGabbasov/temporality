@@ -546,6 +546,7 @@ export const ru: Record<string, string> = {
 
     // Live activity stream lines in chat
     'chat.stream.run_started': 'Запуск начат',
+    'chat.stream.queued': '⏳ В очереди: ждёт свободного слота — запустится автоматически',
     'chat.stream.model_suffix': ' · модель {{model}}',
     'chat.stream.model_turn': 'Ход {{turn}}',
     'chat.stream.tokens_suffix': ' · {{tokens}} ток',

@@ -546,6 +546,7 @@ export const en: Record<string, string> = {
 
     // Live activity stream lines in chat
     'chat.stream.run_started': 'Run started',
+    'chat.stream.queued': '⏳ Queued: waiting for a free slot — starts automatically',
     'chat.stream.model_suffix': ' · model {{model}}',
     'chat.stream.model_turn': 'Turn {{turn}}',
     'chat.stream.tokens_suffix': ' · {{tokens}} tok',

@@ -103,6 +103,9 @@ interface ChatMessage {
   runId?: string
   status?: string
   streamLines?: string[]
+  /** The run waits for a server slot (memory quota): it starts by itself, and
+   *  the chat says so instead of spinning channel noise at the user. */
+  queued?: boolean
   attachments?: UploadedFile[]
   totals?: string
   /** Whole-task budget (all follow-up runs + delegation tree), docs: cost accounting. */
@@ -209,6 +212,8 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
 	switch (type) {
 		case 'run.started':
 			return t('chat.stream.run_started') + (d.model ? t('chat.stream.model_suffix', { model: String(d.model) }) : '')
+		case 'run.queued':
+			return t('chat.stream.queued')
 		case 'model.completed': {
 			// One compact line per turn: thinking time (when the live stream saw
 			// reasoning deltas), tokens, provider latency.
@@ -481,6 +486,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   // at that dead run while the fresh run streams in the newer bubble.
   const activeRunningMessages = activeConv?.messages.filter((m) => m.status === 'running' && m.runId) ?? []
   const activeRunningRunId = activeRunningMessages.length > 0 ? activeRunningMessages[activeRunningMessages.length - 1].runId : undefined
+  const activeRunningQueued = activeRunningMessages.length > 0 ? Boolean(activeRunningMessages[activeRunningMessages.length - 1].queued) : false
   const tokenMetrics = useRunTokenMetrics(activeRunningRunId ?? '', !!activeRunningRunId)
 
   // Pending attachments belong to the active conversation — never leak them
@@ -719,6 +725,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   }, [activeRunningRunId])
   const liveStepParts = (() => {
     if (!tokenMetrics) return ['…']
+    // A queued run has no token channel to watch — the queue line already
+    // said everything; channel liveness would only add noise.
+    if (activeRunningQueued) return []
     const parts: string[] = []
     if (!tokenMetrics.connected) {
       parts.push(tokenMetrics.reconnects > 0
@@ -934,7 +943,20 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         if (Number.isNaN(runStartAt.at)) runStartAt.at = Date.now()
         const line = formatStreamEvent('run.started', outer, t, locale)
         if (line) pushLine(line)
+        // A queued run has left the line: the channel noise stops being noise.
+        updateMsg(convId, runId, { queued: false })
       } catch { /* ignore */ }
+    })
+    // Quota queue: the run waits for a server slot and starts by itself. The
+    // chat must say «in line», not pretend the run is already working (and
+    // not feed the user token-channel reconnect counts for a stream that
+    // does not exist yet).
+    es.addEventListener('run.queued', () => {
+      const line = t('chat.stream.queued')
+      if (!lines.includes(line)) lines.push(line)
+      // The «Run started · streaming…» placeholder is not true yet — the
+      // message adopts the queue line while the run waits for its slot.
+      updateMsg(convId, runId, { queued: true, streamLines: [...lines] })
     })
     es.addEventListener('model.started', () => { /* pacing marker; the completed line carries the numbers */ })
     // send_file starts attach the file chip to the bubble immediately: the

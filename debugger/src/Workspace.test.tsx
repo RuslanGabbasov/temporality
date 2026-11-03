@@ -146,6 +146,18 @@ describe('sendFileChip', () => {
   })
 })
 
+// Quota queue: the run waits for a slot — the chat line must say so instead
+// of claiming the run started.
+describe('formatStreamEvent run.queued', () => {
+  it('renders the queue state in the active locale', () => {
+    const ruLine = formatStreamEvent('run.queued', { data: {} }, translator(ru) as any, 'ru')
+    const enLine = formatStreamEvent('run.queued', { data: {} }, translator(en) as any, 'en')
+    expect(ruLine).toContain('очереди')
+    expect(enLine).toContain('Queued')
+    expect(ruLine).not.toMatch(/run\.queued/)
+  })
+})
+
 // Sidebar order: the conversation that spoke last floats up — recency is the
 // last message, not the creation date.
 describe('sortConversationsByActivity', () => {

@@ -23,8 +23,10 @@ export interface RunTokenMetrics {
    * cannot tell a thinking model from a dead token channel, and a broken
    * transport reads as "waiting for the first token" forever. */
   connected: boolean
-  /** How many times the channel reconnected (or is about to): a non-zero
-   * count with connected=false means the view is mid-backoff, not dead. */
+  /** How many times the channel reconnected after being live: a non-zero
+   *  count with connected=false means the view is mid-backoff, not dead. A
+   *  channel that never opened (a queued run, a slow start) counts zero —
+   *  those are first-connect attempts, not reconnect noise. */
   reconnects: number
 }
 
@@ -137,11 +139,13 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
   const meterRef = useRef(new TokenMeter())
   const connectedRef = useRef(false)
   const reconnectsRef = useRef(0)
+  const everConnectedRef = useRef(false)
 
   useEffect(() => {
     meterRef.current = new TokenMeter()
     connectedRef.current = false
     reconnectsRef.current = 0
+    everConnectedRef.current = false
     setMetrics(null)
     if (!active || !runId) return
     const meter = meterRef.current
@@ -196,6 +200,7 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
         openWatchdog = undefined
         backoff = 1_000
         connectedRef.current = true
+        everConnectedRef.current = true
         touch()
       }
       es.onerror = () => {
@@ -210,7 +215,12 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
     }
     const schedule = () => {
       if (disposed) return
-      reconnectsRef.current += 1
+      // Only a channel that WAS live reconnects; a first connect that keeps
+      // failing (a queued run has no token stream yet) must not parade
+      // climbing attempt counters at the user.
+      if (everConnectedRef.current) {
+        reconnectsRef.current += 1
+      }
       touch()
       // Offline (laptop slept, network switched): instant-fail retries would
       // hammer a dead socket for hours — wait for 'online' instead.
