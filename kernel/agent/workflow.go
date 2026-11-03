@@ -2268,6 +2268,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 								// A Q&A run must stay short: the delegated-turns floor exists to
 								// protect subtask work, an answer needs a couple of turns.
 								relayInput.MaxTurns = askRunMaxTurns
+								// The turn-limit auto-continuation is the chain-maker: without
+								// this zero the resolve step injects the agent's restart budget,
+								// every exhausted ask-run spawns «-rN» with the same relay prompt
+								// and IncomingAsks, answers again, and the chain churns for a
+								// day (observed: 5 hops × 30–45 min). An ask-run that runs out
+								// of turns finishes honestly instead.
+								relayInput.TurnLimitRestarts = 0
 								relayInput.ParentRunID = target.RunID
 								relayInput.TeamRootRunID = input.TeamRootRunID
 								relayInput.SourceID = input.SourceID
