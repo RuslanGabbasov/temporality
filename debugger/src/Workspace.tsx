@@ -771,13 +771,22 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     setNewChatAgentId('')
   }
 
-  const deleteConversation = (id: string) => {
+  const deleteConversation = async (id: string) => {
     const es = streamRef.current.get(id)
     if (es) { es.close(); streamRef.current.delete(id) }
     const tes = tokenStreamRef.current.get(id)
     if (tes) { tes.close(); tokenStreamRef.current.delete(id) }
     setConversations((prev) => prev.filter((c) => c.id !== id))
     if (activeConvId === id) setActiveConvId(null)
+    // The server copy must go too: chats sync to the server (putServerChat)
+    // and the mount restore appends server chats missing locally — a local-
+    // only delete resurrected the chat on the next reload.
+    try {
+      await workspaceApi.deleteServerChat(id)
+    } catch (failure) {
+      setError(t('chat.delete_failed') ?? 'The chat was removed locally, but the server copy could not be deleted — it may reappear after reload')
+      console.error(failure)
+    }
   }
 
   const branchConversation = (convId: string, messageIndex: number) => {
@@ -1660,7 +1669,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                   </div>
                 </div>
                 <button
-                  onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id) }}
+                  onClick={(e) => { e.stopPropagation(); void deleteConversation(conv.id) }}
                   style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: '0.25rem' }}
                 >
                   <TrashCan size={16} />
