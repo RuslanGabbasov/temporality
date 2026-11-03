@@ -90,4 +90,21 @@ describe('approved artifact with a revision in review', () => {
     expect(text).toMatch(/(Approve|Утвердить)/)
     expect(text).toMatch(/(Reject|Отклонить)/)
   })
+
+  it('compares versions as a rich diff against the previous one by default', async () => {
+    await mountSelectedArtifact()
+    const compare = [...container.querySelectorAll('button')]
+      .find((b) => /(Compare versions|Сравнить версии)/.test(b.textContent ?? ''))
+    expect(compare).toBeTruthy()
+    await act(async () => { compare!.click() })
+    await settle()
+    const text = container.textContent ?? ''
+    // The diff opens against the PREVIOUS version (v1 — the approved body)
+    // and names both sides…
+    expect(text).toContain('APPROVED BODY')
+    expect(text).toContain('REVISION BODY TO APPROVE')
+    // …with the word-level story and the added/removed accounting visible.
+    expect(text).toMatch(/(What changed|Что изменилось)/)
+    expect(text).toMatch(/[+~−-][0-9]/)
+  })
 })

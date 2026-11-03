@@ -22,6 +22,7 @@ import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 import { ReviewerPicker } from './ReviewerPicker'
+import RichDiff from './RichDiff'
 import type { User } from './workspaceApi'
 import Markdown from './Markdown'
 
@@ -135,6 +136,12 @@ export default function Artifacts() {
   // revision. A revision under review IS the document being decided — the
   // pane defaults to it, with the approved text one click away.
   const [showRevisionBody, setShowRevisionBody] = useState(false)
+  // Rich diff mode (docs/artifact-lifecycle.md §5): semantic markdown
+  // comparison against any chosen version — by default the previous one, so
+  // an approver sees WHAT changed, not a wall of raw markup.
+  const [diffMode, setDiffMode] = useState(false)
+  const [diffBase, setDiffBase] = useState<number | null>(null)
+  const [archivedVersions, setArchivedVersions] = useState<ArtifactVersion[] | null>(null)
 
   // Deep link (/artifacts?project=…&id=…): the linked artifact opens even
   // when the server page does not include it. Applied once, after the first
@@ -286,6 +293,9 @@ export default function Artifacts() {
     setDecisionComment('')
     setRevision(null)
     setShowRevisionBody(false)
+    setDiffMode(false)
+    setDiffBase(null)
+    setArchivedVersions(null)
     if (!selected) return
     if (selected.provider === 'url') return
     let stale = false
@@ -314,6 +324,17 @@ export default function Artifacts() {
     }
     return () => { stale = true }
   }, [selected?.id, selected?.version, selected?.provider]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Compare mode loads the version archive once per artifact: the retired
+  // versions' bodies live there and feed the base-version picker.
+  useEffect(() => {
+    if (!diffMode || !selectedId || archivedVersions !== null) return
+    let stale = false
+    workspaceApi.listArtifactVersions(selectedId)
+      .then((page) => { if (!stale) setArchivedVersions(page.versions ?? []) })
+      .catch(() => { if (!stale) setArchivedVersions([]) })
+    return () => { stale = true }
+  }, [diffMode, selectedId, archivedVersions])
 
   // Lifecycle counters drive the status filter chips: how many artifacts sit in
   // each state. Pending reviews first — that is the human queue.
@@ -730,6 +751,22 @@ export default function Artifacts() {
             // The body pane reads the version being decided: a pending
             // revision is what an approver must actually read.
             const bodyText = showRevisionBody && revision ? (revision.content ?? '') : selectedBody
+            // Compare mode: the universe of readable versions (live, open
+            // revision, archived) and the base — by default the previous
+            // version of the one being read.
+            const compareOptions = (() => {
+              const opts: Array<{ version: number; label: string; content: string }> = [
+                { version: selected.version ?? 1, label: t('artifacts.diff_current') ?? 'current', content: selectedBody },
+              ]
+              if (revision) opts.push({ version: revision.version, label: t('artifacts.diff_revision') ?? 'revision', content: revision.content ?? '' })
+              for (const v of archivedVersions ?? []) {
+                if (!opts.some((o) => o.version === v.version)) opts.push({ version: v.version, label: v.status, content: v.content ?? '' })
+              }
+              return opts.sort((a, b) => b.version - a.version)
+            })()
+            const displayedVersion = showRevisionBody && revision ? revision.version : (selected.version ?? 1)
+            const defaultBase = compareOptions.filter((o) => o.version < displayedVersion)[0] ?? compareOptions.find((o) => o.version !== displayedVersion)
+            const baseOption = compareOptions.find((o) => o.version === (diffBase ?? defaultBase?.version))
             return (
               <Tile style={{ padding: '1rem 1.1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -918,7 +955,37 @@ export default function Artifacts() {
                       </Button>
                     </div>
                   )}
-                  {selected.provider === 'url' ? (
+                  {selected.provider !== 'url' && (
+                    <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap', marginTop: revisionOpen ? '0.65rem' : 0, marginBottom: '0.65rem' }}>
+                      <Button size="sm" kind="ghost" onClick={() => setDiffMode((v) => !v)}>
+                        {diffMode ? (t('artifacts.diff_close') ?? 'Close diff') : (t('artifacts.diff_open') ?? 'Compare versions')}
+                      </Button>
+                      {diffMode && (
+                        <>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)' }}>{t('artifacts.diff_compare_with') ?? 'Compare with:'}</span>
+                          <select
+                            value={String(diffBase ?? defaultBase?.version ?? '')}
+                            onChange={(e) => setDiffBase(Number(e.target.value))}
+                            style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.3rem 0.5rem' }}
+                          >
+                            {compareOptions.filter((o) => o.version !== displayedVersion).map((o) => (
+                              <option key={o.version} value={o.version}>{`v${o.version} · ${o.label}`}</option>
+                            ))}
+                          </select>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {diffMode && baseOption ? (
+                    <RichDiff
+                      oldText={baseOption.content}
+                      newText={bodyText}
+                      oldLabel={`v${baseOption.version}`}
+                      newLabel={`v${displayedVersion}`}
+                    />
+                  ) : diffMode ? (
+                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.diff_no_base') ?? 'No other version to compare with yet.'}</p>
+                  ) : selected.provider === 'url' ? (
                     selected.external_ref
                       ? <p style={{ fontSize: '0.85rem', wordBreak: 'break-all' }}>
                           {t('artifacts.external_body_hint') ?? 'The body lives in the external system:'}{' '}
