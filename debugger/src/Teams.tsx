@@ -42,6 +42,7 @@ import {
 import { observationApi, type ObservationEvent } from './observationApi'
 import { teamRunsFromEvents, type TeamRunRow } from './teamRuns'
 import { useT } from './i18n'
+import SideBySideDiff from './SideBySideDiff'
 import { runStatusLabel } from './eventPresentation'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 import { INTAKE_PROJECT_ID } from './kernelApi'
@@ -1048,9 +1049,11 @@ function TeamEvolutionTab({ team, versions, metrics, project, detecting, detectN
         <p style={{ color: 'var(--tm-text-3)' }}>{t('teams.no_versions') ?? 'No versions recorded.'}</p>
       ) : (
         <div className="skill-evolution-timeline">
-      {[...versions].reverse().map((version) => {
+      {versions.map((version) => {
         const isDraft = version.status === 'draft'
         const isCurrent = version.version === team.version
+        const currentRow = versions.find((v) => v.version === team.version)
+        const diffBase = !isCurrent && version.status !== 'rejected' ? currentRow : undefined
         return (
           <div key={version.version} style={{ padding: '0.6rem 0.75rem', background: 'var(--tm-raised)', border: '1px solid var(--tm-border)', borderRadius: '6px', marginBottom: '0.5rem', opacity: isCurrent || isDraft ? 1 : 0.6 }}>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1069,6 +1072,17 @@ function TeamEvolutionTab({ team, versions, metrics, project, detecting, detectN
                 {version.source_runs!.map((run) => (
                   <a key={run} href={`/agents?run=${encodeURIComponent(run)}`} style={{ fontSize: '0.7rem', color: 'var(--tm-teal)', fontFamily: 'monospace' }}>{run}</a>
                 ))}
+              </div>
+            )}
+            {diffBase && (
+              <div style={{ marginTop: '0.5rem' }}>
+                <SideBySideDiff
+                  title={t('teams.diff_vs_current') ?? 'Changes vs current revision'}
+                  oldLabel={diffBase.version}
+                  newLabel={version.version}
+                  oldText={JSON.stringify(diffBase.manifest, null, 2)}
+                  newText={JSON.stringify(version.manifest, null, 2)}
+                />
               </div>
             )}
             {isDraft && (

@@ -15,6 +15,7 @@ import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion, type SkillEvaluationCase, type SkillEvaluationRun, type TransferReport, type TransferResultItem } from './workspaceApi'
 import { useT } from './i18n'
+import SideBySideDiff from './SideBySideDiff'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -69,51 +70,6 @@ interface SkillFormState {
 function sectionOfField(field: string): string {
   const head = field.split('.')[0].split('[')[0].trim()
   return head || '*'
-}
-
-interface ManifestDiffEntry {
-  field: string
-  from: string
-  to: string
-}
-
-/** Field-level manifest diff mirroring skills/diff.go (capabilities, tools,
- * runtime, conditions, evidence, evaluation suite reference). */
-function diffManifests(from: SkillManifest, to: SkillManifest): ManifestDiffEntry[] {
-  const entries: ManifestDiffEntry[] = []
-  const diffSets = (field: string, a: string[] = [], b: string[] = []) => {
-    const setA = new Set(a)
-    const setB = new Set(b)
-    const added = b.filter((v) => !setA.has(v))
-    const removed = a.filter((v) => !setB.has(v))
-    if (added.length) entries.push({ field, from: '∅', to: '+ ' + added.join(', + ') })
-    if (removed.length) entries.push({ field, from: '− ' + removed.join(', − '), to: '∅' })
-  }
-  if ((from.description ?? '') !== (to.description ?? '')) entries.push({ field: 'description', from: from.description ?? '', to: to.description ?? '' })
-  diffSets('capabilities', from.capabilities, to.capabilities)
-  diffSets('tools', from.tools, to.tools)
-  if ((from.runtime?.sandbox ?? '') !== (to.runtime?.sandbox ?? '')) entries.push({ field: 'runtime.sandbox', from: from.runtime?.sandbox ?? '', to: to.runtime?.sandbox ?? '' })
-  if ((from.runtime?.network ?? '') !== (to.runtime?.network ?? '')) entries.push({ field: 'runtime.network', from: from.runtime?.network ?? '', to: to.runtime?.network ?? '' })
-  diffSets('preconditions', from.preconditions, to.preconditions)
-  diffSets('postconditions', from.postconditions, to.postconditions)
-  diffSets('evidence.required', from.evidence?.required, to.evidence?.required)
-  return entries
-}
-
-/** Added/removed SKILL.md line counts (bag semantics, mirrors DiffMarkdown). */
-function diffMarkdownCounts(from: string, to: string): [number, number] {
-  const counts = (text: string) => {
-    const map = new Map<string, number>()
-    for (const line of text.split('\n')) map.set(line, (map.get(line) ?? 0) + 1)
-    return map
-  }
-  const a = counts(from)
-  const b = counts(to)
-  let added = 0
-  let removed = 0
-  for (const [line, count] of b) added += Math.max(0, count - (a.get(line) ?? 0))
-  for (const [line, count] of a) removed += Math.max(0, count - (b.get(line) ?? 0))
-  return [added, removed]
 }
 
 export default function Skills() {
@@ -792,14 +748,13 @@ export default function Skills() {
                     </div>
 
                     <div className="skill-evolution-timeline">
-                      {[...versions].reverse().map((version) => {
+                      {versions.map((version) => {
                         const isDraft = version.status === 'draft'
                         const isRejected = version.status === 'rejected'
                         const isCurrent = version.version === selected.version
                         // Diff against the current revision for proposals.
                         const currentRow = versions.find((v) => v.version === selected.version)
-                        const manifestDiff = currentRow && version.version !== selected.version ? diffManifests(currentRow.manifest as SkillManifest, version.manifest as SkillManifest) : []
-                        const [mdAdded, mdRemoved] = currentRow && version.version !== selected.version ? diffMarkdownCounts(currentRow.markdown, version.markdown) : [0, 0]
+                        const diffBase = !isCurrent && !isRejected ? currentRow : undefined
                         return (
                         <div key={version.version} className="skill-version" style={isRejected ? { opacity: 0.55 } : undefined}>
                           <button className="skill-version-head" onClick={() => setOpenVersion(openVersion === version.version ? null : version.version)}>
@@ -861,18 +816,12 @@ export default function Skills() {
                                   )}
                                 </div>
                               )}
-                              {!isCurrent && !isRejected && manifestDiff.length > 0 && (
-                                <div style={{ marginBottom: '0.75rem', fontSize: '0.78rem', padding: '0.5rem 0.75rem', background: 'var(--tm-surface-2)', borderRadius: '6px' }}>
-                                  <div style={{ color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>{t('skills.diff_vs_current') ?? 'Changes vs current revision'} ({selected.version} → {version.version}):</div>
-                                  {manifestDiff.map((d, i) => (
-                                    <div key={i} style={{ fontFamily: 'var(--tm-mono, monospace)', color: 'var(--tm-text-2)' }}>
-                                      {d.field}: <span style={{ color: 'var(--tm-text-3)' }}>{d.from || '∅'}</span> → <span>{d.to || '∅'}</span>
-                                    </div>
-                                  ))}
-                                  {(mdAdded > 0 || mdRemoved > 0) && (
-                                    <div style={{ marginTop: '0.25rem', color: 'var(--tm-text-3)' }}>SKILL.md: +{mdAdded} −{mdRemoved}</div>
-                                  )}
-                                </div>
+                              {diffBase && (
+                                <>
+                                  <div className="skill-subheading" style={{ fontSize: '0.7rem' }}>{t('skills.diff_vs_current') ?? 'Changes vs current revision'} ({diffBase.version} → {version.version})</div>
+                                  <SideBySideDiff title="SKILL.md" oldLabel={diffBase.version} newLabel={version.version} oldText={diffBase.markdown} newText={version.markdown} />
+                                  <SideBySideDiff title="skill.yaml" oldLabel={diffBase.version} newLabel={version.version} oldText={manifestToYaml(diffBase.manifest as SkillManifest)} newText={manifestToYaml(version.manifest as SkillManifest)} />
+                                </>
                               )}
                               {!isCurrent && !isRejected && (
                                 <div style={{ marginBottom: '0.75rem', display: 'flex', gap: '0.5rem' }}>
