@@ -3976,6 +3976,24 @@ func main() {
 				return false
 			}
 		}
+		// Hold on a closed bus: a still-RUNNING workflow between model calls
+		// (tools, thinking without deltas) must not bounce the client into a
+		// done/reconnect storm with a climbing attempt counter — the same
+		// socket holds until the next model call re-opens the bus.
+		for snapshot.Type == "done" {
+			if terminal() {
+				slog.Info("token stream: run terminal (closed bus)", "run_id", runID)
+				writeEvent(TokenDoneEvent)
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(3 * time.Second):
+			}
+			cancel()
+			events, snapshot, cancel = activities.Tokens.Subscribe(runID)
+		}
 		for {
 			select {
 			case <-ctx.Done():
