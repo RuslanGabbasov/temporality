@@ -52,6 +52,21 @@ const STATUS_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'r
   time_limit: 'warm-gray', token_limit: 'warm-gray', budget_limit: 'warm-gray',
 }
 
+/** A conversation's recency is its LAST MESSAGE, not its creation date —
+ *  an old chat that speaks now belongs on top of the sidebar. Empty
+ *  conversations fall back to their creation time. */
+export function conversationActivity(conv: { messages: { timestamp: Date }[]; createdAt: Date }): number {
+  const last = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1].timestamp.getTime() : NaN
+  if (Number.isFinite(last)) return last
+  const created = conv.createdAt.getTime()
+  return Number.isFinite(created) ? created : 0
+}
+
+/** Sidebar order: most recently active conversation first. */
+export function sortConversationsByActivity<T extends { messages: { timestamp: Date }[]; createdAt: Date }>(convs: T[]): T[] {
+  return [...convs].sort((a, b) => conversationActivity(b) - conversationActivity(a))
+}
+
 /** Normalize a run status from the backend into the canonical vocabulary.
  * Temporal-derived statuses used to arrive as American "canceled" while the
  * whole UI (terminal lists, tags, colors) speaks British "cancelled". */
@@ -728,7 +743,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
   // Client-side filter for the conversation list sidebar.
   const [convFilter, setConvFilter] = useState('')
-  const visibleConversations = conversations.filter((conv) => matchesFilter(convFilter, conv.title, conv.agentId ? agentName(conv.agentId) : ''))
+  const visibleConversations = sortConversationsByActivity(
+    conversations.filter((conv) => matchesFilter(convFilter, conv.title, conv.agentId ? agentName(conv.agentId) : ''))
+  )
 
   const createConversation = () => {
     const conv: Conversation = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sendFileChip, formatStreamEvent, normalizeRunStatus, runTraceUrl } from './Workspace'
+import { sendFileChip, formatStreamEvent, normalizeRunStatus, runTraceUrl, sortConversationsByActivity } from './Workspace'
 import { pluralT } from './i18n'
 import { en } from './locales/en'
 import { ru } from './locales/ru'
@@ -143,5 +143,34 @@ describe('sendFileChip', () => {
     expect(sendFileChip({ tool: 'send_file', arguments: '{broken' })).toBeNull()
     expect(sendFileChip({ tool: 'send_file', arguments: '{"note":"no path"}' })).toBeNull()
     expect(sendFileChip({})).toBeNull()
+  })
+})
+
+// Sidebar order: the conversation that spoke last floats up — recency is the
+// last message, not the creation date.
+describe('sortConversationsByActivity', () => {
+  const conv = (id: string, created: string, last?: string) => ({
+    id,
+    createdAt: new Date(created),
+    messages: last ? [{ timestamp: new Date(last) }] : [],
+  })
+
+  it('orders by the last message, not by creation', () => {
+    const sorted = sortConversationsByActivity([
+      conv('old-but-speaking', '2026-10-01T10:00:00Z', '2026-11-03T12:00:00Z'),
+      conv('fresh-but-silent', '2026-11-03T11:00:00Z'),
+      conv('quiet-yesterday', '2026-10-20T10:00:00Z', '2026-11-02T09:00:00Z'),
+    ])
+    // The old chat that spoke a minute ago leads; the chat created today but
+    // never spoken in competes by creation (above yesterday's conversation).
+    expect(sorted.map((c) => c.id)).toEqual(['old-but-speaking', 'fresh-but-silent', 'quiet-yesterday'])
+  })
+
+  it('an empty conversation competes by its creation time', () => {
+    const sorted = sortConversationsByActivity([
+      conv('empty-monday', '2026-11-03T08:00:00Z'),
+      conv('empty-friday', '2026-10-31T08:00:00Z'),
+    ])
+    expect(sorted.map((c) => c.id)).toEqual(['empty-monday', 'empty-friday'])
   })
 })
