@@ -431,6 +431,17 @@ func JSONMode() Option {
 	return func(req *chatRequest) { req.ResponseFormat = map[string]any{"type": "json_object"} }
 }
 
+// WithMaxTokens overrides the configured output cap for a single call —
+// e.g. an evaluation case whose answer is checked only in its first 8k chars
+// need not pay the latency (and timeout tails) of the full 16k default.
+func WithMaxTokens(tokens int) Option {
+	return func(req *chatRequest) {
+		if tokens > 0 {
+			req.MaxTokens = tokens
+		}
+	}
+}
+
 // WithPromptCacheKey routes same-key requests to one provider prompt cache
 // entry. Unsupported providers ignore unknown body fields.
 func WithPromptCacheKey(key string) Option {

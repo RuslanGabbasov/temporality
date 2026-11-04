@@ -1166,6 +1166,8 @@ export const en: Record<string, string> = {
     'agents.gate_passed': 'The evaluation run is green — press “Apply” again to apply the proposal.',
     'agents.gate_failed': 'The evaluation run is red. Details are in the run history below.',
     'agents.gate_run_error': 'The evaluation run ended with an error ({{cause}}). Fix the cause and retry.',
+    'agents.gate_run_model_timeout': 'The model did not answer some cases in time — a provider slowdown, not a definition regression. Retry the apply: it starts a fresh evaluation run.',
+    'agents.gate_run_model_error': 'The model failed on some cases — check the provider/model health and retry the apply.',
     'agents.gate_poll_timeout': 'The evaluation run is still unfinished — check its status in the run history below.',
     'agents.gate_suite_not_ready': 'The eval gate cannot evaluate this proposal: {{cause}}',
     'agents.gate_cause_suite_empty': 'the agent has no evaluation cases — add them in the Evolution tab.',

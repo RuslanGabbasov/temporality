@@ -137,6 +137,22 @@ export function applyGateErrorView(err: unknown): GateErrorView | null {
   }
 }
 
+/** Map a finished-but-not-passed evaluation run's cause to a full-sentence
+ * locale view; null for unknown causes — callers fall back to the generic
+ * run-error text with the raw cause. A timed-out or failed model is provider
+ * flakiness, not a definition regression, and the message must say so.
+ * Pure so the mapping stays testable. */
+export function gateRunErrorView(cause?: string): { key: string } | null {
+  switch (cause) {
+    case 'model_timeout':
+      return { key: 'agents.gate_run_model_timeout' }
+    case 'model_error':
+      return { key: 'agents.gate_run_model_error' }
+    default:
+      return null
+  }
+}
+
 /** Detect pass-rate regressions between consecutive definition versions:
  * version N regressed when its latest run is strictly worse than the previous
  * version's latest run AND both runs used the suite as it stands now (an

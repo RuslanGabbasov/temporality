@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -24,6 +25,11 @@ import (
 const (
 	agentEvalMaxCases  = 16
 	agentEvalMaxAnswer = 8192
+	// evalCaseMaxTokens caps one case's generation. Patterns only inspect the
+	// first 8k chars (~4k tokens), so a generation beyond that is pure
+	// latency — and on slow providers it turns into model_timeout tails that
+	// fail otherwise-green runs. Shared with the skill evaluator.
+	evalCaseMaxTokens = 4096
 )
 
 // workspaceAgentHeader is the registry projection the evaluator needs to
@@ -309,13 +315,26 @@ func (a *Activities) evalModelClient(ctx context.Context) (*llm.Client, error) {
 	return a.EvalModel(ctx)
 }
 
+// classifyModelError maps a case-model failure to its machine cause:
+// deadlines (case context, client timeout) are model_timeout, everything
+// else — transport resets, provider 5xx after retries — is model_error.
+// Both verdict as a run error; the distinction rides along for the UI.
+func classifyModelError(err error) string {
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		return workspace.CauseModelTimeout
+	}
+	return workspace.CauseModelError
+}
+
 // runAgentEvaluationCase executes one case: a model call grounded in the
 // agent's system prompt plus pattern checks. The compiled prompt is used
 // as-is — the evaluation measures whether the definition produces the
 // expected behaviour, not whether the model follows extra instructions. A
-// model failure fails the case (never the whole run) with the error as the
-// answer, so suite history stays comparable. The returned usage feeds the
-// run's token accounting (§10.5); a failed call reports zero usage.
+// model infra failure errors the case (cause model_timeout / model_error —
+// §5.2 verdicts the run as error, never a red fail), an assertion mismatch
+// fails it. The returned usage feeds the run's token accounting (§10.5); a
+// failed call reports zero usage.
 func (a *Activities) runAgentEvaluationCase(ctx context.Context, model *llm.Client, system, input string, mustContain, mustNotContain []string) (evaluationCaseResult, llm.Usage) {
 	messages := []llm.Message{
 		{Role: "system", Content: system},
@@ -323,11 +342,20 @@ func (a *Activities) runAgentEvaluationCase(ctx context.Context, model *llm.Clie
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
-	completion, err := model.Complete(callCtx, messages, nil)
+	completion, err := model.Complete(callCtx, messages, nil, llm.WithMaxTokens(evalCaseMaxTokens))
 	answer := completion.Content
 	if err != nil {
-		answer = "evaluation error: " + err.Error()
-		return evaluationCaseResult{Answer: answer, Passed: false}, llm.Usage{}
+		// Infra failure (timeout, transport, provider outage): record
+		// Error/Cause so the server-side verdict says error/model_timeout —
+		// ComputeRunVerdict turns any errored case into a run error, never a
+		// red fail (§5.2). A slow provider must not masquerade as a definition
+		// regression; the answer keeps the error text for the run-history UI.
+		return evaluationCaseResult{
+			Answer: "evaluation error: " + err.Error(),
+			Passed: false,
+			Error:  err.Error(),
+			Cause:  classifyModelError(err),
+		}, llm.Usage{}
 	}
 	if len(answer) > agentEvalMaxAnswer {
 		answer = answer[:agentEvalMaxAnswer]

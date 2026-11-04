@@ -51,7 +51,7 @@ import {
   type TransferReport,
   type TransferResultItem,
 } from './workspaceApi'
-import { applyGateErrorView, detectRegressions, detectTurnsRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
+import { applyGateErrorView, gateRunErrorView, detectRegressions, detectTurnsRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
 import { useT } from './i18n'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
@@ -833,7 +833,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
           } else if (run.verdict === 'fail') {
             setProposalNotice({ kind: 'error', text: t('agents.gate_failed') ?? 'The evaluation run failed. Check the run history below.' })
           } else {
-            setProposalNotice({ kind: 'error', text: t('agents.gate_run_error', { cause: run.cause ?? '' }) ?? `The evaluation run ended with an error (${run.cause ?? 'unknown'}).` })
+            // Infra causes (model_timeout / model_error) get their own story: a
+            // slow provider is not a definition regression, and the next apply
+            // starts a fresh gate run by itself.
+            const causeView = gateRunErrorView(run.cause)
+            const text = causeView
+              ? t(causeView.key)
+              : t('agents.gate_run_error', { cause: run.cause ?? '' })
+            setProposalNotice({ kind: 'error', text })
           }
           return
         }

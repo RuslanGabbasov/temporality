@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyGateErrorView, detectRegressions, detectTurnsRegressions, latestEvalByVersion, passRate, runsByVersion } from './agentEvolution'
+import { applyGateErrorView, detectRegressions, detectTurnsRegressions, gateRunErrorView, latestEvalByVersion, passRate, runsByVersion } from './agentEvolution'
 import { ApiError } from './workspaceApi'
 import type { AgentEvaluationRun, Run } from './workspaceApi'
 
@@ -141,5 +141,18 @@ describe('applyGateErrorView', () => {
     expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'mystery' }))).toBeNull()
     expect(applyGateErrorView(new Error('HTTP 500'))).toBeNull()
     expect(applyGateErrorView(null)).toBeNull()
+  })
+})
+
+describe('gateRunErrorView', () => {
+  it('maps infra causes to their own sentences — provider flakiness is not a regression', () => {
+    expect(gateRunErrorView('model_timeout')).toEqual({ key: 'agents.gate_run_model_timeout' })
+    expect(gateRunErrorView('model_error')).toEqual({ key: 'agents.gate_run_model_error' })
+  })
+
+  it('leaves unknown and absent causes to the generic run-error text', () => {
+    expect(gateRunErrorView('gate_run_aborted')).toBeNull()
+    expect(gateRunErrorView('')).toBeNull()
+    expect(gateRunErrorView(undefined)).toBeNull()
   })
 })

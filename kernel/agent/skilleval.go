@@ -203,8 +203,9 @@ func (a *Activities) evaluationModel(ctx context.Context, project string) (*llm.
 }
 
 // runEvaluationCase executes one case: a grounded model call plus pattern
-// checks. A model failure fails the case (never the whole run) with the error
-// as the answer, so suite history stays comparable.
+// checks. A model infra failure errors the case (cause model_timeout /
+// model_error — the run verdicts as error, not fail); an assertion mismatch
+// fails it, so suite history stays comparable.
 func (a *Activities) runEvaluationCase(ctx context.Context, model *llm.Client, skill workspaceSkill, markdown, input string, mustContain, mustNotContain []string) evaluationCaseResult {
 	system := "You are executing a documented skill. Follow its procedure exactly and answer the task. Reply with the answer only.\n\n# Skill: " + skill.Name + "\n\n" + markdown
 	messages := []llm.Message{
@@ -213,10 +214,14 @@ func (a *Activities) runEvaluationCase(ctx context.Context, model *llm.Client, s
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
-	completion, err := model.Complete(callCtx, messages, nil)
+	completion, err := model.Complete(callCtx, messages, nil, llm.WithMaxTokens(evalCaseMaxTokens))
 	answer := completion.Content
 	if err != nil {
-		answer = "evaluation error: " + err.Error()
+		// Same contract as the agent evaluator: an infra failure is an errored
+		// case (cause model_timeout/model_error), never a pass and never a
+		// pattern-miss fail. Without this, an error answer with no must_contain
+		// patterns used to count as PASSED.
+		return evaluationCaseResult{Answer: "evaluation error: " + err.Error(), Passed: false, Error: err.Error(), Cause: classifyModelError(err)}
 	}
 	if len(answer) > skillEvalMaxAnswer {
 		answer = answer[:skillEvalMaxAnswer]

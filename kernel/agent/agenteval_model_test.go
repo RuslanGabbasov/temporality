@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,5 +145,55 @@ func TestAgentEvaluationFailsLoudWhenChainErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "resolve evaluation model") || !strings.Contains(err.Error(), "judge offline") {
 		t.Errorf("error = %v, want the wrapped chain message", err)
+	}
+}
+
+// A case model timeout must be recorded as an ERRORED case (cause
+// model_timeout), never as a plain failed case: ComputeRunVerdict (§5.2)
+// turns errored cases into a run error, and evalGateDecide restarts a fresh
+// gate run on the next apply — while a "failed" case would paint a red gate
+// telling the operator to fix a definition nothing is wrong with. This is
+// exactly the golden/eto-loma incident: a 4-minute generation read as a
+// definition regression.
+func TestAgentEvaluationCaseTimeoutIsErroredNotFailed(t *testing.T) {
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(10 * time.Second) // far beyond the case ctx below
+	}))
+	defer dead.Close()
+	activities := &Activities{}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	result, usage := activities.runAgentEvaluationCase(ctx,
+		llm.New(llm.Config{BaseURL: dead.URL, Model: "mimo-x", APIKey: "k"}),
+		"system", "input", nil, nil)
+	if result.Passed {
+		t.Error("an errored case must not pass")
+	}
+	if result.Error == "" {
+		t.Error("the infra failure must be recorded in Error (drives the run verdict)")
+	}
+	if result.Cause != "model_timeout" {
+		t.Errorf("cause = %q, want model_timeout", result.Cause)
+	}
+	if !strings.Contains(result.Answer, "evaluation error:") {
+		t.Errorf("answer = %q, want the error text for the run-history UI", result.Answer)
+	}
+	if usage.PromptTokens != 0 || usage.CompletionTokens != 0 {
+		t.Errorf("usage = %+v, want zero tokens for a failed call", usage)
+	}
+}
+
+// The timeout classifier: deadlines (context deadline, client timeout) map
+// to model_timeout; every other transport/provider failure is model_error.
+func TestClassifyModelError(t *testing.T) {
+	if cause := classifyModelError(context.DeadlineExceeded); cause != "model_timeout" {
+		t.Errorf("context deadline → %q, want model_timeout", cause)
+	}
+	wrapped := fmt.Errorf("call model: %w", context.DeadlineExceeded)
+	if cause := classifyModelError(wrapped); cause != "model_timeout" {
+		t.Errorf("wrapped deadline → %q, want model_timeout", cause)
+	}
+	if cause := classifyModelError(errors.New("connection reset by peer")); cause != "model_error" {
+		t.Errorf("transport reset → %q, want model_error", cause)
 	}
 }
