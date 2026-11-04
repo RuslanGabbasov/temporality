@@ -30,6 +30,25 @@ import (
 
 const runSearchEventsPage = 300
 
+// journalEventFields extracts the run identity from a raw journal event map.
+// The observation envelope (temporality.event/1) NESTS it — context.run,
+// context.project, context.actor.id, data.title — while the original code
+// read flat keys that never existed: every id came out empty, so run_search
+// listed nothing and trace_read rejected every call with 403 «run was
+// started outside your org scope» (the empty actor is in nobody's scope).
+func journalEventFields(event map[string]any) (runID, project, actorID, title string) {
+	eventContext, _ := event["context"].(map[string]any)
+	runID, _ = eventContext["run"].(string)
+	project, _ = eventContext["project"].(string)
+	if actor, ok := eventContext["actor"].(map[string]any); ok {
+		actorID, _ = actor["id"].(string)
+	}
+	if data, ok := event["data"].(map[string]any); ok {
+		title, _ = data["title"].(string)
+	}
+	return runID, project, actorID, title
+}
+
 func registerRunSearchRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *workspace.Store, observationURL string, visibleUnits func(*http.Request) []string, journalToken string) {
 	allowedActors := func(r *http.Request, actor string) ([]string, error) {
 		users, err := ws.ListUsers(r.Context())
@@ -138,11 +157,10 @@ func registerRunSearchRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wo
 		seen := map[string]bool{}
 		runs := []runInfo{}
 		for _, event := range started {
-			id, _ := event["run"].(string)
+			id, project, actorID, title := journalEventFields(event)
 			if id == "" || seen[id] {
 				continue
 			}
-			actorID, _ := event["actor"].(string)
 			if !allowedSet[strings.ToLower(actorID)] {
 				continue
 			}
@@ -151,15 +169,18 @@ func registerRunSearchRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wo
 			status := "running"
 			if err == nil && run.Status != "" {
 				status = run.Status
+			} else if terminal, tErr := ws.RunTerminalStatuses(context.Background(), []string{id}); tErr == nil && terminal[id] != "" {
+				// Delegated children carry no workspace_run row
+				// (docs/agent-delegation.md) — the journal is their only
+				// status source.
+				status = terminal[id]
 			}
 			if statusFilter != "" && status != statusFilter {
 				continue
 			}
-			project, _ := event["project"].(string)
 			if projectFilter != "" && project != projectFilter {
 				continue
 			}
-			title, _ := event["title"].(string)
 			occurred, _ := event["occurred_at"].(string)
 			runs = append(runs, runInfo{ID: id, Title: title, Actor: actorID, Project: project, Status: status, StartedAt: occurred})
 			if len(runs) >= limit {
@@ -203,7 +224,7 @@ func registerRunSearchRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wo
 			writeError(w, 404, errors.New("run not found"))
 			return
 		}
-		startActor, _ := started[0]["actor"].(string)
+		_, _, startActor, _ := journalEventFields(started[0])
 		if !allowedSet[strings.ToLower(startActor)] {
 			writeError(w, 403, fmt.Errorf("run %q was started outside your org scope", runID))
 			return
