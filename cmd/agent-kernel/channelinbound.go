@@ -191,8 +191,13 @@ func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent
 	replies := agent.MatchChannelReplies(messages, asks, users, l.selfID)
 	answered := make(map[string]bool, len(replies))
 	for _, reply := range replies {
-		answered[reply.Message.ID] = true
-		l.routeReply(ctx, channelSettings, reply)
+		// A zombie ask (its workflow is already gone) must not consume the
+		// message: routeReply closes the row and reports unconsumed, so the
+		// message falls through to intake instead of dying silently in a
+		// dead dialog.
+		if l.routeReply(ctx, channelSettings, reply) {
+			answered[reply.Message.ID] = true
+		}
 	}
 	// Everything else is an initiative message: the intake pipeline records
 	// it durably, identifies the sender (closed world) and either starts the
@@ -309,12 +314,18 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 }
 
 // routeReply signals the waiting workflow and closes the human request row.
-// The signal goes first: resuming the run is the point. When it fails the row
-// stays open — the workflow is still waiting and a later retry (e.g. after a
-// restart's history replay) may yet deliver the answer. File replies are
-// downloaded into the project workspace first, so the resumed run — and every
-// agent in the project — can read the attachment by path.
-func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map[string]string, reply agent.ChannelReply) {
+// The signal goes first: resuming the run is the point. When it fails
+// transiently the row stays open — the workflow is still waiting and a later
+// retry (e.g. after a restart's history replay) may yet deliver the answer.
+// When the workflow is GONE (not found / already completed) the row is a
+// zombie: nothing can ever answer it, and left open it swallows every later
+// message of the chat as a phantom reply — the sender hears nothing, ever.
+// The row is closed like the terminal-run hygiene sweep would, and the
+// message returns unconsumed so it re-enters intake as a fresh one.
+// File replies are downloaded into the project workspace first, so the
+// resumed run — and every agent in the project — can read the attachment by
+// path.
+func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map[string]string, reply agent.ChannelReply) bool {
 	// The reply is consumed — the sender gets the read mark now, not when the
 	// resumed run eventually answers.
 	l.markRead(ctx, channelSettings, reply.Message.ChatID, reply.Message.ID)
@@ -331,7 +342,7 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 	// §6 Phase 2): the round resolves through the store, not through a run.
 	if reviewID, ok := artifactReviewFromRequestRun(reply.Ask.RunID); ok {
 		l.routeArtifactReviewReply(ctx, channelSettings, reply, reviewID)
-		return
+		return true
 	}
 	response := truncateForLog(reply.Message.Text, 4000)
 	if len(reply.Message.Files) > 0 {
@@ -357,10 +368,20 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 		detail := strings.ToLower(err.Error())
 		if strings.Contains(detail, "not found") || strings.Contains(detail, "already completed") {
 			l.log.Info("channel reply arrived after run ended", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "run", reply.Ask.RunID)
-			return
+			// The run is gone but the ask row survived it (a crash, a rebuild,
+			// a close activity that never ran). Close the zombie durably —
+			// otherwise every later message of this chat matches it, dies here
+			// and the sender hears nothing — and let the message re-enter
+			// intake as a fresh one.
+			if cErr := l.store.CancelHumanRequest(ctx, reply.Ask.RequestID, "system-sweep"); cErr != nil && !errors.Is(cErr, workspace.ErrNotFound) {
+				l.log.Warn("channel reply close zombie ask", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "error", cErr)
+			}
+			l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID,
+				agent.ChannelText(agent.DetectLang(reply.Message.Text), "notice_ask_dead"))
+			return false
 		}
 		l.log.Warn("channel reply signal", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "run", reply.Ask.RunID, "error", err)
-		return
+		return true // consumed: the ask is still live, the row keeps waiting
 	}
 	if reply.Cancelled {
 		if err := l.store.CancelHumanRequest(ctx, reply.Ask.RequestID, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
@@ -390,6 +411,7 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 		l.log.Warn("channel reply audit", "operation", reply.Ask.RequestID, "error", err)
 	}
 	l.log.Info("channel reply routed", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "run", reply.Ask.RunID, "sender", reply.Message.Sender, "cancelled", reply.Cancelled)
+	return true
 }
 
 // markRead gives the sender the dialog's read mark (matrix m.read receipt):
@@ -413,13 +435,17 @@ func (l *channelInboundLoop) markRead(ctx context.Context, channelSettings map[s
 // crash between here and the workflow start leaves a recorded message the
 // operator can replay instead of a silently lost task.
 func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.InboundMessage, channelSettings map[string]string, senders []agent.UserSenderChannels) {
+	body := truncateForLog(message.Text, 8000)
+	if message.Encrypted && body == "" {
+		body = "[m.room.encrypted]"
+	}
 	row := &workspace.InboundMessage{
 		ID:        workspace.InboundMessageID(message.Channel, message.ID),
 		Channel:   message.Channel,
 		MessageID: message.ID,
 		SenderRaw: message.Sender,
 		Room:      message.ChatID,
-		Body:      truncateForLog(message.Text, 8000),
+		Body:      body,
 		Status:    workspace.InboundStatusReceived,
 	}
 	inserted, err := l.store.InsertInboundMessage(ctx, row)
@@ -432,6 +458,23 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	}
 	if !inserted {
 		return // duplicate delivery — already processed or being processed
+	}
+	// An unreadable payload (matrix E2EE): the transport is plaintext and can
+	// never process it. Refuse it loudly — silently dropping encrypted events
+	// made an E2EE-enabled room look like a dead bot for that user while
+	// everyone in unencrypted rooms got answers.
+	if message.Encrypted {
+		senderUserID, roomRegistered := agent.IdentifyInboundSender(message, senders)
+		_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusRejected, SenderUserID: senderUserID})
+		if l.emit != nil {
+			l.emit(ctx, "intake.rejected", message, senderUserID, map[string]any{"reason": "encrypted_unsupported"})
+		}
+		if roomRegistered && l.intakeEnabled {
+			l.sendRoomNotice(ctx, channelSettings, message.ChatID,
+				agent.ChannelText(agent.DetectLang(message.Text), "notice_encrypted"))
+		}
+		l.log.Warn("intake rejected: encrypted message cannot be read (E2EE unsupported)", "channel", l.driver.Type(), "message", message.ID, "sender", message.Sender, "room", message.ChatID)
+		return
 	}
 	senderUserID, roomRegistered := agent.IdentifyInboundSender(message, senders)
 	if senderUserID == "" {

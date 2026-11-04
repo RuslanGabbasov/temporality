@@ -122,6 +122,47 @@ func TestParseMatrixSyncOrdersChronologically(t *testing.T) {
 // A threaded answer must carry the thread root as ReplyTo: the reply matcher
 // matches the ask whose ThreadRef equals it, so a Matrix thread reply lands
 // on the right ask instead of the oldest one in the room.
+// TestParseMatrixSyncSurfacesEncryptedEvents: E2EE payloads the plaintext
+// transport cannot read surface as Encrypted messages instead of vanishing —
+// the pipeline must be able to refuse them loudly, or an encrypted room makes
+// the bot silently dead for that user while everyone else gets answers.
+func TestParseMatrixSyncSurfacesEncryptedEvents(t *testing.T) {
+	at := time.Now()
+	body := syncPayload(t, "s7", map[string][]matrixRoomEvent{
+		"!room:hs": {
+			{Type: "m.room.encrypted", EventID: "$enc", Sender: "@u:hs", OriginServerTS: at.UnixMilli()},
+			{Type: "m.room.message", EventID: "$txt", Sender: "@u:hs", OriginServerTS: at.UnixMilli(), Content: matrixEventContent{MsgType: "m.text", Body: "hello"}},
+		},
+	})
+	_, messages, err := ParseMatrixSync(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+	if !messages[0].Encrypted || messages[0].EventID != "$enc" || messages[0].Sender != "@u:hs" {
+		t.Fatalf("encrypted event not surfaced: %+v", messages[0])
+	}
+	if messages[1].Encrypted || messages[1].Body != "hello" {
+		t.Fatalf("plain message mangled: %+v", messages[1])
+	}
+	// The flag rides into the channel-neutral model…
+	normalized := matrixNormalized(messages)
+	if len(normalized) != 2 || !normalized[0].Encrypted || normalized[1].Encrypted {
+		t.Fatalf("normalized flags: %+v", normalized)
+	}
+	// …and an unreadable message can never be matched as a reply — even
+	// against a perfectly eligible open ask in the same chat.
+	replies := MatchChannelReplies(normalized[:1], []PendingAsk{{
+		RequestID: "op", RunID: "run", ProjectID: "p", UserID: "u",
+		CreatedAt: at.Add(-time.Minute),
+	}}, []UserChats{{UserID: "u", Chats: []string{"!room:hs"}}}, "")
+	if len(replies) != 0 {
+		t.Fatalf("an unreadable message must never answer an ask: %+v", replies)
+	}
+}
+
 func TestParseMatrixSyncThreadedReply(t *testing.T) {
 	body := []byte(`{
 		"next_batch": "s1",

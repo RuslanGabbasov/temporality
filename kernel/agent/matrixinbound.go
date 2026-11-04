@@ -29,6 +29,12 @@ type MatrixInboundMessage struct {
 	// content URI, Filename the original name. Text messages leave both empty.
 	URL      string
 	Filename string
+	// Encrypted marks an m.room.encrypted event: the transport is plaintext
+	// (no olm/megolm), so the payload cannot be read. Such events must not
+	// vanish silently — the pipeline records and refuses them loudly, or an
+	// E2EE-enabled room makes the bot look dead for that user while others
+	// get answers.
+	Encrypted bool
 }
 
 // matrixSyncResponse models the subset of /sync the poller needs.
@@ -78,8 +84,10 @@ type matrixEventContent struct {
 // messages answer asks with words; file messages (m.file/m.image/m.audio/
 // m.video carrying an mxc content URI) answer them with an attachment the
 // loop downloads into the project workspace. Notices, empty bodies and files
-// without a content URI are ignored; messages are returned in chronological
-// order across rooms.
+// without a content URI are ignored. Encrypted events (m.room.encrypted) are
+// returned as Encrypted messages instead of being dropped — the bot cannot
+// read them, but the sender must learn why nothing happens. Messages are
+// returned in chronological order across rooms.
 func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 	var decoded matrixSyncResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
@@ -88,6 +96,16 @@ func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 	messages := []MatrixInboundMessage{}
 	for roomID, room := range decoded.Rooms.Join {
 		for _, event := range room.Timeline.Events {
+			if event.Type == "m.room.encrypted" {
+				messages = append(messages, MatrixInboundMessage{
+					EventID:   event.EventID,
+					RoomID:    roomID,
+					Sender:    event.Sender,
+					Timestamp: time.UnixMilli(event.OriginServerTS),
+					Encrypted: true,
+				})
+				continue
+			}
 			if event.Type != "m.room.message" {
 				continue
 			}

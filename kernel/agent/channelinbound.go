@@ -37,6 +37,11 @@ type InboundMessage struct {
 	// ReplyTo links the message to a previous one when the channel carries
 	// threading (slack/teams/mattermost threads, matrix replies).
 	ReplyTo string
+	// Encrypted marks a message whose payload the transport cannot read
+	// (matrix E2EE). It answers nothing and starts nothing: the intake
+	// pipeline records and refuses it loudly so an encrypted room cannot
+	// make the bot silently dead for one user while others get answers.
+	Encrypted bool
 }
 
 // InboundFile is one attachment of an inbound message.
@@ -173,6 +178,12 @@ func MatchChannelReplies(messages []InboundMessage, asks []PendingAsk, users []U
 	}
 	for _, message := range messages {
 		if selfSenderID != "" && message.Sender == selfSenderID {
+			continue
+		}
+		// An unreadable payload (matrix E2EE) cannot answer anything — it
+		// must reach the intake pipeline untouched, never be eaten as a
+		// phantom reply.
+		if message.Encrypted {
 			continue
 		}
 		if message.ReplyTo != "" {

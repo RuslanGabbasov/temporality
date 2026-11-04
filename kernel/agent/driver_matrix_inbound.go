@@ -269,6 +269,7 @@ func matrixNormalized(messages []MatrixInboundMessage) []InboundMessage {
 			Text:      message.Body,
 			Timestamp: message.Timestamp,
 			ReplyTo:   message.ReplyTo,
+			Encrypted: message.Encrypted,
 		}
 		if message.URL != "" {
 			entry.Files = []InboundFile{{Ref: message.URL, Name: message.Filename}}

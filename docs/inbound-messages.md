@@ -135,6 +135,10 @@ Intake-агент переиспользует всё это целиком и �
 * несовпадение → `intake.rejected` (reason: unknown_sender) + вежливый ответ
   в комнату: «напишите из зарегистрированного аккаунта или создайте задачу в
   приложении»;
+* зашифрованное сообщение (`m.room.encrypted`) не читается plaintext-транспортом
+  → `intake.rejected` (reason: encrypted_unsupported) + уведомление отправителю;
+  молчаливый дроп делал бота мёртвым для пользователя E2EE-комнаты, пока
+  остальные получали ответы;
 * для ответов на вопросы действует прежнее комнатное правило (MVP-компромисс
   сохраняется и документирован) — порождение работы строже, чем ответ.
 
@@ -264,7 +268,7 @@ intake.received     {message_id, channel, sender, room}
 intake.classified   {classification, confidence}
 intake.clarifying   {question, options}         -- прокси ask_human
 intake.routed       {target_run_id, project_id, actor}
-intake.rejected     {reason: unknown_sender|forbidden|unresolved|not_a_task}
+intake.rejected     {reason: unknown_sender|forbidden|unresolved|not_a_task|encrypted_unsupported}
 intake.expired      {reason}
 ```
 

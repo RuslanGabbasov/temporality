@@ -477,6 +477,54 @@ func TestChannelInboundKeepsRowOpenWhenSignalFails(t *testing.T) {
 	}
 }
 
+// TestChannelInboundZombieAskClosesAndFallsThroughToIntake: a reply matched to
+// an ask whose workflow is already gone must not die silently — the zombie row
+// is closed (or it would swallow every later message of the chat), the sender
+// is told the question is dead, and the message re-enters intake as a fresh
+// one. This is the “bot went quiet for one user while others get answers”
+// incident: a rebuild left the ask row open, and each new message matched it,
+// hit a dead workflow and vanished.
+func TestChannelInboundZombieAskClosesAndFallsThroughToIntake(t *testing.T) {
+	var sent testSink
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixTextEvent("$m5", "!r1:hs", "@human:hs", "да, деплой"),
+	}, &sent)
+	store := &fakeInboundStore{
+		requests: []workspace.HumanRequest{{
+			ID: "op", RunID: "run", ProjectID: "proj", ResolvedUser: "u1",
+			Channel: "matrix", Status: "delivered", CreatedAt: time.Now().Add(-time.Minute),
+		}},
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	sig := &recordedSignal{err: fmt.Errorf("workflow execution already completed")}
+	intake := &recordedIntake{runID: "intake-m5"}
+	loop := newInboundLoop(t, server, store, sig)
+	loop.intake = intake.record
+	loop.intakeEnabled = true
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sig.count() != 1 {
+		t.Fatalf("the reply must reach the signal once, got %d", sig.count())
+	}
+	if len(store.cancelled) != 1 || store.cancelled[0] != "op" {
+		t.Fatalf("zombie ask not closed: %+v", store.cancelled)
+	}
+	if len(store.answered) != 0 {
+		t.Fatalf("zombie ask must not be answered: %+v", store.answered)
+	}
+	if intake.count() != 1 || intake.messages[0].ID != "$m5" {
+		t.Fatalf("message must re-enter intake, calls: %v", intake.messages)
+	}
+	if sent.len() != 1 || !strings.Contains(sent.item(0), "Temporality") {
+		t.Fatalf("expected one ask-dead notice, got %v", sent.all())
+	}
+}
+
 // TestChannelInboundTeamAskMatchesAnyMember: a request with org: recipient and
 // delivery rows (docs/inbound-messages.md §8) is answerable from every
 // member's chat — including a member who is not resolved_user. Exactly one
@@ -647,6 +695,16 @@ func matrixTextEvent(eventID, room, sender, body string) map[string]any {
 		"type": "m.room.message", "event_id": eventID, "sender": sender,
 		"origin_server_ts": time.Now().UnixMilli(),
 		"content":          map[string]any{"msgtype": "m.text", "body": body},
+	}
+}
+
+// matrixEncryptedEvent builds one m.room.encrypted sync event — a payload the
+// plaintext transport cannot read.
+func matrixEncryptedEvent(eventID, room, sender string) map[string]any {
+	return map[string]any{
+		"type": "m.room.encrypted", "event_id": eventID, "sender": sender,
+		"origin_server_ts": time.Now().UnixMilli(),
+		"content":          map[string]any{"algorithm": "m.megolm.v1.aes-sha2", "ciphertext": "AwgBEpABm3A"},
 	}
 }
 
@@ -821,6 +879,57 @@ func TestChannelInboundIntakeRejectsUnregisteredRoomSilently(t *testing.T) {
 	}
 	if sent.len() != 0 {
 		t.Fatalf("unregistered room must stay silent, sent %v", sent.all())
+	}
+}
+
+// TestChannelInboundEncryptedMessageRefusedLoudly: an m.room.encrypted event
+// cannot be read by the plaintext transport. It must never be eaten as a reply
+// (an open ask in the same chat is left waiting), never start intake, and must
+// leave a loud trace: a rejected row, intake.rejected(encrypted_unsupported)
+// and a notice telling the sender why nothing happened.
+func TestChannelInboundEncryptedMessageRefusedLoudly(t *testing.T) {
+	var sent testSink
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixEncryptedEvent("$enc1", "!r1:hs", "@human:hs"),
+	}, &sent)
+	store := &fakeInboundStore{
+		requests: []workspace.HumanRequest{{
+			ID: "op", RunID: "run", ProjectID: "proj", ResolvedUser: "u1",
+			Channel: "matrix", Status: "delivered", CreatedAt: time.Now().Add(-time.Minute),
+		}},
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	emit := &recordedEmit{}
+	sig := &recordedSignal{}
+	loop := newInboundLoop(t, server, store, sig)
+	loop.intake = func(context.Context, agent.InboundMessage, string) (string, error) {
+		t.Fatal("intake must not start for an unreadable message")
+		return "", nil
+	}
+	loop.emit = emit.record
+	loop.intakeEnabled = true
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sig.count() != 0 || len(store.answered) != 0 {
+		t.Fatalf("an unreadable message must not answer the open ask: signals %d answered %v", sig.count(), store.answered)
+	}
+	row, ok := store.inboundRow("$enc1")
+	if !ok {
+		t.Fatal("encrypted message not recorded")
+	}
+	if latest, _ := store.lastUpdate(row.ID); latest.Status != workspace.InboundStatusRejected {
+		t.Fatalf("row not rejected: %+v", latest)
+	}
+	if emit.count() != 1 || emit.types[0] != "intake.rejected" || emit.rawData[0]["reason"] != "encrypted_unsupported" {
+		t.Fatalf("unexpected events: %v %+v", emit.types, emit.rawData)
+	}
+	if sent.len() != 1 || !strings.Contains(sent.item(0), "Temporality") {
+		t.Fatalf("expected one encryption notice, got %v", sent.all())
 	}
 }
 

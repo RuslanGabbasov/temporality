@@ -121,7 +121,14 @@ FetchFile(ctx context.Context, file InboundFile) ([]byte, error)
 
 Матчинг ответов (`MatchMatrixReplies`) обобщается без канальной логики:
 «сообщение в чате X отвечает старейшему открытому вопросу, доставленному в
-чат X» — правило про адреса и время, не про матрицу. Отдельно живёт
+чат X» — правило про адреса и время, не про матрицу. Ответ на вопрос, чей
+воркфлоу уже завершился («зомби»-строка human_request после рестарта или
+ребилда), не «съедает» сообщение: строка закрывается силами роутера
+(аналог terminal-run hygiene sweep), отправителю уходит «вопрос уже
+неактуален», а сообщение уходит в intake как новое — иначе каждое следующее
+сообщение чата тихо умирало в мёртвом диалоге, и бот выглядел мёртвым для
+конкретного пользователя, пока кто-то не открыл бы инбокс.
+Отдельно живёт
 `workspace_channel_cursor (channel, cursor, updated_at)` — телеграмный
 `offset` обязан переживать рестарт, матричный `since` — желательно.
 
@@ -167,7 +174,7 @@ VerifyRequest (для push), курсор (для pull).
 
 | Канал | Модель | Identity | Специфика |
 |---|---|---|---|
-| matrix | pull `/sync` | mxid | whoami для пропуска себя; mxc:// download; txn idempotency |
+| matrix | pull `/sync` | mxid | whoami для пропуска себя; mxc:// download; txn idempotency; E2EE (`m.room.encrypted`) не поддерживается — такие события фиксируются и отклоняются с уведомлением (`intake.rejected`, reason: `encrypted_unsupported`), а не теряются молча |
 | telegram | pull `getUpdates` | chat id (личка) = адрес | offset-курсор персистить; лимит 4096; getFile |
 | slack (webhook) | только outbound | — | текущее поведение, остаётся отдельным типом |
 | slack (bot) | push Events API | member id | треды (ReplyTo=ts), подпись запроса, blocks (future) |
