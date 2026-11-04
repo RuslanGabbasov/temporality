@@ -68,7 +68,14 @@ type Activities struct {
 	// fallback for background quality work (skill builder, area normalization)
 	// when the run/project carries no default model.
 	JudgeModel func(ctx context.Context) (*llm.Client, error)
-	HTTP       *http.Client
+	// EvalModel resolves the model that answers agent-evaluation cases when
+	// the env gateway (Model) is absent: the same chain the draft wizards use
+	// (configured judge model, then the first chat-capable provider model),
+	// injected by main. Fresh installs configured purely through onboarding
+	// have no env gateway — without this resolver every gate run would abort
+	// before executing a single case (gate_run_aborted).
+	EvalModel func(ctx context.Context) (*llm.Client, error)
+	HTTP      *http.Client
 	// TemporalityURL is the journal base URL (observations, hints, events).
 	TemporalityURL string
 	// WorkspaceURL is the base URL of the kernel's own workspace API

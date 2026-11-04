@@ -299,6 +299,11 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const selectedIdRef = useRef(selectedId)
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
   const polledRunsRef = useRef<Set<number>>(new Set())
+  // Auto-apply budget per proposal id: each green gate run spends one
+  // auto-apply. The budget stops a pathological apply→re-gate loop (every
+  // apply starting yet another gate run) from ping-ponging forever; past it
+  // the notice falls back to the manual instruction.
+  const autoApplyBudgetRef = useRef<Map<number, number>>(new Map())
 
   // Prompt tab preview (reflects the saved agent).
   const [promptPreview, setPromptPreview] = useState<{ source: string; prompt: string } | null>(null)
@@ -796,10 +801,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   }
 
   // Follow the gate's background evaluation (202) until it decides: green
-  // invites a second, conscious apply; red/error explains itself. Bounded by
-  // the server's own 30-minute gate-run window; stops silently when the user
-  // switches to another agent so stale polls never cross agents.
-  const pollGateRun = async (agentId: string, runId: number) => {
+  // applies the proposal automatically (the Apply click was the operator's
+  // decision — the gate only verifies it; making them click again after a
+  // multi-minute run is not a release step, it is a chore); red/error
+  // explains itself. Bounded by the server's own 30-minute gate-run window;
+  // stops silently when the user switches to another agent so stale polls
+  // never cross agents.
+  const pollGateRun = async (agentId: string, runId: number, proposal: AgentProposal) => {
     if (polledRunsRef.current.has(runId)) return
     polledRunsRef.current.add(runId)
     const deadline = Date.now() + 31 * 60 * 1000
@@ -814,6 +822,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         const run = (data.runs ?? []).find((r) => r.id === runId)
         if (run?.verdict && run.verdict !== 'unknown') {
           if (run.verdict === 'pass') {
+            const budget = (autoApplyBudgetRef.current.get(proposal.id) ?? 0) + 1
+            autoApplyBudgetRef.current.set(proposal.id, budget)
+            if (budget <= 2) {
+              setProposalNotice({ kind: 'info', text: t('agents.gate_auto_applying') ?? 'The evaluation run is green — applying the proposal automatically…' })
+              await applyProposal(proposal)
+              return
+            }
             setProposalNotice({ kind: 'success', text: t('agents.gate_passed') ?? 'The evaluation run is green — press “Apply” again to apply the proposal.' })
           } else if (run.verdict === 'fail') {
             setProposalNotice({ kind: 'error', text: t('agents.gate_failed') ?? 'The evaluation run failed. Check the run history below.' })
@@ -836,10 +851,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       const result = await workspaceApi.applyAgentProposal(selectedId, proposal.id, opts)
       if (result.kind === 'evaluating') {
         // The gate started (or is already running) an evaluation run: the
-        // proposal stays pending on purpose — a green run still needs a
-        // second, conscious apply (agents propose, people apply).
-        setProposalNotice({ kind: 'info', text: t('agents.gate_started', { id: String(result.evaluation_run_id) }) ?? `The eval gate started evaluation run #${result.evaluation_run_id}. Press “Apply” again once it is green.` })
-        void pollGateRun(selectedId, result.evaluation_run_id)
+        // poller follows it and applies automatically once it is green — the
+        // Apply click stays the operator's single decision point.
+        setProposalNotice({ kind: 'info', text: t('agents.gate_started', { id: String(result.evaluation_run_id) }) ?? `The eval gate started evaluation run #${result.evaluation_run_id}. The proposal will be applied automatically once it is green.` })
+        void pollGateRun(selectedId, result.evaluation_run_id, proposal)
         return
       }
       setProposalNotice({

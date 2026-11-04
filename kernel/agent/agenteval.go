@@ -73,8 +73,12 @@ func (a *Activities) RunAgentEvaluation(ctx context.Context, agentID string, ver
 // is an error — the caller fails the row instead of leaving it 'unknown'
 // forever (§10.4).
 func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string, version int, meta EvalRunMeta) (string, error) {
-	if a.Model == nil {
-		return "", fmt.Errorf("model client is not configured")
+	model, mErr := a.evalModelClient(ctx)
+	if mErr != nil {
+		return "", fmt.Errorf("resolve evaluation model: %w", mErr)
+	}
+	if model == nil {
+		return "", errors.New("no model available for agent evaluation: set the model gateway (TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID), pick a judge model in Agents → Quality settings, or add a provider with models")
 	}
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/agents/%s", a.WorkspaceURL, agentID), nil)
 	if err != nil {
@@ -205,7 +209,7 @@ func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string,
 		if meta.Trigger == EvalTriggerGate && c.HeldOut {
 			continue // §4.5: held-out cases never decide the gate
 		}
-		result, usage := a.runAgentEvaluationCase(ctx, prompt, c.Input, c.MustContain, c.MustNotContain)
+		result, usage := a.runAgentEvaluationCase(ctx, model, prompt, c.Input, c.MustContain, c.MustNotContain)
 		tokensIn += usage.PromptTokens
 		tokensOut += usage.CompletionTokens
 		result.Name = c.Name
@@ -249,7 +253,7 @@ func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string,
 		// §6.2/§11.1 provenance: the model whose answers the cases carry.
 		// The server compares it against the judge model and stores
 		// judge_same_model — the self-bias marker for the UI.
-		"tested_model": a.Model.Model(),
+		"tested_model": model.Model(),
 	}
 	if meta.RunID > 0 {
 		// Gate runs finalise the pre-created row (§10.4): identity rides along.
@@ -288,6 +292,23 @@ func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string,
 	return summary.String(), nil
 }
 
+// evalModelClient resolves the model that answers evaluation cases: the env
+// gateway when configured (the historic behavior), else the injected quality
+// chain (judge model → first chat-capable provider model). The chain lives in
+// main next to the draft wizards' resolver so both pick the same model. A nil
+// client with a nil error (no chain injected, no gateway) is the caller's
+// loud error; a non-nil error keeps the chain's actionable message (broken
+// judge credential, empty provider catalogs).
+func (a *Activities) evalModelClient(ctx context.Context) (*llm.Client, error) {
+	if a.Model != nil {
+		return a.Model, nil
+	}
+	if a.EvalModel == nil {
+		return nil, nil
+	}
+	return a.EvalModel(ctx)
+}
+
 // runAgentEvaluationCase executes one case: a model call grounded in the
 // agent's system prompt plus pattern checks. The compiled prompt is used
 // as-is — the evaluation measures whether the definition produces the
@@ -295,14 +316,14 @@ func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string,
 // model failure fails the case (never the whole run) with the error as the
 // answer, so suite history stays comparable. The returned usage feeds the
 // run's token accounting (§10.5); a failed call reports zero usage.
-func (a *Activities) runAgentEvaluationCase(ctx context.Context, system, input string, mustContain, mustNotContain []string) (evaluationCaseResult, llm.Usage) {
+func (a *Activities) runAgentEvaluationCase(ctx context.Context, model *llm.Client, system, input string, mustContain, mustNotContain []string) (evaluationCaseResult, llm.Usage) {
 	messages := []llm.Message{
 		{Role: "system", Content: system},
 		{Role: "user", Content: input},
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
-	completion, err := a.Model.Complete(callCtx, messages, nil)
+	completion, err := model.Complete(callCtx, messages, nil)
 	answer := completion.Content
 	if err != nil {
 		answer = "evaluation error: " + err.Error()

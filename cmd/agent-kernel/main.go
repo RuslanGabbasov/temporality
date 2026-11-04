@@ -500,6 +500,35 @@ func main() {
 	activities.JudgeModel = func(ctx context.Context) (*llm.Client, error) {
 		return judgeModelClient(ctx, ws, secretMasterKey)
 	}
+	// qualityModelClient serves every model need that is NOT a live run turn:
+	// the draft wizards (agent, skill, team — via wizardModelClient below) and
+	// the agent-evaluation gate (activities.EvalModel). Chain: the env gateway
+	// when configured, else the installation's judge model — the model the
+	// operator already picked for exactly this kind of structured quality work
+	// (Agents → Quality settings) — and only when even that is unset, the first
+	// workspace provider model that looks chat-capable (catalogs mix in
+	// ASR/embedding entries a completion call cannot serve — see
+	// workspaceDraftModel). Fresh installs configured purely through onboarding
+	// have no env gateway (activities.Model is nil there); the gate used to
+	// hard-fail those with gate_run_aborted before a single case ran.
+	// activities.Model is read at call time, so wiring order does not matter.
+	qualityModelClient := func(ctx context.Context) (*llm.Client, error) {
+		if activities.Model != nil {
+			return activities.Model, nil
+		}
+		// A configured judge wins and its failures are loud: silently falling
+		// back to another model would run quality work on something the operator
+		// did not pick. Only an unconfigured judge falls through to the
+		// deterministic first-provider pick (a fresh install that never opened
+		// Quality settings).
+		if config, err := ws.JudgeConfig(ctx); err == nil && config.Configured {
+			return judgeModelClient(ctx, ws, secretMasterKey)
+		}
+		return workspaceDraftModel(ctx, ws, func(ctx context.Context, ref string) (string, error) {
+			return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
+		})
+	}
+	activities.EvalModel = qualityModelClient
 	activities.Secrets = &agent.SecretBroker{
 		HTTP: &http.Client{Timeout: 10 * time.Second},
 		TTL:  secretCacheTTL(),
@@ -1711,37 +1740,12 @@ func main() {
 	registerEntityEnabledRoutes(mux, gate, ws, visibleUnits)
 	registerRunSearchRoutes(mux, gate, ws, observationURL, visibleUnits, journalToken)
 
-	// wizardModelClient serves every description→draft wizard (agent, skill,
-	// team): the env gateway when configured, else the installation's
-	// supervisor judge model — the model the operator already picked for
-	// exactly this kind of structured quality work (Agents → Quality
-	// settings) — and only when even that is unset the first workspace
-	// provider model that looks chat-capable (catalogs mix in ASR/embedding
-	// entries the wizard cannot call — see workspaceDraftModel). Fresh installs
-	// configured purely through onboarding have no env gateway —
-	// activities.Model is nil there — and the wizards must keep working the
-	// same way runs do, through the provider registry. On failure it writes
-	// the 502 response itself and returns nil.
+	// wizardModelClient serves the description→draft wizards (agent, skill,
+	// team) with qualityModelClient — the shared background-quality chain (env
+	// gateway → judge → first chat-capable provider model). On failure it
+	// writes the 502 response itself and returns nil.
 	wizardModelClient := func(w http.ResponseWriter, r *http.Request) *llm.Client {
-		if activities.Model != nil {
-			return activities.Model
-		}
-		// A configured judge wins and its failures are loud: silently falling
-		// back to another model would run the wizard on something the operator
-		// did not pick. Only an unconfigured judge falls through to the
-		// deterministic first-provider pick (a fresh install that never opened
-		// Quality settings).
-		if config, err := ws.JudgeConfig(r.Context()); err == nil && config.Configured {
-			client, err := judgeModelClient(r.Context(), ws, secretMasterKey)
-			if err != nil {
-				writeError(w, 502, err)
-				return nil
-			}
-			return client
-		}
-		client, err := workspaceDraftModel(r.Context(), ws, func(ctx context.Context, ref string) (string, error) {
-			return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
-		})
+		client, err := qualityModelClient(r.Context())
 		if err != nil {
 			writeError(w, 502, err)
 			return nil
