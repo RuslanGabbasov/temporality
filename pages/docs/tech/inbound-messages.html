@@ -206,6 +206,10 @@ Matrix, <code>chat_id</code> для Telegram (там он уже есть — б
 <li>несовпадение → <code>intake.rejected</code> (reason: unknown_sender) + вежливый ответ
 в комнату: «напишите из зарегистрированного аккаунта или создайте задачу в
 приложении»;</li>
+<li>зашифрованное сообщение (<code>m.room.encrypted</code>) не читается plaintext-транспортом
+→ <code>intake.rejected</code> (reason: encrypted_unsupported) + уведомление отправителю;
+молчаливый дроп делал бота мёртвым для пользователя E2EE-комнаты, пока
+остальные получали ответы;</li>
 <li>для ответов на вопросы действует прежнее комнатное правило (MVP-компромисс
 сохраняется и документирован) — порождение работы строже, чем ответ.</li>
 </ul>
@@ -304,7 +308,7 @@ org-structure.md §20–21).</li>
 intake.classified   {classification, confidence}
 intake.clarifying   {question, options}         -- прокси ask_human
 intake.routed       {target_run_id, project_id, actor}
-intake.rejected     {reason: unknown_sender|forbidden|unresolved|not_a_task}
+intake.rejected     {reason: unknown_sender|forbidden|unresolved|not_a_task|encrypted_unsupported}
 intake.expired      {reason}
 </code></pre>
 <p>UI: страница «Входящие» — список сообщений с классификацией, статусом,

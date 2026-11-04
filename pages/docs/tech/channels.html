@@ -170,7 +170,14 @@ FetchFile(ctx context.Context, file InboundFile) ([]byte, error)
 </code></pre>
 <p>Матчинг ответов (<code>MatchMatrixReplies</code>) обобщается без канальной логики:
 «сообщение в чате X отвечает старейшему открытому вопросу, доставленному в
-чат X» — правило про адреса и время, не про матрицу. Отдельно живёт
+чат X» — правило про адреса и время, не про матрицу. Ответ на вопрос, чей
+воркфлоу уже завершился («зомби»-строка human_request после рестарта или
+ребилда), не «съедает» сообщение: строка закрывается силами роутера
+(аналог terminal-run hygiene sweep), отправителю уходит «вопрос уже
+неактуален», а сообщение уходит в intake как новое — иначе каждое следующее
+сообщение чата тихо умирало в мёртвом диалоге, и бот выглядел мёртвым для
+конкретного пользователя, пока кто-то не открыл бы инбокс.
+Отдельно живёт
 <code>workspace_channel_cursor (channel, cursor, updated_at)</code> — телеграмный
 <code>offset</code> обязан переживать рестарт, матричный <code>since</code> — желательно.</p>
 <p>Webhook-драйверы регистрируют свой route в общем mux; после Verify+Parse
@@ -214,7 +221,7 @@ VerifyRequest (для push), курсор (для pull).</p>
 <td>matrix</td>
 <td>pull <code>/sync</code></td>
 <td>mxid</td>
-<td>whoami для пропуска себя; mxc:// download; txn idempotency</td>
+<td>whoami для пропуска себя; mxc:// download; txn idempotency; E2EE (<code>m.room.encrypted</code>) не поддерживается — такие события фиксируются и отклоняются с уведомлением (<code>intake.rejected</code>, reason: <code>encrypted_unsupported</code>), а не теряются молча</td>
 </tr>
 <tr>
 <td>telegram</td>
