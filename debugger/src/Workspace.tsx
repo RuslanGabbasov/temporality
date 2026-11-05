@@ -1714,19 +1714,27 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {conv.title}
+                  {/* Flex row, NOT a text-flow line: the title truncates on its
+                     own (minWidth 0 + ellipsis span) and the live-run badge is
+                     an unclippable sibling — inside an ellipsized div the
+                     badge rendered past the clip and was invisible for every
+                     long title, i.e. for practically every chat. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.875rem', fontWeight: 500 }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</span>
                     {hasLiveRun && (
                       <span
                         title={t('chat.live_run_title') ?? 'A run is still working in this chat'}
-                        style={{ marginLeft: '0.35rem', fontSize: '0.65rem', color: 'var(--tm-accent, #4589ff)', whiteSpace: 'nowrap', verticalAlign: 'middle' }}
+                        style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.65rem', color: 'var(--tm-accent, #4589ff)', whiteSpace: 'nowrap' }}
                       >
-                        <span className="spinner spinner-sm" style={{ marginRight: '0.2rem', verticalAlign: '-1px' }} />{t('chat.live_run') ?? 'running'}
+                        <span className="spinner spinner-sm" />{t('chat.live_run') ?? 'running'}
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
-                    {conv.agentId ? agentName(conv.agentId) : (defaultAgentId ? agentName(defaultAgentId) : (t('chat.no_agent') ?? 'No agent'))}{defaultModel ? ` · ${defaultModel}` : ''} · {conv.messages.length} {t('chat.msgs') ?? 'msgs'} · <TimeHint value={lastIso}>{shortTime(lastIso)}</TimeHint>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.3rem', minWidth: 0 }}>
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {conv.agentId ? agentName(conv.agentId) : (defaultAgentId ? agentName(defaultAgentId) : (t('chat.no_agent') ?? 'No agent'))}{defaultModel ? ` · ${defaultModel}` : ''} · {conv.messages.length} {t('chat.msgs') ?? 'msgs'}
+                    </span>
+                    <TimeHint value={lastIso} style={{ flexShrink: 0 }}>{shortTime(lastIso)}</TimeHint>
                   </div>
                 </div>
                 <button
