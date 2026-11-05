@@ -15,7 +15,7 @@ import {
 } from './kernelApi'
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
-import { SupervisorPanels, supervisorAckedIds, supervisorPendingCount } from './Supervisor'
+import { SupervisorPanels } from './Supervisor'
 import { workspaceApi, type UserMetricsRow, type UserFact } from './workspaceApi'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
@@ -246,21 +246,17 @@ export default function Dashboard({ project, setProject }: Props) {
     setBusy(false)
   }, [window_.go, window_.ms, cached])
 
-  // Seed the supervisor badge once: the same accounting the queue renders —
-  // durable acks + legacy journal acks, reconciliation excluded, verdicts
-  // clustered into rows. Cheap enough for a tab strip.
+  // Seed the supervisor badge once: the queue's own pending count — the same
+  // truth the queue renders (docs/supervisor-model.md §7). The old event-scan
+  // badge read the oldest journal page and went phantom-zero the moment the
+  // verdicts outgrew it (the empty-tab incident's sibling).
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        const [verdictPage, ackPage, durable] = await Promise.all([
-          observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict', limit: 300 }),
-          observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 300 }),
-          workspaceApi.listSupervisorAcks().catch(() => ({ ids: [] as string[] })),
-        ])
+        const queue = await workspaceApi.listSupervisorQueue({ limit: 1 })
         if (cancelled) return
-        const ack = supervisorAckedIds(ackPage.events ?? [], durable.ids ?? [])
-        setSupervisorPending(supervisorPendingCount(verdictPage.events ?? [], ack))
+        setSupervisorPending(queue.pending)
       } catch { /* badge is best-effort */ }
     })()
     return () => { cancelled = true }

@@ -1160,6 +1160,65 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
   }
 }
 
+// SupervisorCase is one attention item: a supervisor verdict family about one
+// subject, folded across re-published verdicts (docs/supervisor-model.md §3).
+export interface SupervisorCase {
+  id: number
+  case_key: string
+  family: string
+  cause: string
+  subject: string
+  project: string
+  summary: string
+  recommendation: string
+  payload: Record<string, unknown>
+  status: 'open' | 'decided' | 'digest'
+  occurrences: number
+  first_seen: string
+  last_seen: string
+  last_event_id: string
+  decided_by?: string
+  decided_at?: string
+  decision?: string
+}
+
+export interface SupervisorQueue {
+  cases: SupervisorCase[]
+  count: number
+  pending: number
+  facets: { families: Record<string, number>; projects: Record<string, number>; family_last_seen: Record<string, string> }
+}
+
+// SreRollup is one bucket of the operational series (per project; Model '' =
+// the project aggregate). Version-level SLIs live in agent-evolution's
+// workspace_agent_version_metrics — this is system health over time.
+export interface SreRollup {
+  bucket_start: string
+  granularity: 'hour' | 'day'
+  project: string
+  model: string
+  runs_started: number
+  runs_completed: number
+  runs_failed: number
+  runs_cancelled: number
+  runs_running: number
+  model_calls: number
+  model_failures: number
+  model_retries: number
+  model_nudged: number
+  latency_p50_ms: number
+  latency_p95_ms: number
+  total_tokens: number
+  cached_tokens: number
+  approvals_requested: number
+  approvals_granted: number
+  approvals_auto: number
+  ask_human_answered: number
+  hab_seconds: number
+  hwt_seconds: number
+  flow_efficiency: number
+}
+
 export const workspaceApi = {
   // Projects
   listProjects: () => request<{ projects: Project[] }>('/v1/workspace/projects'),
@@ -1287,6 +1346,35 @@ export const workspaceApi = {
     request<{ ids: string[] }>('/v1/workspace/supervisor/acks'),
   ackSupervisorVerdicts: (verdictEventIDs: string[]) =>
     request<{ acknowledged: string[] }>('/v1/workspace/supervisor/acks', { method: 'POST', body: JSON.stringify({ verdict_event_ids: verdictEventIDs }) }),
+  // The attention queue (docs/supervisor-model.md §3): cases server-side —
+  // stable pagination, facets and one badge truth. The journal outgrew the
+  // client-page windows (the empty-tab incident: the oldest 500 verdicts,
+  // all decided weeks ago), so the queue is a table, not an event scan.
+  listSupervisorQueue: (params?: { family?: string; project?: string; show_resolved?: boolean; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams()
+    if (params?.family) query.set('family', params.family)
+    if (params?.project) query.set('project', params.project)
+    if (params?.show_resolved) query.set('show_resolved', '1')
+    if (params?.limit) query.set('limit', String(params.limit))
+    if (params?.offset) query.set('offset', String(params.offset))
+    const qs = query.toString()
+    return request<SupervisorQueue>(`/v1/workspace/supervisor/queue${qs ? `?${qs}` : ''}`)
+  },
+  // Decide a case: an action (invalidate the losing knowledge, …) or a plain
+  // acknowledge. Decided cases never reopen — re-published verdicts only
+  // bump their occurrence counter.
+  decideSupervisorCase: (caseKey: string, decision: string, comment?: string) =>
+    request<SupervisorCase>('/v1/workspace/supervisor/queue/decide', { method: 'POST', body: JSON.stringify({ case_key: caseKey, decision, comment }) }),
+  // The operational agentSRE series (docs/supervisor-model.md §3): bucketed
+  // health per project/model for the Signals panel and trend display.
+  listSreRollup: (params?: { granularity?: 'hour' | 'day'; since?: string; project?: string; model?: string }) => {
+    const query = new URLSearchParams()
+    query.set('granularity', params?.granularity ?? 'hour')
+    if (params?.since) query.set('since', params.since)
+    if (params?.project) query.set('project', params.project)
+    if (params?.model) query.set('model', params.model)
+    return request<{ rollups: SreRollup[]; count: number }>(`/v1/workspace/sre/rollup?${query.toString()}`)
+  },
   // Hint tier effectiveness (docs/supervisor-model.md §6.6): helpful/harmful
   // rates per matcher tier — the semantic-vs-lexical A/B evidence.
   hintEffectiveness: (project?: string) => {

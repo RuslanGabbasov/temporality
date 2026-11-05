@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { Button, Tag } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { workspaceApi } from './workspaceApi'
+import { workspaceApi, type SupervisorQueue, type SreRollup } from './workspaceApi'
 import { useT } from './i18n'
 
 const navigate = (path: string) => { window.history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
@@ -67,6 +67,9 @@ interface ClusterRow {
   runs: { run: string; at: string }[]
   eventIDs: string[]
   lastAt: string
+  // The case lifecycle (queue rows): open rows demand attention, decided
+  // rows are closed by a human, digest rows are the noise-budget lane.
+  status: string
   // knowledge_conflict case payload: the pair to compare and act on.
   conflict?: { newID: string; newProp: string; newProject: string; oldID: string; oldProp: string; oldProject: string; score: number }
   // C4 skill draft (name/description/steps from the verdict).
@@ -108,6 +111,7 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
       runs: run ? [{ run, at: event.occurred_at }] : [],
       eventIDs: [event.event_id],
       lastAt: event.occurred_at,
+      status: 'open',
     }
     if (event.data?.case === 'knowledge_conflict' && event.data?.knowledge_id && event.data?.neighbor_id) {
       row.conflict = {
@@ -171,6 +175,59 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
   return [...clustered, ...loose.sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1))]
 }
 
+/** One queue case → the row the panels render (docs/supervisor-model.md §3
+ *  queue rewrite). The payload of the NEWEST verdict carries the
+ *  conflict/skill details the compare-and-act rows need; the occurrence
+ *  count is the case's republish budget. */
+function supervisorCaseRow(c: SupervisorQueue['cases'][number]): ClusterRow {
+  const payload = (c.payload ?? {}) as Record<string, unknown>
+  const row: ClusterRow = {
+    key: c.case_key,
+    cause: c.cause || 'unknown',
+    pattern: String(payload.pattern ?? ''),
+    caseID: c.family,
+    subject: c.subject,
+    summary: c.summary,
+    recommendation: c.recommendation,
+    project: c.project,
+    count: c.occurrences,
+    runs: [],
+    eventIDs: [c.last_event_id],
+    lastAt: c.last_seen,
+    status: c.status,
+  }
+  if (c.family === 'knowledge_conflict' && payload.knowledge_id && payload.neighbor_id) {
+    row.conflict = {
+      newID: String(payload.knowledge_id),
+      newProp: String(payload.new_proposition ?? ''),
+      newProject: String(payload.new_project ?? c.project ?? ''),
+      oldID: String(payload.neighbor_id),
+      oldProp: String(payload.old_proposition ?? ''),
+      oldProject: String(payload.old_project ?? c.project ?? ''),
+      score: Number(payload.score ?? 0),
+    }
+  }
+  if (c.family === 'knowledge_contradiction' && payload.subject && payload.contradicted_by) {
+    row.conflict = {
+      newID: String(payload.contradicted_by),
+      newProp: '',
+      newProject: c.project ?? '',
+      oldID: String(payload.subject),
+      oldProp: '',
+      oldProject: c.project ?? '',
+      score: 0,
+    }
+  }
+  if (c.family === 'skill_candidate' && payload.skill_name) {
+    row.skill = {
+      name: String(payload.skill_name),
+      description: String(payload.description ?? ''),
+      steps: Array.isArray(payload.steps) ? payload.steps.map(String) : [],
+    }
+  }
+  return row
+}
+
 // ── Shared queue accounting (the dashboard tab badge reads the same truth
 // ── the queue renders — divergent bookkeeping was the phantom-badge bug).
 
@@ -203,7 +260,9 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   const t = useT()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [verdicts, setVerdicts] = useState<ObservationEvent[]>([])
+  const [rows, setRows] = useState<ClusterRow[]>([])
+  const [facets, setFacets] = useState<SupervisorQueue['facets'] | null>(null)
+  const [sre, setSre] = useState<SreRollup[] | null>(null)
   const [insights, setInsights] = useState<ObservationEvent[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
   // Queue filters (docs/supervisor-model.md §7): case family, project and
@@ -242,23 +301,25 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     if (!silent) setLoading(true)
     setError('')
     try {
-      const [verdictPage, insightPage, ackPage, acksPage, settings, effect] = await Promise.all([
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict', limit: 500 }),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.insight', limit: 50 }),
+      const [queue, insightPage, ackPage, settings, effect] = await Promise.all([
+        // The queue is a table now (docs/supervisor-model.md §3): cases
+        // server-side with facets. The old journal page fetched the OLDEST
+        // 500 verdicts — every one of them decided weeks earlier — and the
+        // queue read «no problems» while fresh verdicts piled up beyond the
+        // window (the empty-tab incident).
+        workspaceApi.listSupervisorQueue({ show_resolved: true, limit: 200 }),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.insight', limit: 50, order: 'desc' }),
         // Legacy journal acks (pre-durable-state) still count: honour them so
         // nothing closed before the server-side set ever resurrects.
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
-        workspaceApi.listSupervisorAcks().catch(() => ({ ids: [] as string[] })),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
         workspaceApi.getSupervisorSettings().catch(() => null),
         observationApi.hintEffectiveness().catch(() => null),
       ])
-      // Reconciliation verdicts are the supervisor's ALREADY-APPLIED work —
-      // they render on the run (card + trace), never as queue rows: the
-      // removal of the wall threshold would otherwise flood this queue with
-      // one auto-closed row per run.
-      setVerdicts((verdictPage.events ?? []).filter((event) => event.data?.kind !== 'reconciliation'))
-      const acked = supervisorAckedIds(ackPage.events ?? [], acksPage.ids ?? [])
-      // MERGE, never replace: acknowledgements ride the async outbox (the POST
+      setRows((queue.cases ?? []).map(supervisorCaseRow))
+      setFacets(queue.facets ?? null)
+      setInsights((insightPage.events ?? []).filter((event) => event.data?.kind !== 'reconciliation'))
+      // The ack set now serves INSIGHTS only (cases carry their own status):
+      // MERGE, never replace — acknowledgements ride the async outbox (the POST
       // 200s before the journal has the event), so a fresh reload can be
       // missing the just-clicked ids. Replacing resurrected the row and made
       // dismiss take 2–3 clicks; an acknowledgement is irreversible, so the
@@ -266,7 +327,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       // always safe.
       setAcknowledged((prev) => {
         const next = new Set(prev)
-        for (const id of supervisorAckedIds(ackPage.events ?? [], acksPage.ids ?? [])) next.add(id)
+        for (const id of supervisorAckedIds(ackPage.events ?? [], [])) next.add(id)
         return next
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -280,6 +341,28 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // The operational agentSRE series (docs/supervisor-model.md §3): two
+  // 24-hour windows over the project aggregates — the Signals strip answers
+  // «что меняется» without opening a single run. Version-level SLIs live in
+  // the Evolution surface (agent-evolution v2) and are read there.
+  const loadSre = useCallback(async () => {
+    try {
+      const since = new Date(Date.now() - 48 * 3600 * 1000).toISOString()
+      const page = await workspaceApi.listSreRollup({ granularity: 'hour', since })
+      setSre(page.rollups ?? [])
+    } catch { /* signals are monitoring-only: the queue renders without them */ }
+  }, [])
+
+  useEffect(() => { void loadSre() }, [loadSre])
+
+  // Decide a case on the server and flip the row locally so the action closes
+  // it on the first click — the silent reload then reconciles with the server
+  // truth (cases never reopen on a re-published verdict, docs/supervisor-model.md §3).
+  const closeCase = async (row: ClusterRow, decision: string) => {
+    await workspaceApi.decideSupervisorCase(row.key, decision)
+    setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'decided' } : r)))
+  }
 
   // One-click resolutions for a knowledge_conflict verdict: invalidate the
   // losing knowledge through the knowledge API, then acknowledge the verdict
@@ -349,16 +432,9 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
           reason: t('supervisor.action_generalized_reason', { id }),
         })
       }
-      // The helper adds each id to the session ack-set optimistically: the
-      // acks ride the async outbox, so the reload below cannot see them yet —
-      // without the optimistic add the row resurrected and looked broken.
-      // One batch POST for the whole row, then the durable set is the truth.
-      await workspaceApi.ackSupervisorVerdicts(row.eventIDs)
-      setAcknowledged((prev) => {
-        const next = new Set(prev)
-        for (const eventID of row.eventIDs) next.add(eventID)
-        return next
-      })
+      // The case decides server-side and flips locally: the row closes on the
+      // first click and the silent reload reconciles with the server truth.
+      await closeCase(row, 'generalized')
       setGeneralize(null)
       await load(true)
     } catch (failure) {
@@ -380,7 +456,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   useEffect(() => {
     const missingIDs: string[] = []
     const seenIDs = new Set<string>()
-    for (const row of clusterVerdicts(verdicts)) {
+    for (const row of rows) {
       const cf = row.conflict
       if (!cf) continue
       for (const side of [
@@ -418,7 +494,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       setPropFallback(propFallbackRef.current)
     })()
     return () => { cancelled = true }
-  }, [verdicts])
+  }, [rows])
 
   const resolveConflict = async (row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'invalidate_both' | 'keep_both') => {
     const conflict = row.conflict!
@@ -442,15 +518,8 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
           })
         }
       }
-      // Same optimistic ack-set add: invalidate → acknowledge → refresh must
-      // hide the row on the first click, not after the next manual reload.
-      // One batch round-trip for the row's events, not one POST per id.
-      await workspaceApi.ackSupervisorVerdicts(row.eventIDs)
-      setAcknowledged((prev) => {
-        const next = new Set(prev)
-        for (const eventID of row.eventIDs) next.add(eventID)
-        return next
-      })
+      // Same first-click close: the case flips locally, the reload reconciles.
+      await closeCase(row, kind)
       await load(true)
     } catch (failure) {
       setError(message(failure))
@@ -459,11 +528,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     }
   }
 
-  const clusters = clusterVerdicts(verdicts)
+  const clusters = rows
   const projectOptions = [...new Set(clusters.map((row) => row.project).filter(Boolean))]
   const caseOptions = [...new Set(clusters.map((row) => row.caseID).filter(Boolean))]
-  const resolved = (row: ClusterRow) => row.eventIDs.every((id) => acknowledged.has(id))
-  const pendingCount = clusters.filter((row) => !resolved(row)).length
+  const resolved = (row: ClusterRow) => row.status !== 'open'
+  const pendingCount = clusters.filter((row) => row.status === 'open').length
 
   // The tab badge (§7): the administrator must see the queue depth before
   // opening the tab. The Dashboard renders the badge from this report.
@@ -529,26 +598,16 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     setError('')
     try {
       if (kind === 'acknowledge') {
-        const ids = selectedRows.flatMap((row) => row.eventIDs)
-        await workspaceApi.ackSupervisorVerdicts(ids)
-        setAcknowledged((prev) => {
-          const next = new Set(prev)
-          for (const id of ids) next.add(id)
-          return next
-        })
+        for (const row of selectedRows) {
+          await closeCaseQuiet(row, 'acknowledge')
+        }
         setSelected(new Set())
         await load(true)
         return
       }
       for (const row of selectedRows) {
         if (!row.conflict) {
-          const ids = row.eventIDs
-          await workspaceApi.ackSupervisorVerdicts(ids)
-          setAcknowledged((prev) => {
-            const next = new Set(prev)
-            for (const id of ids) next.add(id)
-            return next
-          })
+          await closeCaseQuiet(row, 'acknowledge')
           continue
         }
         await resolveConflictQuiet(row, kind)
@@ -584,7 +643,16 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
         } catch { /* one failure must not sink the batch; the reload shows survivors */ }
       }
     }
-    try { await workspaceApi.ackSupervisorVerdicts(row.eventIDs) } catch { /* best-effort */ }
+    try { await closeCaseQuiet(row, kind) } catch { /* best-effort */ }
+  }
+
+  /** closeCase without its per-row state churn — the bulk loop reloads once
+   *  at the end. */
+  async function closeCaseQuiet(row: ClusterRow, decision: string) {
+    try {
+      await workspaceApi.decideSupervisorCase(row.key, decision)
+      setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'decided' } : r)))
+    } catch { /* one failure must not sink the batch; the reload shows survivors */ }
   }
 
   return (
@@ -619,6 +687,53 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
               <span style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem' }}>{t('supervisor.tiers_empty') ?? 'No hint outcomes in the window yet.'}</span>
             )}
           </div>
+
+          {/* AgentSRE signals (§3): the ongoing operational series — two
+              24-hour windows over the project aggregates. Monitoring, not
+              evaluation: version SLIs live in the Evolution surface
+              (agent-evolution v2), this answers «что меняется в системе». */}
+          {sre && (() => {
+            const aggregate = sre.filter((r) => r.model === '')
+            const dayMs = 24 * 3600 * 1000
+            const sum = (list: SreRollup[]) => list.reduce((acc, r) => ({
+              runs: acc.runs + r.runs_started,
+              failed: acc.failed + r.runs_failed,
+              modelFailures: acc.modelFailures + r.model_failures,
+              retries: acc.retries + r.model_retries,
+              tokens: acc.tokens + r.total_tokens,
+            }), { runs: 0, failed: 0, modelFailures: 0, retries: 0, tokens: 0 })
+            const now = Date.now()
+            const recent = sum(aggregate.filter((r) => new Date(r.bucket_start).getTime() > now - dayMs))
+            const prior = sum(aggregate.filter((r) => { const at = new Date(r.bucket_start).getTime(); return at > now - 2 * dayMs && at <= now - dayMs }))
+            const delta = (cur: number, was: number) => {
+              if (was === 0 && cur === 0) return null
+              if (was === 0) return `↑ +${cur}`
+              const pct = Math.round(((cur - was) / was) * 100)
+              return `${pct > 0 ? '↑' : pct < 0 ? '↓' : '='} ${Math.abs(pct)}%`
+            }
+            const metric = (label: string, cur: number, was: number, badUp = true) => {
+              const d = delta(cur, was)
+              const tone = d && cur > was && badUp && cur > 0 ? 'var(--tm-amber)' : 'var(--tm-text-3)'
+              return (
+                <span key={label} style={{ whiteSpace: 'nowrap' }}>
+                  <span style={{ color: 'var(--tm-text-3)' }}>{label} </span>
+                  <strong>{cur.toLocaleString()}</strong>
+                  {d && <span style={{ color: tone, marginLeft: '0.25rem', fontSize: '0.7rem' }}>{d}</span>}
+                </span>
+              )
+            }
+            return (
+              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.4rem 0.75rem', fontSize: '0.78rem', marginBottom: '1rem', display: 'flex', gap: '0.75rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600 }}>{t('supervisor.sre_title') ?? 'System signals'}</span>
+                {metric(t('supervisor.sre_runs') ?? 'runs', recent.runs, prior.runs, false)}
+                {metric(t('supervisor.sre_failed') ?? 'failed', recent.failed, prior.failed)}
+                {metric(t('supervisor.sre_model_failures') ?? 'model failures', recent.modelFailures, prior.modelFailures)}
+                {metric(t('supervisor.sre_retries') ?? 'retries', recent.retries, prior.retries)}
+                {metric(t('supervisor.sre_tokens') ?? 'tokens', recent.tokens, prior.tokens, false)}
+                <span style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem' }}>{t('supervisor.sre_vs_prev') ?? 'vs previous 24h'}</span>
+              </div>
+            )
+          })()}
 
           {/* Wave A3: health anomaly explanations, newest first. One row per
               metric — the pass re-publishes the same anomaly each cycle, so
@@ -737,6 +852,22 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                 {t('supervisor.show_resolved') ?? 'Show resolved'}
               </label>
             </div>
+            {/* A silent generator is itself a signal: the queue says which
+                case family stopped publishing («skill_candidate молчит с …»). */}
+            {facets && (() => {
+              const stale = Object.entries(facets.family_last_seen ?? {})
+                .filter(([, at]) => Date.now() - new Date(at).getTime() > 3 * 24 * 3600 * 1000)
+              if (stale.length === 0) return null
+              return (
+                <div style={{ fontSize: '0.72rem', color: 'var(--tm-amber)', marginBottom: '0.4rem' }}>
+                  {stale.map(([family, at]) => (
+                    <span key={family} style={{ marginRight: '0.75rem' }}>
+                      {t('supervisor.family_silent', { family: t(`supervisor.case_${family}`) ?? family, date: new Date(at).toLocaleDateString() }) ?? `${family}: silent since ${new Date(at).toLocaleDateString()}`}
+                    </span>
+                  ))}
+                </div>
+              )
+            })()}
             {visibleClusters.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.4rem', fontSize: '0.74rem' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', color: 'var(--tm-text-3)' }}>
@@ -809,6 +940,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                         {row.project && <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{row.project}</span>}
                         {row.count > 1 && <Tag type="cool-gray" size="sm">×{row.count}</Tag>}
                         {isResolved && <Tag type="green" size="sm">{t('supervisor.resolved') ?? 'resolved'}</Tag>}
+                        {row.status === 'digest' && <Tag type="cool-gray" size="sm" title={t('supervisor.digest_hint') ?? undefined}>{t('supervisor.status_digest') ?? 'digest'}</Tag>}
                         <span style={{ marginLeft: 'auto', fontSize: '0.68rem', color: 'var(--tm-text-3)', flexShrink: 0 }}>{new Date(row.lastAt).toLocaleString()}</span>
                       </div>
                       <div style={{ marginTop: '0.3rem', lineHeight: 1.5 }}>{row.summary}</div>

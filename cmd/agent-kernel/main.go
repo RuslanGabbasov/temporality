@@ -7941,6 +7941,7 @@ func main() {
 	// Supervisor settings (docs/supervisor-model.md): judge/vision/embedding
 	// models and the human-attention coefficients.
 	RegisterSupervisorRoutes(mux, gate, ws, activities)
+	RegisterSupervisorQueueRoutes(ctx, mux, ws, gate, observationURL, journalToken, log)
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()
