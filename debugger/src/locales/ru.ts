@@ -472,7 +472,6 @@ export const ru: Record<string, string> = {
     'chat.agent': 'Агент',
     'chat.no_agent': 'Нет агента',
     'chat.msgs': 'сообщ.',
-    'chat.live_run': 'бежит',
     'chat.live_run_title': 'В этом чате ещё работает ран',
     'chat.select_agent': 'Выберите агента',
     'chat.no_messages': 'Отправьте сообщение, чтобы начать разговор.',

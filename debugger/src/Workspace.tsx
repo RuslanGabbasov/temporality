@@ -1720,15 +1720,17 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                      badge rendered past the clip and was invisible for every
                      long title, i.e. for practically every chat. */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.875rem', fontWeight: 500 }}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</span>
+                    {/* Spinner only, BEFORE the title: a compact always-visible
+                     live marker — no text label eating the already narrow
+                     sidebar. The hover hint carries the meaning. */}
                     {hasLiveRun && (
                       <span
                         title={t('chat.live_run_title') ?? 'A run is still working in this chat'}
-                        style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.65rem', color: 'var(--tm-accent, #4589ff)', whiteSpace: 'nowrap' }}
-                      >
-                        <span className="spinner spinner-sm" />{t('chat.live_run') ?? 'running'}
-                      </span>
+                        className="spinner spinner-sm"
+                        style={{ flexShrink: 0 }}
+                      />
                     )}
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</span>
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.3rem', minWidth: 0 }}>
                     <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
