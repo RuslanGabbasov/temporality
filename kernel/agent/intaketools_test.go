@@ -295,3 +295,65 @@ func TestRunToolRefusesIntakeDialogToolsOutsideIntake(t *testing.T) {
 		t.Fatalf("refusal = %q", result.Content)
 	}
 }
+
+// Run history is NOT intake-dialog-only: run_search and trace_read read the
+// org-scoped run history through the run's own initiator and work in EVERY
+// run — the review-run trace lookup was their whole point. The intake-only
+// guard once lumped them with run_status/cancel_run (which really do resolve
+// the inbound message by the CURRENT run id) and refused them everywhere
+// else with «only works in the intake project's dialog».
+func TestRunHistoryToolsWorkOutsideIntake(t *testing.T) {
+	var gotActor string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/agent/run-search" {
+			http.NotFound(w, r)
+			return
+		}
+		gotActor = r.URL.Query().Get("actor")
+		_ = json.NewEncoder(w).Encode(map[string]any{"runs": []any{}, "count": 0, "visible_actors": 1})
+	}))
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		RunID: "review-1", Project: "omni", ActorID: "u1", Name: "run_search",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("run_search: %v", err)
+	}
+	if strings.Contains(result.Content, "only works in the intake") {
+		t.Fatalf("run_search must work outside intake, got %q", result.Content)
+	}
+	if gotActor != "u1" {
+		t.Fatalf("actor = %q, want the run initiator u1", gotActor)
+	}
+
+	// run_status stays intake-bound — outside intake there is no inbound
+	// message whose sender history it could list.
+	result, err = activities.RunTool(context.Background(), ToolRequest{
+		RunID: "review-1", Project: "omni", ActorID: "u1", Name: "run_status",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("run_status: %v", err)
+	}
+	if !strings.Contains(result.Content, "only works in the intake") {
+		t.Fatalf("run_status must stay intake-only, got %q", result.Content)
+	}
+}
+
+// And the catalog agrees: a non-intake run sees the history tools and never
+// the inbound-message pair.
+func TestAdvertisedToolsIncludeRunHistoryOutsideIntake(t *testing.T) {
+	names := map[string]bool{}
+	for _, tool := range advertisedTools(&RunInput{RunID: "r", Project: "omni"}) {
+		names[tool.Name] = true
+	}
+	if !names["run_search"] || !names["trace_read"] {
+		t.Fatal("run_search/trace_read must be advertised outside intake")
+	}
+	if names["run_status"] || names["cancel_run"] {
+		t.Fatal("inbound-message tools must stay cut outside intake")
+	}
+}

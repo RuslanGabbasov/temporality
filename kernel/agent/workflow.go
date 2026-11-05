@@ -4106,10 +4106,15 @@ const IntakeProjectID = "intake"
 // inbound message (its sender, its routed runs) by the CURRENT run id, so in
 // any other run they are guaranteed failures (404 "no inbound message for
 // this run"). advertisedTools cuts them from every non-intake run.
+//
+// run_search and trace_read used to sit here too — wrong company: they read
+// the org-scoped run history through the run's own initiator and work in
+// EVERY run (the review-run trace lookup was their whole point). Kept out:
+// any dialog can now look up how an earlier run went.
 var intakeDialogTools = map[string]bool{
 	"search_projects": true, "search_org_units": true,
 	"start_task": true, "intake_decide": true,
-	"run_status": true, "cancel_run": true, "run_search": true, "trace_read": true,
+	"run_status": true, "cancel_run": true,
 }
 
 // tools the policy regime itself relies on. Consequential tools —
