@@ -5,4 +5,4 @@
 -- task id on the chat row to join it. Transcript-embedded ids are opaque to
 -- the server by design (docs/resilience-and-scale.md §4); the link is a
 -- first-class column instead.
-ALTER TABLE workspace_chat ADD COLUMN task_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspace_chat ADD COLUMN IF NOT EXISTS task_id TEXT NOT NULL DEFAULT '';

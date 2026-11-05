@@ -28,6 +28,27 @@ function message(error: unknown) { return error instanceof Error ? error.message
 // auto-discovered catalogs can be large and must not flood the grid.
 const MODELS_PREVIEW = 8
 
+// model_limits round-trip: per-model output caps ride the form as readable
+// "model=tokens" pairs (the KERNEL_RUN_QUOTAS idiom) — "mimo-v2.6-pro=32768".
+// Absent pairs fall back to the kernel default (TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS).
+function parseModelLimits(raw: string): Record<string, { max_output_tokens?: number }> | undefined {
+  const out: Record<string, { max_output_tokens?: number }> = {}
+  for (const pair of raw.split(',')) {
+    const [name, value] = pair.split('=').map((s) => s.trim())
+    const tokens = Number(value)
+    if (!name || !Number.isFinite(tokens) || tokens <= 0) continue
+    out[name] = { max_output_tokens: Math.round(tokens) }
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+function formatModelLimits(limits?: Record<string, { max_output_tokens?: number }>): string {
+  return Object.entries(limits ?? {})
+    .filter(([, v]) => (v?.max_output_tokens ?? 0) > 0)
+    .map(([name, v]) => `${name}=${v.max_output_tokens}`)
+    .join(', ')
+}
+
 export default function Providers() {
   const t = useT()
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
@@ -38,6 +59,10 @@ export default function Providers() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Provider | null>(null)
   const [form, setForm] = useState<Partial<Provider>>({})
+  // model_limits live in the input as readable "model=tokens" pairs (the
+  // KERNEL_RUN_QUOTAS idiom) — kept as raw text so typing stays smooth and
+  // parsed into the payload on save.
+  const [limitsText, setLimitsText] = useState('')
   const [filter, setFilter] = useState('')
   // Secrets list for the api_key_ref picker: a provider credential is a
   // secret://name reference first, an env name or literal second.
@@ -64,6 +89,7 @@ export default function Providers() {
   const startCreate = () => {
     setEditing(null)
     setForm({ name: '', base_url: '', api_key_ref: '', models: [] })
+    setLimitsText('')
     setFetchNote('')
     loadSecretOptions()
     setShowForm(true)
@@ -72,6 +98,7 @@ export default function Providers() {
   const startEdit = (p: Provider) => {
     setEditing(p)
     setForm({ ...p })
+    setLimitsText(formatModelLimits(p.model_limits))
     setFetchNote('')
     loadSecretOptions()
     setShowForm(true)
@@ -86,16 +113,17 @@ export default function Providers() {
   const save = async () => {
     if (!form.name?.trim() || !form.base_url?.trim()) return
     setLoading(true); setError('')
+    const payload: Partial<Provider> = { ...form, model_limits: parseModelLimits(limitsText) }
     try {
       if (editing) {
-        await workspaceApi.updateProvider(editing.id, form)
+        await workspaceApi.updateProvider(editing.id, payload)
         // PUT payloads ignore org bindings: re-scoping goes through the admin
         // binding endpoint (docs/org-structure.md §39).
         if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
           await workspaceApi.setResourceBinding('provider', editing.id, form.org_unit_id ?? '')
         }
       } else {
-        await workspaceApi.createProvider(form as Provider & { name: string; base_url: string })
+        await workspaceApi.createProvider(payload as Provider & { name: string; base_url: string })
       }
       setShowForm(false); setEditing(null)
       void load()
@@ -335,6 +363,8 @@ export default function Providers() {
               <div>
                 <TextInput id="prov-models" labelText={t('providers.models_label') ?? 'Models (comma-separated)'} value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro"
                   helperText={t('providers.models_helper') ?? 'Leave empty to auto-discover from the provider'} />
+                <TextInput id="prov-model-limits" labelText={t('providers.model_limits_label') ?? 'Output caps (model=tokens, comma-separated)'} value={limitsText} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLimitsText(e.target.value)} placeholder="mimo-v2.6-pro=32768"
+                  helperText={t('providers.model_limits_helper') ?? 'Optional per-model generation cap; empty falls back to the kernel default'} />
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '-0.5rem' }}>
                   <Button size="sm" kind="secondary" renderIcon={Renew} disabled={fetching || !form.base_url?.trim()} onClick={() => void discoverModels()}>
                     {fetching ? (t('providers.fetching_models') ?? 'Discovering…') : (t('providers.fetch_models') ?? 'Discover models')}

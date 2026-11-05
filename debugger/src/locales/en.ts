@@ -1884,6 +1884,8 @@ export const en: Record<string, string> = {
     'providers.key_helper': 'secret://name (recommended), an env var name, or the key itself',
     'providers.models_label': 'Models (comma-separated)',
     'providers.models_helper': 'Leave empty to discover the list from the provider automatically; a manual list pauses auto-sync until you clear it.',
+    'providers.model_limits_label': 'Output caps (model=tokens, comma-separated)',
+    'providers.model_limits_helper': 'Optional per-model generation cap, e.g. mimo-v2.6-pro=32768; empty falls back to the kernel default. Edit large documents by fragments, not by resending the whole body.',
     'providers.fetch_models': 'Discover models',
     'providers.fetching_models': 'Discovering…',
     'providers.check_and_fetch': 'Check key & fetch models',

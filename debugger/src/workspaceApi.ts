@@ -843,6 +843,10 @@ export interface Provider {
   api_key_ref: string
   models: string[]
   labels: Record<string, string>
+  /** optional per-model call caps (docs/agents.md §routing):
+   *  {"mimo-v2.6-pro": {"max_output_tokens": 32768}} — the kernel default
+   *  output ceiling is a conservative floor, a capable model carries its own */
+  model_limits?: Record<string, { max_output_tokens?: number }>
   org_unit_id?: string
   created_at: string
   updated_at: string
@@ -1387,7 +1391,7 @@ export const workspaceApi = {
   // Providers
   listProviders: () => request<{ providers: Provider[] }>('/v1/workspace/providers'),
   getProvider: (id: string) => request<Provider>(`/v1/workspace/providers/${id}`),
-  createProvider: (data: { id?: string; name: string; base_url: string; api_key_ref?: string; models?: string[]; org_unit_id?: string }) =>
+  createProvider: (data: { id?: string; name: string; base_url: string; api_key_ref?: string; models?: string[]; model_limits?: Record<string, { max_output_tokens?: number }>; org_unit_id?: string }) =>
     request<Provider>('/v1/workspace/providers', { method: 'POST', body: JSON.stringify(data) }),
   updateProvider: (id: string, data: Partial<Provider>) =>
     request<Provider>(`/v1/workspace/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

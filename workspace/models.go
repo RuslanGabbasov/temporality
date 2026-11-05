@@ -590,6 +590,14 @@ type EventConfig struct {
 	Prompt    string            `json:"prompt"`
 }
 
+// ModelLimit is the per-model call configuration a provider carries next to
+// its model list. MaxOutputTokens caps ONE generation for that model — the
+// kernel default (TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS, 16k) is a
+// conservative floor that a capable model must not inherit by accident.
+type ModelLimit struct {
+	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
+}
+
 // Provider is an OpenAI-compatible model endpoint (e.g. z.ai, xiaomi).
 type Provider struct {
 	ID        string `json:"id"`
@@ -602,6 +610,10 @@ type Provider struct {
 	Enabled bool              `json:"enabled"`
 	Models  []string          `json:"models,omitempty"` // model IDs discovered or listed
 	Labels  map[string]string `json:"labels,omitempty"`
+	// ModelLimits: optional per-model caps keyed by model id
+	// ({"mimo-v2.6-pro": {"max_output_tokens": 32768}}); absent = the kernel
+	// default (docs/agents.md §routing).
+	ModelLimits map[string]ModelLimit `json:"model_limits,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -829,13 +841,14 @@ type StartRunRequest struct {
 
 // CreateProviderRequest is the payload for creating a model provider.
 type CreateProviderRequest struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	BaseURL   string            `json:"base_url"`
-	APIKeyRef string            `json:"api_key_ref,omitempty"`
-	Models    []string          `json:"models,omitempty"`
-	Labels    map[string]string `json:"labels,omitempty"`
-	OrgUnitID string            `json:"org_unit_id,omitempty"`
+	ID          string                `json:"id"`
+	Name        string                `json:"name"`
+	BaseURL     string                `json:"base_url"`
+	APIKeyRef   string                `json:"api_key_ref,omitempty"`
+	Models      []string              `json:"models,omitempty"`
+	Labels      map[string]string     `json:"labels,omitempty"`
+	ModelLimits map[string]ModelLimit `json:"model_limits,omitempty"`
+	OrgUnitID   string                `json:"org_unit_id,omitempty"`
 }
 
 // CreateUserRequest is the payload for creating a user.

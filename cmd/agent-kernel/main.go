@@ -4227,7 +4227,7 @@ func main() {
 		if req.ID == "" {
 			req.ID = "prov-" + shortID()
 		}
-		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, OrgUnitID: req.OrgUnitID}
+		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits, OrgUnitID: req.OrgUnitID}
 		// An operator who typed a model list curated it: tag the row so the
 		// background loop never overwrites it. An empty list means "discover
 		// from the provider" — sync starts right after the row lands.
@@ -4271,7 +4271,7 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels}
+		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits}
 		// Editing config must not silently re-scope a provider: bindings change
 		// only through the admin binding endpoint.
 		if prev, err := ws.GetProvider(r.Context(), provider.ID); err == nil {
@@ -4379,6 +4379,12 @@ func main() {
 						return
 					}
 					payload := map[string]any{"provider_id": p.ID, "provider_name": p.Name, "base_url": p.BaseURL, "model": m}
+					// Per-model caps ride the routing answer (docs/agents.md §routing):
+					// the kernel default output ceiling is a conservative floor, a
+					// capable model carries its own.
+					if limit, ok := p.ModelLimits[m]; ok && limit.MaxOutputTokens > 0 {
+						payload["max_output_tokens"] = limit.MaxOutputTokens
+					}
 					// Plaintext credentials leave the process only for the kernel's
 					// service principal (the call_model hot path). Human callers get
 					// the routing answer with the reference, not the key — the same

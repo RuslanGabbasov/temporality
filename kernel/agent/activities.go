@@ -1914,6 +1914,18 @@ type modelConfigAnswer struct {
 	BaseURL      string  `json:"base_url"`
 	APIKey       *string `json:"api_key"`
 	Model        string  `json:"model"`
+	// MaxOutputTokens is the provider's per-model cap (docs/agents.md
+	// §routing); 0 = the env/hard default applies.
+	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
+}
+
+// applyModelOutputCap lets the per-model cap override the shared default:
+// the kernel floor (TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS, 16k) is
+// conservative on purpose, and a capable model carries its own ceiling.
+func applyModelOutputCap(config *llm.Config, answer modelConfigAnswer) {
+	if answer.MaxOutputTokens > 0 {
+		config.MaxOutputTokens = answer.MaxOutputTokens
+	}
 }
 
 // pinnedConfigFrom decodes the model-config answer into the pinned llm.Config,
@@ -1955,6 +1967,7 @@ func (a *Activities) pinnedConfigFrom(body string, status int, providerID, model
 		config.StreamFirstTokenTimeout = 2 * time.Minute
 		config.MaxOutputTokens = 16384
 	}
+	applyModelOutputCap(&config, answer)
 	return config, answer.ProviderName, nil
 }
 
@@ -2019,6 +2032,7 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 		config.StreamFirstTokenTimeout = 2 * time.Minute
 		config.MaxOutputTokens = 16384
 	}
+	applyModelOutputCap(&config, answer)
 	a.providerCachePut(key, config, answer.ProviderID, answer.ProviderName, true)
 	return config, answer.ProviderID, answer.ProviderName, true, nil
 }

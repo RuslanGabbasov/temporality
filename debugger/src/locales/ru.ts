@@ -1884,6 +1884,8 @@ export const ru: Record<string, string> = {
     'providers.key_helper': 'secret://имя (рекомендуется), имя переменной окружения или сам ключ',
     'providers.models_label': 'Модели (через запятую)',
     'providers.models_helper': 'Оставьте пустым — список загрузится с провайдера автоматически; ручной список приостанавливает автосинхронизацию, пока его не очистить.',
+    'providers.model_limits_label': 'Лимиты вывода (модель=токены, через запятую)',
+    'providers.model_limits_helper': 'Опциональный лимит генерации на модель, например mimo-v2.6-pro=32768; пусто — дефолт ядра. Большие документы правьте фрагментами, а не полным телом.',
     'providers.fetch_models': 'Загрузить модели',
     'providers.fetching_models': 'Загружаем…',
     'providers.check_and_fetch': 'Проверить ключ и загрузить модели',
