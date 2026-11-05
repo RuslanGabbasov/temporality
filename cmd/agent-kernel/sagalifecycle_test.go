@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/temporality-project/temporality/controlplane"
@@ -19,7 +23,7 @@ import (
 type fakeSagaJournal struct {
 	mu    sync.Mutex
 	url   string
-	pages map[string][]observation.Event // project → registered events
+	pages map[string][]observation.Event // project → registered/deleted events
 }
 
 func (f *fakeSagaJournal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -29,12 +33,20 @@ func (f *fakeSagaJournal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	events := f.pages[r.URL.Query().Get("project")]
-	if r.URL.Query().Get("type") != "saga.registered" {
-		events = nil
+	// The journal's query form: type= (single) or types= (any-of list).
+	wanted := map[string]bool{}
+	for _, part := range strings.Split(r.URL.Query().Get("type")+","+r.URL.Query().Get("types"), ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			wanted[part] = true
+		}
 	}
 	var matched []observation.Event
-	for _, ev := range events {
+	// Insertion order is the fake's journal order (chronological), matching
+	// the real store's occurred_at/received_at ordering.
+	for _, ev := range f.pages[r.URL.Query().Get("project")] {
+		if !wanted[ev.Type] {
+			continue
+		}
 		if id, _ := ev.Data["saga_id"].(string); id != "" {
 			matched = append(matched, ev)
 		}
@@ -49,8 +61,24 @@ func (f *fakeSagaJournal) register(project, sagaID, title string) {
 		f.pages = map[string][]observation.Event{}
 	}
 	f.pages[project] = append(f.pages[project], observation.Event{
-		Type: "saga.registered",
-		Data: map[string]any{"saga_id": sagaID, "title": title},
+		Type:       "saga.registered",
+		OccurredAt: time.Now().UTC(),
+		Data:       map[string]any{"saga_id": sagaID, "title": title},
+	})
+}
+
+// del records a saga.deleted tombstone — what the delete route's outbox emit
+// lands in the journal.
+func (f *fakeSagaJournal) del(project, sagaID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pages == nil {
+		f.pages = map[string][]observation.Event{}
+	}
+	f.pages[project] = append(f.pages[project], observation.Event{
+		Type:       "saga.deleted",
+		OccurredAt: time.Now().UTC(),
+		Data:       map[string]any{"saga_id": sagaID},
 	})
 }
 
@@ -67,7 +95,7 @@ func startFakeSagaJournal(t *testing.T) *fakeSagaJournal {
 
 // newSagaLifecycleServer mounts the saga router the way main wires it: real
 // RBAC gate, capture outbox and a fake journal behind its real HTTP shape.
-func newSagaLifecycleServer(t *testing.T, outbox *captureArtifactOutbox, journal *fakeSagaJournal) *httptest.Server {
+func newSagaLifecycleServer(t *testing.T, outbox sagaLifecycleOutbox, journal *fakeSagaJournal) *httptest.Server {
 	t.Helper()
 	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*\nadmintoken:admin:admin:*")
 	require.NoError(t, err)
@@ -223,4 +251,92 @@ func TestSagaRoutesRequireProject(t *testing.T) {
 	status, _ := sagaPost(t, server, "writertoken", "/v1/workspace/sagas", `{"title":"X"}`)
 	require.Equal(t, 400, status)
 	require.Zero(t, len(outbox.events))
+}
+
+// A deleted saga is gone: the tombstone retracts its registration in every
+// route's existence check (docs/sagas.md §8) — a second delete answers 404
+// instead of silently re-tombstoning, and nothing can bind to it again.
+func TestSagaDeleteTombstoneRetractsRegistration(t *testing.T) {
+	journal := startFakeSagaJournal(t)
+	journal.register("omni", "saga-x", "Empty effort")
+	outbox := &captureArtifactOutbox{}
+	server := newSagaLifecycleServer(t, outbox, journal)
+	defer server.Close()
+
+	status, body := sagaPost(t, server, "writertoken", "/v1/workspace/sagas/saga-x/delete?project=omni", `{}`)
+	require.Equal(t, 200, status, body)
+
+	// What the outbox emit lands in the journal:
+	journal.del("omni", "saga-x")
+
+	status, _ = sagaPost(t, server, "writertoken", "/v1/workspace/sagas/saga-x/delete?project=omni", `{}`)
+	require.Equal(t, 404, status, "a deleted saga must not validate as registered")
+	status, _ = sagaPost(t, server, "writertoken", "/v1/workspace/tasks/t9/saga?project=omni", `{"saga_id":"saga-x"}`)
+	require.Equal(t, 404, status, "a task must not bind to a deleted saga")
+}
+
+// A fresh saga.registered with the same id resurrects it cleanly: the delete
+// only carries the moment, the registration after it wins.
+func TestSagaReregisterAfterDeleteResurrects(t *testing.T) {
+	journal := startFakeSagaJournal(t)
+	journal.register("omni", "saga-x", "Empty effort")
+	journal.del("omni", "saga-x")
+	journal.register("omni", "saga-x", "Reborn")
+	outbox := &captureArtifactOutbox{}
+	server := newSagaLifecycleServer(t, outbox, journal)
+	defer server.Close()
+
+	status, body := sagaPost(t, server, "writertoken", "/v1/workspace/sagas/saga-x/delete?project=omni", `{}`)
+	require.Equal(t, 200, status, body)
+}
+
+// failingSagaOutbox simulates a durable outbox that cannot accept events.
+type failingSagaOutbox struct{}
+
+func (failingSagaOutbox) Enqueue(context.Context, observation.Event) error {
+	return errors.New("outbox down")
+}
+
+// The create→act window (docs/sagas.md §8): the create emits through the
+// durable outbox while the follow-up calls validate against the journal —
+// before the read-your-writes grace, an immediate bind (the bulk-create
+// dialog binds every task right after the create returned) 404'd «saga is
+// not registered» while the registration was merely in flight. The grace
+// covers the just-created saga only; a ghost id still 404s.
+func TestSagaCreateGraceCoversImmediateFollowUps(t *testing.T) {
+	outbox := &captureArtifactOutbox{}
+	journal := startFakeSagaJournal(t) // deliberately empty: the outbox has not drained
+	server := newSagaLifecycleServer(t, outbox, journal)
+	defer server.Close()
+
+	status, body := sagaPost(t, server, "writertoken", "/v1/workspace/sagas?project=p",
+		`{"title":"Смета на разработку","task_id":"T42"}`)
+	require.Equal(t, 201, status, body)
+	var created struct {
+		SagaID string `json:"saga_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &created))
+	require.NotEmpty(t, created.SagaID)
+
+	// Immediately bind ANOTHER task to the just-created saga: the journal
+	// still has no saga.registered for it.
+	status, body = sagaPost(t, server, "writertoken", "/v1/workspace/tasks/T43/saga?project=p",
+		fmt.Sprintf(`{"saga_id":%q}`, created.SagaID))
+	require.Equal(t, 200, status, body)
+
+	// The grace is not a bypass: a saga this kernel never created is still
+	// unknown.
+	status, _ = sagaPost(t, server, "writertoken", "/v1/workspace/tasks/T44/saga?project=p", `{"saga_id":"saga-ghost-000000"}`)
+	require.Equal(t, 404, status)
+}
+
+// A saga whose registration event cannot be recorded does NOT exist — the
+// handler answers 502 instead of claiming creation (the outbox is the only
+// state: a 201 here would be a saga no projection ever sees).
+func TestSagaCreateFailsWhenTheEventCannotBeRecorded(t *testing.T) {
+	server := newSagaLifecycleServer(t, failingSagaOutbox{}, startFakeSagaJournal(t))
+	defer server.Close()
+
+	status, body := sagaPost(t, server, "writertoken", "/v1/workspace/sagas?project=p", `{"title":"Смета"}`)
+	require.Equal(t, 502, status, body)
 }

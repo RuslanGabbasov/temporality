@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
@@ -37,13 +37,14 @@ type sagaLifecycleOutbox interface {
 	Enqueue(context.Context, observation.Event) error
 }
 
-// emitSagaLifecycleEvent journals one manual saga mutation, best-effort: the
-// projection derives from all saga.* events, so a lost event degrades the UI
-// hint but never corrupts state. Context mirrors the agent tools (project and
-// task set, human actor) so project-filtered journal queries find the event.
-func emitSagaLifecycleEvent(ctx context.Context, events sagaLifecycleOutbox, eventType, sagaID, project, taskID, actor string, data map[string]any) {
+// emitSagaLifecycleEvent journals one manual saga mutation through the
+// durable outbox. The error is returned, not swallowed: sagas are
+// event-sourced — the event IS the state, so a lost saga.registered is a
+// saga that never existed and a lost saga.attached is a bind that never
+// happened. The handlers answer 502 rather than claim success.
+func emitSagaLifecycleEvent(ctx context.Context, events sagaLifecycleOutbox, eventType, sagaID, project, taskID, actor string, data map[string]any) error {
 	if events == nil {
-		return
+		return errors.New("saga events outbox is not configured")
 	}
 	if actor == "" {
 		actor = "workspace"
@@ -61,13 +62,17 @@ func emitSagaLifecycleEvent(ctx context.Context, events sagaLifecycleOutbox, eve
 		Data: data,
 	}
 	if err := events.Enqueue(ctx, item); err != nil {
-		slog.Warn("emit saga lifecycle event", "saga", sagaID, "type", eventType, "error", err)
+		return fmt.Errorf("record %s: %w", eventType, err)
 	}
+	return nil
 }
 
-// sagaJournalPage fetches one page of a single-type journal query.
-func sagaJournalPage(ctx context.Context, journalURL, token, project, eventType, cursor string) ([]observation.Event, string, error) {
-	path := fmt.Sprintf("%s/v1/observations/events?project=%s&type=%s&limit=500", journalURL, url.QueryEscape(project), eventType)
+// sagaJournalPage fetches one page of a journal query. eventType accepts the
+// journal's any-of form ("a,b") so one walk sees interleaved lifecycle events
+// in the journal's own order — the only honest tie-break for same-timestamp
+// events (occurred_at, received_at, …).
+func sagaJournalPage(ctx context.Context, journalURL, token, project, eventTypes, cursor string) ([]observation.Event, string, error) {
+	path := fmt.Sprintf("%s/v1/observations/events?project=%s&types=%s&limit=500", journalURL, url.QueryEscape(project), url.QueryEscape(eventTypes))
 	if cursor != "" {
 		path += "&cursor=" + url.QueryEscape(cursor)
 	}
@@ -88,7 +93,7 @@ func sagaJournalPage(ctx context.Context, journalURL, token, project, eventType,
 		return nil, "", err
 	}
 	if response.StatusCode != 200 {
-		return nil, "", fmt.Errorf("journal query for %s: %s", eventType, strings.TrimSpace(string(body)))
+		return nil, "", fmt.Errorf("journal query for %s: %s", eventTypes, strings.TrimSpace(string(body)))
 	}
 	var page struct {
 		Events     []observation.Event `json:"events"`
@@ -100,27 +105,64 @@ func sagaJournalPage(ctx context.Context, journalURL, token, project, eventType,
 	return page.Events, page.NextCursor, nil
 }
 
-// sagaRegisteredIDs pages through the project's saga.registered events and
-// returns the set of known saga ids. Registration alone is the existence
-// proof: no other event type creates a saga.
+// sagaCreateGrace is the read-your-writes window (docs/sagas.md §8): create
+// emits through the durable outbox while follow-up calls validate against the
+// journal, so an immediate bind (the bulk-create dialog binds every task right
+// after create returned) used to 404 «saga is not registered» while the
+// registration was merely in flight. A just-created saga validates for the
+// window; a delete clears the entry — the grace never resurrects a deleted
+// saga, and a ghost id still 404s. Package state is correct here: one kernel
+// answers these routes, and a restart empties the window harmlessly (the
+// outbox has drained meanwhile).
+var sagaCreateGrace sync.Map // saga id → created-at time.Time
+
+const sagaCreateGraceWindow = 30 * time.Second
+
+// sagaRegisteredIDs walks the project's saga lifecycle events in journal
+// order and returns the set of currently known saga ids. Deletion is a
+// tombstone, not a fact eraser: saga.deleted removes the id, a later
+// saga.registered with the same id resurrects it (docs/sagas.md §8) — the
+// same fold the cost projection performs, so route validation and the UI
+// list can never disagree about what exists.
 func sagaRegisteredIDs(ctx context.Context, journalURL, token, project string) (map[string]bool, error) {
 	ids := map[string]bool{}
 	cursor := ""
 	for {
-		events, next, err := sagaJournalPage(ctx, journalURL, token, project, "saga.registered", cursor)
+		events, next, err := sagaJournalPage(ctx, journalURL, token, project, "saga.registered,saga.deleted", cursor)
 		if err != nil {
 			return nil, err
 		}
 		for _, ev := range events {
-			if id, _ := ev.Data["saga_id"].(string); id != "" {
-				ids[id] = true
+			id, _ := ev.Data["saga_id"].(string)
+			if id == "" {
+				continue
 			}
+			if ev.Type == "saga.deleted" {
+				delete(ids, id)
+				continue
+			}
+			ids[id] = true
 		}
 		if next == "" {
-			return ids, nil
+			break
 		}
 		cursor = next
 	}
+	// The read-your-writes window: sagas created through these routes in the
+	// last moments validate even though their registration has not drained
+	// into the journal yet.
+	sagaCreateGrace.Range(func(key, value any) bool {
+		at, _ := value.(time.Time)
+		if time.Since(at) > sagaCreateGraceWindow {
+			sagaCreateGrace.Delete(key)
+			return true
+		}
+		if id, ok := key.(string); ok {
+			ids[id] = true
+		}
+		return true
+	})
+	return ids, nil
 }
 
 type sagaCreateRequest struct {
@@ -190,7 +232,13 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 		if req.TaskID != "" {
 			data["task_id"] = req.TaskID
 		}
-		emitSagaLifecycleEvent(r.Context(), events, "saga.registered", sagaID, project, req.TaskID, actor, data)
+		if err := emitSagaLifecycleEvent(r.Context(), events, "saga.registered", sagaID, project, req.TaskID, actor, data); err != nil {
+			writeError(w, 502, fmt.Errorf("recording the saga failed: %w", err))
+			return
+		}
+		// Read-your-writes grace: follow-up calls validate against the journal,
+		// and the registration is still draining through the outbox.
+		sagaCreateGrace.Store(sagaID, time.Now().UTC())
 		writeJSON(w, 201, map[string]any{"saga_id": sagaID, "title": req.Title, "task_id": req.TaskID, "status": "registered"})
 	})
 
@@ -229,7 +277,10 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 		if req.Goal != "" {
 			data["goal"] = req.Goal
 		}
-		emitSagaLifecycleEvent(r.Context(), events, "saga.renamed", sagaID, project, "", requestUserID(r), data)
+		if err := emitSagaLifecycleEvent(r.Context(), events, "saga.renamed", sagaID, project, "", requestUserID(r), data); err != nil {
+			writeError(w, 502, fmt.Errorf("recording the rename failed: %w", err))
+			return
+		}
 		writeJSON(w, 200, map[string]any{"saga_id": sagaID, "title": req.Title, "goal": req.Goal, "status": "renamed"})
 	})
 
@@ -273,9 +324,12 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 			}
 			sources = append(sources, source)
 		}
-		emitSagaLifecycleEvent(r.Context(), events, "saga.merged", sagaID, project, "", requestUserID(r), map[string]any{
+		if err := emitSagaLifecycleEvent(r.Context(), events, "saga.merged", sagaID, project, "", requestUserID(r), map[string]any{
 			"saga_id": sagaID, "source_saga_ids": sources, "origin": "human-ui", "actor_id": requestUserID(r),
-		})
+		}); err != nil {
+			writeError(w, 502, fmt.Errorf("recording the merge failed: %w", err))
+			return
+		}
 		writeJSON(w, 200, map[string]any{"saga_id": sagaID, "merged_sources": sources, "status": "merged"})
 	})
 
@@ -301,9 +355,14 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 			writeError(w, 404, fmt.Errorf("saga %q is not registered in project %q", sagaID, project))
 			return
 		}
-		emitSagaLifecycleEvent(r.Context(), events, "saga.deleted", sagaID, project, "", requestUserID(r), map[string]any{
+		if err := emitSagaLifecycleEvent(r.Context(), events, "saga.deleted", sagaID, project, "", requestUserID(r), map[string]any{
 			"saga_id": sagaID, "origin": "human-ui", "actor_id": requestUserID(r),
-		})
+		}); err != nil {
+			writeError(w, 502, fmt.Errorf("recording the deletion failed: %w", err))
+			return
+		}
+		// The grace never resurrects a deleted saga.
+		sagaCreateGrace.Delete(sagaID)
 		writeJSON(w, 200, map[string]any{"saga_id": sagaID, "status": "deleted"})
 	})
 
@@ -322,9 +381,12 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 		taskID := r.PathValue("taskID")
 		sagaID := strings.TrimSpace(req.SagaID)
 		if sagaID == "" {
-			emitSagaLifecycleEvent(r.Context(), events, "saga.detached", taskID, project, taskID, requestUserID(r), map[string]any{
+			if err := emitSagaLifecycleEvent(r.Context(), events, "saga.detached", taskID, project, taskID, requestUserID(r), map[string]any{
 				"task_id": taskID, "origin": "human-ui", "actor_id": requestUserID(r),
-			})
+			}); err != nil {
+				writeError(w, 502, fmt.Errorf("recording the detach failed: %w", err))
+				return
+			}
 			writeJSON(w, 200, map[string]any{"task_id": taskID, "status": "detached"})
 			return
 		}
@@ -337,9 +399,12 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 			writeError(w, 404, fmt.Errorf("saga %q is not registered in project %q", sagaID, project))
 			return
 		}
-		emitSagaLifecycleEvent(r.Context(), events, "saga.attached", sagaID, project, taskID, requestUserID(r), map[string]any{
+		if err := emitSagaLifecycleEvent(r.Context(), events, "saga.attached", sagaID, project, taskID, requestUserID(r), map[string]any{
 			"saga_id": sagaID, "task_id": taskID, "origin": "human-ui", "actor_id": requestUserID(r),
-		})
+		}); err != nil {
+			writeError(w, 502, fmt.Errorf("recording the bind failed: %w", err))
+			return
+		}
 		writeJSON(w, 200, map[string]any{"task_id": taskID, "saga_id": sagaID, "status": "attached"})
 	})
 }
