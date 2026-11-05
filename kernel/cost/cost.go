@@ -438,7 +438,11 @@ func (a *CostAPI) ProjectBudgetHandler(w http.ResponseWriter, r *http.Request) {
 	events, err := a.queryEventsFiltered(r, project, "", "",
 		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
 		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted", "human.answered",
-		"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged")
+		// saga.deleted must be fetched, not just folded: the projection below
+		// knows how to forget a saga, but the handler never asked the journal
+		// for the deletions — deleted sagas stayed in the budget rollup and the
+		// UI list forever.
+		"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged", "saga.deleted")
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
