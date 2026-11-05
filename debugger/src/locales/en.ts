@@ -637,6 +637,7 @@ export const en: Record<string, string> = {
     'runs.decision_note': 'Decision note',
     'runs.human_question': 'Agent asks',
     'runs.asks_human': 'asks you',
+    'runs.attempt_title': 'Which attempt of the original task this run is',
     'runs.answer_label': 'Your answer',
     'runs.answer_placeholder': 'Free-form answer…',
     'runs.reconcile_title': 'Needs your verdict',

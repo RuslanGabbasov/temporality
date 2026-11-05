@@ -60,6 +60,33 @@ type runOutcome struct {
 	Error   string
 }
 
+// orphanSweepInterval is the periodic cycle of runOrphanSweepLoop. The
+// startup pass stays immediate; later passes only see runs whose journal
+// lost its terminal event AFTER boot (out-of-band terminates, wedged
+// kernels, journal outages), so the describe cost stays tiny in steady
+// state. The interval is the phantom-run detection window: how long a
+// killed run can keep ticking as «live» in the UI before the sweep closes
+// it with a derived terminal event.
+const orphanSweepInterval = 5 * time.Minute
+
+// runOrphanSweepLoop runs sweepOrphanedRuns at boot and then on a ticker.
+// Each pass is best-effort and idempotent: a run the journal already closed
+// is skipped, a live workflow is left alone, and only truly finished or
+// gone workflows get their derived terminal verdict.
+func runOrphanSweepLoop(ctx context.Context, store orphanStore, liveness clientSweeper, journalURL, token, sourceID string, log *slog.Logger) {
+	sweepOrphanedRuns(ctx, store, liveness, journalURL, token, sourceID, log)
+	ticker := time.NewTicker(orphanSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sweepOrphanedRuns(ctx, store, liveness, journalURL, token, sourceID, log)
+		}
+	}
+}
+
 // sweepOrphanedRuns repairs runs whose journal never recorded an outcome.
 // Best-effort end to end: a sweep error is logged and never blocks kernel
 // startup.

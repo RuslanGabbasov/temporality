@@ -637,6 +637,7 @@ export const ru: Record<string, string> = {
     'runs.decision_note': 'Примечание к решению',
     'runs.human_question': 'Агент спрашивает',
     'runs.asks_human': 'спрашивает вас',
+    'runs.attempt_title': 'Какая это по счёту попытка выполнения исходной задачи',
     'runs.answer_label': 'Ваш ответ',
     'runs.answer_placeholder': 'Свободный ответ…',
     'runs.reconcile_title': 'Требуют проверки',

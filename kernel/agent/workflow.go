@@ -526,6 +526,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if input.AgentID != "" {
 		started["agent_id"] = input.AgentID
 	}
+	// The attempt number of a turn-limit continuation chain (…-r2 is the
+	// second attempt): the runs list shows «× N» so a restart is recognizable
+	// at a glance instead of by id suffix archaeology.
+	if input.RestartAttempt > 0 {
+		started["restart_attempt"] = input.RestartAttempt
+	}
 	// The initiating request rides the start event: the run overview renders
 	// it, and without it the journal has no readable trace of what the run
 	// was asked to do (the task row holds the full prompt, but child runs of

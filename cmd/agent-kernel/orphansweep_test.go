@@ -221,3 +221,52 @@ func TestSweepOrphanedRunsNoCandidates(t *testing.T) {
 	require.Empty(t, store.updated)
 	require.Empty(t, liveness.running)
 }
+
+// The omni delegate/01 incident: a workflow TERMINATED out of band (no
+// deferred run.cancelled ever fires) leaves the journal frozen mid-model-call,
+// and every consumer keeps the run «live» with a phantom ticking «waiting for
+// first token». The periodic sweep must close it with a derived run.cancelled.
+func TestSweepOrphanedRunsClosesTerminatedWorkflow(t *testing.T) {
+	var mu sync.Mutex
+	var events []map[string]any
+	journal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Events []map[string]any `json:"events"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		mu.Lock()
+		events = append(events, payload.Events...)
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer journal.Close()
+
+	store := &sweepStore{
+		missing:  []workspace.RunRef{{RunID: "task/delegate/01", ProjectID: "omni"}},
+		terminal: map[string]string{},
+		sources:  map[string]string{"task/delegate/01": "kernel-source"},
+		updated:  map[string]string{},
+	}
+	liveness := &sweepLiveness{results: map[string]runOutcome{
+		// Temporal maps TERMINATED onto the sweep's cancelled status.
+		"task/delegate/01": {Found: true, Status: "cancelled"},
+	}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sweepOrphanedRuns(context.Background(), store, liveness, journal.URL, "token", "kernel-source", log)
+
+	require.Equal(t, map[string]string{"task/delegate/01": "cancelled"}, store.updated)
+	mu.Lock()
+	require.Len(t, events, 1)
+	require.Equal(t, "run.cancelled", events[0]["type"])
+	require.Equal(t, true, events[0]["data"].(map[string]any)["derived"])
+	mu.Unlock()
+
+	// Idempotency across the loop's cycles: once the journal knows the verdict,
+	// the next pass neither re-probes nor re-journals.
+	store.terminal["task/delegate/01"] = "cancelled"
+	sweepOrphanedRuns(context.Background(), store, liveness, journal.URL, "token", "kernel-source", log)
+	mu.Lock()
+	require.Len(t, events, 1)
+	mu.Unlock()
+}

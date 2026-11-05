@@ -1679,7 +1679,15 @@ func main() {
 	// a stack rebuild while runs are in flight can leave workspace_run rows
 	// "started" forever when the Temporal state did not survive. Async — the
 	// sweep never blocks request wiring; failures are logged, not fatal.
-	go sweepOrphanedRuns(ctx, ws, liveness, observationURL, journalToken, activities.SourceID, log)
+	// Periodic, not startup-only: a workflow terminated out-of-band (raw
+	// Temporal terminate, a wedged kernel, an operator tool that never
+	// journals) leaves the journal without a terminal event, and every
+	// consumer — the runs list, the chat stream, the dashboards — keeps the
+	// run "live" with a phantom ticking model call until the next kernel
+	// restart. A short cycle bounds that window to minutes (the incident:
+	// delegate/01 at omni, turn 99 «waiting for first token» for hours after
+	// the workflow was terminated).
+	go runOrphanSweepLoop(ctx, ws, liveness, observationURL, journalToken, activities.SourceID, log)
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		// Empty project = global listing constrained to the principal's visible

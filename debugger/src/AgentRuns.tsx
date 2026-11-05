@@ -210,6 +210,9 @@ interface RunRow {
   sourceId: string
   workflow?: string
   agentId?: string
+  /** Rerun attempt number (× N badge): turn-limit continuation `…-r2`,
+   * same-task delegation `…/delegate/02`, or run.started restart_attempt. */
+  attempt: number
   /** Project attribution of the run (docs/activity-scoping.md §4): global
    * listings span projects, so every row carries its own project — detail
    * calls (result, cost, nudge) must use it, not the header filter. */
@@ -217,6 +220,22 @@ interface RunRow {
   /** Who started the run: the event context actor (user id for API/chat
    * starts, trigger id for automated ones). */
   actor?: string
+}
+
+/** The attempt number of a rerun, for the «× N» badge. Turn-limit
+ * continuations run as `…-r2`, same-task delegations as `…/delegate/02`;
+ * newer run.started events also carry restart_attempt explicitly. 0 = the
+ * first attempt (no badge). Exported for tests. */
+export function runAttempt(event: ObservationEvent): number {
+  const explicit = event.data?.restart_attempt
+  if (typeof explicit === 'number' && explicit > 0) return explicit
+  if (typeof explicit === 'string' && Number(explicit) > 0) return Number(explicit)
+  const id = runID(event)
+  const restart = /-r(\d+)$/.exec(id)
+  if (restart) return Number(restart[1])
+  const delegate = /\/delegate\/(\d+)$/.exec(id)
+  if (delegate) return Number(delegate[1])
+  return 0
 }
 
 /** Build the run call tree: roots are runs without a known parent, children
@@ -256,6 +275,7 @@ function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStat
       sourceId: event.source.id,
       workflow: typeof event.data?.workflow === 'string' ? event.data.workflow : undefined,
       agentId: typeof event.data?.agent_id === 'string' && event.data.agent_id ? event.data.agent_id : undefined,
+      attempt: runAttempt(event),
       project: event.context?.project || undefined,
       actor: event.context?.actor?.id || undefined,
     })
@@ -1203,6 +1223,15 @@ export default function AgentRuns({ project }: { project: string }) {
                   <div style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {row.depth > 0 && <span style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}>↳</span>}
                     {label}
+                    {/* Rerun attempt of the same task (× 2, × 3 …): a restarted or
+                     * re-delegated run is indistinguishable by title — the badge
+                     * is the only at-a-glance marker of which attempt this is. */}
+                    {row.attempt > 1 && (
+                      <span
+                        title={t('runs.attempt_title') ?? 'Which attempt of the original task this run is'}
+                        style={{ marginLeft: '0.35rem', fontSize: '0.62rem', color: 'var(--tm-text-2)', border: '1px solid var(--tm-border)', borderRadius: '3px', padding: '0 0.25rem', verticalAlign: 'middle', whiteSpace: 'nowrap' }}
+                      >× {row.attempt}</span>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(row.agentId && agents.find((a) => a.id === row.agentId)?.name) || row.role || 'agent'} · {shortTime(row.at)}</span>

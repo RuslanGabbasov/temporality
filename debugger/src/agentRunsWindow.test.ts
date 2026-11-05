@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace } from './AgentRuns'
+import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace, runAttempt } from './AgentRuns'
+import type { ObservationEvent } from './observationApi'
+
+const startedAt = (run: string, data?: Record<string, unknown>): ObservationEvent =>
+  ({ type: 'run.started', occurred_at: '2026-11-05T06:21:10Z', source: { id: 's' }, context: { run }, data } as unknown as ObservationEvent)
+
+/** The «× N» rerun badge source: a restarted or re-delegated run must be
+ *  recognizable at a glance — by id suffix for history (…-r2, …/delegate/02)
+ *  and by the explicit restart_attempt newer kernels journal. */
+describe('runAttempt', () => {
+  it('reads the explicit restart_attempt when the kernel journaled it', () => {
+    expect(runAttempt(startedAt('task-20261105'))).toBe(0)
+    expect(runAttempt(startedAt('task-20261105-r2', { restart_attempt: 3 }))).toBe(3)
+  })
+
+  it('parses the attempt from continuation and delegation id suffixes (history)', () => {
+    expect(runAttempt(startedAt('opyat-…-045911-r1'))).toBe(1)
+    expect(runAttempt(startedAt('opyat-…-045911-r12'))).toBe(12)
+    expect(runAttempt(startedAt('opyat-…-045911/delegate/02'))).toBe(2)
+    expect(runAttempt(startedAt('plain-run-id'))).toBe(0)
+  })
+
+  it('never badges the first attempt or garbage', () => {
+    expect(runAttempt(startedAt('task/delegate/01'))).toBe(1)
+    expect(runAttempt(startedAt('model-r'))).toBe(0)
+    expect(runAttempt(startedAt('x/delegate/0'))).toBe(0)
+  })
+})
 
 /** NFR-5 (docs/trace-rework/01-spec §3E): the trace renders a bounded window
  *  of the newest rows (50–100), extended by explicit request only — a
