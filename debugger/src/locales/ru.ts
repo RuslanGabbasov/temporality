@@ -812,6 +812,7 @@ export const ru: Record<string, string> = {
     'runs.event.slot_mode_matched': 'подобран',
     'runs.event.plan': 'План',
     'runs.event.plan_started': 'План запущен',
+    'runs.event.plan_no_tasks': '(нет задач)',
     'runs.event.plan_completed': 'План завершён',
     'runs.event.plan_tasks': 'задач',
     'runs.event.plan_task_started': 'Задача плана запущена',

@@ -347,3 +347,42 @@ describe('tool result human form', () => {
     expect(details.result).not.toContain('\\"')
   })
 })
+
+/** A plan tool call renders as its DAG — one line per task with the agent,
+ *  dependencies and the prompt head — never as the raw tasks JSON blob. */
+describe('plan tool call details', () => {
+  const planArgs = JSON.stringify({
+    goal: 'penpot-mcp: честный статус подключения',
+    on_failure: 'continue',
+    parallel: true,
+    tasks: [
+      { id: 'dev-a', agent_id: 'developer', prompt: 'Ты — Developer. Закончи подключение', max_turns: 100 },
+      { id: 'qa-repro', agent_id: 'qa', prompt: 'Ты — QA. Задача: воспроизведи баг', depends_on: ['dev-a'], max_turns: 45 },
+      { id: 'review', agent_id: 'reviewer', prompt: 'Проверь результат', review_of: ['dev-a', 'qa-repro'] },
+    ],
+  })
+
+  it('details are per-task lines with agent, deps and review gate', () => {
+    const details = eventDetails(modelEvent('tool.started', { tool: 'plan', arguments: planArgs }) as never, t)
+    const keys = details.argumentLines.map((line) => line.key)
+    expect(keys).toContain('goal')
+    expect(keys).toEqual(expect.arrayContaining(['dev-a', 'qa-repro', 'review']))
+    const qa = details.argumentLines.find((line) => line.key === 'qa-repro')
+    expect(qa?.value).toContain('qa')
+    expect(qa?.value).toContain('⇐ dev-a')
+    const gate = details.argumentLines.find((line) => line.key === 'review')
+    expect(gate?.value).toContain('👁 dev-a, qa-repro')
+    // The knobs line carries the parallel declaration.
+    const knobs = details.argumentLines.find((line) => line.key === '')
+    expect(knobs?.value).toContain('parallel')
+    // No raw JSON wall of tasks anywhere.
+    expect(details.argumentLines.some((line) => line.value.includes('"agent_id"'))).toBe(false)
+  })
+
+  it('the timeline fact names the DAG shape and the goal', () => {
+    const row = timelineRow(modelEvent('tool.started', { tool: 'plan', arguments: planArgs }), RU, t)
+    expect(row.fact).toContain('3')
+    expect(row.fact).toContain('∥')
+    expect(row.fact).toContain('penpot-mcp')
+  })
+})

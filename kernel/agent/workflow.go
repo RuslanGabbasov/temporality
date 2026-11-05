@@ -1951,6 +1951,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// they are re-injected as one follow-up user message (append-only history:
 		// prompt-cache compatible, dedup replays already carry the blocks).
 		var turnImages []llm.ImageBlock
+		// argumentsPreview journals a tool call's arguments: plans get the
+		// structural preview (whole DAG, clipped prompts) — the trace renders
+		// them per task; everything else keeps the bounded generic compact.
+		argumentsPreview := func(name string, args map[string]any) string {
+			if name == "plan" {
+				return planArgsPreview(args)
+			}
+			return compactJSON(args, 500)
+		}
 		for _, call := range completion.ToolCalls {
 			operationID := fmt.Sprintf("%s/%s", frame, call.ID)
 			argumentsHash := operationArgumentsHash(call.Args)
@@ -1959,7 +1968,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// effect could land (effect=none); neighboring calls of this
 				// response survive instead of failing the whole completion.
 				argumentsHash = rawArgumentsHash(call.ArgsRaw)
-				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": compactJSON(call.Args, 500)}); err != nil {
+				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": argumentsPreview(call.Name, call.Args)}); err != nil {
 					return result, err
 				}
 				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "malformed_arguments", "effect": "none", "detail": call.ArgsError}); err != nil {
@@ -1970,7 +1979,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			callKey := dedupSignature(call.Name, call.Args) // legacy key format: call.Name + "\x00" + argumentsHash
 			if original, duplicate := executed[callKey]; duplicate {
-				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": compactJSON(call.Args, 500), "duplicate_of": original.operationID}); err != nil {
+				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": argumentsPreview(call.Name, call.Args), "duplicate_of": original.operationID}); err != nil {
 					return result, err
 				}
 				if original.pending != nil {
@@ -2007,7 +2016,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return nil
 				}
 				toolStarted = true
-				return emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": compactJSON(call.Args, 500)})
+				return emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": argumentsPreview(call.Name, call.Args)})
 			}
 			startMCP := func() error {
 				if !isMCP {
@@ -3548,6 +3557,54 @@ func compactJSON(v any, maxLen int) string {
 		}
 	}
 	return truncateJSON(b, maxLen)
+}
+
+// compactJSON bounds a JSON payload by shrinking its longest strings first
+// (structure survives, values ellipsize), falling back to a parse-preserving
+// truncation. Plans deserve better: their tasks array is a DAG the reader
+// ACTUALLY renders (the trace shows one line per task with its deps), and a
+// shrunken prompt here eats the task ids' readability budget for nothing —
+// planArgsPreview keeps every structural field verbatim and clips only the
+// prompts, so the preview stays a valid, complete-DAG document.
+func planArgsPreview(args map[string]any) string {
+	rawTasks, _ := args["tasks"].([]any)
+	tasks := make([]map[string]any, 0, len(rawTasks))
+	for _, item := range rawTasks {
+		task, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		entry := map[string]any{"id": task["id"], "agent_id": task["agent_id"]}
+		if deps, ok := task["depends_on"].([]any); ok && len(deps) > 0 {
+			entry["depends_on"] = deps
+		}
+		if review, ok := task["review_of"].([]any); ok && len(review) > 0 {
+			entry["review_of"] = review
+		}
+		if budget, ok := numericArg(task["max_turns"]); ok && budget > 0 {
+			entry["max_turns"] = int(budget)
+		}
+		if prompt, ok := task["prompt"].(string); ok && prompt != "" {
+			entry["prompt"] = compactContent(prompt, 100)
+		}
+		tasks = append(tasks, entry)
+	}
+	preview := map[string]any{"tasks": tasks}
+	if goal, ok := args["goal"].(string); ok && goal != "" {
+		preview["goal"] = compactContent(goal, 200)
+	}
+	for _, knob := range []string{"on_failure", "mode"} {
+		if v, ok := args[knob].(string); ok && v != "" {
+			preview[knob] = v
+		}
+	}
+	if v, ok := args["parallel"].(bool); ok && v {
+		preview["parallel"] = true
+	}
+	if v, ok := numericArg(args["max_rework"]); ok && v > 0 {
+		preview["max_rework"] = int(v)
+	}
+	return compactJSON(preview, 1600)
 }
 
 // compactJSONStringFloor is the shrink floor: strings at or below it keep

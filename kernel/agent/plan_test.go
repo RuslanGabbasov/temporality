@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -205,6 +206,63 @@ func TestValidatePlanSpecRejectsDependencyFreePlan(t *testing.T) {
 	})
 	if rejection != "" || !spec.Parallel {
 		t.Fatalf("parallel must parse: %q %+v", rejection, spec)
+	}
+}
+
+// planArgsPreview must journal a COMPLETE DAG: every task keeps id, agent,
+// deps and budget, prompts clip to a readable head — the generic 500-char
+// compact used to eat task fields mid-JSON ("…":"…" tasks), and the trace
+// rendered an unreadable wall instead of the plan.
+func TestPlanArgsPreviewKeepsWholeDAG(t *testing.T) {
+	args := map[string]any{
+		"goal":       "ship the feature",
+		"on_failure": "continue",
+		"parallel":   true,
+		"tasks": []any{
+			map[string]any{"id": "a", "agent_id": "coder", "prompt": strings.Repeat("длинный промпт ", 40), "max_turns": float64(100)},
+			map[string]any{"id": "b", "agent_id": "qa", "prompt": "short", "depends_on": []any{"a", "a"}},
+			map[string]any{"id": "gate", "agent_id": "reviewer", "prompt": "review", "review_of": []any{"b"}},
+		},
+	}
+	raw := planArgsPreview(args)
+	if len(raw) > 1600 {
+		t.Fatalf("preview must stay bounded, got %d", len(raw))
+	}
+	var parsed struct {
+		Goal     string `json:"goal"`
+		Parallel bool   `json:"parallel"`
+		Tasks    []struct {
+			ID        string   `json:"id"`
+			AgentID   string   `json:"agent_id"`
+			DependsOn []string `json:"depends_on"`
+			ReviewOf  []string `json:"review_of"`
+			MaxTurns  int      `json:"max_turns"`
+			Prompt    string   `json:"prompt"`
+		}
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		t.Fatalf("preview must be valid JSON, got %s: %s", err, raw[:200])
+	}
+	if parsed.Goal != "ship the feature" || !parsed.Parallel {
+		t.Fatalf("goal/parallel lost: %+v", parsed)
+	}
+	if len(parsed.Tasks) != 3 {
+		t.Fatalf("every task must survive, got %d", len(parsed.Tasks))
+	}
+	if parsed.Tasks[0].ID != "a" || parsed.Tasks[0].AgentID != "coder" || parsed.Tasks[0].MaxTurns != 100 {
+		t.Fatalf("task a mangled: %+v", parsed.Tasks[0])
+	}
+	if strings.Join(parsed.Tasks[1].DependsOn, ",") != "a,a" {
+		t.Fatalf("task b deps mangled: %+v", parsed.Tasks[1])
+	}
+	if strings.Join(parsed.Tasks[2].ReviewOf, ",") != "b" {
+		t.Fatalf("gate review_of mangled: %+v", parsed.Tasks[2])
+	}
+	if len(parsed.Tasks[0].Prompt) > 120 {
+		t.Fatalf("prompts must clip: %d", len(parsed.Tasks[0].Prompt))
+	}
+	if parsed.Tasks[1].Prompt != "short" {
+		t.Fatalf("short prompts must survive verbatim: %q", parsed.Tasks[1].Prompt)
 	}
 }
 

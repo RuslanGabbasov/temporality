@@ -812,6 +812,7 @@ export const en: Record<string, string> = {
     'runs.event.slot_mode_matched': 'matched',
     'runs.event.plan': 'Plan',
     'runs.event.plan_started': 'Plan started',
+    'runs.event.plan_no_tasks': '(no tasks)',
     'runs.event.plan_completed': 'Plan finished',
     'runs.event.plan_tasks': 'tasks',
     'runs.event.plan_task_started': 'Plan task started',

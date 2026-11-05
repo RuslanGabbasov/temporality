@@ -179,6 +179,13 @@ function toolFact(d: Record<string, unknown>): string {
       const gist = squash(args.prompt)
       return `→ ${String(args.agent_id)}${gist ? ` · ${gist}` : ''}`
     }
+    // plan: the shape of the DAG is the fact — 7 dependency-free tasks read
+    // very differently from a 7-deep chain, and the goal names the why.
+    if (Array.isArray(args.tasks)) {
+      const goal = squash(args.goal)
+      const fact = `${args.tasks.length} ${args.parallel ? '∥' : '→'}`
+      return goal ? `${fact} · ${goal}` : fact
+    }
   }
   return squash(typeof d.output === 'string' ? unwrapJsonString(d.output) : (d.output ?? d.path ?? d.query ?? d.title ?? d.tool))
 }
@@ -683,6 +690,40 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
     if (path) argumentLines.push({ key: 'path', value: path })
     const content = textOf(args.content ?? args.new_string ?? args.old_string)
     if (content) argumentLines.push({ key: 'content', value: content.slice(0, 400) + (content.length > 400 ? '…' : '') })
+  } else if (args && tool === 'plan') {
+    // A plan call is a DAG, not a JSON blob: the reader wants the goal, the
+    // policy knobs and — per line — which task runs on which agent, what it
+    // waits for and the first line of its instruction. The raw tasks array
+    // (the old render) was an unreadable wall of truncated prompts.
+    const goal = textOf(args.goal)
+    if (goal) argumentLines.push({ key: 'goal', value: goal.slice(0, 300) + (goal.length > 300 ? '…' : '') })
+    const knobs: string[] = []
+    if (args.parallel === true) knobs.push('parallel')
+    const onFailure = textOf(args.on_failure)
+    if (onFailure) knobs.push(`on_failure: ${onFailure}`)
+    const mode = textOf(args.mode)
+    if (mode) knobs.push(`mode: ${mode}`)
+    const rework = Number(args.max_rework)
+    if (Number.isFinite(rework) && rework > 0) knobs.push(`max_rework: ${rework}`)
+    if (knobs.length > 0) argumentLines.push({ key: '', value: knobs.join(' · ') })
+    const tasks = Array.isArray(args.tasks) ? (args.tasks as unknown[]) : []
+    tasks.forEach((raw, index) => {
+      const task = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+      const id = textOf(task.id) || `#${index + 1}`
+      const agent = textOf(task.agent_id) || '?'
+      const deps = Array.isArray(task.depends_on) ? (task.depends_on as unknown[]).map((x) => textOf(x)).filter(Boolean) : []
+      const review = Array.isArray(task.review_of) ? (task.review_of as unknown[]).map((x) => textOf(x)).filter(Boolean) : []
+      const arrows: string[] = []
+      if (deps.length > 0) arrows.push(`⇐ ${deps.join(', ')}`)
+      if (review.length > 0) arrows.push(`👁 ${review.join(', ')}`)
+      const budget = Number(task.max_turns)
+      if (Number.isFinite(budget) && budget > 0) arrows.push(`${budget}t`)
+      const head = [`${agent}${arrows.length > 0 ? ` (${arrows.join(' · ')})` : ''}`]
+      const prompt = squash(task.prompt)
+      if (prompt) head.push(prompt.slice(0, 160) + (prompt.length > 160 ? '…' : ''))
+      argumentLines.push({ key: id, value: head.join(' — ') })
+    })
+    if (tasks.length === 0) argumentLines.push({ key: 'tasks', value: t('runs.event.plan_no_tasks') ?? '(no tasks)' })
   } else if (args) {
     for (const [key, value] of Object.entries(args)) {
       const text = textOf(value)
