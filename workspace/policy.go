@@ -78,9 +78,29 @@ func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	p.MaxTokens = maxTokens
 	p.MaxBudgetUSD = budget
 	p.TimeoutSeconds = timeout
-	p.MaxConcurrentRuns = maxConcurrentRuns
-	p.MemoryBudgetMB = memoryBudgetMB
+	p.MaxConcurrentRuns = zeroAsUnset(maxConcurrentRuns)
+	p.MemoryBudgetMB = zeroAsUnset(memoryBudgetMB)
 	return p, nil
+}
+
+// zeroAsUnset / intOrZero translate the memory-quota columns at the storage
+// boundary (migration 0020_org_policy_memory_quota): the columns are NOT NULL
+// with 0 = «no restriction», while the model's «not set» is nil — and the
+// restrictive merge (minIntPtr) treats nil as unlimited. Writing nil straight
+// through violated the NOT NULL constraint the moment a human set 0 to lift
+// a restriction («null value in column memory_budget_mb»).
+func zeroAsUnset(v *int) *int {
+	if v != nil && *v <= 0 {
+		return nil
+	}
+	return v
+}
+
+func intOrZero(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 func (s *Store) CreatePolicy(ctx context.Context, p *Policy) error {
@@ -105,7 +125,7 @@ func (s *Store) CreatePolicy(ctx context.Context, p *Policy) error {
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
 		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
 		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode,
-		p.MaxConcurrentRuns, p.MemoryBudgetMB, p.Enabled, p.CreatedAt, p.UpdatedAt)
+		intOrZero(p.MaxConcurrentRuns), intOrZero(p.MemoryBudgetMB), p.Enabled, p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
@@ -160,7 +180,7 @@ func (s *Store) UpdatePolicy(ctx context.Context, p Policy) error {
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
 		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
 		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode,
-		p.MaxConcurrentRuns, p.MemoryBudgetMB, p.Enabled, p.UpdatedAt)
+		intOrZero(p.MaxConcurrentRuns), intOrZero(p.MemoryBudgetMB), p.Enabled, p.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -191,8 +211,9 @@ func normalizePolicyLists(p *Policy) {
 	if len(p.AllowedMCP) == 0 {
 		p.AllowedMCP = nil
 	}
-	// Memory quota caps: 0/negative reads back as NULL ("not set") — the same
-	// nil-vs-zero discipline as the lists above, §3.5 semantics.
+	// Memory quota caps: 0/negative normalizes to nil («not set») — the same
+	// nil-vs-zero discipline as the lists above, §3.5 semantics. The columns
+	// store 0 for that (NOT NULL), intOrZero/zeroAsUnset translate.
 	if p.MaxConcurrentRuns != nil && *p.MaxConcurrentRuns <= 0 {
 		p.MaxConcurrentRuns = nil
 	}

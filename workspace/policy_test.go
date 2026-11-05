@@ -128,3 +128,30 @@ func TestValidatePolicy(t *testing.T) {
 	require.NoError(t, ValidatePolicy(Policy{Name: "x", IntakeMode: "deny"}))
 	require.Error(t, ValidatePolicy(Policy{Name: "x", IntakeMode: "allow"}))
 }
+
+// The memory-quota columns are NOT NULL with 0 = «no restriction»
+// (migration 0020_org_policy_memory_quota), while the model's «not set» is
+// nil — the restrictive merge treats nil as unlimited. A human setting 0 to
+// lift a limit must round-trip: 0 normalizes to nil, nil writes back as the
+// stored 0. Passing nil straight to the column used to fail the save with
+// «null value in column \"memory_budget_mb\" … violates not-null constraint».
+func TestPolicyQuotaZeroRoundTrip(t *testing.T) {
+	zero := 0
+	p := Policy{Name: "base", MaxConcurrentRuns: &zero, MemoryBudgetMB: &zero}
+	normalizePolicyLists(&p)
+	require.Nil(t, p.MaxConcurrentRuns, "0 must read as «no restriction»")
+	require.Nil(t, p.MemoryBudgetMB)
+	require.Equal(t, 0, intOrZero(p.MaxConcurrentRuns), "unset must store as the 0 the NOT NULL column wants")
+	require.Equal(t, 0, intOrZero(p.MemoryBudgetMB))
+
+	// And the read boundary: stored zeros are unset again, real caps survive.
+	require.Nil(t, zeroAsUnset(&zero))
+	require.Equal(t, 5, *zeroAsUnset(intPtr(5)))
+
+	// Unset quotas never restrict the merge (nil = unlimited, not 0).
+	effective, _ := MergePolicies([]Policy{{Name: "a", Enabled: true, MemoryBudgetMB: intPtr(5000)}})
+	require.NotNil(t, effective.MemoryBudgetMB)
+	require.Equal(t, 5000, *effective.MemoryBudgetMB)
+	effective, _ = MergePolicies([]Policy{{Name: "a", Enabled: true, MemoryBudgetMB: intPtr(5000)}, {Name: "b", Enabled: true}})
+	require.Equal(t, 5000, *effective.MemoryBudgetMB, "an absent cap must not narrow the merge")
+}
