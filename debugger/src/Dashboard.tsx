@@ -22,6 +22,7 @@ import { formatDuration } from './eventSummary'
 import { runStatusLabel } from './eventPresentation'
 import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
 import { fmtBytes } from './format'
+import { fullDateTime } from './timeHint'
 import { cacheGet, cacheSet } from './tabCache'
 import { SkeletonBox, SkeletonTiles } from './Skeleton'
 
@@ -335,7 +336,7 @@ export default function Dashboard({ project, setProject }: Props) {
         <Heading style={{ fontSize: '1.1rem' }}>{t('dashboard.title') ?? 'System dashboard'}</Heading>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
           {updatedAt && (
-            <span title={updatedAt.toISOString()} style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
+            <span title={fullDateTime(updatedAt)} style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
               {t('dashboard.updated') ?? 'updated'} {updatedAt.toLocaleTimeString()}
             </span>
           )}

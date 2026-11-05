@@ -2689,6 +2689,14 @@ button.header-nav-link {
   border-width: 3px;
 }
 
+// Inline badge spinner (chat list «running» marker): small enough to sit on
+// the title line next to the text without inflating it.
+.spinner-sm {
+  width: 8px;
+  height: 8px;
+  border-width: 1.5px;
+}
+
 // Skeleton loaders: a quiet shimmer standing in for slow-loading content —
 // the layout keeps its shape while the data is in flight, so a surface never
 // collapses to an empty block or a premature «пусто» message. Deliberately

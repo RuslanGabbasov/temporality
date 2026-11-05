@@ -17,6 +17,7 @@ import { workspaceApi, type Artifact, type ArtifactInboxEntry, type ArtifactRevi
 import { whoami, canReconcile } from './kernelApi'
 import { useT } from './i18n'
 import { shortTime } from './eventSummary'
+import { TimeHint } from './timeHint'
 import ListFilter from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -587,7 +588,7 @@ export default function Artifacts() {
                   </div>
                   <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.2rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
                     {entry.review.mode === 'all' ? (t('artifacts.inbox_mode_all') ?? 'все рецензенты') : (t('artifacts.inbox_mode_any') ?? 'любой рецензент')}
-                    {' · '}{shortTime(entry.review.requested_at)}
+                    {' · '}<TimeHint value={entry.review.requested_at}>{shortTime(entry.review.requested_at)}</TimeHint>
                     {entry.origin_user ? ` · ${entry.origin_user}` : ''}
                   </div>
                   {entry.matched.length > 0 && (

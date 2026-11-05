@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState } from 'react'
 import type { ObservationEvent } from './observationApi'
 import { eventDetails, timelineRow, rawEnvelope } from './eventPresentation'
 import { shortTime } from './eventSummary'
+import { TimeHint } from './timeHint'
 import { collapseRouteMarkers, foldTrace, foldTraceTree, groupSummary, matchesChip, operationKey, type TraceChip, type TraceItem, type TurnNode } from './traceModel'
 import { filterTraceItems, isTraceStateEmpty, searchItems, type TraceUrlState } from './traceFilters'
 import TraceFiltersPanel, { consoleSearchIndex, type ConsoleStateLike } from './TraceFiltersPanel'
@@ -169,7 +170,7 @@ export function TraceEventRow({ event, locale, t, project, response, reasoning, 
         {row.duration && <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{row.duration}</span>}
         {statusDot && <span aria-hidden title={row.status} style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: statusDot, flexShrink: 0 }} />}
         {(
-          <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', flexShrink: 0, marginLeft: 'auto' }}>{shortTime(event.occurred_at)}</span>
+          <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', flexShrink: 0, marginLeft: 'auto' }}><TimeHint value={event.occurred_at}>{shortTime(event.occurred_at)}</TimeHint></span>
         )}
         {(
           <button
@@ -409,7 +410,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
               ? <span style={{ color: 'var(--tm-text-3)', flex: 1, minWidth: 0, fontSize: '0.72rem', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{preview}</span>
               : <span style={{ flex: 1 }} />}
             {duration && <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{duration}</span>}
-            <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', flexShrink: 0 }}>{shortTime(turn.started.occurred_at)}</span>
+            <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', flexShrink: 0 }}><TimeHint value={turn.started.occurred_at}>{shortTime(turn.started.occurred_at)}</TimeHint></span>
             {statusDot && <span aria-hidden title={running ? 'running' : turn.hasError ? 'error' : 'completed'} style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: statusDot, flexShrink: 0 }} />}
           </button>
           {expanded && (
@@ -504,7 +505,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
             {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <strong>{summary.label}</strong>
             <span style={{ color: 'var(--tm-text-3)', fontWeight: 400 }}>{summary.detail}</span>
-            {lastSeen && <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', marginLeft: 'auto', flexShrink: 0 }}>{lastSeen}</span>}
+            {lastSeen && <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', marginLeft: 'auto', flexShrink: 0 }}><TimeHint value={item.events[item.events.length - 1].occurred_at}>{lastSeen}</TimeHint></span>}
           </button>
           {open && (
             <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }} onClick={(e) => e.stopPropagation()}>

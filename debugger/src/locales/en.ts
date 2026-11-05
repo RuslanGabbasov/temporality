@@ -473,6 +473,8 @@ export const en: Record<string, string> = {
     'chat.agent': 'Agent',
     'chat.no_agent': 'No agent',
     'chat.msgs': 'msgs',
+    'chat.live_run': 'running',
+    'chat.live_run_title': 'A run is still working in this chat',
     'chat.no_messages': 'Send a message to start the conversation.',
     'chat.title': 'Temporality Agent',
     'chat.select_conversation': 'Select a conversation or start a new one.',

@@ -25,6 +25,7 @@ import AppModal from './Modal'
 import ProjectRequired from './ProjectRequired'
 import { useI18n, pluralT } from './i18n'
 import { pseudoToolLabel, formatDuration, friendlyRunFailure } from './eventSummary'
+import { TimeHint } from './timeHint'
 import { randomUUID } from './uuid'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -1648,7 +1649,17 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           {conversations.length > 0 && visibleConversations.length === 0 && (
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', padding: '1rem', textAlign: 'center' }}>{t('common.no_matches') ?? 'Nothing matches the filter'}</p>
           )}
-          {visibleConversations.map((conv) => (
+          {visibleConversations.map((conv) => {
+            // Last message time (creation time for an empty chat) — the same
+            // activity stamp the sidebar sorts by, so the user sees WHY a chat
+            // sits on top. Bare clock time + hover with the full date («today
+            // or yesterday?» is the question it answers).
+            const lastAt = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1].timestamp : conv.createdAt
+            const lastIso = lastAt instanceof Date ? lastAt.toISOString() : String(lastAt)
+            // A still-running run marks the chat even when it is not the active
+            // one — the badge is why the user would switch to it.
+            const hasLiveRun = conv.messages.some((m) => m.status === 'running')
+            return (
             <div
               key={conv.id}
               onClick={() => setActiveConvId(conv.id)}
@@ -1663,9 +1674,19 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {conv.title}
+                    {hasLiveRun && (
+                      <span
+                        title={t('chat.live_run_title') ?? 'A run is still working in this chat'}
+                        style={{ marginLeft: '0.35rem', fontSize: '0.65rem', color: 'var(--tm-accent, #4589ff)', whiteSpace: 'nowrap', verticalAlign: 'middle' }}
+                      >
+                        <span className="spinner spinner-sm" style={{ marginRight: '0.2rem', verticalAlign: '-1px' }} />{t('chat.live_run') ?? 'running'}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
-                    {conv.agentId ? agentName(conv.agentId) : (defaultAgentId ? agentName(defaultAgentId) : (t('chat.no_agent') ?? 'No agent'))}{defaultModel ? ` · ${defaultModel}` : ''} · {conv.messages.length} {t('chat.msgs') ?? 'msgs'}
+                    {conv.agentId ? agentName(conv.agentId) : (defaultAgentId ? agentName(defaultAgentId) : (t('chat.no_agent') ?? 'No agent'))}{defaultModel ? ` · ${defaultModel}` : ''} · {conv.messages.length} {t('chat.msgs') ?? 'msgs'} · <TimeHint value={lastIso}>{shortTime(lastIso)}</TimeHint>
                   </div>
                 </div>
                 <button
@@ -1676,7 +1697,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                 </button>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -1756,7 +1778,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                           <div key={addendumIndex} style={{ borderLeft: '2px solid var(--tm-border-strong)', paddingLeft: '0.6rem' }}>
                             <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                               <span>⤳</span>
-                              <span>{t('chat.addendum_at', { time: new Date(addendum.at).toLocaleTimeString() }) ?? `Amended at ${new Date(addendum.at).toLocaleTimeString()}`}</span>
+                              <span><TimeHint value={new Date(addendum.at).toISOString()}>{t('chat.addendum_at', { time: new Date(addendum.at).toLocaleTimeString() }) ?? `Amended at ${new Date(addendum.at).toLocaleTimeString()}`}</TimeHint></span>
                             </div>
                             {addendum.text && <div style={{ fontSize: '0.82rem', whiteSpace: 'pre-wrap' }}>{addendum.text}</div>}
                             {addendum.attachments && addendum.attachments.length > 0 && (

@@ -10,6 +10,7 @@ import AppModal from './Modal'
 import { ImproveAgentDialog } from './AgentProposalDialogs'
 import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
+import { TimeHint } from './timeHint'
 import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
 import { useRunTokenMetrics } from './tokenStream'
 import { operationKey, turnAlignedWindow } from './traceModel'
@@ -1234,7 +1235,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(row.agentId && agents.find((a) => a.id === row.agentId)?.name) || row.role || 'agent'} · {shortTime(row.at)}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(row.agentId && agents.find((a) => a.id === row.agentId)?.name) || row.role || 'agent'} · <TimeHint value={row.at}>{shortTime(row.at)}</TimeHint></span>
                     {/* Project attribution in the global listing
                         (docs/activity-scoping.md §7): shows which project the
                         run worked in without narrowing the list. */}
@@ -1571,7 +1572,7 @@ export default function AgentRuns({ project }: { project: string }) {
                                   <Tag type="gray" size="sm">× {ops.length}</Tag>
                                   <Tag type="red" size="sm">{REASON_KEYS[first.reason] ? t(REASON_KEYS[first.reason]) : first.reason}</Tag>
                                   {first.agent_id && <Tag type="cool-gray" size="sm">{userNameOf(first.agent_id)}</Tag>}
-                                  <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>{shortTime(times[0])} — {shortTime(times[times.length - 1])}</span>
+                                  <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}><TimeHint value={times[0]}>{shortTime(times[0])}</TimeHint> — <TimeHint value={times[times.length - 1]}>{shortTime(times[times.length - 1])}</TimeHint></span>
                                   <button
                                     onClick={() => setExpandedGroups((prev) => {
                                       const next = new Set(prev)
@@ -1601,7 +1602,7 @@ export default function AgentRuns({ project }: { project: string }) {
                               {turn && <Tag type="cool-gray" size="sm">{t('operations.turn_n', { turn })}</Tag>}
                               <Tag type="red" size="sm">{REASON_KEYS[op.reason] ? t(REASON_KEYS[op.reason]) : op.reason}</Tag>
                               {op.state === 'in_flight' && <Tag type="blue" size="sm">{t('runs.ops_in_flight')}</Tag>}
-                              <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', marginLeft: 'auto', flexShrink: 0 }}>{shortTime(op.started_at)}</span>
+                              <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', marginLeft: 'auto', flexShrink: 0 }}><TimeHint value={op.started_at}>{shortTime(op.started_at)}</TimeHint></span>
                             </div>
                             <p style={{ fontSize: '0.8rem', color: 'var(--tm-text)', margin: '0.5rem 0' }}>
                               {delegated ? t('operations.delegated_notice', { run: op.child_run_id ?? '' }) : t('operations.agent_notice')}

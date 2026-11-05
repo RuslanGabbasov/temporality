@@ -6,6 +6,7 @@ import { type Agent } from './workspaceApi'
 import Markdown from './Markdown'
 import { useT, useI18n } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines } from './eventSummary'
+import { TimeHint } from './timeHint'
 import { collapseRouteMarkers } from './traceModel'
 
 export interface DelegationNodeInfo {
@@ -259,7 +260,7 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
                       <span className="chat-delegation-trace-icon" style={{ color: line.color }}>{line.icon}</span>
                       <span className="chat-delegation-trace-label" style={{ color: line.color }}>{line.label}</span>
                       <span className="chat-delegation-trace-detail">{line.detail}</span>
-                      <span className="chat-delegation-trace-time">{shortTime(event.occurred_at)}</span>
+                      <span className="chat-delegation-trace-time"><TimeHint value={event.occurred_at}>{shortTime(event.occurred_at)}</TimeHint></span>
                     </div>
                   )
                 })}

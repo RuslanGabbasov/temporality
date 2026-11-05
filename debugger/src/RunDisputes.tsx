@@ -3,6 +3,7 @@ import { ChevronRight } from '@carbon/icons-react'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { detectMisleads, foldExperience, type MisleadSignal } from './experience'
 import { shortTime } from './eventSummary'
+import { TimeHint } from './timeHint'
 import { useT } from './i18n'
 
 /** Knowledge lifecycle event types that can start a row (proposed) or end it
@@ -117,7 +118,7 @@ export default function RunDisputes({ project, selected, rows, onOpenRun }: {
                   {t('timeline.mislead', { challenged: signal.challengedBy ?? '?', proposed: signal.proposedBy ?? '?' })}
                 </span>
                 <span className="run-disputes-item-kind">{t(`timeline.kind.${signal.kind}`) || signal.kind}</span>
-                <span className="run-disputes-item-time">{shortTime(signal.at)}</span>
+                <span className="run-disputes-item-time"><TimeHint value={signal.at}>{shortTime(signal.at)}</TimeHint></span>
                 {signal.run && (
                   <button
                     type="button"
