@@ -202,3 +202,108 @@ func TestArtifactToolsHaveNoApprove(t *testing.T) {
 		}
 	}
 }
+
+// patchServer plays the workspace API for patch-mode tests: GET serves the
+// current body, PUT captures the patched one.
+func patchServer(t *testing.T, current string, gotPut *map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact":  map[string]any{"id": "doc", "content": current, "version": 2},
+				"truncated": false,
+			})
+		case http.MethodPut:
+			if err := json.NewDecoder(r.Body).Decode(gotPut); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "doc", "status": "draft", "version": 2})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// Patch mode: the kernel edits the CURRENT body — the model sends one small
+// fragment. A full-body call at ~44 KB gets truncated by the model output
+// limit mid-arguments (finish: length) and the whole edit is lost; a fragment
+// never approaches that ceiling.
+func TestArtifactUpdatePatchReplacesExactFragment(t *testing.T) {
+	var gotPut map[string]any
+	server := patchServer(t, "# Док\n\nСтарый абзац.\n\nКонец.", &gotPut)
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		Project: "omni", RunID: "r1", ActorID: "u1", Name: "artifact_update",
+		Arguments: map[string]any{
+			"artifact_id": "doc",
+			"old_string":  "Старый абзац.", "new_string": "Новый абзац.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("artifact_update patch: %v", err)
+	}
+	if !strings.Contains(result.Content, `"version":2`) {
+		t.Fatalf("expected the updated version back, got %q", result.Content)
+	}
+	content, _ := gotPut["content"].(string)
+	if content != "# Док\n\nНовый абзац.\n\nКонец." {
+		t.Fatalf("patched body = %q", content)
+	}
+}
+
+func TestArtifactUpdatePatchAppendsAtTheEnd(t *testing.T) {
+	var gotPut map[string]any
+	server := patchServer(t, "# Док", &gotPut)
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	_, err := activities.RunTool(context.Background(), ToolRequest{
+		Project: "omni", RunID: "r1", ActorID: "u1", Name: "artifact_update",
+		Arguments: map[string]any{"artifact_id": "doc", "append": "\n## Новый раздел\nТекст."},
+	})
+	if err != nil {
+		t.Fatalf("artifact_update append: %v", err)
+	}
+	content, _ := gotPut["content"].(string)
+	if content != "# Док\n\n## Новый раздел\nТекст." {
+		t.Fatalf("appended body = %q", content)
+	}
+}
+
+// Ambiguous and missing fragments refuse instead of corrupting the body —
+// and a truncated (empty-args) call explains the output limit instead of a
+// bare «artifact_id is required».
+func TestArtifactUpdatePatchRefusesUnsafeEdits(t *testing.T) {
+	var gotPut map[string]any
+	server := patchServer(t, "Повтор. Повтор.", &gotPut)
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+	run := func(args map[string]any) string {
+		result, err := activities.RunTool(context.Background(), ToolRequest{
+			Project: "omni", RunID: "r1", ActorID: "u1", Name: "artifact_update", Arguments: args,
+		})
+		if err != nil {
+			t.Fatalf("artifact_update: %v", err)
+		}
+		return result.Content
+	}
+	if msg := run(map[string]any{"artifact_id": "doc", "old_string": "Повтор.", "new_string": "X"}); !strings.Contains(msg, "matches 2 places") {
+		t.Fatalf("ambiguous fragment must refuse, got %q", msg)
+	}
+	if msg := run(map[string]any{"artifact_id": "doc", "old_string": "нет такого", "new_string": "X"}); !strings.Contains(msg, "not found") {
+		t.Fatalf("missing fragment must refuse, got %q", msg)
+	}
+	if msg := run(map[string]any{"artifact_id": "doc", "append": "X", "old_string": "Повтор."}); !strings.Contains(msg, "not both") {
+		t.Fatalf("mixed patch modes must refuse, got %q", msg)
+	}
+	if msg := run(map[string]any{}); !strings.Contains(msg, "output limit") {
+		t.Fatalf("an empty (truncated) call must explain the output limit, got %q", msg)
+	}
+	if gotPut != nil {
+		t.Fatalf("a refused patch must not write, got %v", gotPut)
+	}
+}

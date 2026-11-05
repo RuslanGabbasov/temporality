@@ -23,6 +23,76 @@ func artifactStringArg(request ToolRequest, name string) string {
 	return strings.TrimSpace(value)
 }
 
+// artifactRawArg reads a string argument WITHOUT trimming: patch fragments
+// must match the stored body byte for byte (edit_file semantics) and a
+// document body keeps its own leading whitespace.
+func artifactRawArg(request ToolRequest, name string) string {
+	value, _ := request.Arguments[name].(string)
+	return value
+}
+
+// artifactPatchMaxBody is how much of the body one patch read fetches — a
+// safety rail, not a document limit: patching happens server-side in the
+// kernel, the model never re-sends a body it already wrote.
+const artifactPatchMaxBody = 4 << 20
+
+// fetchArtifactBody loads the artifact's CURRENT body in full for a patch.
+// A truncated read refuses: editing against a partial body would corrupt the
+// document (the whole point of the patch modes).
+func (a *Activities) fetchArtifactBody(ctx context.Context, artifactID string) (string, error) {
+	body, status, err := a.workspaceDo(ctx, http.MethodGet,
+		fmt.Sprintf("%s/v1/workspace/artifacts/%s?offset=0&limit=%d", a.WorkspaceURL, url.PathEscape(artifactID), artifactPatchMaxBody), nil)
+	if err != nil {
+		return "", err
+	}
+	if status == 404 {
+		return "", fmt.Errorf("artifact %q not found; use artifact_search to list ids", artifactID)
+	}
+	if status >= 400 {
+		return "", fmt.Errorf("artifact read failed (HTTP %d): %s", status, truncate(body, 400))
+	}
+	var page struct {
+		Artifact struct {
+			Content string `json:"content"`
+		} `json:"artifact"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		return "", err
+	}
+	if page.Truncated {
+		return "", fmt.Errorf("the body exceeds %d bytes and cannot be patched in one piece", artifactPatchMaxBody)
+	}
+	return page.Artifact.Content, nil
+}
+
+// artifactPatch applies one exact-fragment edit or an append to the current
+// body. The fragment must occur EXACTLY once (edit_file semantics): an
+// ambiguous edit is refused instead of silently corrupting one of the
+// matches.
+func artifactPatch(current, oldString, newString, appendText string) (string, error) {
+	switch {
+	case oldString != "" && appendText != "":
+		return "", fmt.Errorf("pass either old_string/new_string or append, not both")
+	case appendText != "":
+		if current != "" && !strings.HasSuffix(current, "\n") {
+			current += "\n"
+		}
+		return current + appendText, nil
+	case oldString != "":
+		count := strings.Count(current, oldString)
+		switch {
+		case count == 0:
+			return "", fmt.Errorf("old_string was not found in the body — re-read the current body with artifact_read and retry with the exact fragment")
+		case count > 1:
+			return "", fmt.Errorf("old_string matches %d places in the body — extend it with surrounding text until it is unique", count)
+		}
+		return strings.Replace(current, oldString, newString, 1), nil
+	default:
+		return "", fmt.Errorf("no patch given: pass old_string/new_string or append")
+	}
+}
+
 // handleArtifactCreate posts a new draft artifact. origin_run is pinned to the
 // calling run server-side: provenance is not model-controlled, and the run's
 // submit quota is enforced against it.
@@ -91,11 +161,37 @@ func (a *Activities) handleArtifactCreate(ctx context.Context, request ToolReque
 func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	artifactID := artifactStringArg(request, "artifact_id")
 	if artifactID == "" {
-		return ToolResult{Content: "error: artifact_id is required"}, nil
+		// The classic truncation trap: a call carrying a huge content body is
+		// cut by the model output limit mid-arguments and arrives EMPTY.
+		return ToolResult{Content: "error: artifact_id is required (if the call carried a large content body it was truncated by the model output limit — edit with old_string/new_string or append instead of resending the whole body)"}, nil
 	}
 	newVersion, _ := request.Arguments["new_version"].(bool)
+	oldString := artifactRawArg(request, "old_string")
+	newString := artifactRawArg(request, "new_string")
+	appendText := artifactRawArg(request, "append")
+	if newString != "" && oldString == "" {
+		return ToolResult{Content: "error: new_string requires old_string (the exact fragment to replace)"}, nil
+	}
+	content := artifactRawArg(request, "content")
+	if oldString != "" || appendText != "" {
+		// Patch mode: the kernel edits the CURRENT body — the model only ever
+		// sends the fragment, so a 100 KB document edits fine under the output
+		// limit that kills a full-body call.
+		if strings.TrimSpace(content) != "" {
+			return ToolResult{Content: "error: pass either a full content body or an old_string/append patch, not both"}, nil
+		}
+		current, err := a.fetchArtifactBody(ctx, artifactID)
+		if err != nil {
+			return ToolResult{Content: "error: " + err.Error()}, nil
+		}
+		patched, err := artifactPatch(current, oldString, newString, appendText)
+		if err != nil {
+			return ToolResult{Content: "error: " + err.Error()}, nil
+		}
+		content = patched
+	}
 	if newVersion {
-		return a.handleArtifactNewVersion(ctx, request, artifactID)
+		return a.handleArtifactNewVersion(ctx, request, artifactID, content)
 	}
 	payload := map[string]any{
 		"title":       artifactStringArg(request, "title"),
@@ -109,7 +205,7 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 	if saga := artifactStringArg(request, "saga_id"); saga != "" {
 		payload["saga_id"] = saga
 	}
-	if content := artifactStringArg(request, "content"); content != "" {
+	if strings.TrimSpace(content) != "" {
 		payload["content"] = content
 	}
 	if mimeType := artifactStringArg(request, "mime_type"); mimeType != "" {
@@ -144,13 +240,14 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 // handleArtifactNewVersion opens a new revision of an APPROVED artifact
 // (docs/artifact-lifecycle.md §5): the approved version stays live while the
 // revision is a draft; the model then submits it for re-approval with
-// artifact_submit. The approval decision remains human.
-func (a *Activities) handleArtifactNewVersion(ctx context.Context, request ToolRequest, artifactID string) (ToolResult, error) {
+// artifact_submit. The approval decision remains human. The body arrives
+// already patched (or as the raw content argument).
+func (a *Activities) handleArtifactNewVersion(ctx context.Context, request ToolRequest, artifactID, content string) (ToolResult, error) {
 	payload := map[string]any{
 		"title":       artifactStringArg(request, "title"),
 		"description": artifactStringArg(request, "description"),
 		"kind":        artifactStringArg(request, "kind"),
-		"content":     artifactStringArg(request, "content"),
+		"content":     content,
 		"mime_type":   artifactStringArg(request, "mime_type"),
 		"actor":       request.ActorID,
 	}
