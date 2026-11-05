@@ -249,6 +249,36 @@ func (s *Store) ListRoutedInboundMessages(ctx context.Context, senderUserID stri
 	return result, rows.Err()
 }
 
+// RecentRoomDialog returns the previous inbound messages of one room
+// (channel + chat id), newest first, for the intake continuation block: a
+// user replying in a messenger long after their run finished starts a fresh
+// intake whose only input would otherwise be the new text. Rejected/expired
+// rows never shaped the dialog and stay out; the just-inserted current row
+// is excluded by its message id so the block is strictly history.
+func (s *Store) RecentRoomDialog(ctx context.Context, channel, room, excludeMessageID string, limit int) ([]InboundMessage, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+inboundMessageColumns+` FROM workspace_inbound_message
+		 WHERE channel = $1 AND room = $2 AND message_id <> $3
+		   AND status NOT IN ('rejected', 'expired')
+		 ORDER BY created_at DESC LIMIT $4`, channel, room, excludeMessageID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []InboundMessage{}
+	for rows.Next() {
+		m, err := scanInboundMessage(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, m)
+	}
+	return result, rows.Err()
+}
+
 // ExpireStaleInboundMessages marks still-unrouted messages older than ttl as
 // expired (docs/inbound-messages.md §6.1: the clarification timeout ends the
 // intake politely). Called lazily from the list endpoint.

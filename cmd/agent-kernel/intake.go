@@ -198,6 +198,67 @@ type intakeRunner struct {
 	supervisorModel func(ctx context.Context) (*llm.Client, error)
 }
 
+// roomDialogWindow bounds how many previous room messages ride the intake
+// prompt: enough for the agent to recognize a resumed conversation, not so
+// much that classification prompts balloon.
+const roomDialogWindow = 8
+
+// roomDialogAnswerCap bounds one quoted agent answer in the continuation
+// block: the point is recognition (what was this dialog about), not replay.
+const roomDialogAnswerCap = 500
+
+// roomDialogBlock renders the sender's recent dialogue in this room (oldest
+// first, UTC-stamped) for the intake prompt: their messages from the inbound
+// rows, the agent's delivered answers from the routed target runs. A reply
+// sent long after the run finished otherwise arrives as a context-free
+// initiative message and the intake agent has to guess what «это» refers to.
+// Best-effort: unreadable run rows degrade to the status note, never block.
+func (r *intakeRunner) roomDialogBlock(ctx context.Context, message agent.InboundMessage) string {
+	if r.ws == nil || message.ChatID == "" {
+		return ""
+	}
+	rows, err := r.ws.RecentRoomDialog(ctx, message.Channel, message.ChatID, message.ID, roomDialogWindow)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	// Newest first from the store — the dialogue reads oldest first.
+	lines := make([]string, 0, len(rows)*2)
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		stamp := row.CreatedAt.UTC().Format("2006-01-02 15:04")
+		lines = append(lines, fmt.Sprintf("[%s] User: %s", stamp, firstLine(row.Body, 400)))
+		switch {
+		case row.TargetRunID != "":
+			note := "(no answer recorded)"
+			if run, rErr := r.ws.GetRun(ctx, row.TargetRunID); rErr == nil && strings.TrimSpace(run.Answer) != "" {
+				note = firstLine(run.Answer, roomDialogAnswerCap)
+			}
+			lines = append(lines, fmt.Sprintf("[%s] Agent: %s", stamp, note))
+		case row.Classification != "":
+			lines = append(lines, fmt.Sprintf("[%s] Agent: (closed as %s)", stamp, row.Classification))
+		}
+	}
+	var builder strings.Builder
+	builder.WriteString("\nRecent dialogue in this room (oldest first, times UTC). The new message below may continue one of these conversations — check the dates and topics before classifying it as a brand-new task:\n")
+	for _, line := range lines {
+		builder.WriteString(line + "\n")
+	}
+	return builder.String()
+}
+
+// firstLine collapses a text to its first non-empty line bounded to limit —
+// dialog quotes stay scannable; the full bodies live in the product UI.
+func firstLine(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if idx := strings.IndexAny(text, "\n\r"); idx >= 0 {
+		text = strings.TrimSpace(text[:idx])
+	}
+	if len(text) > limit {
+		text = text[:limit] + "…"
+	}
+	return text
+}
+
 // start resolves the intake agent, applies its config and starts the AgentRun
 // workflow. ActorID = the identified sender, so ask_human inside the dialog
 // addresses them by default and the audit chain attributes the spawned task
@@ -211,7 +272,7 @@ func (r *intakeRunner) start(ctx context.Context, message agent.InboundMessage, 
 	input := agent.RunInput{
 		RunID:   runID,
 		Project: IntakeProjectID,
-		Prompt:  intakePrompt(message, senderUser, senderProfileBlock(ctx, r.ws, senderUser)),
+		Prompt:  intakePrompt(message, senderUser, senderProfileBlock(ctx, r.ws, senderUser), r.roomDialogBlock(ctx, message)),
 		// Hint matching runs on the message body, not the assembled prompt:
 		// the prompt's instruction template (intake_decide, start_task…) matched
 		// meta-knowledge about past classifications and surfaced the same hints
@@ -275,10 +336,12 @@ func intakeRunID(messageID string) string {
 	return "intake-" + slug
 }
 
-// intakePrompt renders the run prompt from the message and the sender
-// position. The intake agent sees exactly what the user wrote plus who they
-// are — nothing else is inferred here.
-func intakePrompt(message agent.InboundMessage, sender workspace.User, profileBlock string) string {
+// intakePrompt renders the run prompt from the message, the sender position
+// and the recent room dialogue. The intake agent sees exactly what the user
+// wrote, who they are, and — when the room has history — what was already
+// discussed (with dates), so a resumed conversation classifies as a
+// continuation instead of a context-free new task.
+func intakePrompt(message agent.InboundMessage, sender workspace.User, profileBlock, dialogBlock string) string {
 	var builder strings.Builder
 	builder.WriteString("An initiative message arrived through the " + message.Channel + " channel and must be turned into a task (or closed politely).\n\n")
 	builder.WriteString("Sender: " + sender.Name + " (user id " + sender.ID + ")\n")
@@ -287,6 +350,9 @@ func intakePrompt(message agent.InboundMessage, sender workspace.User, profileBl
 	}
 	if profileBlock != "" {
 		builder.WriteString("\n" + profileBlock + "\n")
+	}
+	if dialogBlock != "" {
+		builder.WriteString(dialogBlock)
 	}
 	builder.WriteString("\nMessage (verbatim):\n---\n" + strings.TrimSpace(message.Text) + "\n---\n")
 	if len(message.Files) > 0 {

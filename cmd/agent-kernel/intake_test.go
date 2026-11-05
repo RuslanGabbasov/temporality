@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -73,6 +74,12 @@ func TestSenderProfileBlockAndPrompt(t *testing.T) {
 	if err != nil {
 		t.Skipf("store: %v", err)
 	}
+	defer store.Close()
+	// A clean repro database carries no schema — migrate to the same one the
+	// kernel applies at boot, or the seeds below reference absent tables.
+	if err := store.MigrateAll(ctx, "../../migrations/workspace", func(string, ...any) {}); err != nil {
+		t.Skipf("migrate: %v", err)
+	}
 	// Seed: user, project, a routed task with a run, an open ask.
 	for _, stmt := range []string{
 		"DELETE FROM human_request", "DELETE FROM workspace_run", "DELETE FROM workspace_inbound_message", "DELETE FROM workspace_project", "DELETE FROM workspace_user",
@@ -98,8 +105,80 @@ func TestSenderProfileBlockAndPrompt(t *testing.T) {
 		t.Fatalf("profile block must disclaim instructions:\n%s", block)
 	}
 
-	prompt := intakePrompt(agent.InboundMessage{Channel: "matrix", Text: "продолжи"}, sender, block)
+	prompt := intakePrompt(agent.InboundMessage{Channel: "matrix", Text: "продолжи"}, sender, block, "")
 	if !strings.Contains(prompt, "Sender context") || !strings.Contains(prompt, "почини flaky тесты") {
 		t.Fatalf("prompt lost the sender context:\n%s", prompt)
+	}
+}
+
+// The continuation block: a messenger reply sent long after the run finished
+// must reach the intake agent WITH the room's recent dialogue — the user's
+// messages and the agent's delivered answers, dated — so «продолжи» has
+// something to refer to. Without it the intake classified context-free texts
+// as brand-new tasks (docs/inbound-messages.md, the resumed-dialog blindspot).
+func TestRoomDialogBlockBuildsDatedHistory(t *testing.T) {
+	ctx := context.Background()
+	dsn := "postgres://temporality:x@localhost:55432/temporality?sslmode=disable"
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Skipf("local repro db unavailable: %v", err)
+	}
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		t.Skipf("local repro db unreachable: %v", err)
+	}
+	store, err := workspace.Open(ctx, dsn)
+	if err != nil {
+		t.Skipf("store: %v", err)
+	}
+	defer store.Close()
+	// The real migrated schema — the dialog SQL is exactly what the live
+	// kernel runs, and a scan-shape drift must fail here, not in production.
+	// The path is repo-relative: tests run from the package dir.
+	if err := store.MigrateAll(ctx, "../../migrations/workspace", func(string, ...any) {}); err != nil {
+		t.Skipf("migrate: %v", err)
+	}
+	for _, stmt := range []string{
+		// Parent project for the target run's foreign key (shared with the other
+		// intake tests' seeds — upsert keeps the tests order-independent).
+		"INSERT INTO workspace_project (id, name, created_at, updated_at) VALUES ('omni','Omni',now(),now()) ON CONFLICT (id) DO NOTHING",
+		"DELETE FROM workspace_inbound_message WHERE room = '!rr'",
+		"DELETE FROM workspace_run WHERE id = 'trd1'",
+		// Yesterday's dialog: a routed message with its answered target run…
+		"INSERT INTO workspace_run (id, project_id, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at) VALUES ('trd1','omni','{}','trd1','completed','','ключ сохранён в секретах проекта',1,'', now() - interval '1 day', now())",
+		"INSERT INTO workspace_inbound_message (id, channel, message_id, sender_user_id, room, body, status, project_id, target_run_id, created_at, updated_at) VALUES ('inbound/matrix/$old','matrix','$old','u9','!rr','сгенерируй ключ для MCP','routed','omni','trd1', now() - interval '1 day', now())",
+		// …and an old rejected row that never shaped the dialog.
+		"INSERT INTO workspace_inbound_message (id, channel, message_id, sender_user_id, room, body, status, created_at, updated_at) VALUES ('inbound/matrix/$rej','matrix','$rej','u9','!rr','спам','rejected', now() - interval '2 days', now())",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	runner := &intakeRunner{ws: store}
+	block := runner.roomDialogBlock(ctx, agent.InboundMessage{Channel: "matrix", ChatID: "!rr", ID: "$new"})
+	for _, want := range []string{
+		"Recent dialogue in this room",
+		"User: сгенерируй ключ для MCP",
+		"Agent: ключ сохранён в секретах проекта",
+		"may continue one of these conversations",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("dialog block missing %q:\n%s", want, block)
+		}
+	}
+	if strings.Contains(block, "спам") {
+		t.Fatalf("rejected rows must stay out of the dialog:\n%s", block)
+	}
+	// The stamp is a date, not a bare clock time — «today or yesterday» must be
+	// answerable from the block itself.
+	if !regexp.MustCompile(`\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] User:`).MatchString(block) {
+		t.Fatalf("dialog lines must be date-stamped:\n%s", block)
+	}
+
+	// A fresh room (no history) yields no block — first messages keep the
+	// lean prompt.
+	if empty := runner.roomDialogBlock(ctx, agent.InboundMessage{Channel: "matrix", ChatID: "!fresh-room", ID: "$x"}); empty != "" {
+		t.Fatalf("fresh room must yield no dialog block, got:\n%s", empty)
 	}
 }
