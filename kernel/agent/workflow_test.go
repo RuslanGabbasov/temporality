@@ -1727,6 +1727,9 @@ func TestAgentRunPlanExecutesDAG(t *testing.T) {
 		if parentCalls == 1 {
 			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
 				"goal": "ship the feature",
+				// a and b are an honest read-only fan-out — the parallel declaration
+				// the validator now requires for dependency-free roots.
+				"parallel": true,
 				"tasks": []any{
 					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "work a"},
 					map[string]any{"id": "b", "agent_id": "repo-a-coder", "prompt": "work b"},
@@ -2064,6 +2067,9 @@ func TestAgentRunPlanFailureSkipsDependents(t *testing.T) {
 		if parentCalls == 1 {
 			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
 				"goal": "resilient plan",
+				// a, b and c are independent branches — the failure semantics the
+				// test drives need them parallel.
+				"parallel": true,
 				"tasks": []any{
 					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "work a"},
 					map[string]any{"id": "b", "agent_id": "repo-a-coder", "prompt": "sabotage the build"},
@@ -2184,6 +2190,7 @@ func TestAgentRunPlanAbortOnFailure(t *testing.T) {
 			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
 				"goal":       "cut losses fast",
 				"on_failure": "abort",
+				"parallel":   true, // the failing and spinning branches run concurrently
 				"tasks": []any{
 					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "sabotage the build"},
 					map[string]any{"id": "b", "agent_id": "repo-a-qa", "prompt": "spin the branch", "max_turns": 40},
@@ -2279,6 +2286,7 @@ func TestAgentRunPlanStopOnFailure(t *testing.T) {
 			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
 				"goal":       "bound the damage",
 				"on_failure": "stop",
+				"parallel":   true, // the failing branch and b's branch run concurrently
 				"tasks": []any{
 					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "sabotage the build"},
 					map[string]any{"id": "b", "agent_id": "repo-a-qa", "prompt": "work b"},
@@ -2460,7 +2468,8 @@ func TestAgentRunPlanIncompleteTaskSkipsDependents(t *testing.T) {
 		parentCalls++
 		if parentCalls == 1 {
 			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
-				"goal": "honest plan",
+				"goal":     "honest plan",
+				"parallel": true, // a's branch and c run concurrently
 				"tasks": []any{
 					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "exhaust turns"},
 					map[string]any{"id": "mid", "agent_id": "repo-a-reviewer", "prompt": "merge work", "depends_on": []any{"a"}},
@@ -2561,7 +2570,7 @@ func TestAgentRunPlanWidthLimit(t *testing.T) {
 			for i := 1; i <= tasks; i++ {
 				planTasks = append(planTasks, map[string]any{"id": fmt.Sprintf("t%02d", i), "agent_id": "repo-a-coder", "prompt": fmt.Sprintf("work item %02d", i)})
 			}
-			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{"goal": "fan out", "tasks": planTasks}}}}, nil
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{"goal": "fan out", "parallel": true, "tasks": planTasks}}}}, nil
 		}
 		return llm.Completion{Content: "parent done"}, nil
 	}, activity.RegisterOptions{Name: ActivityCallModel})

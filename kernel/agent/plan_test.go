@@ -155,6 +155,59 @@ func TestValidatePlanSpec(t *testing.T) {
 	}
 }
 
+// The degenerate-DAG guard (docs/agent-delegation.md, plans): a plan whose
+// tasks carry no dependencies runs everything at once over one shared
+// workspace — models kept emitting such DAGs despite the description rules
+// («через раз дичь»), so the validator now enforces the default-sequential
+// contract. One root, a chain, or a review-gated pair stay valid.
+func TestValidatePlanSpecRejectsDependencyFreePlan(t *testing.T) {
+	flat := []PlanTask{
+		{ID: "dev-a", AgentID: "developer", Prompt: "p"},
+		{ID: "dev-b", AgentID: "developer", Prompt: "p"},
+		{ID: "sec", AgentID: "security-auditor", Prompt: "p"},
+	}
+	_, rejection := validatePlanSpec(PlanSpec{Tasks: flat}, nil)
+	if rejection == "" || !strings.Contains(rejection, "dependency-free") || !strings.Contains(rejection, "parallel") {
+		t.Fatalf("a dependency-free plan must reject with the fix spelled out, got: %q", rejection)
+	}
+	if !strings.Contains(rejection, "dev-a") || !strings.Contains(rejection, "sec") {
+		t.Fatalf("the rejection must name the offending tasks, got: %q", rejection)
+	}
+
+	// Explicit parallel declaration unblocks the honest read-only fan-out.
+	if _, rejection := validatePlanSpec(PlanSpec{Tasks: flat, Parallel: true}, nil); rejection != "" {
+		t.Fatalf("parallel=true must validate a fan-out, got: %s", rejection)
+	}
+
+	// The default chain and a single root stay valid without the flag.
+	chain := []PlanTask{
+		{ID: "a", AgentID: "x", Prompt: "p"},
+		{ID: "b", AgentID: "x", Prompt: "p", DependsOn: []string{"a"}},
+		{ID: "c", AgentID: "x", Prompt: "p", DependsOn: []string{"b"}},
+	}
+	if _, rejection := validatePlanSpec(PlanSpec{Tasks: chain}, nil); rejection != "" {
+		t.Fatalf("a chain must validate, got: %s", rejection)
+	}
+
+	// A review gate auto-adds its dependency, so the pair keeps one root.
+	gated := []PlanTask{
+		{ID: "build", AgentID: "coder", Prompt: "p"},
+		{ID: "gate", AgentID: "reviewer", Prompt: "p", ReviewOf: []string{"build"}},
+	}
+	if _, rejection := validatePlanSpec(PlanSpec{Tasks: gated}, nil); rejection != "" {
+		t.Fatalf("a review-gated pair must validate, got: %s", rejection)
+	}
+
+	// parallel=true must parse from the tool arguments.
+	spec, rejection := planSpecFromArgs(map[string]any{
+		"parallel": true,
+		"tasks":    []any{map[string]any{"id": "a", "agent_id": "x", "prompt": "p"}, map[string]any{"id": "b", "agent_id": "x", "prompt": "p"}},
+	})
+	if rejection != "" || !spec.Parallel {
+		t.Fatalf("parallel must parse: %q %+v", rejection, spec)
+	}
+}
+
 func TestValidatePlanSpecTemplateRefs(t *testing.T) {
 	tasks := []PlanTask{
 		{ID: "a", AgentID: "x", Prompt: "p"},

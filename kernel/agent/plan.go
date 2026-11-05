@@ -67,11 +67,18 @@ const (
 
 // PlanSpec is the validated form of the `plan` tool arguments.
 type PlanSpec struct {
-	Goal      string     `json:"goal,omitempty"`
-	MaxRework int        `json:"max_rework,omitempty"` // 0 when absent; executor applies DefaultMaxRework
-	OnFailure string     `json:"on_failure,omitempty"` // "" = continue
-	Mode      string     `json:"mode,omitempty"`       // "" = full
-	Tasks     []PlanTask `json:"tasks"`
+	Goal      string `json:"goal,omitempty"`
+	MaxRework int    `json:"max_rework,omitempty"` // 0 when absent; executor applies DefaultMaxRework
+	OnFailure string `json:"on_failure,omitempty"` // "" = continue
+	Mode      string `json:"mode,omitempty"`       // "" = full
+	// Parallel is the model's explicit claim that the plan's dependency-free
+	// tasks genuinely may run at once (read-only fan-out). Without it the
+	// validator rejects a plan whose roots carry no dependencies — models
+	// kept emitting dependency-free DAGs that ran concurrent writers over
+	// one shared workspace (the «идиотские планы» pattern: instructions in
+	// the description alone did not hold).
+	Parallel bool       `json:"parallel,omitempty"`
+	Tasks    []PlanTask `json:"tasks"`
 }
 
 // ReviewVerdict is the acceptance-gate verdict of a reviewer task
@@ -133,6 +140,9 @@ func planSpecFromArgs(args map[string]any) (PlanSpec, string) {
 	}
 	if v, ok := args["mode"].(string); ok {
 		spec.Mode = v
+	}
+	if v, ok := args["parallel"].(bool); ok {
+		spec.Parallel = v
 	}
 	if v, ok := numericArg(args["max_rework"]); ok {
 		spec.MaxRework = int(v)
@@ -276,6 +286,24 @@ func validatePlanSpec(spec PlanSpec, priorAnswers map[string]string) (*planDAG, 
 	}
 	if visited != len(spec.Tasks) {
 		return nil, "the plan has a dependency cycle"
+	}
+	// Degenerate-DAG guard (docs/agent-delegation.md, plans): without explicit
+	// parallel=true, a plan of several dependency-free roots is almost always
+	// a lost DAG — concurrent tasks (writers especially) collide in the shared
+	// workspace, and the intended order disappears. Reject with the fix spelled
+	// out: chain the tasks (the default) or declare the fan-out honestly.
+	if !spec.Parallel {
+		var roots []string
+		for index := range spec.Tasks {
+			if len(dag.DependsOn[spec.Tasks[index].ID]) == 0 {
+				roots = append(roots, spec.Tasks[index].ID)
+			}
+		}
+		if len(roots) > 1 {
+			return nil, fmt.Sprintf(
+				"the plan has %d dependency-free tasks (%s) but parallel is not declared: they would all run at once over one shared workspace. Either list the real blockers in depends_on for every task (DEFAULT IS SEQUENTIAL: chain a → b → c unless tasks are truly independent) or set parallel=true ONLY if every pair satisfies all three: disjoint files, no data flow between them, none runs build/tests/git",
+				len(roots), strings.Join(roots, ", "))
+		}
 	}
 	return dag, ""
 }
