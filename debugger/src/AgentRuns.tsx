@@ -1138,7 +1138,15 @@ export default function AgentRuns({ project }: { project: string }) {
           <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
             <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                <Heading style={{ fontSize: '1rem' }}>{t('runs.count', { count: String(visibleRuns.length) })}</Heading>
+                {/* The bare «Запуски» title: the unfiltered list is capped at
+                    RUNS_LIMIT, so the count was a meaningless hardcoded "100".
+                    A count only informs when a filter narrows the window — then
+                    it says how many of the loaded runs match. */}
+                <Heading style={{ fontSize: '1rem' }}>
+                  {(filter || initiatorPick || statusFilter || ageFilter || opsOnly)
+                    ? t('runs.count', { count: String(visibleRuns.length) })
+                    : t('runs.title')}
+                </Heading>
                 <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
                   <button
                     onClick={() => setOpsOnly((value) => !value)}
