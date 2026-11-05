@@ -151,20 +151,56 @@ func sandboxMemorySpec(input RunInput) string {
 	return ""
 }
 
-// Verdict answers "is it my turn": zero wait admits a run with the given
-// sandbox memory under the given unit quota; otherwise WaitSeconds is the
-// next poll delay and Position is the human-facing queue place (1 = next).
-func (g *ModelGate) Verdict(runID string, memoryMB, quotaMB, quotaRuns int) (waitSeconds int, position int) {
+// GateVerdict is the full "is it my turn" answer: the wait, the human
+// queue position and — while blocked — WHY (the dimension that is full) plus
+// the numbers behind it. Without the reason a queued run looks like phantom
+// queueing («квота утекла») when the ledger is honest and the memory
+// dimension is simply full.
+type GateVerdict struct {
+	WaitSeconds int
+	Position    int
+	Reason      string // "" when admitted; see the blocked* constants
+	UsedMB      int    // admitted sandbox requirements on the host ledger
+	BudgetMB    int    // the host budget those requirements must fit
+	Admitted    int    // ledger entries (concurrent runs holding a slot)
+	MaxRuns     int    // the absolute concurrent-runs ceiling
+}
+
+// Blocked-reason vocabulary for GateVerdict.Reason (stable strings — the
+// trace and the channel notices quote them).
+const (
+	GateBlockedMemoryBudget = "memory_budget" // the host's runnable budget is reserved
+	GateBlockedMemoryFloor  = "memory_floor"  // MemAvailable below the admission floor
+	GateBlockedCountCeiling = "count_ceiling" // the absolute concurrent-runs guard
+	GateBlockedQuotaMemory  = "quota_memory"  // the unit's memory_budget_mb
+	GateBlockedQuotaRuns    = "quota_runs"    // the unit's max_concurrent_runs
+)
+
+// Verdict answers "is it my turn": a zero WaitSeconds admits a run with the
+// given sandbox memory under the given unit quota; otherwise the verdict
+// carries the next poll delay, the queue position and the blocking reason.
+func (g *ModelGate) Verdict(runID string, memoryMB, quotaMB, quotaRuns int) GateVerdict {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.expireLocked()
 	if memoryMB <= 0 {
 		memoryMB = gateDefaultRunMemoryMB
 	}
-	if g.fitsLocked(runID, memoryMB, quotaScopeKey(quotaMB, quotaRuns), quotaMB, quotaRuns) {
-		return 0, 0
+	verdict := GateVerdict{
+		BudgetMB: g.budgetMB,
+		Admitted: len(g.entries),
+		MaxRuns:  g.max,
 	}
-	return 10, len(g.order) + 1
+	for _, entry := range g.entries {
+		verdict.UsedMB += entry.memoryMB
+	}
+	if reason := g.blockedReasonLocked(runID, memoryMB, quotaScopeKey(quotaMB, quotaRuns), quotaMB, quotaRuns); reason != "" {
+		verdict.Reason = reason
+		verdict.WaitSeconds = 10
+		verdict.Position = len(g.order) + 1
+		return verdict
+	}
+	return verdict
 }
 
 // Acquire claims the budget for a run. A lost race with another run comes
@@ -177,11 +213,13 @@ func (g *ModelGate) Acquire(runID string, memoryMB, quotaMB, quotaRuns int) erro
 		memoryMB = gateDefaultRunMemoryMB
 	}
 	key := quotaScopeKey(quotaMB, quotaRuns)
-	if len(g.entries)+1 > g.max || !g.fitsLocked(runID, memoryMB, key, quotaMB, quotaRuns) {
+	if reason := g.blockedReasonLocked(runID, memoryMB, key, quotaMB, quotaRuns); reason != "" {
 		return ErrModelGateBusy
 	}
+	if _, exists := g.entries[runID]; !exists {
+		g.order = append(g.order, runID) // re-acquire must not ghost the queue order
+	}
 	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, quotaKey: key, lastRenew: time.Now()}
-	g.order = append(g.order, runID)
 	return nil
 }
 
@@ -202,11 +240,13 @@ func (g *ModelGate) Renew(runID string, memoryMB, quotaMB, quotaRuns int) (admit
 		memoryMB = gateDefaultRunMemoryMB
 	}
 	key := quotaScopeKey(quotaMB, quotaRuns)
-	if len(g.entries)+1 > g.max || !g.fitsLocked(runID, memoryMB, key, quotaMB, quotaRuns) {
+	if reason := g.blockedReasonLocked(runID, memoryMB, key, quotaMB, quotaRuns); reason != "" {
 		return false
 	}
+	if _, exists := g.entries[runID]; !exists {
+		g.order = append(g.order, runID)
+	}
 	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, quotaKey: key, lastRenew: time.Now()}
-	g.order = append(g.order, runID)
 	return true
 }
 
@@ -226,12 +266,13 @@ func (g *ModelGate) Release(runID string) {
 	}
 }
 
-// fitsLocked checks both floors: the host budget (sum of all admitted
-// requirements) and — when the run carries a unit quota — the sum of the
-// runs sharing that same quota scope, plus the absolute ceiling. A run's
-// own entry is already on the books (renew of an admitted run): it does not
-// compete with itself.
-func (g *ModelGate) fitsLocked(runID string, memoryMB int, quotaKey string, quotaMB, quotaRuns int) bool {
+// blockedReasonLocked answers WHY a run cannot enter the ledger right now —
+// the empty string when it fits. Every dimension reports separately: the
+// host budget (sum of admitted requirements), the unit quota (the runs
+// sharing the quota scope), the absolute ceiling and the MemAvailable floor.
+// A run's own entry is already on the books (renew of an admitted run): it
+// does not compete with itself.
+func (g *ModelGate) blockedReasonLocked(runID string, memoryMB int, quotaKey string, quotaMB, quotaRuns int) string {
 	used, quotaUsed, quotaCount := 0, 0, 0
 	for id, entry := range g.entries {
 		if id == runID {
@@ -243,25 +284,28 @@ func (g *ModelGate) fitsLocked(runID string, memoryMB int, quotaKey string, quot
 			quotaCount++
 		}
 	}
+	if _, exists := g.entries[runID]; !exists && len(g.entries)+1 > g.max {
+		return GateBlockedCountCeiling
+	}
 	if used+memoryMB > g.budgetMB {
-		return false
+		return GateBlockedMemoryBudget
 	}
 	if quotaKey != "" {
 		if quotaMB > 0 && quotaUsed+memoryMB > quotaMB {
-			return false
+			return GateBlockedQuotaMemory
 		}
 		if quotaRuns > 0 && quotaCount+1 > quotaRuns {
-			return false
+			return GateBlockedQuotaRuns
 		}
 	}
 	if g.floorPct > 0 && g.memory != nil {
 		if total, available, ok := g.memory(); ok && total > 0 {
 			if float64(available)/float64(total)*100 < g.floorPct {
-				return false
+				return GateBlockedMemoryFloor
 			}
 		}
 	}
-	return true
+	return ""
 }
 
 // expireLocked drops entries that stopped renewing — a run that died

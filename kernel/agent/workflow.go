@@ -1458,13 +1458,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		}
 		queuedAt := workflow.Now(ctx)
 		notifiedPosition := verdict.Position
-		if err := emit(activityCtx, state, "run.queued", map[string]any{"position": verdict.Position, "wait_seconds": verdict.WaitSeconds, "memory_mb": gateMemoryMB}); err != nil {
+		if err := emit(activityCtx, state, "run.queued", map[string]any{
+			"position": verdict.Position, "wait_seconds": verdict.WaitSeconds, "memory_mb": gateMemoryMB,
+			"reason": verdict.Reason, "used_mb": verdict.UsedMB, "budget_mb": verdict.BudgetMB,
+			"admitted": verdict.Admitted, "max_runs": verdict.MaxRuns,
+		}); err != nil {
 			return result, err
 		}
 		// One channel notice at entry: only directly-started runs speak —
 		// delegated children answer to their parent, not to a human.
 		if input.DelegationDepth == 0 {
-			_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict.Position)}).Get(ctx, nil)
+			_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict)}).Get(ctx, nil)
 		}
 		for verdict.WaitSeconds > 0 && workflow.Now(ctx).Sub(queuedAt) < ModelGateQueueTimeout {
 			workflow.Sleep(ctx, time.Duration(verdict.WaitSeconds)*time.Second)
@@ -1481,7 +1485,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if input.DelegationDepth == 0 && gateQueuedTotal >= time.Minute {
 				for _, milestone := range QueueNoticeMilestones {
 					if verdict.Position <= milestone && notifiedPosition > milestone {
-						_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict.Position)}).Get(ctx, nil)
+						_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: queueNoticeText(verdict)}).Get(ctx, nil)
 						notifiedPosition = verdict.Position
 						break
 					}
@@ -2914,6 +2918,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// «running» forever.
 			if err := emitChainOutcome(activityCtx, state, *child); err != nil {
 				return result, err
+			}
+			// The parent's sandbox slot hands back NOW: the continuation child
+			// claims its own, and the parent's entry would otherwise sit on the
+			// gate ledger until the TTL expires it — a multi-GB ghost holding
+			// capacity for up to half an hour of every chain.
+			if modelGate == 1 && gateMemoryMB > 0 {
+				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, nil)
 			}
 			return *child, nil
 		}

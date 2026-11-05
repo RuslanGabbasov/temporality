@@ -94,9 +94,12 @@ func TestModelGateMemoryFloor(t *testing.T) {
 	if err := g.Acquire("x", 512, 0, 0); !errIsBusy(err) {
 		t.Fatalf("memory floor must pause admissions, got %v", err)
 	}
-	wait, _ := g.Verdict("y", 512, 0, 0)
-	if wait <= 0 {
+	verdict := g.Verdict("y", 512, 0, 0)
+	if verdict.WaitSeconds <= 0 {
 		t.Fatal("memory floor must make the verdict wait")
+	}
+	if verdict.Reason != GateBlockedMemoryFloor {
+		t.Fatalf("want memory_floor, got %q", verdict.Reason)
 	}
 	// A probe failure never wedges the gate: missing data admits.
 	ConfigureModelGate(8, gateTestBudget, 10, func() (total, available uint64, ok bool) { return 0, 0, false }, 1024)
@@ -110,9 +113,69 @@ func TestModelGateMemoryFloor(t *testing.T) {
 func TestGateVerdictDefaultsPermissive(t *testing.T) {
 	// A binary that never configured the gate must not wedge runs.
 	ConfigureModelGate(1<<30, gateTestBudget, 0, nil, 1024)
-	wait, _ := gate().Verdict("z", 512, 0, 0)
-	if wait != 0 {
+	verdict := gate().Verdict("z", 512, 0, 0)
+	if verdict.WaitSeconds != 0 {
 		t.Fatal("unconfigured gate must admit immediately")
+	}
+}
+
+// The blocked reason is the difference between «the quota leaked» and «the
+// memory dimension is full»: every queue report names the dimension that is
+// actually binding (the count ceiling is rarely it — sandbox memory is).
+func TestModelGateBlockedReason(t *testing.T) {
+	g := newTestGate(10, 1024)
+	if err := g.Acquire("a", 1024, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	verdict := g.Verdict("b", 512, 0, 0)
+	if verdict.WaitSeconds == 0 {
+		t.Fatal("a full budget must queue the newcomer")
+	}
+	if verdict.Reason != GateBlockedMemoryBudget {
+		t.Fatalf("want memory_budget, got %q", verdict.Reason)
+	}
+	if verdict.UsedMB != 1024 || verdict.BudgetMB != 1024 || verdict.Admitted != 1 {
+		t.Fatalf("the verdict must carry the ledger numbers: %+v", verdict)
+	}
+
+	// The absolute ceiling reports as its own dimension.
+	maxed := newTestGate(1, 1<<20)
+	if err := maxed.Acquire("a", 1024, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	verdict = maxed.Verdict("b", 1024, 0, 0)
+	if verdict.Reason != GateBlockedCountCeiling {
+		t.Fatalf("want count_ceiling, got %q", verdict.Reason)
+	}
+
+	// The unit quota names its own dimension.
+	quota := newTestGate(10, 1<<20)
+	if err := quota.Acquire("a", 1024, 2048, 1); err != nil {
+		t.Fatal(err)
+	}
+	verdict = quota.Verdict("b", 1024, 2048, 1)
+	if verdict.Reason != GateBlockedQuotaRuns {
+		t.Fatalf("want quota_runs, got %q", verdict.Reason)
+	}
+}
+
+// A re-acquire of a run already on the ledger must not ghost the queue
+// order: duplicates in order inflated the reported positions forever
+// (Release and expiry remove one occurrence each).
+func TestModelGateReAcquireDoesNotDuplicateOrder(t *testing.T) {
+	g := newTestGate(10, 4096)
+	if err := g.Acquire("a", 512, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Acquire("a", 512, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.order) != 1 || len(g.entries) != 1 {
+		t.Fatalf("re-acquire must keep one ledger row: order=%v entries=%d", g.order, len(g.entries))
+	}
+	g.Release("a")
+	if len(g.order) != 0 {
+		t.Fatalf("release must clear the queue order, got %v", g.order)
 	}
 }
 

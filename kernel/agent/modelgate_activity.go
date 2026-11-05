@@ -24,10 +24,17 @@ const (
 )
 
 // ModelGateVerdictResult: WaitSeconds == 0 admits the run; otherwise it is
-// the next poll delay. Position is the human-facing queue place.
+// the next poll delay. Position is the human-facing queue place; Reason and
+// the ledger numbers explain the wait («квота утекла» is almost always the
+// memory dimension being full, not phantom sessions).
 type ModelGateVerdictResult struct {
-	WaitSeconds int `json:"wait_seconds"`
-	Position    int `json:"position"`
+	WaitSeconds int    `json:"wait_seconds"`
+	Position    int    `json:"position"`
+	Reason      string `json:"reason,omitempty"`
+	UsedMB      int    `json:"used_mb,omitempty"`
+	BudgetMB    int    `json:"budget_mb,omitempty"`
+	Admitted    int    `json:"admitted,omitempty"`
+	MaxRuns     int    `json:"max_runs,omitempty"`
 }
 
 // ModelGateAdmission: the run's identity + its sandbox requirement + the
@@ -40,8 +47,12 @@ type ModelGateAdmission struct {
 }
 
 func (a *Activities) ModelGateVerdict(ctx context.Context, admission ModelGateAdmission) (ModelGateVerdictResult, error) {
-	wait, position := gate().Verdict(admission.RunID, admission.MemoryMB, admission.QuotaMB, admission.QuotaRuns)
-	return ModelGateVerdictResult{WaitSeconds: wait, Position: position}, nil
+	verdict := gate().Verdict(admission.RunID, admission.MemoryMB, admission.QuotaMB, admission.QuotaRuns)
+	return ModelGateVerdictResult{
+		WaitSeconds: verdict.WaitSeconds, Position: verdict.Position,
+		Reason: verdict.Reason, UsedMB: verdict.UsedMB, BudgetMB: verdict.BudgetMB,
+		Admitted: verdict.Admitted, MaxRuns: verdict.MaxRuns,
+	}, nil
 }
 
 // ModelGateBudgetInput carries the run's memory requirement (MB), the unit
@@ -111,10 +122,31 @@ func (a *Activities) NotifyActorText(ctx context.Context, input NotifyActorTextI
 
 // queueNoticeText renders the human-facing queue line. Position 1 reads as
 // "next up" — no fake arithmetic about people ahead.
-func queueNoticeText(position int) string {
-	if position <= 1 {
-		return "The server is at capacity: you are next in line — your request starts automatically."
+func queueNoticeText(verdict ModelGateVerdictResult) string {
+	reason := queueReasonText(verdict)
+	if verdict.Position <= 1 {
+		return sanitizeQueueText(fmt.Sprintf("The server is at capacity%s: you are next in line — your request starts automatically.", reason))
 	}
-	ahead := position - 1
-	return fmt.Sprintf("The server is at capacity: %d request(s) are ahead of yours. Your request starts automatically, no action needed — the answer arrives in this conversation.", ahead)
+	ahead := verdict.Position - 1
+	return sanitizeQueueText(fmt.Sprintf("The server is at capacity%s: %d request(s) are ahead of yours. Your request starts automatically, no action needed — the answer arrives in this conversation.", reason, ahead))
+}
+
+// queueReasonText names the dimension that is full — the sentence that turns
+// «why is this queued with 64 allowed sessions?» into an answer instead of a
+// bug hunt (the count ceiling is rarely the binding one; sandbox memory is).
+func queueReasonText(verdict ModelGateVerdictResult) string {
+	switch verdict.Reason {
+	case GateBlockedMemoryBudget:
+		return fmt.Sprintf(" — the sandbox memory budget is reserved: %d GB of %d GB in use", verdict.UsedMB/1024, verdict.BudgetMB/1024)
+	case GateBlockedMemoryFloor:
+		return " — the host is low on free memory, admissions pause until it recovers"
+	case GateBlockedCountCeiling:
+		return fmt.Sprintf(" — the concurrent-runs ceiling is full: %d of %d", verdict.Admitted, verdict.MaxRuns)
+	case GateBlockedQuotaRuns:
+		return fmt.Sprintf(" — the unit's concurrent-runs quota is full: %d", verdict.Admitted)
+	case GateBlockedQuotaMemory:
+		return " — the unit's sandbox memory quota is reserved"
+	default:
+		return ""
+	}
 }
