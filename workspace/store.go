@@ -218,12 +218,14 @@ func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
+		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent WHERE id = $1`, id).
 		Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
 			&a.SystemPrompt, &skills, &mcp, &tools, &secrets, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
-			&a.MaxTurns, &a.TurnLimitRestarts, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled, &a.CreatedAt, &a.UpdatedAt)
+			&a.MaxTurns, &a.TurnLimitRestarts, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled,
+			&a.ObservationDays, &a.ObservationMinRuns, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrNotFound
 	}
@@ -245,7 +247,8 @@ func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
+		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -264,7 +267,8 @@ func (s *Store) ListAgentsVisible(ctx context.Context, units []string) ([]Agent,
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
+		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
 	if err != nil {
 		return nil, err
@@ -279,7 +283,8 @@ func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Ag
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
+		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent WHERE project_id = $1 OR project_id IS NULL ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -297,7 +302,8 @@ func (s *Store) FindAgentsByName(ctx context.Context, name, projectID string) ([
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
-		        definition, definition_version, org_unit_id, egress_allowlist, enabled, created_at, updated_at
+		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
+		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent WHERE (project_id IS NULL OR project_id = $1) AND lower(name) = lower($2) ORDER BY id`,
 		projectID, name)
 	if err != nil {
@@ -320,7 +326,8 @@ func scanAgents(rows interface {
 		if err := rows.Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
 			&a.SystemPrompt, &skills, &mcp, &tools, &secrets, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
-			&a.MaxTurns, &a.TurnLimitRestarts, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.MaxTurns, &a.TurnLimitRestarts, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled,
+			&a.ObservationDays, &a.ObservationMinRuns, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		a.ProjectID = derefPtr(projectID)
@@ -418,34 +425,36 @@ func (s *Store) InsertAgentVersion(ctx context.Context, v AgentVersion) error {
 // insertAgentVersionRow writes the snapshot against the given executor —
 // the pool for standalone writes, the apply transaction for proposals
 // (specs/quality-loop.md §10.1a: agent mutation and snapshot land together).
+// An empty kind is a manual edit; absent lineage columns are stored NULL.
 func insertAgentVersionRow(ctx context.Context, ex agentExecer, v AgentVersion) error {
 	definition, _ := json.Marshal(v.Definition)
+	kind := v.Kind
+	if kind == "" {
+		kind = "edit"
+	}
 	_, err := ex.Exec(ctx,
 		`INSERT INTO workspace_agent_version
-		 (agent_id, version, definition, description, compiled_prompt, prompt_source, generator_model, author, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		 (agent_id, version, definition, description, compiled_prompt, prompt_source, generator_model, author, created_at,
+		  kind, baseline_version, rollback_of, change_summary)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		 ON CONFLICT (agent_id, version) DO NOTHING`,
-		v.AgentID, v.Version, definition, v.Description, v.CompiledPrompt, v.PromptSource, v.GeneratorModel, v.Author, v.CreatedAt)
+		v.AgentID, v.Version, definition, v.Description, v.CompiledPrompt, v.PromptSource, v.GeneratorModel, v.Author, v.CreatedAt,
+		kind, nullInt(v.BaselineVersion), nullInt(v.RollbackOf), v.ChangeSummary)
 	return err
 }
 
 func (s *Store) ListAgentVersions(ctx context.Context, agentID string) ([]AgentVersion, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT agent_id, version, definition, description, compiled_prompt, prompt_source, generator_model, author, created_at
-		 FROM workspace_agent_version WHERE agent_id = $1 ORDER BY version DESC`, agentID)
+		`SELECT `+agentVersionColumns+` FROM workspace_agent_version WHERE agent_id = $1 ORDER BY version DESC`, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var result []AgentVersion
 	for rows.Next() {
-		var v AgentVersion
-		var definition []byte
-		if err := rows.Scan(&v.AgentID, &v.Version, &definition, &v.Description, &v.CompiledPrompt, &v.PromptSource, &v.GeneratorModel, &v.Author, &v.CreatedAt); err != nil {
+		v, err := scanAgentVersion(rows)
+		if err != nil {
 			return nil, err
-		}
-		if def := decodeAgentDefinition(definition); def != nil {
-			v.Definition = *def
 		}
 		result = append(result, v)
 	}
@@ -1643,6 +1652,15 @@ func nullString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// nullInt folds the zero value to NULL for nullable int lineage columns
+// (baseline_version, rollback_of, applied_version): 0 means "absent".
+func nullInt(v int) interface{} {
+	if v == 0 {
+		return nil
+	}
+	return v
 }
 
 func nullTime(t *time.Time) interface{} {

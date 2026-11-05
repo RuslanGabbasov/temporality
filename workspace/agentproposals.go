@@ -34,17 +34,33 @@ type AgentProposal struct {
 	CreatedAt      time.Time       `json:"created_at"`
 	DecidedAt      *time.Time      `json:"decided_at,omitempty"`
 	DecidedBy      string          `json:"decided_by,omitempty"`
+	// Evolution v2 (docs/agent-evolution.md §2.2): one object for all sources.
+	Source         string          `json:"source"`                    // agent | user | supervisor
+	ChangeSummary  string          `json:"change_summary"`            // behavioral summary of the change
+	Context        json.RawMessage `json:"context,omitempty"`         // {"run_id", "project"} origin
+	AppliedVersion int             `json:"applied_version,omitempty"` // version the proposal landed in
 }
+
+// agentProposalColumns is the projection every proposal read scans — the
+// column order and scanAgentProposal are position-sensitive. applied_version
+// is nullable until the apply lands, so reads fold it to 0.
+const agentProposalColumns = `id, agent_id, base_version, definition, description, problem, change, effect,
+	evidence, status, author, generator_model, created_at, decided_at, decided_by,
+	source, change_summary, context, COALESCE(applied_version, 0)`
 
 // CreateAgentProposal stores a pending proposal. The definition is the full
 // target definition (callers default it to the agent's current one); the
 // server, never the client, records the base version it was derived from.
+// Empty Source defaults to "agent" (docs/agent-evolution.md §2.2).
 func (s *Store) CreateAgentProposal(ctx context.Context, p *AgentProposal) error {
 	if strings.TrimSpace(p.Problem) == "" || strings.TrimSpace(p.Change) == "" {
 		return fmt.Errorf("%w: problem and change are required", ErrConflict)
 	}
 	if p.Status == "" {
 		p.Status = "pending"
+	}
+	if p.Source == "" {
+		p.Source = "agent"
 	}
 	if p.Evidence == nil {
 		p.Evidence = []string{}
@@ -59,10 +75,11 @@ func (s *Store) CreateAgentProposal(ctx context.Context, p *AgentProposal) error
 	}
 	return s.pool.QueryRow(ctx,
 		`INSERT INTO workspace_agent_proposal
-		 (agent_id, base_version, definition, description, problem, change, effect, evidence, status, author, generator_model)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, created_at`,
+		 (agent_id, base_version, definition, description, problem, change, effect, evidence, status, author, generator_model,
+		  source, change_summary, context)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id, created_at`,
 		p.AgentID, p.BaseVersion, definition, p.Description, p.Problem, p.Change, p.Effect,
-		evidence, p.Status, p.Author, p.GeneratorModel).
+		evidence, p.Status, p.Author, p.GeneratorModel, p.Source, p.ChangeSummary, nullRawMessage(p.Context)).
 		Scan(&p.ID, &p.CreatedAt)
 }
 
@@ -72,9 +89,7 @@ func (s *Store) ListAgentProposals(ctx context.Context, agentID, status string, 
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	query := `SELECT id, agent_id, base_version, definition, description, problem, change, effect,
-	                 evidence, status, author, generator_model, created_at, decided_at, decided_by
-	          FROM workspace_agent_proposal WHERE agent_id = $1`
+	query := `SELECT ` + agentProposalColumns + ` FROM workspace_agent_proposal WHERE agent_id = $1`
 	args := []any{agentID}
 	if status != "" {
 		query += ` AND status = $2`
@@ -119,12 +134,11 @@ func (s *Store) PendingProposalCounts(ctx context.Context) (map[string]int, erro
 	return counts, rows.Err()
 }
 
-// GetAgentProposal loads one proposal scoped to its agent.
-func (s *Store) GetAgentProposal(ctx context.Context, agentID string, id int64) (AgentProposal, error) {
+// GetAgentProposal loads one proposal by id; the returned AgentID names the
+// owning agent, so callers scope their authorization themselves.
+func (s *Store) GetAgentProposal(ctx context.Context, id int64) (AgentProposal, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT id, agent_id, base_version, definition, description, problem, change, effect,
-		        evidence, status, author, generator_model, created_at, decided_at, decided_by
-		 FROM workspace_agent_proposal WHERE id = $1 AND agent_id = $2`, id, agentID)
+		`SELECT `+agentProposalColumns+` FROM workspace_agent_proposal WHERE id = $1`, id)
 	p, err := scanAgentProposal(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AgentProposal{}, ErrNotFound
@@ -146,8 +160,7 @@ func (s *Store) DecideAgentProposal(ctx context.Context, id int64, status, decid
 		`UPDATE workspace_agent_proposal
 		 SET status = $2, decided_at = now(), decided_by = $3
 		 WHERE id = $1 AND status = 'pending'
-		 RETURNING id, agent_id, base_version, definition, description, problem, change, effect,
-		           evidence, status, author, generator_model, created_at, decided_at, decided_by`,
+		 RETURNING `+agentProposalColumns,
 		id, status, decidedBy)
 	p, err := scanAgentProposal(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -218,8 +231,7 @@ func (s *Store) applyAgentProposal(ctx context.Context, next Agent, proposalID i
 		`UPDATE workspace_agent_proposal
 		 SET status = 'applied', decided_at = now(), decided_by = $3
 		 WHERE id = $1 AND agent_id = $2 AND status = 'pending'
-		 RETURNING id, agent_id, base_version, definition, description, problem, change, effect,
-		           evidence, status, author, generator_model, created_at, decided_at, decided_by`,
+		 RETURNING `+agentProposalColumns,
 		proposalID, next.ID, decidedBy)
 	decided, err := scanAgentProposal(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -255,9 +267,21 @@ func (s *Store) applyAgentProposal(ctx context.Context, next Agent, proposalID i
 		return AgentProposal{}, err
 	}
 	if snapshot != nil {
+		// The apply writes the version as a proposal release (docs/agent-evolution.md §2.2):
+		// the lineage and the behavioral summary come from the proposal, and the
+		// proposal row is stamped with the version its change landed in.
+		snapshot.Kind = "proposal"
+		snapshot.BaselineVersion = decided.BaseVersion
+		snapshot.ChangeSummary = decided.ChangeSummary
 		if err := insertAgentVersionRow(ctx, tx, *snapshot); err != nil {
 			return AgentProposal{}, err
 		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_agent_proposal SET applied_version = $2 WHERE id = $1`,
+			decided.ID, snapshot.Version); err != nil {
+			return AgentProposal{}, err
+		}
+		decided.AppliedVersion = snapshot.Version
 	}
 	if audit != nil {
 		if err := insertAccessAudit(ctx, tx, audit.Actor, audit.Action, audit.EntityKind, audit.EntityID, audit.Details); err != nil {
@@ -272,10 +296,11 @@ func (s *Store) applyAgentProposal(ctx context.Context, next Agent, proposalID i
 
 func scanAgentProposal(row interface{ Scan(dest ...any) error }) (*AgentProposal, error) {
 	var p AgentProposal
-	var definition, evidence []byte
+	var definition, evidence, proposalContext []byte
 	if err := row.Scan(&p.ID, &p.AgentID, &p.BaseVersion, &definition, &p.Description, &p.Problem,
 		&p.Change, &p.Effect, &evidence, &p.Status, &p.Author, &p.GeneratorModel,
-		&p.CreatedAt, &p.DecidedAt, &p.DecidedBy); err != nil {
+		&p.CreatedAt, &p.DecidedAt, &p.DecidedBy,
+		&p.Source, &p.ChangeSummary, &proposalContext, &p.AppliedVersion); err != nil {
 		return nil, err
 	}
 	if def := decodeAgentDefinition(definition); def != nil {
@@ -288,6 +313,9 @@ func scanAgentProposal(row interface{ Scan(dest ...any) error }) (*AgentProposal
 	}
 	if p.Evidence == nil {
 		p.Evidence = []string{}
+	}
+	if len(proposalContext) > 0 {
+		p.Context = json.RawMessage(proposalContext)
 	}
 	return &p, nil
 }

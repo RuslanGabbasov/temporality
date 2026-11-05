@@ -43,10 +43,9 @@ type supervisorCaseStore interface {
 	ListAllAgents(ctx context.Context) ([]workspace.Agent, error)
 	ListSkillsVisible(ctx context.Context, units []string) ([]workspace.Skill, error)
 	CreateAgentProposal(ctx context.Context, p *workspace.AgentProposal) error
-	ListAgentEvaluationRuns(ctx context.Context, agentID string, limit int) ([]workspace.AgentEvaluationRun, error)
+	ListAgentVersions(ctx context.Context, agentID string) ([]workspace.AgentVersion, error)
+	ListAgentVersionMetrics(ctx context.Context, agentID string, version int, since time.Time) ([]workspace.AgentVersionMetrics, error)
 	ListRunsByAgent(ctx context.Context, agentID string, limit int) ([]workspace.Run, error)
-	GetAgentEvaluationSuite(ctx context.Context, agentID string) (workspace.AgentEvaluationSuite, error)
-	SaveAgentEvaluationSuite(ctx context.Context, agentID string, cases []workspace.EvaluationCase) error
 }
 
 func supervisorCasesEnabled() bool {
@@ -79,7 +78,6 @@ func runSupervisorCasesPass(ctx context.Context, log *slog.Logger, activities *a
 	narrateAgentDevelopment(ctx, log, activities, ws, client, done)
 	monitorTurns(ctx, log, activities, observationURL, journalToken, client, done)
 	verifyCompletionClaims(ctx, log, activities, observationURL, journalToken, client, done)
-	warmupEvalCases(ctx, log, ws, client, done)
 }
 
 // verificationClaimPhrases: the success claims a final answer makes about
@@ -349,25 +347,6 @@ func proposeContractsFromClusters(ctx context.Context, log *slog.Logger, activit
 		if err := ws.CreateAgentProposal(ctx, proposal); err != nil {
 			log.Warn("supervisor cases: contract file", "agent", c.agent, "error", err.Error())
 			continue
-		}
-		// Close the loop (docs/agent-quality-loop.md §6 + warm-start): the same
-		// failure cluster drafts ONE regression case into the agent's suite —
-		// if the proposal is applied, the gate now has a case that catches the
-		// exact failure that motivated it. The case name marks it as
-		// supervisor-authored; the human prunes it like any warmup draft.
-		if len(c.runs) > 0 {
-			if suite, sErr := ws.GetAgentEvaluationSuite(ctx, c.agent); sErr == nil {
-				caseInput := fmt.Sprintf("Повторяющийся сбой (раны %s): %s. Выполни задачу так, чтобы этой ошибки не было.", strings.Join(c.runs, ", "), c.summary)
-				expected := fmt.Sprintf("Решение учитывает правило из эволюции: %s", draft.Change)
-				suite.Cases = append(suite.Cases, workspace.EvaluationCase{
-					Name:           "supervisor/contract-" + patternHash(key)[:8],
-					Input:          caseInput,
-					ExpectedOutput: expected,
-				})
-				if saveErr := ws.SaveAgentEvaluationSuite(ctx, c.agent, suite.Cases); saveErr != nil {
-					log.Warn("supervisor cases: eval case append", "agent", c.agent, "error", saveErr.Error())
-				}
-			}
 		}
 		summary := fmt.Sprintf("%d однотипных сбоев агента %s оформлены предложением развития #%d: %s", len(c.runs), c.agent, proposal.ID, draft.Change)
 		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseContractProposal, subject, "", summary, "Примите или отклоните предложение в карточке агента.", map[string]any{
@@ -961,13 +940,24 @@ func narrateAgentDevelopment(ctx context.Context, log *slog.Logger, activities *
 		if !caseDue(done, agent.CaseDevelopmentNarrative, subject) {
 			continue
 		}
-		runs, err := ws.ListAgentEvaluationRuns(ctx, a.ID, 2)
-		if err != nil || len(runs) < 2 {
+		versions, err := ws.ListAgentVersions(ctx, a.ID)
+		if err != nil || len(versions) < 2 {
 			continue
 		}
-		latest, previous := runs[0], runs[1]
-		if latest.AgentVersion == previous.AgentVersion {
-			continue // both evaluations saw the same definition: nothing to narrate
+		latest, previous := versions[0], versions[1]
+		if latest.Version == previous.Version {
+			continue
+		}
+		// The narrative reads the agentSRE rollups of the two versions — the
+		// eval runs it used before are gone with the quality loop
+		// (docs/agent-evolution.md §8).
+		versionStats := func(v workspace.AgentVersion) string {
+			rows, mErr := ws.ListAgentVersionMetrics(ctx, a.ID, v.Version, v.CreatedAt.Add(-7*24*time.Hour))
+			if mErr != nil {
+				return "no measured data"
+			}
+			sum := workspace.SumMetrics(rows)
+			return fmt.Sprintf("runs %d, succeeded %d, failed %d, corrected verdicts %d", sum.Runs, sum.Succeeded, sum.Failed, sum.VerdictCorrected)
 		}
 		changes := []string{}
 		if a.Definition != nil && len(a.Definition.Completion) > 0 {
@@ -975,10 +965,10 @@ func narrateAgentDevelopment(ctx context.Context, log *slog.Logger, activities *
 		}
 		verdict, err := agent.NarrativeCase(ctx, client, agent.NarrativeCaseInput{
 			AgentID:   a.ID,
-			FromVer:   previous.AgentVersion,
-			ToVer:     latest.AgentVersion,
-			FromStats: fmt.Sprintf("passed %d, failed %d (verdict %s)", previous.Passed, previous.Failed, previous.Verdict),
-			ToStats:   fmt.Sprintf("passed %d, failed %d (verdict %s)", latest.Passed, latest.Failed, latest.Verdict),
+			FromVer:   previous.Version,
+			ToVer:     latest.Version,
+			FromStats: versionStats(previous),
+			ToStats:   versionStats(latest),
 			Changes:   changes,
 		})
 		if err != nil {
@@ -986,7 +976,7 @@ func narrateAgentDevelopment(ctx context.Context, log *slog.Logger, activities *
 			continue
 		}
 		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseDevelopmentNarrative, subject, a.ProjectID, verdict.Explanation, verdict.Recommendation, map[string]any{
-			"agent": a.ID, "from_version": previous.AgentVersion, "to_version": latest.AgentVersion,
+			"agent": a.ID, "from_version": previous.Version, "to_version": latest.Version,
 		}); err != nil {
 			log.Warn("supervisor cases: publish narrative", "error", err.Error())
 			continue
@@ -1138,103 +1128,4 @@ func reviewedIndex(ctx context.Context, observationURL, journalToken string) map
 		}
 	}
 	return set
-}
-
-// ── Warm-start: supervisor-drafted eval cases for agents the gate cannot gate ──
-
-// evalGateMinCases mirrors the gate's suite_not_ready minimum (§7.1): a suite
-// below this cannot decide an apply, so it is the warm-start trigger.
-const evalGateMinCases = 3
-
-// warmupCaseStore is the store face the warm-start pass needs.
-type warmupCaseStore interface {
-	ListAllAgents(ctx context.Context) ([]workspace.Agent, error)
-	ListRunsByAgent(ctx context.Context, agentID string, limit int) ([]workspace.Run, error)
-	GetAgentEvaluationSuite(ctx context.Context, agentID string) (workspace.AgentEvaluationSuite, error)
-	SaveAgentEvaluationSuite(ctx context.Context, agentID string, cases []workspace.EvaluationCase) error
-}
-
-// warmupEvalCases closes the cold-start gap of the quality loop: an agent
-// whose suite holds fewer cases than the gate's minimum cannot pass an apply,
-// and hand-writing cases is the chore that kills the loop. The supervisor
-// drafts up to three representative cases from the agent's purpose and recent
-// successful runs and APPENDS them to the suite (author 'supervisor
-// warm-start' via the case name prefix) — a floor the human reviews and
-// prunes, never a full suite. Suites that already gate are left alone, and
-// one pass touches at most two agents (the pass cap shared by the siblings).
-func warmupEvalCases(ctx context.Context, log *slog.Logger, ws warmupCaseStore, client *llm.Client, done map[string]time.Time) {
-	if ws == nil || client == nil {
-		return
-	}
-	agents, err := ws.ListAllAgents(ctx)
-	if err != nil {
-		log.Warn("eval warmup: list agents", "error", err.Error())
-		return
-	}
-	touched := 0
-	for _, a := range agents {
-		if touched >= supervisorCasePassCap {
-			break
-		}
-		if a.Description == "" || a.Definition == nil {
-			continue
-		}
-		suite, err := ws.GetAgentEvaluationSuite(ctx, a.ID)
-		if err != nil {
-			log.Warn("eval warmup: suite", "agent", a.ID, "error", err.Error())
-			continue
-		}
-		if len(suite.Cases) >= evalGateMinCases {
-			continue // the suite already gates
-		}
-		subject := "eval-warmup:" + a.ID
-		if !caseDue(done, agent.CaseEvalWarmup, subject) {
-			continue
-		}
-		runs, err := ws.ListRunsByAgent(ctx, a.ID, 5)
-		if err != nil {
-			log.Warn("eval warmup: runs", "agent", a.ID, "error", err.Error())
-			continue
-		}
-		var runDigests []string
-		for _, run := range runs {
-			if run.Status != "completed" || strings.TrimSpace(run.Answer) == "" {
-				continue
-			}
-			digest := "task answer: " + run.Answer
-			if len(digest) > 400 {
-				digest = digest[:400]
-			}
-			runDigests = append(runDigests, digest)
-		}
-		drafts, err := agent.DraftEvalCases(ctx, client, a.ID, a.Description, runDigests)
-		if err != nil {
-			log.Warn("eval warmup: draft", "agent", a.ID, "error", err.Error())
-			continue
-		}
-		if len(drafts) > evalGateMinCases-len(suite.Cases) {
-			drafts = drafts[:evalGateMinCases-len(suite.Cases)]
-		}
-		cases := make([]workspace.EvaluationCase, 0, len(drafts))
-		for i, draft := range drafts {
-			name := strings.TrimSpace(draft.Name)
-			if name == "" {
-				name = fmt.Sprintf("warmup-%d", i+1)
-			}
-			cases = append(cases, workspace.EvaluationCase{
-				Name:           "warmup/" + name,
-				Input:          draft.Input,
-				ExpectedOutput: draft.ExpectedOutput,
-			})
-		}
-		if err := ws.SaveAgentEvaluationSuite(ctx, a.ID, append(suite.Cases, cases...)); err != nil {
-			log.Warn("eval warmup: save suite", "agent", a.ID, "error", err.Error())
-			continue
-		}
-		summary := fmt.Sprintf("Сьют агента %s не дотягивал до гейта (%d кейсов) — супервайзер добавил %d черновых кейсов из purpose и свежих ранов, всего теперь %d. Ревью и удаление — во вкладке «Эволюция».",
-			a.ID, len(suite.Cases), len(cases), len(suite.Cases)+len(cases))
-		log.Info("eval warmup: summary", "agent", a.ID, "summary", summary)
-		log.Info("eval warmup: appended supervisor cases", "agent", a.ID, "cases", len(cases))
-		touched++
-	}
 }

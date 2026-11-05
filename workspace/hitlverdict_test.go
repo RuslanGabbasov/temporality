@@ -54,6 +54,12 @@ func (r sliceRow) Scan(dest ...any) error {
 			*t, _ = r[i].(string)
 		case *int:
 			*t, _ = r[i].(int)
+		case *int64:
+			*t, _ = r[i].(int64)
+		case *float64:
+			*t, _ = r[i].(float64)
+		case *[]string:
+			*t, _ = r[i].([]string)
 		case *[]byte:
 			*t, _ = r[i].([]byte)
 		case *time.Time:

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -40,10 +41,10 @@ type workspaceSkillVersion struct {
 	Status   string `json:"status"`
 }
 
-// evaluationCaseResult is the outcome of one case in one run. The agent
-// evaluator also carries the judge fields of specs/quality-loop.md §6 (M4);
-// skill evaluations never populate them, so the JSON stays identical for
-// the two callers.
+// evaluationCaseResult is the outcome of one case in one run. The judge
+// fields are kept for JSON compatibility with historical records and are
+// never populated — the judge machinery was removed with the eval gate
+// (docs/agent-evolution.md §8).
 type evaluationCaseResult struct {
 	Name           string   `json:"name"`
 	Passed         bool     `json:"passed"`
@@ -55,6 +56,21 @@ type evaluationCaseResult struct {
 	JudgeRationale string   `json:"judge_rationale,omitempty"`
 	Error          string   `json:"error,omitempty"`
 	Cause          string   `json:"cause,omitempty"`
+}
+
+// evalCaseMaxTokens caps one case's generation. Patterns only inspect the
+// answer head, and long generations on slow models turn into timeout tails.
+const evalCaseMaxTokens = 4096
+
+// classifyModelError maps a case-model failure to its machine cause:
+// deadlines (case context, client timeout) are model_timeout, everything
+// else — transport resets, provider 5xx after retries — is model_error.
+func classifyModelError(err error) string {
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		return "model_timeout"
+	}
+	return "model_error"
 }
 
 // RunSkillEvaluation loads the suite, runs every case against the requested

@@ -69,21 +69,9 @@ func (s *Store) EvalScheduleInterval(ctx context.Context) (time.Duration, error)
 	return parseEvalSchedule(raw), nil
 }
 
-// LatestScheduledEvalRun returns the newest trigger=schedule run timestamp
-// across all agents — the anchor the scheduler adds the interval to. Zero
-// time means "never ran", so the first cycle fires immediately.
-func (s *Store) LatestScheduledEvalRun(ctx context.Context) (time.Time, error) {
-	var last *time.Time
-	if err := s.pool.QueryRow(ctx, `
-		SELECT max(created_at) FROM workspace_agent_evaluation_run WHERE trigger = $1`,
-		TriggerSchedule).Scan(&last); err != nil {
-		return time.Time{}, err
-	}
-	if last == nil {
-		return time.Time{}, nil
-	}
-	return *last, nil
-}
+// LatestScheduledEvalRun was removed with the retired evaluation scheduler:
+// its trigger constant and the workspace_agent_evaluation_run table are gone
+// with the quality loop (docs/agent-evolution.md §8).
 
 // ListEvalSuiteAgentIDs returns agents with a non-empty evaluation suite —
 // the schedule's work list. Agents without cases have nothing to re-run.

@@ -289,7 +289,7 @@ func rollupSre(ctx context.Context, ws *workspace.Store, observationURL, journal
 		stats := observation.ComputeHealthStats(group, key.hour, key.hour.Add(time.Hour), human)
 		rows = append(rows, sreRowsFromStats(key.hour, key.project, stats)...)
 	}
-	if err := ws.UpsertSreBuckets(rows); err != nil {
+	if err := ws.UpsertSreBuckets(ctx, rows); err != nil {
 		log.Warn("sre rollup: store buckets", "error", err)
 		return
 	}

@@ -2764,12 +2764,39 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
+		a, err := ws.GetAgent(r.Context(), r.PathValue("agentID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("agent not found"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
 		versions, err := ws.ListAgentVersions(r.Context(), r.PathValue("agentID"))
 		if err != nil {
 			writeError(w, 500, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"versions": versions})
+		// Timeline rows carry the observation verdict (docs/agent-evolution.md
+		// §6.4): every version that was measured against a baseline reports
+		// how its window closed; the rest show no verdict instead of a fake one.
+		rows := make([]agentVersionRow, 0, len(versions))
+		now := time.Now().UTC()
+		for _, v := range versions {
+			row := agentVersionRow{AgentVersion: v}
+			if v.BaselineVersion > 0 {
+				if result, _, _, err := observationFor(r.Context(), ws, a, v.Version, a.ObservationDays, now); err == nil && result.Verdict != "" {
+					row.Verdict = result.Verdict
+				}
+			}
+			rows = append(rows, row)
+		}
+		writeJSON(w, 200, map[string]any{"versions": rows})
 	})
 	// Rollback to a previous definition snapshot (docs/evaluable-agent.md §14):
 	// the snapshot's definition and purpose come back as a NEW version —
@@ -2801,7 +2828,7 @@ func main() {
 			writeError(w, 409, errors.New("agent is already on this version"))
 			return
 		}
-		snapshot, err := ws.GetAgentVersion(r.Context(), agentID, version)
+		created, err := ws.RollbackAgentVersion(r.Context(), agentID, version, requestSubject(r))
 		if err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, errors.New("version snapshot not found"))
@@ -2810,30 +2837,26 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		definition := snapshot.Definition
+		// The rolled-back definition becomes the live one under the new
+		// version number — history stays append-only, the observation window
+		// measures the rollback like any other version.
+		definition := created.Definition
 		next := a
-		next.Description = snapshot.Description
+		next.Description = created.Description
 		next.Definition = &definition
-		if agentSemanticsChanged(a, next) {
-			next.DefinitionVersion++
-		}
-		newSnapshot := agentVersionSnapshot(next, requestSubject(r)+" (rollback to v"+strconv.Itoa(version)+")", "rollback", "")
-		if err := ws.InsertAgentVersion(r.Context(), newSnapshot); err != nil {
-			writeError(w, 500, err)
-			return
-		}
+		next.DefinitionVersion = created.Version
 		if err := ws.UpdateAgent(r.Context(), next); err != nil {
 			writeError(w, 500, err)
 			return
 		}
 		_ = ws.RecordAccessAudit(r.Context(), requestSubject(r), workspace.AuditAgentRollback, "agent", agentID, map[string]any{
-			"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion, "rolled_back_to": version,
+			"from_version": a.DefinitionVersion, "to_version": created.Version, "rolled_back_to": version,
 		})
 		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.rollback", a, workspace.AgentProposal{
 			AgentID: agentID, BaseVersion: a.DefinitionVersion,
 			Description: next.Description, Definition: definition,
-		}, actorFromRequest(r), map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion, "rolled_back_to": version})
-		writeJSON(w, 200, next)
+		}, actorFromRequest(r), map[string]any{"from_version": a.DefinitionVersion, "to_version": created.Version, "rolled_back_to": version})
+		writeJSON(w, 201, next)
 	})
 	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/runs", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -2861,145 +2884,6 @@ func main() {
 		}
 		source, prompt := agentPromptPreview(a)
 		writeJSON(w, 200, map[string]any{"agent_id": a.ID, "version": a.DefinitionVersion, "source": source, "prompt": prompt})
-	})
-	// Agent evaluation suites and runs (docs/plan-evaluable-agent.md §2.2 stage 8).
-	// A run is pinned to a definition version: the runner tests the compiled
-	// prompt snapshot of that exact version (0 = current effective prompt).
-	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/evaluation-suite", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleReader) {
-			return
-		}
-		suite, err := ws.GetAgentEvaluationSuite(r.Context(), r.PathValue("agentID"))
-		if err != nil {
-			writeError(w, 500, err)
-			return
-		}
-		writeJSON(w, 200, suite)
-	})
-	mux.HandleFunc("PUT /v1/workspace/agents/{agentID}/evaluation-suite", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleWriter) {
-			return
-		}
-		var suite workspace.AgentEvaluationSuite
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&suite); err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		if len(suite.Cases) > 16 {
-			writeError(w, 422, errors.New("at most 16 evaluation cases are supported"))
-			return
-		}
-		// Judge-case validation (specs/quality-loop.md §6.1-§6.2, M4): the
-		// check class must be known, judge checks need a 0-100 threshold and
-		// a configured installation judge model — otherwise saving would
-		// produce a suite whose runs can only end in error.
-		judgeCases := false
-		for i, c := range suite.Cases {
-			if strings.TrimSpace(c.Input) == "" {
-				writeError(w, 422, fmt.Errorf("case %d: input is required", i+1))
-				return
-			}
-			switch workspace.NormalizeEvalCheck(c.Check) {
-			case workspace.EvalCheckPatterns:
-			case workspace.EvalCheckJudge, workspace.EvalCheckPatternsJudge:
-				judgeCases = true
-				if c.JudgeThreshold == nil || *c.JudgeThreshold < 0 || *c.JudgeThreshold > 100 {
-					writeError(w, 422, fmt.Errorf("case %d: judge_threshold (0-100) is required for judge checks", i+1))
-					return
-				}
-			default:
-				writeError(w, 422, fmt.Errorf("case %d: unknown check %q (use patterns, judge or patterns+judge)", i+1, c.Check))
-				return
-			}
-		}
-		if judgeCases {
-			judgeConfig, cfgErr := ws.JudgeConfig(r.Context())
-			if cfgErr != nil {
-				writeError(w, 500, cfgErr)
-				return
-			}
-			if !judgeConfig.Configured {
-				writeError(w, 422, errors.New("judge_not_configured: set EVAL_JUDGE_MODEL to a configured provider model before saving judge cases"))
-				return
-			}
-		}
-		agentID := r.PathValue("agentID")
-		if _, err := ws.GetAgent(r.Context(), agentID); err != nil {
-			if errors.Is(err, workspace.ErrNotFound) {
-				writeError(w, 404, err)
-				return
-			}
-			writeError(w, 500, err)
-			return
-		}
-		if err := ws.SaveAgentEvaluationSuite(r.Context(), agentID, suite.Cases); err != nil {
-			writeError(w, 500, err)
-			return
-		}
-		saved, _ := ws.GetAgentEvaluationSuite(r.Context(), agentID)
-		writeJSON(w, 200, saved)
-	})
-	// POST runs the suite synchronously (one grounded model call per case) and
-	// records the run; GET lists run history. The internal record sink lives at
-	// .../evaluation-runs so the evaluator's loopback write cannot recurse into
-	// a fresh evaluation.
-	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/evaluation-runs", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleWriter) {
-			return
-		}
-		var run workspace.AgentEvaluationRun
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&run); err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		run.AgentID = r.PathValue("agentID")
-		if run.AgentVersion <= 0 {
-			writeError(w, 422, errors.New("agent_version is required"))
-			return
-		}
-		if err := ws.RecordAgentEvaluationRun(r.Context(), &run); err != nil {
-			writeError(w, 500, err)
-			return
-		}
-		writeJSON(w, 201, run)
-	})
-	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/evaluations", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleWriter) {
-			return
-		}
-		agentID := r.PathValue("agentID")
-		var req struct {
-			Version int `json:"version"`
-		}
-		if r.ContentLength > 0 {
-			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-				writeError(w, 400, err)
-				return
-			}
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-		defer cancel()
-		if _, err := activities.RunAgentEvaluation(ctx, agentID, req.Version); err != nil {
-			writeError(w, 422, err)
-			return
-		}
-		runs, err := ws.ListAgentEvaluationRuns(r.Context(), agentID, 1)
-		if err != nil || len(runs) == 0 {
-			writeError(w, 500, errors.New("evaluation ran but the result could not be read back"))
-			return
-		}
-		writeJSON(w, 200, runs[0])
-	})
-	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/evaluations", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleReader) {
-			return
-		}
-		runs, err := ws.ListAgentEvaluationRuns(r.Context(), r.PathValue("agentID"), 0)
-		if err != nil {
-			writeError(w, 500, err)
-			return
-		}
-		writeJSON(w, 200, map[string]any{"runs": runs})
 	})
 	// HITL verdicts of one run (specs/quality-loop.md §3, §8.1): every human
 	// decision on the run — ask_human answers plus human approvals and manual
@@ -3085,9 +2969,12 @@ func main() {
 			Problem        string                     `json:"problem"`
 			Change         string                     `json:"change"`
 			Effect         string                     `json:"effect"`
+			ChangeSummary  string                     `json:"change_summary"`
 			Description    string                     `json:"description"`
 			Definition     *workspace.AgentDefinition `json:"definition"`
 			Evidence       []string                   `json:"evidence"`
+			Source         string                     `json:"source"`
+			Context        json.RawMessage            `json:"context"`
 			Author         string                     `json:"author"`
 			GeneratorModel string                     `json:"generator_model"`
 		}
@@ -3135,6 +3022,16 @@ func main() {
 			Definition:  definition,
 			Description: req.Description, Problem: req.Problem, Change: req.Change, Effect: req.Effect,
 			Evidence: req.Evidence, Author: req.Author, GeneratorModel: req.GeneratorModel,
+			Source: req.Source, ChangeSummary: req.ChangeSummary, Context: req.Context,
+		}
+		if proposal.Source == "" {
+			proposal.Source = "user"
+			if strings.HasPrefix(proposal.Author, "agent-run:") {
+				proposal.Source = "agent"
+			}
+		}
+		if proposal.ChangeSummary == "" {
+			proposal.ChangeSummary = summarizeChange(proposal.Problem, proposal.Change)
 		}
 		if proposal.Description == "" {
 			proposal.Description = a.Description
@@ -3148,20 +3045,9 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.proposed", a, proposal, actorFromRequest(r), nil)
+		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.proposed", a, proposal, actorFromRequest(r), map[string]any{"source": proposal.Source})
 		writeJSON(w, 201, proposal)
 	})
-	// Applying is gated (specs/quality-loop.md §5 — cmd/agent-kernel/
-	// evalgate.go): a fresh green eval run on the proposal's base version
-	// is required, red blocks unless a writer overrides with justification,
-	// no run starts one and answers 202. The cleared apply continues on the
-	// transactional Store.ApplyAgentProposal (§10.1a): claim + version++ +
-	// immutable snapshot land atomically (docs/living-skills.md §26: agents
-	// propose, people apply). The bool result tells the gate handler whether
-	// the apply landed, so the gate:false path journals its skip only after
-	// a real apply (F-1). A gate:false apply passes its audit event along
-	// (F-2): the skip record joins the apply's own transaction
-	// (Store.ApplyAgentProposalAudited), so a failed audit INSERT rolls the
 	// apply back and answers 503 audit_write_failed — a gate-less apply can
 	// never land unjournaled (fail-closed, CWE-778).
 	// Hosted form links (docs/interactive-HITL.md §6.2): chat-delivered
@@ -3169,57 +3055,10 @@ func main() {
 	// answerable from any browser, no harness account. The answer re-enters
 	// through the same validation + workflow signal as every other channel.
 	RegisterFormLinkRoutes(mux, ws, gate, kernelFormSignal{client: temporalClient, sourceID: activities.SourceID}, log)
-	RegisterEvalGateRoutes(mux, gate, ws, kernelGateRunner{activities: activities}, events,
-		func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal, audit *workspace.AccessAuditEvent) bool {
-			next := a
-			next.Description = proposal.Description
-			definition := proposal.Definition
-			next.Definition = &definition
-			// Bindings never change through a proposal (mirror of the PUT freeze).
-			next.OrgUnitID = a.OrgUnitID
-			if agentSemanticsChanged(a, next) {
-				next.DefinitionVersion++
-			}
-			var snapshot *workspace.AgentVersion
-			if next.Definition != nil && next.DefinitionVersion != a.DefinitionVersion {
-				version := agentVersionSnapshot(next, requestSubject(r), "proposal", proposal.GeneratorModel)
-				snapshot = &version
-			}
-			var decided workspace.AgentProposal
-			var err error
-			if audit != nil {
-				decided, err = ws.ApplyAgentProposalAudited(r.Context(), next, proposal.ID, requestSubject(r), snapshot, audit)
-			} else {
-				decided, err = ws.ApplyAgentProposal(r.Context(), next, proposal.ID, requestSubject(r), snapshot)
-			}
-			if err != nil {
-				switch {
-				case errors.Is(err, workspace.ErrAuditWriteFailed):
-					// F-2 fail-closed: the audit INSERT rode the apply
-					// transaction, so the apply rolled back with it —
-					// surface 503, never a success without a bypass trail.
-					writeJSON(w, 503, map[string]any{"error": "audit_write_failed"})
-				case errors.Is(err, workspace.ErrNotFound):
-					writeError(w, 404, err)
-				case errors.Is(err, workspace.ErrBaseVersionStale):
-					writeJSON(w, 409, map[string]any{
-						"error":           "base_version_stale",
-						"base_version":    proposal.BaseVersion,
-						"current_version": next.DefinitionVersion,
-					})
-				case errors.Is(err, workspace.ErrConflict):
-					writeError(w, 409, err)
-				default:
-					writeError(w, 500, err)
-				}
-				return false
-			}
-			emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.applied", next, decided, actorFromRequest(r),
-				map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion})
-			writeJSON(w, 200, map[string]any{"agent": next, "proposal": decided})
-			return true
-		},
-		visibleUnits, time.Now, log)
+	// Agent evolution v2 (docs/agent-evolution.md): proposals from users and
+	// agents, gateless apply, per-version agentSRE metrics, rollback and
+	// control examples. Drafting and smoke runs use the wizard model chain.
+	RegisterAgentEvolutionRoutes(mux, gate, ws, wizardModelClient, visibleUnits, observationURL, func() string { return os.Getenv("TEMPORALITY_API_TOKEN") }, log)
 	// Artifact lifecycle routes (docs/artifact-lifecycle.md §6): submit a
 	// draft to review, list review rounds, resolve them by human decision —
 	// in the UI or by channel reply (Phase 2). Reviewer notices ride the
@@ -7923,16 +7762,14 @@ func main() {
 		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 
-	// Quality dashboard and version diffs (specs/quality-loop.md §7).
-	RegisterQualityRoutes(mux, gate, ws, events, visibleUnits)
 	// Stand-to-stand transfer (docs/user/operations.md §2): export/import of
 	// skills and agents in the internal format. Admin-only.
 	registerTransferRoutes(mux, gate, ws)
 	// Egress control (docs/agent-behavior-monitoring.md §7): generate the
 	// proxy config from agent settings; agent CRUD nudges regeneration.
 	startEgressLoop(ctx, log, ws, env("KERNEL_DOCKER_BINARY", "docker"))
-	// LLM-judge configuration and calibration (specs/quality-loop.md §6).
-	RegisterJudgeRoutes(mux, gate, ws, activities, events, visibleUnits, log)
+	// Installation judge model (docs/agent-evolution.md §8): the knowledge contours resolve their judge model here.
+	RegisterJudgeRoutes(mux, gate, ws, events, log)
 	// Judge-driven knowledge-area normalization (docs/human-knowledge-explorer.md §4.2).
 	RegisterKnowledgeAreaRoutes(mux, gate, ws, secretMasterKey, observationURL, log)
 	// Semantic knowledge search (docs/supervisor-model.md §6.6): lexical +
@@ -7953,11 +7790,10 @@ func main() {
 	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, liveness, func(ctx context.Context) (*llm.Client, error) {
 		return judgeModelClient(ctx, ws, secretMasterKey)
 	})
-	// Scheduled quality runs (docs/agent-quality-loop.md §8.1): the cadence is
-	// an operator setting the loop re-reads every minute, so UI changes apply
-	// without a restart. Anchored on the newest scheduled run row.
-	registerQualityScheduleRoutes(mux, gate, ws, events)
-	go runQualityScheduleJob(ctx, ws, activities, log)
+	// AgentSRE metrics rollup (docs/agent-evolution.md §3): per-version daily
+	// counters and observation verdicts — how a version proves itself on real
+	// work instead of a pre-apply gate.
+	go startAgentMetricsRollup(ctx, log, ws, observationURL)
 	// Review deadline sweep (docs/artifact-lifecycle.md §6 Phase 2): one
 	// reminder past ARTIFACT_REVIEW_TIMEOUT, one escalation to the org head
 	// (else admins) after another silent timeout. Disabled by "0".
@@ -7976,9 +7812,6 @@ func main() {
 		judgeConflict:  relationConflictJudgeAdapter(ctx, func(ctx context.Context) (*llm.Client, error) { return judgeModelClient(ctx, ws, secretMasterKey) }),
 	})
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
-	// Golden eval-case candidates (specs/quality-loop.md §4): review
-	// endpoints, candidate events and the harvesting/reaping background job.
-	RegisterEvalCandidateRoutes(ctx, mux, ws, gate, events, temporalClient, activities.SourceID, log)
 	// Intake pipeline (docs/inbound-messages.md): the system project + agent
 	// exist before the first message arrives; create-if-absent, never
 	// overwritten. The kill switch records and rejects messages without
@@ -8998,7 +8831,7 @@ func loadAgentProposal(w http.ResponseWriter, r *http.Request, ws *workspace.Sto
 		}
 		return failure(500, err)
 	}
-	proposal, err := ws.GetAgentProposal(r.Context(), agentID, proposalID)
+	proposal, err := ws.GetAgentProposal(r.Context(), proposalID)
 	if err != nil {
 		if errors.Is(err, workspace.ErrNotFound) {
 			return failure(404, err)

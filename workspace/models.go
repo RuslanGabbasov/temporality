@@ -395,6 +395,57 @@ type AgentVersion struct {
 	GeneratorModel string          `json:"generator_model,omitempty"`
 	Author         string          `json:"author,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
+	// Lineage (docs/agent-evolution.md §2.1): how this version came to be and
+	// which version its metrics are compared against.
+	Kind            string `json:"kind,omitempty"`             // edit | proposal | rollback
+	BaselineVersion int    `json:"baseline_version,omitempty"` // the version this one replaced
+	RollbackOf      int    `json:"rollback_of,omitempty"`      // original version when kind=rollback
+	ChangeSummary   string `json:"change_summary,omitempty"`   // what changes in behavior
+}
+
+// AgentVersionMetrics is one daily rollup row of a definition version's
+// agentSRE metrics (docs/agent-evolution.md §3). Day is a UTC calendar day
+// truncated to midnight.
+type AgentVersionMetrics struct {
+	AgentID          string    `json:"agent_id"`
+	Version          int       `json:"version"`
+	Day              time.Time `json:"day"`
+	Runs             int       `json:"runs"`
+	Succeeded        int       `json:"succeeded"`
+	Failed           int       `json:"failed"`
+	Cancelled        int       `json:"cancelled"`
+	TurnLimited      int       `json:"turn_limited"`
+	VerdictAccepted  int       `json:"verdict_accepted"`
+	VerdictCorrected int       `json:"verdict_corrected"`
+	VerdictRejected  int       `json:"verdict_rejected"`
+	Interventions    int       `json:"interventions"`
+	Reworks          int       `json:"reworks"`
+	Tokens           int64     `json:"tokens"`
+	CostUSD          float64   `json:"cost_usd"`
+	WallMs           int64     `json:"wall_ms"`
+	UncertainOps     int       `json:"uncertain_ops"`
+	Incidents        int       `json:"incidents"`
+}
+
+// AgentCheckCase is one saved «control example» (docs/agent-evolution.md §2.4):
+// an input with pattern expectations, usually harvested from a production run.
+// A check case is never a gate — the smoke run against it is informational.
+type AgentCheckCase struct {
+	ID             int64     `json:"id"`
+	AgentID        string    `json:"agent_id"`
+	Input          string    `json:"input"`
+	MustContain    []string  `json:"must_contain"`
+	MustNotContain []string  `json:"must_not_contain"`
+	FromRunID      string    `json:"from_run_id,omitempty"`
+	CreatedBy      string    `json:"created_by,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ObservationConfig is the per-agent observation window (docs/agent-evolution.md §2.3):
+// the window closes when both the day count and the run count are reached.
+type ObservationConfig struct {
+	Days    int `json:"days"`
+	MinRuns int `json:"min_runs"`
 }
 
 // Agent is a top-level entity with full configuration. Agents are reusable
@@ -446,9 +497,14 @@ type Agent struct {
 	// Metadata
 	Labels map[string]string `json:"labels,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
-	OrgUnitID string    `json:"org_unit_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	OrgUnitID string `json:"org_unit_id,omitempty"`
+	// Observation window for version metrics (docs/agent-evolution.md §2.3):
+	// closes when both observation_days have passed and observation_min_runs
+	// runs of the version have accumulated.
+	ObservationDays    int       `json:"observation_days"`
+	ObservationMinRuns int       `json:"observation_min_runs"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // Task is scoped to a project and optionally bound to an agent.
