@@ -1,158 +1,114 @@
 import { describe, expect, it } from 'vitest'
-import { applyGateErrorView, detectRegressions, detectTurnsRegressions, gateRunErrorView, latestEvalByVersion, passRate, runsByVersion } from './agentEvolution'
-import { ApiError } from './workspaceApi'
-import type { AgentEvaluationRun, Run } from './workspaceApi'
+import {
+  isCostTimeMetric,
+  isLowerBetter,
+  isSignalMark,
+  metricDeltaText,
+  metricValueText,
+  promptDiffTone,
+  verdictTagType,
+  versionKindLabelKey,
+  versionKindTagType,
+} from './agentEvolution'
 
-const evalRun = (id: number, version: number, passed: number, failed: number, createdAt: string): AgentEvaluationRun =>
-  ({ id, agent_id: 'qa', agent_version: version, passed, failed, cases: [], created_at: createdAt })
-
-const run = (version: number, status: string, turns: number): Run =>
-  ({ id: `r-${version}-${status}-${turns}`, task_id: 't', project_id: 'p', agent_id: 'qa', agent_version: version, run_id: 'x', status, model: 'm', answer: '', turns, error: '', created_at: '', updated_at: '' })
-
-describe('latestEvalByVersion', () => {
-  it('keeps the newest run per version', () => {
-    const runs = [
-      evalRun(3, 2, 2, 0, '2026-10-10T10:00:00Z'),
-      evalRun(2, 2, 1, 1, '2026-10-09T10:00:00Z'),
-      evalRun(1, 1, 2, 0, '2026-10-08T10:00:00Z'),
-    ]
-    const latest = latestEvalByVersion(runs)
-    expect(latest.size).toBe(2)
-    expect(latest.get(2)!.id).toBe(3)
-    expect(latest.get(1)!.id).toBe(1)
+describe('isSignalMark', () => {
+  it('folds the §5 string markers', () => {
+    expect(isSignalMark('signal')).toBe(true)
+    expect(isSignalMark('noise')).toBe(false)
+  })
+  it('folds the bool a rollup may send instead', () => {
+    expect(isSignalMark(true)).toBe(true)
+    expect(isSignalMark(false)).toBe(false)
+    expect(isSignalMark(undefined)).toBe(false)
   })
 })
 
-describe('passRate', () => {
-  it('returns null for empty runs', () => {
-    expect(passRate(evalRun(1, 1, 0, 0, ''))).toBeNull()
-  })
-  it('computes the ratio', () => {
-    expect(passRate(evalRun(1, 1, 3, 1, ''))).toBe(0.75)
-  })
-})
-
-describe('runsByVersion', () => {
-  it('aggregates outcomes and average turns', () => {
-    const stats = runsByVersion([
-      run(2, 'completed', 4),
-      run(2, 'failed', 6),
-      run(2, 'completed', 8),
-      run(1, 'completed', 5),
-    ])
-    expect(stats.get(2)).toEqual({ total: 3, completed: 2, failed: 1, avgTurns: 6 })
-    expect(stats.get(1)!.avgTurns).toBe(5)
-  })
-  it('keeps avgTurns null when no run reports turns', () => {
-    const stats = runsByVersion([run(3, 'completed', 0)])
-    expect(stats.get(3)).toEqual({ total: 1, completed: 1, failed: 0, avgTurns: null })
+describe('isCostTimeMetric', () => {
+  it('flags the informational cost/time metrics', () => {
+    expect(isCostTimeMetric('tokens_avg')).toBe(true)
+    expect(isCostTimeMetric('cost_avg')).toBe(true)
+    expect(isCostTimeMetric('cost_usd_avg')).toBe(true)
+    expect(isCostTimeMetric('wall_avg')).toBe(true)
+    expect(isCostTimeMetric('wall_ms_avg')).toBe(true)
+    expect(isCostTimeMetric('success_rate')).toBe(false)
+    expect(isCostTimeMetric('incident_rate')).toBe(false)
   })
 })
 
-describe('detectTurnsRegressions', () => {
-  const run = (version: number, status: string, turns: number): Run => ({
-    id: `r-${version}-${status}-${turns}-${Math.random()}`, task_id: 't', project_id: 'p',
-    agent_version: version, run_id: 'r', status, turns, created_at: '', updated_at: '',
-  } as unknown as Run)
-
-  it('flags a version whose runs take meaningfully more turns', () => {
-    const runs: Run[] = [
-      ...Array.from({ length: 3 }, () => run(1, 'completed', 4)),
-      ...Array.from({ length: 4 }, () => run(2, 'completed', 8)),
-    ]
-    const result = detectTurnsRegressions(runs)
-    expect(result).toEqual([{ version: 2, previousVersion: 1, from: 4, to: 8 }])
-  })
-
-  it('stays quiet on noise and on thin samples', () => {
-    // +0.5 turn growth is noise, not a regression.
-    expect(detectTurnsRegressions([
-      ...Array.from({ length: 3 }, () => run(1, 'completed', 4)),
-      ...Array.from({ length: 4 }, () => run(2, 'completed', 4.5 as unknown as number)),
-    ])).toEqual([])
-    // Fewer than 3 completed runs per side cannot decide.
-    expect(detectTurnsRegressions([
-      run(1, 'completed', 3),
-      run(2, 'completed', 9),
-    ])).toEqual([])
+describe('isLowerBetter', () => {
+  it('rates success as the only higher-is-better SLI', () => {
+    expect(isLowerBetter('success_rate')).toBe(false)
+    expect(isLowerBetter('correction_rate')).toBe(true)
+    expect(isLowerBetter('incident_rate')).toBe(true)
   })
 })
 
-describe('detectRegressions', () => {
-  const SUITE_SAVED = '2026-10-01T00:00:00Z'
-
-  it('flags a version whose pass rate dropped on the unchanged suite', () => {
-    const regressions = detectRegressions([
-      evalRun(2, 2, 1, 3, '2026-10-05T00:00:00Z'),
-      evalRun(1, 1, 4, 0, '2026-10-03T00:00:00Z'),
-    ], SUITE_SAVED)
-    expect(regressions).toEqual([{ version: 2, previousVersion: 1, from: 1, to: 0.25 }])
+describe('metricValueText', () => {
+  it('renders rates as percents', () => {
+    expect(metricValueText('success_rate', 0.83)).toBe('83%')
+    expect(metricValueText('correction_rate', 0.25)).toBe('25%')
+    expect(metricValueText('success_rate', 1)).toBe('100%')
   })
-
-  it('ignores the drop when the suite changed between runs', () => {
-    const regressions = detectRegressions([
-      evalRun(2, 2, 1, 3, '2026-10-05T00:00:00Z'),
-      evalRun(1, 1, 4, 0, '2026-10-03T00:00:00Z'),
-    ], '2026-10-04T00:00:00Z') // v1 ran before the suite changed
-    expect(regressions).toEqual([])
+  it('renders tokens as grouped counts and cost in dollars', () => {
+    expect(metricValueText('tokens_avg', 41000)).toBe('41 000')
+    expect(metricValueText('cost_avg', 0.21)).toBe('$0.21')
+    expect(metricValueText('cost_usd_avg', 1.5)).toBe('$1.50')
   })
-
-  it('ignores improvements and equal rates', () => {
-    const regressions = detectRegressions([
-      evalRun(2, 2, 4, 0, '2026-10-05T00:00:00Z'),
-      evalRun(1, 1, 2, 2, '2026-10-03T00:00:00Z'),
-    ], SUITE_SAVED)
-    expect(regressions).toEqual([])
+  it('renders wall-time through the injected duration formatter', () => {
+    expect(metricValueText('wall_avg', 183000, (ms) => `${ms / 1000}s`)).toBe('183s')
+    // Without one the plain seconds fallback stands.
+    expect(metricValueText('wall_ms_avg', 183000)).toBe('183s')
   })
-
-  it('needs a previous version to compare against', () => {
-    expect(detectRegressions([evalRun(1, 1, 0, 4, '2026-10-05T00:00:00Z')], SUITE_SAVED)).toEqual([])
-    // v3 without v2: no comparison
-    expect(detectRegressions([
-      evalRun(2, 3, 0, 4, '2026-10-05T00:00:00Z'),
-      evalRun(1, 1, 4, 0, '2026-10-03T00:00:00Z'),
-    ], SUITE_SAVED)).toEqual([])
+  it('keeps unknown metrics numeric and non-finite values honest', () => {
+    expect(metricValueText('reworks', 2)).toBe('2.00')
+    expect(metricValueText('reworks', Number.NaN)).toBe('—')
   })
 })
 
-describe('applyGateErrorView', () => {
-  const gateError = (body: Record<string, any>) => new ApiError(409, body)
-
-  it('maps suite_not_ready causes to locale views', () => {
-    expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'suite_empty' })))
-      .toEqual({ kind: 'suite_not_ready', causeKey: 'agents.gate_cause_suite_empty', rawCause: 'suite_empty' })
-    expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'suite_too_small' })))
-      .toEqual({ kind: 'suite_not_ready', causeKey: 'agents.gate_cause_suite_too_small', causeParams: { min: '3' }, rawCause: 'suite_too_small' })
-    expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'judge_not_configured' })))
-      .toEqual({ kind: 'suite_not_ready', causeKey: 'agents.gate_cause_judge_not_configured', rawCause: 'judge_not_configured' })
+describe('metricDeltaText', () => {
+  it('signs deltas and formats them in the metric unit', () => {
+    expect(metricDeltaText('success_rate', -0.07)).toBe('-7%')
+    expect(metricDeltaText('correction_rate', 0.14)).toBe('+14%')
+    expect(metricDeltaText('cost_avg', 0.05)).toBe('+$0.05')
   })
-
-  it('maps blocked, stale and rebase refusals with their case lists', () => {
-    expect(applyGateErrorView(gateError({ error: 'gate_blocked', failed_cases: ['golden/a', 'golden/b'] })))
-      .toEqual({ kind: 'message', key: 'agents.gate_blocked', params: { cases: 'golden/a, golden/b' } })
-    expect(applyGateErrorView(gateError({ error: 'suite_stale', stale_cases: ['golden/old'] })))
-      .toEqual({ kind: 'message', key: 'agents.gate_suite_stale', params: { cases: 'golden/old' } })
-    expect(applyGateErrorView(gateError({ error: 'base_version_stale', base_version: 4, current_version: 7 })))
-      .toEqual({ kind: 'message', key: 'agents.gate_base_version_stale', params: { base: '4', current: '7' } })
-  })
-
-  it('falls back to null for unknown codes and plain errors', () => {
-    expect(applyGateErrorView(gateError({ error: 'audit_write_failed' }))).toBeNull()
-    expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'mystery' }))).toBeNull()
-    expect(applyGateErrorView(new Error('HTTP 500'))).toBeNull()
-    expect(applyGateErrorView(null)).toBeNull()
+  it('drops the sign when the formatted delta is zero', () => {
+    expect(metricDeltaText('success_rate', -0.001)).toBe('0%')
+    expect(metricDeltaText('tokens_avg', 0)).toBe('0')
   })
 })
 
-describe('gateRunErrorView', () => {
-  it('maps infra causes to their own sentences — provider flakiness is not a regression', () => {
-    expect(gateRunErrorView('model_timeout')).toEqual({ key: 'agents.gate_run_model_timeout' })
-    expect(gateRunErrorView('model_error')).toEqual({ key: 'agents.gate_run_model_error' })
+describe('verdictTagType', () => {
+  it('maps the §3.1 verdicts to tag colors', () => {
+    expect(verdictTagType('improved')).toBe('green')
+    expect(verdictTagType('stable')).toBe('cyan')
+    expect(verdictTagType('degraded')).toBe('red')
+    expect(verdictTagType('insufficient')).toBe('warm-gray')
+    expect(verdictTagType(null)).toBe('gray')
+    expect(verdictTagType('')).toBe('gray')
+    expect(verdictTagType('mystery')).toBe('gray')
   })
+})
 
-  it('leaves unknown and absent causes to the generic run-error text', () => {
-    expect(gateRunErrorView('gate_run_aborted')).toBeNull()
-    expect(gateRunErrorView('')).toBeNull()
-    expect(gateRunErrorView(undefined)).toBeNull()
+describe('version kind badges', () => {
+  it('maps kinds to tag colors', () => {
+    expect(versionKindTagType('edit')).toBe('blue')
+    expect(versionKindTagType('proposal')).toBe('purple')
+    expect(versionKindTagType('rollback')).toBe('warm-gray')
+    expect(versionKindTagType('mystery')).toBe('gray')
+  })
+  it('maps known kinds to locale keys and refuses unknown ones', () => {
+    expect(versionKindLabelKey('edit')).toBe('agents.kind_edit')
+    expect(versionKindLabelKey('proposal')).toBe('agents.kind_proposal')
+    expect(versionKindLabelKey('rollback')).toBe('agents.kind_rollback')
+    expect(versionKindLabelKey('mystery')).toBeNull()
+  })
+})
+
+describe('promptDiffTone', () => {
+  it('reads the «- » / «+ » prefixes of changed prompt lines', () => {
+    expect(promptDiffTone('- Never delete files.')).toBe('del')
+    expect(promptDiffTone('+ Never delete files or dirs.')).toBe('add')
+    expect(promptDiffTone('  unchanged')).toBe('same')
+    expect(promptDiffTone('')).toBe('same')
   })
 })

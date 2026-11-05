@@ -237,45 +237,6 @@ export interface AgentVersion {
   created_at: string
 }
 
-export interface EvalCaseCandidate {
-  id: number
-  agent_id: string
-  run_id: string
-  task_id?: string
-  project_id?: string
-  agent_version?: number
-  input: string
-  expected_output: string
-  source: string
-  verdict: 'pending' | 'accepted' | 'rejected' | string
-  redaction_applied?: boolean
-  redactions?: number
-  reviewed_by?: string
-  reviewed_at?: string
-  created_at: string
-}
-
-export interface AgentEvaluationCase {
-  name: string
-  input: string
-  must_contain?: string[]
-  must_not_contain?: string[]
-}
-
-export interface AgentEvaluationSuite {
-  agent_id: string
-  cases: AgentEvaluationCase[]
-  updated_at?: string
-}
-
-export interface AgentEvaluationCaseResult {
-  name: string
-  passed: boolean
-  answer?: string
-  missed?: string[]
-  unexpected?: string[]
-}
-
 // Installation-wide judge resolution (GET/PUT /v1/workspace/evaluation-judge):
 // configured=false means the judge is off; source says which knob is in
 // effect — "setting" (UI) or "env".
@@ -307,30 +268,6 @@ export interface AreaNormalizationResult {
   hidden: number
 }
 
-// Scheduled quality-run cadence (GET/PUT /v1/workspace/quality-schedule):
-// interval_hours=0 disables; next_run_at is the approximate fire time.
-export interface QualitySchedule {
-  interval_hours: number
-  enabled: boolean
-  last_run_at?: string
-  next_run_at?: string
-}
-
-export interface AgentEvaluationRun {
-  id: number
-  agent_id: string
-  agent_version: number
-  passed: number
-  failed: number
-  cases: AgentEvaluationCaseResult[]
-  created_at: string
-  verdict?: 'pass' | 'fail' | 'error' | 'unknown' | string
-  cause?: string
-  trigger?: string
-  proposal_id?: number
-  judge_degraded?: boolean
-}
-
 /** Evolution proposal (plan §2.2 stage 10): a pending definition change with
  * full provenance. Apply is human-only and goes through the regular version
  * path — capabilities are never part of a proposal. */
@@ -351,13 +288,6 @@ export interface AgentProposal {
   decided_at?: string
   decided_by?: string
 }
-
-/** Gated apply result: either the proposal landed (200) or the eval gate
- * started/waited on a run (202) — the UI shows the run and asks for a second,
- * conscious apply once it turns green. */
-export type ApplyProposalResult =
-  | { kind: 'applied'; agent: Agent; proposal: AgentProposal }
-  | { kind: 'evaluating'; evaluation_run_id: number; status: string }
 
 export interface BuiltinAgentSpec {
   slug: string
@@ -1298,38 +1228,18 @@ export const workspaceApi = {
     request<{ versions: AgentVersion[] }>(`/v1/workspace/agents/${id}/versions`),
   rollbackAgentVersion: (id: string, version: number) =>
     request<Agent>(`/v1/workspace/agents/${id}/versions/${version}/rollback`, { method: 'POST' }),
-  listEvalCaseCandidates: (id: string) =>
-    request<{ candidates: EvalCaseCandidate[]; count: number }>(`/v1/workspace/agents/${id}/eval-case-candidates`),
-  acceptEvalCaseCandidate: (id: string, candidateId: number) =>
-    request<{ case: unknown; suite_size: number }>(`/v1/workspace/agents/${id}/eval-case-candidates/${candidateId}/accept`, { method: 'POST' }),
-  rejectEvalCaseCandidate: (id: string, candidateId: number) =>
-    request<{ candidate_id: number; verdict: string }>(`/v1/workspace/agents/${id}/eval-case-candidates/${candidateId}/reject`, { method: 'POST' }),
-  acceptAllEvalCaseCandidates: (id: string) =>
-    request<{ accepted: EvalCaseCandidate[]; accepted_n: number; skipped: EvalCaseCandidate[]; skip_reasons: string[] }>(`/v1/workspace/agents/${id}/eval-case-candidates/accept-all`, { method: 'POST' }),
   listAgentRuns: (id: string) =>
     request<{ runs: Run[] }>(`/v1/workspace/agents/${id}/runs`),
   getAgentPrompt: (id: string) =>
     request<{ agent_id: string; version: number; source: string; prompt: string }>(`/v1/workspace/agents/${id}/prompt`),
-  getAgentEvaluationSuite: (id: string) =>
-    request<AgentEvaluationSuite>(`/v1/workspace/agents/${id}/evaluation-suite`),
-  saveAgentEvaluationSuite: (id: string, cases: AgentEvaluationCase[]) =>
-    request<AgentEvaluationSuite>(`/v1/workspace/agents/${id}/evaluation-suite`, { method: 'PUT', body: JSON.stringify({ cases }) }),
-  runAgentEvaluation: (id: string, version?: number) =>
-    request<AgentEvaluationRun>(`/v1/workspace/agents/${id}/evaluations`, { method: 'POST', body: JSON.stringify(version ? { version } : {}) }),
-  listAgentEvaluationRuns: (id: string) =>
-    request<{ runs: AgentEvaluationRun[] }>(`/v1/workspace/agents/${id}/evaluations`),
   listAgentProposals: (id: string) =>
     request<{ proposals: AgentProposal[] }>(`/v1/workspace/agents/${id}/proposals`),
-  // Installation-level quality settings (docs/agent-quality-loop.md §15):
-  // the judge model and the scheduled re-run cadence, owned by the UI.
+  // Installation judge model (docs/agent-evolution.md §8): the knowledge
+  // contours resolve their judge model through it.
   getJudgeConfig: () =>
     request<JudgeConfig>('/v1/workspace/evaluation-judge'),
   updateJudgeConfig: (model: string) =>
     request<JudgeConfig>('/v1/workspace/evaluation-judge', { method: 'PUT', body: JSON.stringify({ model }) }),
-  getQualitySchedule: () =>
-    request<QualitySchedule>('/v1/workspace/quality-schedule'),
-  updateQualitySchedule: (intervalHours: number) =>
-    request<QualitySchedule>('/v1/workspace/quality-schedule', { method: 'PUT', body: JSON.stringify({ interval_hours: intervalHours }) }),
   // Supervisor panel (docs/supervisor-model.md): the models that work for the
   // administrator plus the human-attention estimate coefficients.
   getSupervisorSettings: () =>
@@ -1390,27 +1300,6 @@ export const workspaceApi = {
     request<AreaNormalizationResult>('/v1/workspace/knowledge-areas/normalize', { method: 'POST', body: JSON.stringify({ project }) }),
   createAgentProposal: (id: string, data: { problem: string; change: string; effect?: string; description?: string; definition?: { constraints?: string[]; completion?: string[] }; evidence?: string[] }) =>
     request<AgentProposal>(`/v1/workspace/agents/${id}/proposals`, { method: 'POST', body: JSON.stringify(data) }),
-  // Gated apply (docs/agent-quality-loop.md §7.1): the answer is one of two
-  // shapes — the applied proposal (200) or the accepted-for-evaluation gate
-  // run (202) that a repeat apply waits on. `gate:false` skips the gate and is
-  // audited server-side; `override` + justification pushes an agent-authored
-  // change through a red/unready gate — the override lands in the audit trail
-  // with the justification, so the bypass is never silent.
-  applyAgentProposal: async (id: string, proposalId: number, opts?: { gate?: boolean; override?: boolean; justification?: string }): Promise<ApplyProposalResult> => {
-    const body: Record<string, unknown> = {}
-    if (opts?.gate === false) body.gate = false
-    if (opts?.override) {
-      body.override = true
-      body.justification = opts.justification ?? ''
-    }
-    const hasBody = Object.keys(body).length > 0
-    const init = hasBody ? { method: 'POST' as const, body: JSON.stringify(body) } : { method: 'POST' as const }
-    const result = await request<any>(`/v1/workspace/agents/${id}/proposals/${proposalId}/apply`, init)
-    if (result && typeof result.evaluation_run_id === 'number' && !result.proposal) {
-      return { kind: 'evaluating', evaluation_run_id: result.evaluation_run_id, status: result.status ?? 'running' }
-    }
-    return { kind: 'applied', agent: result.agent, proposal: result.proposal }
-  },
   rejectAgentProposal: (id: string, proposalId: number) =>
     request<AgentProposal>(`/v1/workspace/agents/${id}/proposals/${proposalId}/reject`, { method: 'POST' }),
   listBuiltinAgents: () =>

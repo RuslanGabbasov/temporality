@@ -1,176 +1,91 @@
-// Evolution analytics for agents (docs/plan-evaluable-agent.md §2.2 stage 9):
-// per-version eval pass rate, regression detection and run outcomes, joined
-// client-side from agent versions × evaluation runs × run statistics. Kept as
-// pure functions so the aggregation and the regression rule are testable.
+// Evolution analytics for agents (docs/agent-evolution.md §6): pure view
+// helpers for the «Эволюция» tab — SLI table formatting, verdict/kind badge
+// mapping and prompt-diff tone. Kept free of I/O so every rule stays testable.
 
-import { ApiError } from './workspaceApi'
-import type { AgentEvaluationRun, Run } from './workspaceApi'
+import type { MetricDelta } from './kernelApi'
 
-/** Latest evaluation run per definition version (runs arrive newest-first). */
-export function latestEvalByVersion(runs: AgentEvaluationRun[]): Map<number, AgentEvaluationRun> {
-  const latest = new Map<number, AgentEvaluationRun>()
-  for (const run of runs) {
-    if (!latest.has(run.agent_version)) latest.set(run.agent_version, run)
-  }
-  return latest
+/** The Carbon <Tag type> palette — the badge helpers return only these. */
+export type TagTone = 'blue' | 'cool-gray' | 'cyan' | 'gray' | 'green' | 'high-contrast' | 'magenta' | 'outline' | 'purple' | 'red' | 'teal' | 'warm-gray'
+
+/** Normalize the §5 «signal» marker («signal» | «noise»); the metrics rollup
+ * may also send a plain bool — both fold to "is this a real signal?". */
+export function isSignalMark(signal: MetricDelta['signal'] | undefined): boolean {
+  return signal === true || signal === 'signal'
 }
 
-/** Pass rate 0..1 for a run; null when the run has no cases. */
-export function passRate(run: AgentEvaluationRun): number | null {
-  const total = run.passed + run.failed
-  return total > 0 ? run.passed / total : null
+/** True for SLIs where a negative delta is the bad direction (success rate).
+ * Used only for coloring; the signal/noise mark carries the verdict. */
+export function isLowerBetter(metric: string): boolean {
+  return metric !== 'success_rate'
 }
 
-export interface RunStats {
-  total: number
-  completed: number
-  failed: number
-  avgTurns: number | null
+const groupThousands = (value: number): string =>
+  String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+
+/** True for informational cost/time metrics (§3 «Цена и время»): rendered as
+ * informational rows, never carrying a signal/noise mark. */
+export function isCostTimeMetric(metric: string): boolean {
+  return metric.includes('wall') || metric.includes('cost') || metric.includes('tokens')
 }
 
-/** Run outcomes grouped by agent definition version. */
-export function runsByVersion(runs: Run[]): Map<number, RunStats> {
-  const acc = new Map<number, { stats: RunStats; turns: number; withTurns: number }>()
-  for (const run of runs) {
-    const key = run.agent_version ?? 0
-    const entry = acc.get(key) ?? { stats: { total: 0, completed: 0, failed: 0, avgTurns: null }, turns: 0, withTurns: 0 }
-    entry.stats.total++
-    if (run.status === 'completed') entry.stats.completed++
-    if (run.status === 'failed' || run.status === 'cancelled') entry.stats.failed++
-    if (typeof run.turns === 'number' && run.turns > 0) {
-      entry.turns += run.turns
-      entry.withTurns++
-    }
-    acc.set(key, entry)
-  }
-  const result = new Map<number, RunStats>()
-  for (const [key, entry] of acc) {
-    result.set(key, entry.withTurns > 0 ? { ...entry.stats, avgTurns: entry.turns / entry.withTurns } : entry.stats)
-  }
-  return result
+/** Render one metric cell: rates as percent, tokens as grouped counts, cost
+ * in dollars, wall-time through the injected ms formatter (the component
+ * passes the locale-aware duration formatter). Unknown codes stay numeric. */
+export function metricValueText(metric: string, value: number, fmtMs?: (ms: number) => string): string {
+  if (!Number.isFinite(value)) return '—'
+  if (metric.endsWith('_rate')) return `${Math.round(value * 100)}%`
+  if (metric.includes('wall')) return fmtMs ? fmtMs(value) : `${Math.round(value / 1000)}s`
+  if (metric.includes('cost')) return `$${value.toFixed(2)}`
+  if (metric.includes('tokens')) return groupThousands(Math.round(value))
+  return value.toFixed(2)
 }
 
-/** Cost regressions: a version whose completed runs take meaningfully more
- * turns than the previous version's (≥+50% and ≥+1 turn, at least 3 runs per
- * side so two flukes do not flag). Effort is a quality signal too — an agent
- * that got smarter but 3× lazier is a regression. */
-export interface TurnsRegression {
-  version: number
-  previousVersion: number
-  from: number
-  to: number
+/** Render a signed delta cell: '+14%' / '-7%' — a delta that formats to the
+ * same text as zero carries no sign. */
+export function metricDeltaText(metric: string, delta: number, fmtMs?: (ms: number) => string): string {
+  const text = metricValueText(metric, Math.abs(delta), fmtMs)
+  if (text === metricValueText(metric, 0, fmtMs)) return text
+  return `${delta > 0 ? '+' : '-'}${text}`
 }
 
-export function detectTurnsRegressions(runs: Run[]): TurnsRegression[] {
-  const stats = [...runsByVersion(runs).entries()]
-    .map(([version, s]) => ({ version, avgTurns: s.avgTurns, completed: s.completed }))
-    .sort((a, b) => a.version - b.version)
-  const result: TurnsRegression[] = []
-  for (let i = 1; i < stats.length; i++) {
-    const current = stats[i]
-    const previous = stats[i - 1]
-    if (current.avgTurns === null || previous.avgTurns === null) continue
-    if (current.completed < 3 || previous.completed < 3) continue
-    if (current.avgTurns >= previous.avgTurns + 1 && current.avgTurns >= previous.avgTurns * 1.5) {
-      result.push({ version: current.version, previousVersion: previous.version, from: previous.avgTurns, to: current.avgTurns })
-    }
-  }
-  return result
-}
-
-/** True when both compared eval runs were executed against the current suite —
- * a pass-rate drop only means regression when the questions did not change. */
-function sameSuite(runA?: AgentEvaluationRun, runB?: AgentEvaluationRun, suiteUpdatedAt?: string): boolean {
-  if (!runA || !runB || !suiteUpdatedAt) return false
-  const changed = Date.parse(suiteUpdatedAt)
-  if (Number.isNaN(changed)) return false
-  return Date.parse(runA.created_at) >= changed && Date.parse(runB.created_at) >= changed
-}
-
-export interface Regression {
-  /** Version whose latest pass rate dropped. */
-  version: number
-  /** The version it dropped against. */
-  previousVersion: number
-  from: number
-  to: number
-}
-
-/** How a gated-apply refusal renders in the UI: a locale key plus its
- * interpolation params. `kind: 'suite_not_ready'` wraps a nested cause key —
- * the framing and the cause are translated separately. */
-export type GateErrorView =
-  | { kind: 'message'; key: string; params?: Record<string, string> }
-  | { kind: 'suite_not_ready'; causeKey: string; causeParams?: Record<string, string>; rawCause: string }
-
-/** Map a gated-apply API error (docs/agent-quality-loop.md §7.1) to its locale
- * view; null when the error carries no known gate code — callers fall back to
- * the raw message. Pure so the mapping stays testable. */
-export function applyGateErrorView(err: unknown): GateErrorView | null {
-  if (!(err instanceof ApiError)) return null
-  const body = err.body ?? {}
-  const list = (value: unknown): string => (Array.isArray(value) ? value.join(', ') : '')
-  switch (err.code) {
-    case 'suite_not_ready':
-      switch (body.cause) {
-        case 'suite_empty':
-          return { kind: 'suite_not_ready', causeKey: 'agents.gate_cause_suite_empty', rawCause: body.cause }
-        case 'suite_too_small':
-          return { kind: 'suite_not_ready', causeKey: 'agents.gate_cause_suite_too_small', causeParams: { min: '3' }, rawCause: body.cause }
-        case 'judge_not_configured':
-          return { kind: 'suite_not_ready', causeKey: 'agents.gate_cause_judge_not_configured', rawCause: body.cause }
-        default:
-          return null
-      }
-    case 'gate_blocked':
-      return { kind: 'message', key: 'agents.gate_blocked', params: { cases: list(body.failed_cases) } }
-    case 'suite_stale':
-      return { kind: 'message', key: 'agents.gate_suite_stale', params: { cases: list(body.stale_cases) } }
-    case 'base_version_stale':
-      return {
-        kind: 'message',
-        key: 'agents.gate_base_version_stale',
-        params: { base: String(body.base_version ?? '?'), current: String(body.current_version ?? '?') },
-      }
-    default:
-      return null
+/** Carbon Tag type per observation verdict (§3.1): improved/stable/degraded/
+ * insufficient. Unknown or absent verdicts stay neutral gray. */
+export function verdictTagType(verdict: string | null | undefined): TagTone {
+  switch (verdict) {
+    case 'improved': return 'green'
+    case 'stable': return 'cyan'
+    case 'degraded': return 'red'
+    case 'insufficient': return 'warm-gray'
+    default: return 'gray'
   }
 }
 
-/** Map a finished-but-not-passed evaluation run's cause to a full-sentence
- * locale view; null for unknown causes — callers fall back to the generic
- * run-error text with the raw cause. A timed-out or failed model is provider
- * flakiness, not a definition regression, and the message must say so.
- * Pure so the mapping stays testable. */
-export function gateRunErrorView(cause?: string): { key: string } | null {
-  switch (cause) {
-    case 'model_timeout':
-      return { key: 'agents.gate_run_model_timeout' }
-    case 'model_error':
-      return { key: 'agents.gate_run_model_error' }
-    default:
-      return null
+/** Carbon Tag type per version kind (§2.1). */
+export function versionKindTagType(kind: string): TagTone {
+  switch (kind) {
+    case 'edit': return 'blue'
+    case 'proposal': return 'purple'
+    case 'rollback': return 'warm-gray'
+    default: return 'gray'
   }
 }
 
-/** Detect pass-rate regressions between consecutive definition versions:
- * version N regressed when its latest run is strictly worse than the previous
- * version's latest run AND both runs used the suite as it stands now (an
- * unchanged suite makes the comparison fair; otherwise the drop may just be
- * new, harder cases). */
-export function detectRegressions(evalRuns: AgentEvaluationRun[], suiteUpdatedAt?: string): Regression[] {
-  const latest = latestEvalByVersion(evalRuns)
-  const versions = [...latest.keys()].sort((a, b) => a - b)
-  const result: Regression[] = []
-  for (const version of versions) {
-    const previousVersion = version - 1
-    if (!latest.has(previousVersion)) continue
-    const current = passRate(latest.get(version)!)
-    const previous = passRate(latest.get(previousVersion)!)
-    if (current === null || previous === null) continue
-    if (current < previous && sameSuite(latest.get(version), latest.get(previousVersion), suiteUpdatedAt)) {
-      result.push({ version, previousVersion, from: previous, to: current })
-    }
-  }
-  return result
+const KIND_LABEL_KEYS: Record<string, string> = {
+  edit: 'agents.kind_edit',
+  proposal: 'agents.kind_proposal',
+  rollback: 'agents.kind_rollback',
+}
+
+/** Locale key of a version-kind badge; null for unknown kinds — callers show
+ * the raw kind instead of a raw locale key. */
+export function versionKindLabelKey(kind: string): string | null {
+  return KIND_LABEL_KEYS[kind] ?? null
+}
+
+/** Tone of one compiled-prompt diff line: the diff (§4) lists changed lines
+ * only, prefixed «- » (old) and «+ » (new). */
+export function promptDiffTone(line: string): 'add' | 'del' | 'same' {
+  if (line.startsWith('+')) return 'add'
+  if (line.startsWith('-')) return 'del'
+  return 'same'
 }

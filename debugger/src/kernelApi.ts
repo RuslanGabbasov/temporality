@@ -1,4 +1,5 @@
 import { authHeaders } from './api'
+import type { Agent, AgentDefinition, AgentProposal, AgentVersion } from './workspaceApi'
 
 export const KERNEL_API = '/kernel-api'
 
@@ -417,43 +418,6 @@ export function projectsOverview(window?: string): Promise<ProjectsOverview> {
   return request(`/v1/agent/cost/projects-overview${suffix}`)
 }
 
-export interface QualitySummaryEvaluation {
-  at: string
-  verdict: string
-  passed: number
-  failed: number
-  pass_rate: number
-  judge_agreement?: number
-}
-
-export interface QualitySummaryAgent {
-  agent_id: string
-  name: string
-  project: string
-  definition_version: number
-  last_evaluation?: QualitySummaryEvaluation
-  pending_proposals: number
-  stale_goldens: number
-}
-
-export interface QualitySummary {
-  agents: QualitySummaryAgent[]
-  loop: {
-    window_days: number
-    gate_passed: number
-    gate_blocked: number
-    gate_overridden: number
-    override_rate: number
-    judge_degraded_runs: number
-    evaluation_runs: number
-  }
-}
-
-export function qualitySummary(project?: string): Promise<QualitySummary> {
-  const suffix = project && project.trim() ? `?project=${encodeURIComponent(project.trim())}` : ''
-  return request(`/v1/workspace/quality/summary${suffix}`)
-}
-
 // ── Storage inventory & host health (docs/sandbox-storage.md §5) ──────────
 
 export interface StorageTopPath {
@@ -595,4 +559,256 @@ export interface ReadinessCheck {
 
 export function readiness(): Promise<{ checks: ReadinessCheck[] }> {
   return request('/v1/setup/readiness')
+}
+
+// ── Agent evolution v2 (docs/agent-evolution.md §4–§5) ────────────────────
+//
+// Versions, proposals, the observation window, per-version metrics and the
+// control check-cases. Gate-free by contract (§1): apply always lands and
+// degradation is answered by a one-click rollback — never silently.
+
+/** Proposal origin (§2.2): agent_propose, the "suggest an improvement"
+ * button (user) or the supervisor. */
+export type ProposalSource = 'agent' | 'user' | 'supervisor' | string
+
+/** Where a proposal was born (§2.2): the run that surfaced the problem. */
+export interface ProposalContext {
+  run_id?: string
+  project?: string
+}
+
+/** A proposal as served by the v2 API (§4): the old anatomy plus source,
+ * behavioral change_summary, origin context and the version it landed in. */
+export interface EvolutionProposal extends AgentProposal {
+  source: ProposalSource
+  change_summary: string
+  context?: ProposalContext | null
+  applied_version?: number
+}
+
+/** Version row as served by the v2 API (§4): snapshot metadata plus how the
+ * version came to be and its observation verdict. */
+export interface EvolutionVersion extends AgentVersion {
+  kind: 'edit' | 'proposal' | 'rollback' | string
+  baseline_version?: number
+  rollback_of?: number
+  change_summary?: string
+  verdict?: string | null
+}
+
+/** One structural difference between two definition snapshots (§4 diff):
+ * purpose, constraints, completion items and capability names. */
+export interface DefinitionChange {
+  field: string
+  kind: 'added' | 'removed' | 'changed' | string
+  value: string
+  from?: string
+  redacted?: boolean
+}
+
+/** Structural + compiled-prompt diff of two versions (§4). A proposal diff
+ * is the same shape plus the behavioral change_summary. Prompt lines are
+ * prefixed "- " / "+ " (changed lines only). */
+export interface VersionDiff {
+  from: number
+  to: number
+  definition_changes: DefinitionChange[]
+  prompt_diff: string[]
+  redacted?: boolean
+  change_summary?: string
+}
+
+/** Draft returned by proposals/from-text (§4): a pending source=user
+ * proposal; the definition is the full target definition. */
+export interface ProposalDraft {
+  proposal_id: number
+  change_summary: string
+  definition: AgentDefinition
+}
+
+/** Apply always succeeds (§1): the answer is just the new version (§4). */
+export interface ApplyProposalReceipt {
+  version: number
+}
+
+/** Observation window config (§2.3): the window closes when both the day
+ * count and the run minimum are reached. */
+export interface ObservationSettings {
+  days: number
+  min_runs: number
+}
+
+/** Observation window state (§5 «observation»): verdict is null/empty while
+ * the window is still open. */
+export interface ObservationState {
+  state: 'observing' | 'closed' | string
+  verdict: 'improved' | 'stable' | 'degraded' | 'insufficient' | '' | null
+  days: number
+  min_runs: number
+  started_at?: string
+  elapsed_days: number
+  runs: number
+}
+
+/** Aggregated metrics of one comparison arm (§5 «current» / «baseline»). */
+export interface WindowSummary {
+  runs: number
+  succeeded: number
+  failed: number
+  cancelled: number
+  turn_limited: number
+  verdicts: { accepted: number; corrected: number; rejected: number }
+  interventions: number
+  reworks: number
+  tokens_avg: number
+  cost_usd_avg: number
+  wall_ms_avg: number
+  uncertain_ops_avg: number
+  incidents: number
+}
+
+/** One row of the «сейчас / база / Δ» table (§5 «delta»). `signal` is the
+ * §5 "signal"/"noise" marker; the rollup may also send a plain bool —
+ * isSignalMark() in agentEvolution.ts folds both. */
+export interface MetricDelta {
+  metric: string
+  current: number
+  baseline: number
+  delta: number
+  signal: 'signal' | 'noise' | boolean
+}
+
+/** Daily rollup row (§5 «daily»). */
+export interface MetricsDay {
+  day: string
+  runs: number
+  succeeded?: number
+  [key: string]: unknown
+}
+
+/** GET versions/{v}/metrics payload (§5). */
+export interface VersionMetrics {
+  observation: ObservationState
+  current: WindowSummary
+  baseline: WindowSummary | null
+  delta: MetricDelta[]
+  daily: MetricsDay[]
+}
+
+/** Control check-case (§2.4): a task input plus answer pattern checks. */
+export interface CheckCase {
+  id: number
+  agent_id: string
+  input: string
+  must_contain: string[]
+  must_not_contain: string[]
+  from_run_id?: string
+  created_by?: string
+  created_at?: string
+}
+
+/** Synchronous smoke run of the control cases (§4): an informational signal,
+ * never a condition of applying. */
+export interface CheckRunResult {
+  passed: number
+  failed: number
+  results: { input: string; pass: boolean; detail?: string }[]
+}
+
+const agentPath = (agentID: string) => `/v1/workspace/agents/${encodeURIComponent(agentID)}`
+
+// Versions (§4)
+export function listEvolutionVersions(agentID: string): Promise<{ versions: EvolutionVersion[] }> {
+  return request(`${agentPath(agentID)}/versions`)
+}
+
+export function evolutionVersionDiff(agentID: string, from: number, to: number): Promise<VersionDiff> {
+  return request(`${agentPath(agentID)}/versions/diff?from=${from}&to=${to}`)
+}
+
+/** Rollback creates a NEW version with the old content (§1): history is
+ * append-only and the rollback itself is revertible. */
+export function rollbackEvolutionVersion(agentID: string, version: number): Promise<Agent> {
+  return request(`${agentPath(agentID)}/versions/${version}/rollback`, { method: 'POST' })
+}
+
+// Proposals (§2.2)
+export function listEvolutionProposals(agentID: string): Promise<{ proposals: EvolutionProposal[] }> {
+  return request(`${agentPath(agentID)}/proposals`)
+}
+
+export function createEvolutionProposal(agentID: string, data: {
+  problem: string
+  change: string
+  effect?: string
+  description?: string
+  definition?: { constraints?: string[]; completion?: string[] }
+  evidence?: string[]
+  source?: ProposalSource
+  context?: ProposalContext
+}): Promise<EvolutionProposal> {
+  return request(`${agentPath(agentID)}/proposals`, { method: 'POST', body: JSON.stringify(data) })
+}
+
+/** Free-text problem → LLM draft proposal (§4): lands as pending source=user.
+ * May take a while — the caller shows a generating state. */
+export function proposalFromText(agentID: string, data: { problem: string; context?: ProposalContext }): Promise<ProposalDraft> {
+  return request(`${agentPath(agentID)}/proposals/from-text`, { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function evolutionProposalDiff(agentID: string, proposalID: number): Promise<VersionDiff> {
+  return request(`${agentPath(agentID)}/proposals/${proposalID}/diff`)
+}
+
+/** Gate-free apply (§1): always succeeds, no body, answer is {version}. */
+export function applyEvolutionProposal(agentID: string, proposalID: number): Promise<ApplyProposalReceipt> {
+  return request(`${agentPath(agentID)}/proposals/${proposalID}/apply`, { method: 'POST' })
+}
+
+export function rejectEvolutionProposal(agentID: string, proposalID: number): Promise<EvolutionProposal> {
+  return request(`${agentPath(agentID)}/proposals/${proposalID}/reject`, { method: 'POST' })
+}
+
+// Observation window (§2.3)
+export function getObservationSettings(agentID: string): Promise<ObservationSettings> {
+  return request(`${agentPath(agentID)}/observation`)
+}
+
+export function setObservationSettings(agentID: string, settings: ObservationSettings): Promise<ObservationSettings> {
+  return request(`${agentPath(agentID)}/observation`, { method: 'PUT', body: JSON.stringify(settings) })
+}
+
+// Version metrics (§5): observation state + current/baseline windows +
+// signal-folded deltas over `days` of real work.
+export function evolutionVersionMetrics(agentID: string, version: number, days?: number): Promise<VersionMetrics> {
+  const suffix = days && days > 0 ? `?days=${days}` : ''
+  return request(`${agentPath(agentID)}/versions/${version}/metrics${suffix}`)
+}
+
+// Control check-cases (§2.4)
+export async function listAgentCheckCases(agentID: string): Promise<{ cases: CheckCase[] }> {
+  // The contract fixes the list, not its envelope: accept both the
+  // {cases:[…]} convention and a bare array.
+  const page = await request<{ cases?: CheckCase[] } | CheckCase[]>(`${agentPath(agentID)}/check-cases`)
+  return { cases: Array.isArray(page) ? page : page.cases ?? [] }
+}
+
+export function addAgentCheckCase(agentID: string, data: {
+  input: string
+  must_contain: string[]
+  must_not_contain: string[]
+  from_run_id?: string
+}): Promise<CheckCase> {
+  return request(`${agentPath(agentID)}/check-cases`, { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function deleteAgentCheckCase(agentID: string, caseID: number): Promise<{ deleted?: boolean }> {
+  return request(`${agentPath(agentID)}/check-cases/${caseID}`, { method: 'DELETE' })
+}
+
+/** Synchronous smoke run (§4): against a stored version or a pending
+ * proposal's draft definition — informational, never a condition of apply. */
+export function runAgentCheckCases(agentID: string, target: number | { proposal: number }): Promise<CheckRunResult> {
+  const query = typeof target === 'number' ? `version=${target}` : `proposal=${target.proposal}`
+  return request(`${agentPath(agentID)}/check-cases/run?${query}`)
 }

@@ -7,6 +7,7 @@ import PlanGraph from './PlanGraph'
 import RunDisputes from './RunDisputes'
 import Markdown from './Markdown'
 import AppModal from './Modal'
+import { ImproveAgentDialog } from './AgentProposalDialogs'
 import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
 import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
@@ -352,6 +353,9 @@ export default function AgentRuns({ project }: { project: string }) {
   // pair the provider test dialog shows — which model, which base URL, which
   // masked credential the call actually used.
   const [callReportOpen, setCallReportOpen] = useState(false)
+  // «Предложить улучшение агенту» (docs/agent-evolution.md §6.3): the same
+  // dialog as on the Evolution tab, opened with this run attached as context.
+  const [improveOpen, setImproveOpen] = useState(false)
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
   // Ancestors of runs with unresolved ops light up too, so the delegation
   // chain points straight at the failure; subtree counts feed the row tags.
@@ -1081,6 +1085,20 @@ export default function AgentRuns({ project }: { project: string }) {
     }
     return null
   }, [ownEvents])
+  // The improve-a-proposal context (§6.3): the agent behind the run, the run
+  // id + project to attach, and the request text that prefills «save this run
+  // as a control example» (§6.6).
+  const improveContext = useMemo(() => {
+    const started = ownEvents.find((event) => event.type === 'run.started' && runID(event) === selected)
+    const agentId = typeof started?.data?.agent_id === 'string' ? started.data.agent_id : ''
+    const request = typeof started?.data?.request === 'string' ? started.data.request.trim() : ''
+    const rowProject = rows.find((row) => row.id === selected)?.project
+    return {
+      agentId,
+      request,
+      context: { run_id: selected, project: rowProject || project },
+    }
+  }, [ownEvents, rows, selected, project])
   const overviewEmpty = typeof answer !== 'string' && !Array.isArray(stages) && result?.result === undefined
     && !ownEvents.some((event) => event.type === 'delegation.started' || event.type === 'plan.started' || event.type === 'plan.task.started')
   const overviewRunning = selectedLive || (!result && ownEvents.some((event) => event.type === 'run.started') && !ownEvents.some((event) => event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled'))
@@ -1641,6 +1659,11 @@ export default function AgentRuns({ project }: { project: string }) {
                           {t('runs.call_report') ?? 'Запрос → Ответ'}
                         </Button>
                       )}
+                      {improveContext.agentId && (
+                        <Button size="sm" kind="secondary" onClick={() => setImproveOpen(true)}>
+                          {t('agents.propose_improvement_to_agent') ?? 'Suggest an improvement to the agent'}
+                        </Button>
+                      )}
                     </div>
                   </Tile>
                 )}
@@ -1662,6 +1685,11 @@ export default function AgentRuns({ project }: { project: string }) {
                         <Heading style={{ fontSize: '0.875rem' }}>🎯 {t('runs.request') ?? 'Request'}</Heading>
                         {agent && <Tag type="gray" size="sm">{agent}</Tag>}
                         {turns > 0 && <Tag type="gray" size="sm">≤ {turns} {t('runs.turns')}</Tag>}
+                        {agent && (
+                          <Button size="sm" kind="ghost" style={{ marginLeft: 'auto' }} onClick={() => setImproveOpen(true)}>
+                            {t('agents.propose_improvement_to_agent') ?? 'Suggest an improvement to the agent'}
+                          </Button>
+                        )}
                       </div>
                       {/* Markdown: delegated prompts carry tables and lists
                           (agents delegate to agents) — plain text mangles
@@ -1970,6 +1998,18 @@ export default function AgentRuns({ project }: { project: string }) {
         <AppModal onClose={() => setCallReportOpen(false)} panelStyle={{ width: '640px' }}>
           <CallReportView event={callFailedEvent} t={t} />
         </AppModal>
+      )}
+
+      {/* «Предложить улучшение агенту» (docs/agent-evolution.md §6.3): the
+          same dialog as on the Evolution tab, with this run attached as
+          context and the request prefilled for a control example. */}
+      {improveOpen && improveContext.agentId && (
+        <ImproveAgentDialog
+          agentId={improveContext.agentId}
+          context={improveContext.context}
+          runPrompt={improveContext.request}
+          onClose={() => setImproveOpen(false)}
+        />
       )}
 
       {busy && <PageLoading />}
