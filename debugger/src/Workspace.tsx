@@ -26,6 +26,7 @@ import ProjectRequired from './ProjectRequired'
 import { useI18n, pluralT } from './i18n'
 import { pseudoToolLabel, formatDuration, friendlyRunFailure } from './eventSummary'
 import { TimeHint } from './timeHint'
+import { buildChatPrompt } from './chatPrompt'
 import { randomUUID } from './uuid'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -1558,21 +1559,15 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
     try {
-      // Build full conversation history as the prompt
-      const historyLines: string[] = []
-      for (const msg of updatedConv.messages) {
-        if (msg.role === 'user') {
-          let line = `User: ${msg.content}`
-          // Files travel as sandbox paths only — never inlined into the prompt.
-          if (msg.attachments?.length) {
-            line += '\n' + msg.attachments.map((a) => `[Attached file: ${a.path}]`).join('\n')
-          }
-          historyLines.push(line)
-        } else if (msg.role === 'assistant' && msg.content) {
-          historyLines.push(`Assistant: ${msg.content}`)
-        }
-      }
-      const fullPrompt = historyLines.join('\n\n')
+      // Build the run prompt from the conversation: a follow-up (there is
+      // history) is framed as a continuation — every message stamped with its
+      // date-time, the history bounded, the header saying the LAST message is
+      // the new request. Without the frame the model read the transcript as
+      // one compound task and struggled to tell a resumed dialogue (days
+      // later) from a fresh one.
+      const fullPrompt = buildChatPrompt(updatedConv.messages.map((m) => ({
+        role: m.role, content: m.content, timestamp: m.timestamp, attachments: m.attachments,
+      })))
 
       // Reuse existing task for follow-up messages, create new one for first message
       let taskId = activeConv.taskId
