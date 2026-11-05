@@ -71,7 +71,7 @@ func TestChatPersistenceRoundTrip(t *testing.T) {
 	store := newFakeChatStore()
 	server := newChatServer(t, store)
 
-	body := `{"project_id":"omni","agent_id":"lead","title":"Разбор инцидента","transcript":[{"role":"user","content":"почему упало"},{"role":"assistant","content":"вот трейс"}]}`
+	body := `{"project_id":"omni","agent_id":"lead","task_id":"task-42","title":"Разбор инцидента","transcript":[{"role":"user","content":"почему упало"},{"role":"assistant","content":"вот трейс"}]}`
 	req, _ := http.NewRequest(http.MethodPut, server.URL+"/v1/workspace/chats/conv-1", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer writertoken")
 	req.Header.Set("Content-Type", "application/json")
@@ -93,6 +93,7 @@ func TestChatPersistenceRoundTrip(t *testing.T) {
 	require.NoError(t, json.NewDecoder(page.Body).Decode(&payload))
 	require.Len(t, payload.Chats, 1)
 	require.Equal(t, "conv-1", payload.Chats[0].ID)
+	require.Equal(t, "task-42", payload.Chats[0].TaskID, "the task link must survive the round trip — restored chats rejoin live-run state by it")
 	require.Contains(t, string(payload.Chats[0].Transcript), "почему упало")
 
 	// Delete closes the circle.

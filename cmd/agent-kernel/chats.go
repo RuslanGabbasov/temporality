@@ -59,6 +59,7 @@ func RegisterChatRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws chatsSto
 		var req struct {
 			ProjectID  string          `json:"project_id"`
 			AgentID    string          `json:"agent_id"`
+			TaskID     string          `json:"task_id"`
 			Title      string          `json:"title"`
 			Transcript json.RawMessage `json:"transcript"`
 		}
@@ -67,7 +68,7 @@ func RegisterChatRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws chatsSto
 			return
 		}
 		chat := &workspace.Chat{
-			ID: id, ProjectID: req.ProjectID, AgentID: req.AgentID,
+			ID: id, ProjectID: req.ProjectID, AgentID: req.AgentID, TaskID: req.TaskID,
 			Title: req.Title, Transcript: req.Transcript,
 		}
 		if err := ws.UpsertChat(r.Context(), chat); err != nil {

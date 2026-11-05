@@ -20,11 +20,14 @@ import (
 const TranscriptSizeLimit = 1 << 20
 
 // Chat is one stored conversation. Transcript is the UI's messages array,
-// kept as pre-marshaled JSON.
+// kept as pre-marshaled JSON. TaskID links the chat to its task row so the
+// restored copy can rejoin task-scoped state (live-run badges) — the
+// transcript itself stays opaque to the server.
 type Chat struct {
 	ID         string          `json:"id"`
 	ProjectID  string          `json:"project_id"`
 	AgentID    string          `json:"agent_id"`
+	TaskID     string          `json:"task_id"`
 	Title      string          `json:"title"`
 	Transcript json.RawMessage `json:"transcript"`
 	UpdatedAt  time.Time       `json:"updated_at"`
@@ -54,12 +57,13 @@ func (s *Store) UpsertChat(ctx context.Context, c *Chat) error {
 	}
 	c.UpdatedAt = time.Now().UTC()
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_chat (id, project_id, agent_id, title, transcript, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6)
+		`INSERT INTO workspace_chat (id, project_id, agent_id, task_id, title, transcript, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)
 		 ON CONFLICT (id) DO UPDATE SET
 		   project_id = EXCLUDED.project_id, agent_id = EXCLUDED.agent_id,
-		   title = EXCLUDED.title, transcript = EXCLUDED.transcript, updated_at = EXCLUDED.updated_at`,
-		c.ID, c.ProjectID, c.AgentID, c.Title, []byte(c.Transcript), c.UpdatedAt)
+		   task_id = EXCLUDED.task_id, title = EXCLUDED.title,
+		   transcript = EXCLUDED.transcript, updated_at = EXCLUDED.updated_at`,
+		c.ID, c.ProjectID, c.AgentID, c.TaskID, c.Title, []byte(c.Transcript), c.UpdatedAt)
 	return err
 }
 
@@ -70,7 +74,7 @@ func (s *Store) ListChats(ctx context.Context, projectID string, limit int) ([]C
 		limit = 100
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, agent_id, title, transcript, updated_at
+		`SELECT id, project_id, agent_id, COALESCE(task_id, ''), title, transcript, updated_at
 		 FROM workspace_chat WHERE project_id = $1
 		 ORDER BY updated_at DESC LIMIT $2`, projectID, limit)
 	if err != nil {
@@ -81,7 +85,7 @@ func (s *Store) ListChats(ctx context.Context, projectID string, limit int) ([]C
 	for rows.Next() {
 		var c Chat
 		var raw []byte
-		if err := rows.Scan(&c.ID, &c.ProjectID, &c.AgentID, &c.Title, &raw, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.ProjectID, &c.AgentID, &c.TaskID, &c.Title, &raw, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		c.Transcript = json.RawMessage(raw)

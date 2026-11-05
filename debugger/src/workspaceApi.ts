@@ -1355,9 +1355,9 @@ export const workspaceApi = {
   // follows the user across devices. The transcript shape is owned by the
   // UI; the backend stores it opaquely.
   listServerChats: (project: string) =>
-    request<{ chats: { id: string; project_id: string; agent_id: string; title: string; transcript: unknown[]; updated_at: string }[] }>(
+    request<{ chats: { id: string; project_id: string; agent_id: string; task_id?: string; title: string; transcript: unknown[]; updated_at: string }[] }>(
       `/v1/workspace/chats?project=${encodeURIComponent(project)}`),
-  putServerChat: (id: string, data: { project_id: string; agent_id?: string; title: string; transcript: unknown[] }) =>
+  putServerChat: (id: string, data: { project_id: string; agent_id?: string; task_id?: string; title: string; transcript: unknown[] }) =>
     request<{ id: string; updated_at: string }>(`/v1/workspace/chats/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteServerChat: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/chats/${encodeURIComponent(id)}`, { method: 'DELETE' }),

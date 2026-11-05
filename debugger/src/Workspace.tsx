@@ -582,7 +582,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           runId: m.runId, status: m.status,
         }))
         workspaceApi.putServerChat(c.id, {
-          project_id: project, agent_id: c.agentId ?? '',
+          project_id: project, agent_id: c.agentId ?? '', task_id: c.taskId ?? '',
           title: c.title || 'Untitled', transcript,
         }).catch(() => { /* server sync is best-effort; localStorage stays the cache */ })
       }
@@ -614,7 +614,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           if (messages.length === 0) continue
           next.push({
             id: chat.id, title: chat.title || 'Chat', messages,
-            agentId: chat.agent_id ?? '', taskId: '', createdAt: new Date(chat.updated_at),
+            agentId: chat.agent_id ?? '', taskId: chat.task_id ?? '', createdAt: new Date(chat.updated_at),
           })
         }
         return next
