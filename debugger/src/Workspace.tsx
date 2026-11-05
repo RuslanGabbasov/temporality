@@ -477,6 +477,41 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null
 
+  // Live runs BY TASK (any start source: this chat, a trigger, a channel
+  // intake, a delegation, a continuation): the chat list badge must not
+  // depend on this tab having started the run or on a restored transcript's
+  // stale statuses. The journal's run.started (it carries task_id — delegates
+  // and continuations inherit the parent task's) minus the terminal events is
+  // the authoritative liveness map — the same pair of queries the Runs page
+  // uses. Refreshed on mount and every 30s while the tab is visible; a journal
+  // outage degrades to the local message statuses.
+  const [liveTaskRuns, setLiveTaskRuns] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (!project) return
+    let alive = true
+    const load = async () => {
+      if (document.visibilityState !== 'visible') return
+      try {
+        const startedPage = await observationApi.events(project, undefined, undefined, undefined, { type: 'run.started', limit: 100, order: 'desc' })
+        const terminals = await Promise.all(['run.completed', 'run.failed', 'run.cancelled'].map((type) =>
+          observationApi.events(project, undefined, undefined, undefined, { type, limit: 200, order: 'desc' })
+            .catch(() => ({ events: [] as ObservationEvent[] }))))
+        const ended = new Set<string>()
+        for (const page of terminals) for (const e of page.events ?? []) ended.add(e.context?.run ?? '')
+        const live = new Set<string>()
+        for (const e of startedPage.events ?? []) {
+          const run = e.context?.run ?? ''
+          const task = typeof e.data?.task_id === 'string' ? e.data.task_id : ''
+          if (run && task && !ended.has(run)) live.add(task)
+        }
+        if (alive) setLiveTaskRuns((prev) => prev.size === live.size && [...live].every((id) => prev.has(id)) ? prev : live)
+      } catch { /* journal unreachable — keep the last map */ }
+    }
+    void load()
+    const timer = window.setInterval(() => { void load() }, 30000)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [project])
+
   // The live step line (what-is-it-doing-right-now) rides the shared token
   // metrics hook — the same source the runs-page trace uses: elapsed tokens,
   // rate, liveness (alive/stalled/reconnecting) and the pending tool's args
@@ -540,6 +575,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const transcript = c.messages.map((m) => ({
           role: m.role, content: m.content, at: m.timestamp,
           addenda: m.addenda ?? [], attachments: m.attachments ?? [],
+          // Live-run identity: without these a restored transcript (another
+          // device, wiped browser) cannot reconnect the stream or light the
+          // chat-list badge — the run id is the join key, the status carries
+          // «was still executing when this copy was pushed».
+          runId: m.runId, status: m.status,
         }))
         workspaceApi.putServerChat(c.id, {
           project_id: project, agent_id: c.agentId ?? '',
@@ -568,6 +608,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           const messages = (chat.transcript as any[]).map((m) => ({
             role: m.role, content: m.content ?? '', timestamp: new Date(m.at ?? chat.updated_at),
             addenda: m.addenda ?? [], attachments: m.attachments ?? [],
+            runId: typeof m.runId === 'string' ? m.runId : undefined,
+            status: typeof m.status === 'string' ? m.status : undefined,
           }))
           if (messages.length === 0) continue
           next.push({
@@ -1651,9 +1693,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             // or yesterday?» is the question it answers).
             const lastAt = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1].timestamp : conv.createdAt
             const lastIso = lastAt instanceof Date ? lastAt.toISOString() : String(lastAt)
-            // A still-running run marks the chat even when it is not the active
-            // one — the badge is why the user would switch to it.
-            const hasLiveRun = conv.messages.some((m) => m.status === 'running')
+            // A still-running run marks the chat even when it is not the
+            // active one — the badge is why the user would switch to it.
+            // Two sources: a message this tab knows is streaming, and the
+            // journal's live runs of the chat's task (covers runs started
+            // elsewhere and restored transcripts).
+            const hasLiveRun = conv.messages.some((m) => m.status === 'running') || (conv.taskId ? liveTaskRuns.has(conv.taskId) : false)
             return (
             <div
               key={conv.id}
