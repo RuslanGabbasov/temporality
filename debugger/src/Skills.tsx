@@ -756,12 +756,14 @@ export default function Skills() {
                         const isDraft = version.status === 'draft'
                         const isRejected = version.status === 'rejected'
                         const isCurrent = version.version === selected.version
-                        // Compare like the artifact versions: any base the
-                        // reviewer picks, defaulting to the PREVIOUS version —
-                        // not the fixed «against current» line diff.
-                        const base = (diffBases[version.version]
-                          ? versions.find((v) => v.version === diffBases[version.version])
-                          : undefined) ?? previousVersion(versions, version.version)
+                        					// Compare like the artifact versions: any base the
+                        					// reviewer picks, defaulting to the PREVIOUS version —
+                        					// not the fixed «against current» line diff. The stored
+                        					// pick arrives as a string (select values are strings).
+                        					const picked = diffBases[version.version]
+                        					const base = (picked !== undefined && picked !== ''
+                        					  ? versions.find((v) => String(v.version) === picked)
+                        					  : undefined) ?? previousVersion(versions, version.version)
                         return (
                         <div key={version.version} className="skill-version" style={isRejected ? { opacity: 0.55 } : undefined}>
                           <button className="skill-version-head" onClick={() => setOpenVersion(openVersion === version.version ? null : version.version)}>
@@ -826,16 +828,16 @@ export default function Skills() {
                               {base && (
                                 <>
                                   <div className="skill-subheading" style={{ fontSize: '0.7rem', display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                    <span>{t('skills.compare_with') ?? 'Compare with:'}</span>
-                                    <select
-                                      value={base.version}
-                                      onChange={(e) => setDiffBases((prev) => ({ ...prev, [version.version]: e.target.value }))}
-                                      style={{ fontSize: '0.72rem', padding: '0.15rem 0.35rem' }}
-                                    >
-                                      {versions.filter((v) => v.version !== version.version).map((v) => (
-                                        <option key={v.version} value={v.version}>{v.version}{v.version === selected.version ? ` (${t('skills.current') ?? 'current'})` : ''}</option>
-                                      ))}
-                                    </select>
+                                    									<span>{t('skills.compare_with') ?? 'Compare with:'}</span>
+                                    									<select
+                                    									  value={String(base.version)}
+                                    									  onChange={(e) => setDiffBases((prev) => ({ ...prev, [version.version]: e.target.value }))}
+                                    									  style={{ border: '1px solid var(--tm-border)', borderRadius: '4px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.72rem', padding: '0.15rem 0.35rem' }}
+                                    									>
+                                    									  {versions.filter((v) => v.version !== version.version).map((v) => (
+                                    									    <option key={v.version} value={String(v.version)}>{v.version}{v.version === selected.version ? ` (${t('skills.current') ?? 'current'})` : ''}</option>
+                                    									  ))}
+                                    									</select>
                                     <span style={{ color: 'var(--tm-text-3)' }}>{base.version} → {version.version}</span>
                                   </div>
                                   <RichDiff oldText={base.markdown ?? ''} newText={version.markdown ?? ''} oldLabel={base.version} newLabel={version.version} />
