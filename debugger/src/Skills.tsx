@@ -15,7 +15,7 @@ import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion, type SkillEvaluationCase, type SkillEvaluationRun, type TransferReport, type TransferResultItem } from './workspaceApi'
 import { useT } from './i18n'
-import SideBySideDiff from './SideBySideDiff'
+import RichDiff from './RichDiff'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -819,8 +819,8 @@ export default function Skills() {
                               {diffBase && (
                                 <>
                                   <div className="skill-subheading" style={{ fontSize: '0.7rem' }}>{t('skills.diff_vs_current') ?? 'Changes vs current revision'} ({diffBase.version} → {version.version})</div>
-                                  <SideBySideDiff title="SKILL.md" oldLabel={diffBase.version} newLabel={version.version} oldText={diffBase.markdown} newText={version.markdown} />
-                                  <SideBySideDiff title="skill.yaml" oldLabel={diffBase.version} newLabel={version.version} oldText={manifestToYaml(diffBase.manifest as SkillManifest)} newText={manifestToYaml(version.manifest as SkillManifest)} />
+                                  <RichDiff title="SKILL.md" oldLabel={diffBase.version} newLabel={version.version} oldText={diffBase.markdown} newText={version.markdown} />
+                                  <RichDiff format="yaml" title="skill.yaml" oldLabel={diffBase.version} newLabel={version.version} oldText={manifestToYaml(diffBase.manifest as SkillManifest)} newText={manifestToYaml(version.manifest as SkillManifest)} />
                                 </>
                               )}
                               {!isCurrent && !isRejected && (
