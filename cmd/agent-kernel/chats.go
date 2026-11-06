@@ -19,8 +19,9 @@ import (
 
 // chatsStore is the storage surface behind the chat routes (fakes in tests).
 type chatsStore interface {
+	GetChat(ctx context.Context, id string) (workspace.Chat, error)
 	UpsertChat(ctx context.Context, c *workspace.Chat) error
-	ListChats(ctx context.Context, projectID string, limit int) ([]workspace.Chat, error)
+	ListChats(ctx context.Context, projectID string, limit int, scope workspace.ChatScope) ([]workspace.Chat, error)
 	DeleteChat(ctx context.Context, id string) error
 }
 
@@ -40,7 +41,19 @@ func RegisterChatRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws chatsSto
 				limit = n
 			}
 		}
-		chats, err := ws.ListChats(r.Context(), project, limit)
+		// Ownership scoping (docs/resilience-and-scale.md §4): everyone lists
+		// their OWN chats — a shared wall leaked every user's conversations
+		// into every sidebar. Admins additionally see unattributed legacy rows
+		// so nothing orphans invisibly; ?all=1 (admin) is the debugging escape.
+		scope := workspace.ChatScope{Owners: []string{requestUserID(r)}}
+		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.Role >= controlplane.RoleAdmin {
+			if r.URL.Query().Get("all") == "1" {
+				scope = workspace.ChatScope{All: true}
+			} else {
+				scope.IncludeOwnerless = true
+			}
+		}
+		chats, err := ws.ListChats(r.Context(), project, limit, scope)
 		if err != nil {
 			writeError(w, 500, err)
 			return
@@ -71,6 +84,21 @@ func RegisterChatRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws chatsSto
 			ID: id, ProjectID: req.ProjectID, AgentID: req.AgentID, TaskID: req.TaskID,
 			Title: req.Title, Transcript: req.Transcript,
 		}
+		// Ownership: the creator is stamped on insert and immutable; a later
+		// upsert from someone else (or an admin supporting) updates content but
+		// never steals the chat. Foreign non-admin writes are refused.
+		owner := requestUserID(r)
+		if existing, err := ws.GetChat(r.Context(), id); err == nil {
+			if existing.OwnerUserID != "" && existing.OwnerUserID != owner {
+				if principal, ok := controlplane.FromContext(r.Context()); !ok || principal.Role < controlplane.RoleAdmin {
+					writeError(w, 403, errors.New("this chat belongs to another user"))
+					return
+				}
+			}
+			chat.OwnerUserID = existing.OwnerUserID
+		} else {
+			chat.OwnerUserID = owner
+		}
 		if err := ws.UpsertChat(r.Context(), chat); err != nil {
 			writeError(w, 400, err)
 			return
@@ -82,7 +110,22 @@ func RegisterChatRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws chatsSto
 		if !gate.Allow(w, r, controlplane.RoleWriter) {
 			return
 		}
-		if err := ws.DeleteChat(r.Context(), r.PathValue("id")); err != nil {
+		id := r.PathValue("id")
+		// Ownership: deleting someone else's chat (it used to be possible —
+		// the foreign copy was in the sidebar and the delete hit the shared
+		// row) removes THEIR conversation. Owner or admin only.
+		if existing, err := ws.GetChat(r.Context(), id); err == nil {
+			if existing.OwnerUserID != "" && existing.OwnerUserID != requestUserID(r) {
+				if principal, ok := controlplane.FromContext(r.Context()); !ok || principal.Role < controlplane.RoleAdmin {
+					writeError(w, 403, errors.New("this chat belongs to another user"))
+					return
+				}
+			}
+		} else if !errors.Is(err, workspace.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.DeleteChat(r.Context(), id); err != nil {
 			writeSandboxLikeError(w, err)
 			return
 		}

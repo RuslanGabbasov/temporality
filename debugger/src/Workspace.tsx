@@ -134,6 +134,12 @@ interface Conversation {
   agentId: string
   taskId: string
   createdAt: Date
+  /** True once the server listing CONFIRMED this chat as ours (the scoped
+   *  ownership response contained it). A synced flag + absence from the next
+   * scoped response = the chat left the user's server set (foreign copy from
+   * the old shared wall, deleted elsewhere) — the restore prunes it. Local
+   * chats never synced (offline sends) carry no flag and are never pruned. */
+  syncedFromServer?: boolean
 }
 
 const STORAGE_KEY = 'temporality_chats'
@@ -610,18 +616,33 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     return () => { if (chatSyncTimer.current) window.clearTimeout(chatSyncTimer.current) }
   }, [conversations, project])
 
-  // Restore on mount: server chats missing locally (other device, wiped
-  // browser) are appended; locally newer copies win (by message count).
+  // Restore on mount: the server listing is SCOPED to the caller's own
+  // chats (ownership, migration 0025). Server chats missing locally (other
+  // device, wiped browser) are appended; locally newer copies win (by
+  // message count). Chats previously synced but ABSENT from this response
+  // (foreign copies leaked by the old shared wall, or deleted on another
+  // device) are pruned — the syncedFromServer flag marks exactly the chats
+  // the server once confirmed as ours, so unsynced local work is untouched.
   useEffect(() => {
     if (!project) return
     let alive = true
     workspaceApi.listServerChats(project).then((page) => {
-      if (!alive || !page.chats?.length) return
+      if (!alive) return
+      const serverIds = new Set((page.chats ?? []).map((chat) => chat.id))
       setConversations((prev) => {
         const known = new Map(prev.map((c) => [c.id, c]))
-        const next = [...prev]
-        for (const chat of page.chats) {
-          if (known.has(chat.id)) continue // local copy wins: it may be newer
+        const next = prev.filter((c) => !c.syncedFromServer || serverIds.has(c.id))
+        for (const chat of page.chats ?? []) {
+          if (known.has(chat.id)) {
+            // The server just confirmed this row as ours — mark it so a
+            // future absence prunes it (foreign copies never get the mark).
+            const local = known.get(chat.id)
+            if (local && !local.syncedFromServer) {
+              const idx = next.indexOf(local)
+              if (idx >= 0) next[idx] = { ...local, syncedFromServer: true }
+            }
+            continue // local copy wins: it may be newer
+          }
           // Older kernels marshaled Chat without json tags ("Transcript") —
           // such rows carry no readable transcript; skip instead of crashing.
           if (!Array.isArray(chat.transcript)) continue
@@ -635,6 +656,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           next.push({
             id: chat.id, title: chat.title || 'Chat', messages,
             agentId: chat.agent_id ?? '', taskId: chat.task_id ?? '', createdAt: new Date(chat.updated_at),
+            syncedFromServer: true,
           })
         }
         return next

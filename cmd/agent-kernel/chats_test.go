@@ -33,14 +33,37 @@ func (f *fakeChatStore) UpsertChat(_ context.Context, c *workspace.Chat) error {
 	return nil
 }
 
-func (f *fakeChatStore) ListChats(_ context.Context, projectID string, limit int) ([]workspace.Chat, error) {
+func (f *fakeChatStore) GetChat(_ context.Context, id string) (workspace.Chat, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.chats[id]
+	if !ok {
+		return workspace.Chat{}, workspace.ErrNotFound
+	}
+	return c, nil
+}
+
+func (f *fakeChatStore) ListChats(_ context.Context, projectID string, limit int, scope workspace.ChatScope) ([]workspace.Chat, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []workspace.Chat
 	for _, c := range f.chats {
-		if c.ProjectID == projectID {
-			out = append(out, c)
+		if c.ProjectID != projectID {
+			continue
 		}
+		if !scope.All {
+			owned := false
+			for _, owner := range scope.Owners {
+				if c.OwnerUserID == owner {
+					owned = true
+					break
+				}
+			}
+			if !owned && !(scope.IncludeOwnerless && c.OwnerUserID == "") {
+				continue
+			}
+		}
+		out = append(out, c)
 		if len(out) >= limit {
 			break
 		}
@@ -60,7 +83,7 @@ func (f *fakeChatStore) DeleteChat(_ context.Context, id string) error {
 
 func newChatServer(t *testing.T, store *fakeChatStore) *httptest.Server {
 	t.Helper()
-	gate, err := controlplane.NewGate("writertoken:writer:writer:*")
+	gate, err := controlplane.NewGate("writertoken:writer:writer:*;othertoken:otheruser:writer:*")
 	require.NoError(t, err)
 	mux := http.NewServeMux()
 	RegisterChatRoutes(mux, gate, store)
@@ -104,7 +127,7 @@ func TestChatPersistenceRoundTrip(t *testing.T) {
 	defer dresp.Body.Close()
 	require.Equal(t, 200, dresp.StatusCode)
 
-	remaining, err := store.ListChats(context.Background(), "omni", 10)
+	remaining, err := store.ListChats(context.Background(), "omni", 10, workspace.ChatScope{All: true})
 	require.NoError(t, err)
 	require.Empty(t, remaining)
 }
@@ -129,4 +152,74 @@ func TestChatUpsertValidation(t *testing.T) {
 	require.NoError(t, err)
 	defer aresp.Body.Close()
 	require.Equal(t, 401, aresp.StatusCode)
+}
+
+// Ownership scoping (migration 0025): the listing serves each user their
+// OWN chats — the shared wall leaked everyone's conversations into every
+// sidebar (the «чужие чаты в моём списке» report). Foreign writes and
+// deletes are refused: a stray delete used to remove the chat for its true
+// owner.
+func TestChatOwnershipScoping(t *testing.T) {
+	store := newFakeChatStore()
+	server := newChatServer(t, store)
+	defer server.Close()
+
+	put := func(token, id, title string) *http.Response {
+		t.Helper()
+		body := `{"project_id":"omni","title":"` + title + `","transcript":[{"role":"user","content":"hi"}]}`
+		req, _ := http.NewRequest(http.MethodPut, server.URL+"/v1/workspace/chats/"+id, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		return resp
+	}
+	list := func(token string) []workspace.Chat {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/workspace/chats?project=omni", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, 200, resp.StatusCode)
+		var payload struct {
+			Chats []workspace.Chat `json:"chats"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+		return payload.Chats
+	}
+
+	// Two users create their chats in the same project.
+	resp := put("writertoken", "mine-1", "writer chat")
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+	resp = put("othertoken", "theirs-1", "other chat")
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+
+	// Each listing sees only its own chat.
+	mine := list("writertoken")
+	require.Len(t, mine, 1)
+	require.Equal(t, "mine-1", mine[0].ID)
+	require.Equal(t, "writer", mine[0].OwnerUserID, "the creator is stamped server-side")
+	theirs := list("othertoken")
+	require.Len(t, theirs, 1)
+	require.Equal(t, "theirs-1", theirs[0].ID)
+
+	// A foreign update is refused (no hijacking content or ownership).
+	forbidden := put("othertoken", "mine-1", "hijacked")
+	defer forbidden.Body.Close()
+	require.Equal(t, 403, forbidden.StatusCode)
+
+	// A foreign delete is refused — it used to remove the chat for the owner.
+	del, _ := http.NewRequest(http.MethodDelete, server.URL+"/v1/workspace/chats/theirs-1", nil)
+	del.Header.Set("Authorization", "Bearer writertoken")
+	dresp, err := server.Client().Do(del)
+	require.NoError(t, err)
+	defer dresp.Body.Close()
+	require.Equal(t, 403, dresp.StatusCode)
+
+	// Both chats still stand for their owners.
+	require.Len(t, list("writertoken"), 1)
+	require.Len(t, list("othertoken"), 1)
 }
