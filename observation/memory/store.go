@@ -16,10 +16,23 @@ import (
 type Store struct {
 	mu                sync.RWMutex
 	observationEvents map[string]observation.Event
+	// runActors mirrors workspace_run's exec_context actor stamping for tests
+	// and single-binary deployments: run id → initiating actor ids (actor +
+	// authorized_by). The ActorScope filter joins against it exactly like the
+	// Postgres store joins workspace_run.
+	runActors map[string][]string
 }
 
 func New() *Store {
-	return &Store{observationEvents: make(map[string]observation.Event)}
+	return &Store{observationEvents: make(map[string]observation.Event), runActors: make(map[string][]string)}
+}
+
+// SetRunActors records one run's initiating actors (the memory-store stand-in
+// for workspace_run.exec_context).
+func (s *Store) SetRunActors(runID string, actors []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runActors[runID] = actors
 }
 
 func observationKey(sourceID, eventID string) string { return sourceID + "\x00" + eventID }
@@ -106,6 +119,24 @@ func (s *Store) listObservationsAll(filter observation.Filter) []observation.Eve
 			filter.Until != nil && event.OccurredAt.After(*filter.Until) ||
 			filter.KnownAt != nil && event.ReceivedAt.After(*filter.KnownAt) {
 			continue
+		}
+		// Run visibility (docs/activity-scoping.md): a scoped principal sees
+		// only run events whose initiator is allowed; run-less events pass.
+		// Initiator resolution mirrors Postgres: the event's own actor (children
+		// inherit the root initiator) or the workspace_run stand-in row.
+		if filter.ActorScope != nil && event.Context.Run != "" {
+			visible := containsStringValue(filter.ActorScope, event.Context.Actor.ID)
+			if !visible {
+				for _, actor := range s.runActors[event.Context.Run] {
+					if containsStringValue(filter.ActorScope, actor) {
+						visible = true
+						break
+					}
+				}
+			}
+			if !visible {
+				continue
+			}
 		}
 		result = append(result, event)
 	}

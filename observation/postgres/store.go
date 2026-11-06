@@ -321,10 +321,15 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 		AND (cardinality($18::text[]) = 0 OR data->>'knowledge_id' = ANY($18))
 		AND (cardinality($19::text[]) = 0 OR project_id = ANY($19))
 		AND (cardinality($20::text[]) = 0 OR type = ANY($20))
+		AND ($21::text[] IS NULL OR run_id = '' OR actor_id = ANY($21) OR EXISTS (
+		    SELECT 1 FROM workspace_run vr
+		    WHERE vr.id = observation_events.run_id
+		      AND (vr.exec_context->>'actor' = ANY($21) OR vr.exec_context->'authorized_by'->>'user_id' = ANY($21))))
 		ORDER BY occurred_at `+order+`,received_at `+order+`,source_id `+order+`,event_id `+order+` LIMIT $15`,
 		filter.Project, filter.SourceID, filter.EventID, filter.Run, filter.Task, filter.Actor, filter.Type,
 		filter.Since, filter.Until, filter.KnownAt, cursorOccurred, cursorReceived, cursorSource, cursorEvent, limit+1,
-		filter.ScopeKind, textList(filter.ScopeIDs), textList(filter.KnowledgeIDs), textList(filter.Projects), textList(filter.Types))
+		filter.ScopeKind, textList(filter.ScopeIDs), textList(filter.KnowledgeIDs), textList(filter.Projects), textList(filter.Types),
+		actorScopeArg(filter.ActorScope))
 	if err != nil {
 		return observation.Page{}, err
 	}
@@ -381,6 +386,17 @@ func (s *Store) HealthEvents(ctx context.Context, since time.Time, projects []st
 func textList(values []string) []string {
 	if len(values) == 0 {
 		return []string{}
+	}
+	return values
+}
+
+// actorScopeArg keeps nil distinguishable from empty for the run-visibility
+// join: nil (no restriction — admins, service principals) must reach SQL as
+// NULL so the `$21::text[] IS NULL` branch short-circuits the EXISTS; an
+// empty non-nil slice stays an empty array and matches no runs.
+func actorScopeArg(values []string) any {
+	if values == nil {
+		return nil
 	}
 	return values
 }

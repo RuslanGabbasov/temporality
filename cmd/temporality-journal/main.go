@@ -195,6 +195,19 @@ func main() {
 				}
 				return observation.HumanFactors{ApprovalSeconds: hab.ApprovalSeconds, AnswerBaseSeconds: hab.AnswerBaseSeconds, ReadingWPM: hab.ReadingWPM}, nil
 			}),
+			// Run visibility (docs/activity-scoping.md, the operator model): the
+			// journal shares DATABASE_URL with the workspace schema, so the allowed
+			// initiators — the user, their triggers, their granted units' people —
+			// resolve straight from the workspace tables.
+			httpapi.WithRunVisibility(func(ctx context.Context, p controlplane.Principal) ([]string, error) {
+				grantUnits := make([]string, 0, len(p.OrgRoles))
+				for _, grant := range p.OrgRoles {
+					grantUnits = append(grantUnits, grant.UnitID)
+				}
+				return ws.RunVisibilityActors(ctx, workspace.PrincipalSeed{
+					UserID: p.UserID, Admin: p.Role >= controlplane.RoleAdmin, GrantUnits: grantUnits,
+				})
+			}),
 		)
 	}
 	apiServer := httpapi.NewServer(store, log, gate, opts...)

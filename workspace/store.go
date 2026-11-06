@@ -1057,10 +1057,10 @@ func (s *Store) CreateTrigger(ctx context.Context, t *Trigger) error {
 		t.Config = json.RawMessage(`{}`)
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_trigger (id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		`INSERT INTO workspace_trigger (id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_by, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		t.ID, t.ProjectID, nullString(t.AgentID), t.Name, t.Type, t.Enabled, t.Config,
-		nullString(t.OrgUnitID), nullString(t.ExecutionIdentityID), t.CreatedAt, t.UpdatedAt)
+		nullString(t.OrgUnitID), nullString(t.ExecutionIdentityID), t.CreatedBy, t.CreatedAt, t.UpdatedAt)
 	return err
 }
 
@@ -1068,9 +1068,9 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (Trigger, error) {
 	var t Trigger
 	var agentID, orgUnitID, identityID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
+		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, COALESCE(created_by, ''), created_at, updated_at
 		 FROM workspace_trigger WHERE id = $1`, id).
-		Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedAt, &t.UpdatedAt)
+		Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return t, ErrNotFound
 	}
@@ -1082,7 +1082,7 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (Trigger, error) {
 
 func (s *Store) ListTriggers(ctx context.Context, projectID string) ([]Trigger, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
+		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, COALESCE(created_by, ''), created_at, updated_at
 		 FROM workspace_trigger WHERE project_id = $1 ORDER BY created_at DESC`, projectID)
 	if err != nil {
 		return nil, err
@@ -1092,7 +1092,7 @@ func (s *Store) ListTriggers(ctx context.Context, projectID string) ([]Trigger, 
 	for rows.Next() {
 		var t Trigger
 		var agentID, orgUnitID, identityID *string
-		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.AgentID = derefPtr(agentID)
@@ -1109,7 +1109,7 @@ func (s *Store) ListTriggers(ctx context.Context, projectID string) ([]Trigger, 
 // only wants enabled rows); an empty non-nil slice matches nothing — the
 // caller answers for a principal who sees no projects.
 func (s *Store) ListTriggersScoped(ctx context.Context, projects []string) ([]Trigger, error) {
-	query := `SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
+	query := `SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, COALESCE(created_by, ''), created_at, updated_at
 		 FROM workspace_trigger`
 	args := []any{}
 	if projects != nil {
@@ -1139,7 +1139,7 @@ func (s *Store) ListTriggersScoped(ctx context.Context, projects []string) ([]Tr
 
 func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
+		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, COALESCE(created_by, ''), created_at, updated_at
 		 FROM workspace_trigger WHERE enabled = true ORDER BY created_at`)
 	if err != nil {
 		return nil, err

@@ -1468,6 +1468,15 @@ func main() {
 		}
 		runID := r.PathValue("runID")
 		sourceID := querySourceID(r, activities.SourceID)
+		// Run visibility: terminating someone else's run must read as missing.
+		// Row-less children resolve through the journal fallback.
+		if run, gErr := ws.GetRun(r.Context(), runID); gErr == nil {
+			if !guardRunVisibility(w, r, ws, log, &run, observationURL, journalToken, runID) {
+				return
+			}
+		} else if !guardRunVisibility(w, r, ws, log, nil, observationURL, journalToken, runID) {
+			return
+		}
 		workflowID := workflowIDFor(sourceID, project, runID)
 		// R1 (kernel-wedge-2026-10-21): the terminate rides the temporal RPC
 		// deadline — expiry answers 503 "temporal rpc timeout: …" and never
@@ -3568,6 +3577,11 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		// Run visibility (docs/activity-scoping.md): someone else's run reads
+		// as missing — no existence oracle.
+		if !guardRunVisibility(w, r, ws, log, &run, observationURL, journalToken, r.PathValue("runID")) {
+			return
+		}
 		writeJSON(w, 200, run)
 	})
 	mux.HandleFunc("POST /v1/workspace/runs/{runID}/cancel", func(w http.ResponseWriter, r *http.Request) {
@@ -3581,6 +3595,10 @@ func main() {
 				return
 			}
 			writeError(w, 500, err)
+			return
+		}
+		// Run visibility: stopping someone else's run must read as missing too.
+		if !guardRunVisibility(w, r, ws, log, &run, observationURL, journalToken, run.ID) {
 			return
 		}
 		workflowID := workflowIDFor(activities.SourceID, run.ProjectID, run.RunID)
@@ -3612,6 +3630,15 @@ func main() {
 		run, err := ws.GetRun(r.Context(), runID)
 		if err != nil && !errors.Is(err, workspace.ErrNotFound) {
 			writeError(w, 500, err)
+			return
+		}
+		// Row-less runs are delegation/plan children: their visibility resolves
+		// through the journal's initiating actor.
+		var rowPtr *workspace.Run
+		if err == nil {
+			rowPtr = &run
+		}
+		if !guardRunVisibility(w, r, ws, log, rowPtr, observationURL, journalToken, runID) {
 			return
 		}
 		project := ""
@@ -3723,6 +3750,16 @@ func main() {
 		run, err := ws.GetRun(r.Context(), runID)
 		if err != nil && !errors.Is(err, workspace.ErrNotFound) {
 			writeError(w, 500, err)
+			return
+		}
+		// Run visibility BEFORE the row-less fallback rewrites `run`: the
+		// synthetic row below carries no exec_context and would read as someone
+		// else's run for every delegated child.
+		var rowPtr *workspace.Run
+		if err == nil {
+			rowPtr = &run
+		}
+		if !guardRunVisibility(w, r, ws, log, rowPtr, observationURL, journalToken, runID) {
 			return
 		}
 		project := ""
@@ -3887,12 +3924,23 @@ func main() {
 		// when present, then the ?project= param, then the run's own events.
 		project := r.URL.Query().Get("project")
 		if run, err := ws.GetRun(r.Context(), runID); err == nil {
-			project = run.ProjectID
-		} else if errors.Is(err, workspace.ErrNotFound) && project == "" {
-			if resolved, perr := ws.RunProjectID(r.Context(), runID); perr == nil {
-				project = resolved
+			// Run visibility for the row-backed case; row-less children resolve
+			// through the journal below (they share this guard).
+			if !guardRunVisibility(w, r, ws, log, &run, observationURL, journalToken, runID) {
+				return
 			}
-		} else if !errors.Is(err, workspace.ErrNotFound) && project == "" {
+			project = run.ProjectID
+		} else if errors.Is(err, workspace.ErrNotFound) {
+			// Row-less (delegated) run: the same guard, with the journal fallback.
+			if !guardRunVisibility(w, r, ws, log, nil, observationURL, journalToken, runID) {
+				return
+			}
+			if project == "" {
+				if resolved, perr := ws.RunProjectID(r.Context(), runID); perr == nil {
+					project = resolved
+				}
+			}
+		} else if project == "" {
 			writeError(w, 500, err)
 			return
 		}
@@ -4513,6 +4561,10 @@ func main() {
 			writeError(w, 403, err)
 			return
 		}
+		// Ownership (docs/activity-scoping.md, run visibility): the creator sees
+		// the runs this trigger produces. Server-stamped, never client-supplied
+		// — a spoofed created_by would widen someone's visibility.
+		req.CreatedBy = requestUserID(r)
 		if err := ws.CreateTrigger(r.Context(), &req); err != nil {
 			writeError(w, 409, err)
 			return
@@ -7144,6 +7196,23 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		// Run-visibility scope applies to the inbox too (docs/activity-scoping.md):
+		// an operator sees their own messages (and, through org grants, their
+		// units' people's); admins and service principals see everything. Trigger
+		// ids in the actor list simply never match a sender_user_id.
+		if actors, scoped := runVisibilityActors(r.Context(), ws, log, r); scoped {
+			allowed := map[string]bool{}
+			for _, actor := range actors {
+				allowed[actor] = true
+			}
+			filtered := make([]workspace.InboundMessage, 0, len(messages))
+			for _, message := range messages {
+				if message.SenderUserID != "" && allowed[message.SenderUserID] {
+					filtered = append(filtered, message)
+				}
+			}
+			messages = filtered
+		}
 		// Status counters are independent of the list limit: the inbox shows
 		// them on the filter chips, so a bounded list does not hide the scale.
 		response := map[string]any{"messages": messages}
@@ -8797,6 +8866,122 @@ func requestUserID(r *http.Request) string {
 		return principal.Subject
 	}
 	return ""
+}
+
+// runVisibilityActors resolves the caller's run-initiator scope (docs/
+// activity-scoping.md, the operator model) — same contract as the journal's
+// resolver: nil = unrestricted (admin / service principal), empty = no runs.
+// Fails CLOSED on resolver errors.
+func runVisibilityActors(ctx context.Context, ws *workspace.Store, log *slog.Logger, r *http.Request) ([]string, bool) {
+	principal, ok := controlplane.FromContext(r.Context())
+	if !ok || principal.UserID == "" || principal.Role >= controlplane.RoleAdmin {
+		return nil, false
+	}
+	grantUnits := make([]string, 0, len(principal.OrgRoles))
+	for _, grant := range principal.OrgRoles {
+		grantUnits = append(grantUnits, grant.UnitID)
+	}
+	actors, err := ws.RunVisibilityActors(ctx, workspace.PrincipalSeed{
+		UserID: principal.UserID, Admin: false, GrantUnits: grantUnits,
+	})
+	if err != nil {
+		log.Warn("run visibility resolver failed; failing closed", "error", err, "user", principal.UserID)
+		return []string{}, true
+	}
+	if actors == nil {
+		return nil, false
+	}
+	return actors, true
+}
+
+// runVisible reports whether the run's initiator is inside the allowed actor
+// scope. Unrestricted callers always pass.
+func runVisible(run workspace.Run, allowed []string) bool {
+	if allowed == nil {
+		return true
+	}
+	actor, _ := run.ExecContext["actor"].(string)
+	if actor != "" && stringInList(allowed, actor) {
+		return true
+	}
+	if authorized, ok := run.ExecContext["authorized_by"].(map[string]any); ok {
+		if userID, _ := authorized["user_id"].(string); userID != "" && stringInList(allowed, userID) {
+			return true
+		}
+	}
+	return false
+}
+
+func stringInList(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+// guardRunVisibility checks a loaded run row against the caller's scope.
+// A nil row means the run carries no workspace_run row (delegation/plan
+// children): visibility falls back to the run's initiating actor from the
+// journal — children inherit it, so the tree of an allowed initiator passes.
+// Returns false when the handler already answered (404 — someone else's run
+// reads as missing).
+func guardRunVisibility(w http.ResponseWriter, r *http.Request, ws *workspace.Store, log *slog.Logger, run *workspace.Run, observationURL, journalToken, runID string) bool {
+	allowed, scoped := runVisibilityActors(r.Context(), ws, log, r)
+	if !scoped {
+		return true
+	}
+	if run != nil && runVisible(*run, allowed) {
+		return true
+	}
+	if run == nil && childRunVisible(r.Context(), allowed, observationURL, journalToken, runID) {
+		return true
+	}
+	writeError(w, 404, workspace.ErrNotFound)
+	return false
+}
+
+// childRunVisible resolves a row-less run's initiator through the journal's
+// run.started event (children inherit the initiating actor). Best-effort
+// transport: a journal outage fails CLOSED — the run reads as missing until
+// the journal answers again.
+func childRunVisible(ctx context.Context, allowed []string, observationURL, journalToken, runID string) bool {
+	if observationURL == "" {
+		return false
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	endpoint := strings.TrimRight(observationURL, "/") + "/v1/observations/events?type=run.started&limit=1&run=" + url.QueryEscape(runID)
+	request, err := http.NewRequestWithContext(lookupCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return false
+	}
+	if journalToken != "" {
+		request.Header.Set("Authorization", "Bearer "+journalToken)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return false
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<16))
+	if response.StatusCode != http.StatusOK {
+		return false
+	}
+	var page struct {
+		Events []struct {
+			Context struct {
+				Actor struct {
+					ID string `json:"id"`
+				} `json:"actor"`
+			} `json:"context"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil || len(page.Events) == 0 {
+		return false
+	}
+	return stringInList(allowed, page.Events[0].Context.Actor.ID)
 }
 
 // validateChannelTypes checks channel rows against the kernel transport

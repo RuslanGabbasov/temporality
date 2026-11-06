@@ -57,6 +57,12 @@ type Filter struct {
 	// supervision verdicts and acks would otherwise fill whole pages of the
 	// newest-first window with events the timeline cannot render.
 	Types []string
+	// ActorScope restricts run-carrying events (run_id <> '') to runs whose
+	// initiating actor is in the list (docs/activity-scoping.md, the operator
+	// visibility model): the journal joins workspace_run's exec_context.actor /
+	// authorized_by.user_id. Nil = no restriction (admins, service principals);
+	// an empty non-nil slice matches no runs at all.
+	ActorScope []string
 }
 
 type Page struct {

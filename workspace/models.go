@@ -542,6 +542,7 @@ type Run struct {
 }
 
 // Trigger is a configurable mechanism to launch agent runs.
+// Trigger struct fields — see CreateTrigger for storage.
 type Trigger struct {
 	ID        string          `json:"id"`
 	ProjectID string          `json:"project_id"`
@@ -555,9 +556,13 @@ type Trigger struct {
 	// Execution identity the automated runs execute under (§20-21): the run
 	// never inherits the creator's rights. Empty = legacy trigger behaviour
 	// (pre-wave-D triggers keep running as before).
-	ExecutionIdentityID string    `json:"execution_identity_id,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ExecutionIdentityID string `json:"execution_identity_id,omitempty"`
+	// CreatedBy records who configured the trigger (docs/activity-scoping.md,
+	// run visibility): an operator sees the runs their own triggers produce.
+	// Legacy rows carry '' — those runs stay outside the operator scope.
+	CreatedBy string    `json:"created_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ScheduleConfig is the config JSON for schedule triggers.

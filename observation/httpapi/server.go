@@ -43,6 +43,11 @@ type Server struct {
 	topicAliases func(ctx context.Context, project string) (map[string]AreaAlias, error)
 	// humanFactors resolves the HAB estimate coefficients. Optional.
 	humanFactors func(ctx context.Context) (observation.HumanFactors, error)
+	// runVisibility resolves the run-initiator scope of a principal (docs/
+	// activity-scoping.md, the operator model). Optional: without the hook the
+	// journal does not restrict runs (single-binary/dev). Fails CLOSED on
+	// resolver errors — a broken resolver must not widen visibility.
+	runVisibility func(ctx context.Context, p controlplane.Principal) ([]string, error)
 	// counters: per-route request accounting, read by the debug listener.
 	counters *endpointCounters
 	// handler: the middleware-wrapped mux, built by NewServer.
@@ -95,6 +100,15 @@ func WithTopicAliases(fn func(ctx context.Context, project string) (map[string]A
 // built-in defaults.
 func WithHumanFactors(fn func(ctx context.Context) (observation.HumanFactors, error)) Option {
 	return func(s *Server) { s.humanFactors = fn }
+}
+
+// WithRunVisibility wires the principal → allowed-run-initiators resolver
+// (docs/activity-scoping.md, the operator visibility model). Nil result = no
+// restriction (admin); empty non-nil = the principal sees no runs. A missing
+// hook keeps the journal open (single-binary/dev stores); a resolver error
+// degrades to the empty scope — visibility must fail closed.
+func WithRunVisibility(fn func(ctx context.Context, p controlplane.Principal) ([]string, error)) Option {
+	return func(s *Server) { s.runVisibility = fn }
 }
 
 // humanFactorsFor resolves the coefficients with the documented fallback:
@@ -316,6 +330,33 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, result)
 }
 
+// actorScope resolves the principal's run-visibility scope. The second
+// return is false when runs are unrestricted (admin, service principal, or
+// no hook wired). Resolver errors fail CLOSED: the caller gets an empty
+// scope and sees no runs until the resolver recovers.
+func (s *Server) actorScope(ctx context.Context, p controlplane.Principal) ([]string, bool) {
+	if s.runVisibility == nil {
+		return nil, false
+	}
+	if p.Role >= controlplane.RoleAdmin {
+		return nil, false
+	}
+	// Service principals (kernel loopback, static env tokens) have no user —
+	// the runtime must not depend on one person's visibility.
+	if p.UserID == "" {
+		return nil, false
+	}
+	actors, err := s.runVisibility(ctx, p)
+	if err != nil {
+		s.log.Warn("run visibility resolver failed; failing closed", "error", err, "user", p.UserID)
+		return []string{}, true
+	}
+	if actors == nil {
+		return nil, false
+	}
+	return actors, true
+}
+
 func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 	// The project filter may be empty: the listing is global then, constrained
 	// server-side to the principal's visible projects (docs/activity-scoping.md
@@ -368,6 +409,12 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 			}
 			filter.Projects = projects
 		}
+	}
+	// Run visibility (docs/activity-scoping.md): a scoped principal sees only
+	// the runs they have a stake in — their own (delegation children inherit
+	// the initiating actor), their triggers' and their granted units' people's.
+	if actors, restricted := s.actorScope(r.Context(), principal); restricted {
+		filter.ActorScope = actors
 	}
 	page, err := s.store.ListObservationPage(r.Context(), filter, cursor)
 	if err != nil {
@@ -492,11 +539,14 @@ func (s *Server) getObservationEvent(w http.ResponseWriter, r *http.Request) {
 		// principal's visible projects.
 		if projects, all := principal.AllowedProjects(); !all {
 			if len(projects) == 0 {
-				writeError(w, http.StatusNotFound, observation.ErrNotFound)
+				writeJSON(w, http.StatusNotFound, observation.ErrNotFound)
 				return
 			}
 			filter.Projects = projects
 		}
+	}
+	if actors, restricted := s.actorScope(r.Context(), principal); restricted {
+		filter.ActorScope = actors
 	}
 	page, err := s.store.ListObservationPage(r.Context(), filter, "")
 	if err != nil {
@@ -1181,8 +1231,27 @@ func (s *Server) compareRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.gate.Allow(w, r, controlplane.RoleReader, project) {
 		return
 	}
+	// Run visibility applies to both compared runs — one scoped summary next
+	// to a leaked one would defeat the point.
+	var actorScope []string
+	scoped := false
+	if principal, ok := controlplane.FromContext(r.Context()); ok {
+		if actors, restricted := s.actorScope(r.Context(), principal); restricted {
+			actorScope, scoped = actors, true
+		}
+	}
 	summarize := func(runID string) (RunSummary, error) {
-		filter := observation.Filter{Project: project, Run: runID, Limit: 500}
+		filter := observation.Filter{Project: project, Run: runID, Limit: 500, ActorScope: actorScope}
+		if !scoped {
+			filter.ActorScope = nil
+		}
+		// Run visibility: a scoped principal gets an empty state for someone
+		// else's run instead of its full event wall.
+		if principal, ok := controlplane.FromContext(r.Context()); ok {
+			if actors, restricted := s.actorScope(r.Context(), principal); restricted {
+				filter.ActorScope = actors
+			}
+		}
 		var allEvents []observation.Event
 		cursor := ""
 		for {
