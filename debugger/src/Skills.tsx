@@ -15,7 +15,8 @@ import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion, type SkillEvaluationCase, type SkillEvaluationRun, type TransferReport, type TransferResultItem } from './workspaceApi'
 import { useT } from './i18n'
-import SideBySideDiff from './SideBySideDiff'
+import RichDiff from './RichDiff'
+import SkillManifestDiff, { previousVersion } from './SkillManifestDiff'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -80,6 +81,9 @@ export default function Skills() {
   const [selected, setSelected] = useState<Skill | null>(null)
   const [tab, setTab] = useState<SkillTab>('main')
   const [versions, setVersions] = useState<SkillVersion[]>([])
+  // Per-version compare base (the artifacts' semantics): the reviewer picks
+  // any version, the default is the PREVIOUS one.
+  const [diffBases, setDiffBases] = useState<Record<string, string>>({})
   const [executions, setExecutions] = useState<SkillExecution[]>([])
   const [memory, setMemory] = useState<SkillMemoryItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -752,9 +756,12 @@ export default function Skills() {
                         const isDraft = version.status === 'draft'
                         const isRejected = version.status === 'rejected'
                         const isCurrent = version.version === selected.version
-                        // Diff against the current revision for proposals.
-                        const currentRow = versions.find((v) => v.version === selected.version)
-                        const diffBase = !isCurrent && !isRejected ? currentRow : undefined
+                        // Compare like the artifact versions: any base the
+                        // reviewer picks, defaulting to the PREVIOUS version —
+                        // not the fixed «against current» line diff.
+                        const base = (diffBases[version.version]
+                          ? versions.find((v) => v.version === diffBases[version.version])
+                          : undefined) ?? previousVersion(versions, version.version)
                         return (
                         <div key={version.version} className="skill-version" style={isRejected ? { opacity: 0.55 } : undefined}>
                           <button className="skill-version-head" onClick={() => setOpenVersion(openVersion === version.version ? null : version.version)}>
@@ -816,11 +823,23 @@ export default function Skills() {
                                   )}
                                 </div>
                               )}
-                              {diffBase && (
+                              {base && (
                                 <>
-                                  <div className="skill-subheading" style={{ fontSize: '0.7rem' }}>{t('skills.diff_vs_current') ?? 'Changes vs current revision'} ({diffBase.version} → {version.version})</div>
-                                  <SideBySideDiff title="SKILL.md" oldLabel={diffBase.version} newLabel={version.version} oldText={diffBase.markdown} newText={version.markdown} />
-                                  <SideBySideDiff title="skill.yaml" oldLabel={diffBase.version} newLabel={version.version} oldText={manifestToYaml(diffBase.manifest as SkillManifest)} newText={manifestToYaml(version.manifest as SkillManifest)} />
+                                  <div className="skill-subheading" style={{ fontSize: '0.7rem', display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span>{t('skills.compare_with') ?? 'Compare with:'}</span>
+                                    <select
+                                      value={base.version}
+                                      onChange={(e) => setDiffBases((prev) => ({ ...prev, [version.version]: e.target.value }))}
+                                      style={{ fontSize: '0.72rem', padding: '0.15rem 0.35rem' }}
+                                    >
+                                      {versions.filter((v) => v.version !== version.version).map((v) => (
+                                        <option key={v.version} value={v.version}>{v.version}{v.version === selected.version ? ` (${t('skills.current') ?? 'current'})` : ''}</option>
+                                      ))}
+                                    </select>
+                                    <span style={{ color: 'var(--tm-text-3)' }}>{base.version} → {version.version}</span>
+                                  </div>
+                                  <RichDiff oldText={base.markdown ?? ''} newText={version.markdown ?? ''} oldLabel={base.version} newLabel={version.version} />
+                                  <SkillManifestDiff before={base.manifest as SkillManifest} after={version.manifest as SkillManifest} oldLabel={base.version} newLabel={version.version} />
                                 </>
                               )}
                               {!isCurrent && !isRejected && (
