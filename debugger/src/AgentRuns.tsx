@@ -1391,13 +1391,13 @@ export default function AgentRuns({ project }: { project: string }) {
                               <Markdown content={String(event.data?.context)} />
                             </div>
                           )}
-                          									{options.length > 0 && !schema && (
-                          										<Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem', flexWrap: 'nowrap', overflowX: 'auto', maxWidth: '100%', paddingBottom: '0.25rem' }}>
-                          										{options.map((option) => (
-                          											<Button key={option} size="sm" style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }} title={option} onClick={() => void decide(event, true, option)} disabled={busy}>{option}</Button>
-                          										))}
-                          									</Stack>
-                          									)}
+									{options.length > 0 && !schema && (
+										<Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem', flexWrap: 'wrap', maxWidth: '100%' }}>
+											{options.map((option) => (
+												<Button key={option} size="sm" style={{ flex: '0 0 auto', whiteSpace: 'nowrap', maxWidth: '100%' }} title={option} onClick={() => void decide(event, true, option)} disabled={busy}>{option}</Button>
+											))}
+										</Stack>
+									)}
                           {schema && (
                             <HumanForm
                               schema={schema}
