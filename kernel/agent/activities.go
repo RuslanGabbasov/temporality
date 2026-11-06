@@ -853,6 +853,9 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			return false
 		}, llm.WithPromptCacheKey(request.PromptCacheKey))
 		if streamErr == nil {
+			if err := guardCompletion(completion); err != nil {
+				return llm.Completion{}, a.routeFailure(ctx, request, routeProvider, routeProviderName, attempt, err)
+			}
 			return completion, nil
 		}
 		// A cancelled context means the nudge (or workflow termination) killed
@@ -902,6 +905,9 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 				// really waited minutes unless the salvage is marked here too.
 				retryCompletion.StreamRetried = true
 				retryCompletion.StreamMs = streamMs
+				if err := guardCompletion(retryCompletion); err != nil {
+					return llm.Completion{}, a.routeFailure(ctx, request, routeProvider, routeProviderName, attempt, err)
+				}
 				return retryCompletion, nil
 			}
 			if ctx.Err() != nil {
@@ -921,6 +927,10 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 				completion.StreamFailed = true
 				completion.StreamMs = streamMs + retryMs
 				completion.StreamError = retryErr.Error()
+				err = guardCompletion(completion)
+				if err != nil {
+					completion = llm.Completion{}
+				}
 			}
 			return completion, a.routeFailure(ctx, request, routeProvider, routeProviderName, attempt, err)
 		}
@@ -943,10 +953,20 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			completion.StreamFailed = true
 			completion.StreamMs = streamMs
 			completion.StreamError = streamErr.Error()
+			err = guardCompletion(completion)
+			if err != nil {
+				completion = llm.Completion{}
+			}
 		}
 		return completion, a.routeFailure(ctx, request, routeProvider, routeProviderName, attempt, err)
 	}
 	completion, err := client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
+	if err == nil {
+		err = guardCompletion(completion)
+		if err != nil {
+			completion = llm.Completion{}
+		}
+	}
 	return completion, a.routeFailure(ctx, request, routeProvider, routeProviderName, attempt, err)
 }
 
@@ -957,6 +977,51 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 // shows, captured from the call that actually failed. Also evicts the cached
 // routing on auth rejections: a rotated key must re-resolve on the retry
 // ladder instead of serving the stale credential until the TTL runs out.
+// providerRejectionTexts are verbatim refusals some provider risk filters
+// return AS the completion content when they reject a request (200 + plain
+// text, not an error). Left alone they become «the agent's answer» — the run
+// completes with a mystery sentence like "The request was rejected because
+// it was considered high risk" and the operator hunts their own approval
+// gates for a rejection that never happened there.
+var providerRejectionTexts = []string{
+	"the request was rejected because it was considered high risk",
+	"the response was filtered due to the prompt triggering azure's content management policy",
+}
+
+// providerRejection matches a completion against the known risk-filter
+// refusals — STRICTLY the whole answer (normalized for case, surrounding
+// space and a trailing period). A refusal embedded in a longer answer is the
+// assistant quoting or narrating it, and a false positive here fails a
+// perfectly good turn, so the bias is toward missing over killing.
+func providerRejection(content string) string {
+	normalized := strings.ToLower(strings.TrimSpace(content))
+	normalized = strings.TrimRight(normalized, ". \t\n\r!…")
+	if normalized == "" {
+		return ""
+	}
+	for _, phrase := range providerRejectionTexts {
+		if normalized == phrase {
+			return strings.TrimSpace(content)
+		}
+	}
+	return ""
+}
+
+// guardCompletion turns a risk-filter refusal masquerading as a successful
+// answer into a retryable model error: the activity retry ladder re-runs the
+// call (a fresh attempt may pass — these filters are flaky on context), and
+// an exhausted ladder fails the turn honestly (model.failed) instead of
+// delivering the refusal text as the agent's answer.
+func guardCompletion(completion llm.Completion) error {
+	if len(completion.ToolCalls) > 0 {
+		return nil
+	}
+	if refusal := providerRejection(completion.Content); refusal != "" {
+		return fmt.Errorf("provider risk filter rejected the request: %s", refusal)
+	}
+	return nil
+}
+
 // routeFailure journals a failed model call together with the routing
 // decision and a full provider map (docs/diagnostics.md): the operator's
 // «запрос → ответ» dialog reads this to answer WHY the call went where it
