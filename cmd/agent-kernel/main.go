@@ -6387,6 +6387,7 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		keepArtifactEditsOnEmpty(&req, current)
 		artifact, err := req.toArtifact(current.ID)
 		if err != nil {
 			writeError(w, 422, err)
@@ -6496,6 +6497,7 @@ func main() {
 			writeError(w, 409, fmt.Errorf("revision applies to approved artifacts only: %s is %s — edit a draft with PUT", id, current.Status))
 			return
 		}
+		keepArtifactEditsOnEmpty(&req, current)
 		artifact, err := req.toArtifact(current.ID)
 		if err != nil {
 			writeError(w, 422, err)
@@ -9607,6 +9609,35 @@ type artifactRequest struct {
 	// Tags are catalog labels: normalized (trimmed, deduped, lowercased by
 	// normalize()) and filtered with AND semantics in the list endpoint.
 	Tags []string `json:"tags,omitempty"`
+}
+
+// keepArtifactEditsOnEmpty fills omitted fields with the stored artifact
+// BEFORE validation: an UPDATE is a partial edit (artifact_update patches
+// fragments — a title-less edit must not 422 on the create-time validator,
+// and an omitted field must never blank what is stored). The create path
+// never calls this: there it is nothing to keep.
+func keepArtifactEditsOnEmpty(req *artifactRequest, current workspace.Artifact) {
+	if strings.TrimSpace(req.Title) == "" {
+		req.Title = current.Title
+	}
+	if strings.TrimSpace(req.Description) == "" {
+		req.Description = current.Description
+	}
+	if strings.TrimSpace(req.Provider) == "" {
+		req.Provider = current.Provider
+	}
+	if strings.TrimSpace(req.MimeType) == "" {
+		req.MimeType = current.MimeType
+	}
+	if strings.TrimSpace(req.ExternalRef) == "" {
+		req.ExternalRef = current.ExternalRef
+	}
+	// A url artifact keeps its body outside the registry: only backfill the
+	// body of builtin ones — backfilling a url artifact would trip its
+	// "content must be empty" rule and break the provider contract.
+	if req.Content == "" && current.Provider != "url" {
+		req.Content = current.Content
+	}
 }
 
 // toArtifact validates the request and converts it into a workspace.Artifact.
