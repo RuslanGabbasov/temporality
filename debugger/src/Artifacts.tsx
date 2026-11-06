@@ -961,8 +961,8 @@ export default function Artifacts() {
                       </Button>
                     </div>
                   )}
-                  {selected.provider !== 'url' && (
-                    <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap', marginTop: revisionOpen ? '0.65rem' : 0, marginBottom: '0.65rem' }}>
+                					  {selected.provider !== 'url' && compareOptions.length > 1 && (
+                					    <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap', marginTop: revisionOpen ? '0.65rem' : 0, marginBottom: '0.65rem' }}>
                       <Button size="sm" kind="ghost" onClick={() => setDiffMode((v) => !v)}>
                         {diffMode ? (t('artifacts.diff_close') ?? 'Close diff') : (t('artifacts.diff_open') ?? 'Compare versions')}
                       </Button>
@@ -982,7 +982,7 @@ export default function Artifacts() {
                       )}
                     </div>
                   )}
-                  {diffMode && baseOption ? (
+                					  {diffMode && compareOptions.length > 1 && baseOption ? (
                     <RichDiff
                       oldText={baseOption.content}
                       newText={bodyText}
