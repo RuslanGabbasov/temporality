@@ -60,10 +60,34 @@ func (s *Store) Enqueue(ctx context.Context, event observation.Event) error {
 	if err != nil {
 		return err
 	}
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("outbox key %s/%s already exists with different content", event.Source.ID, event.EventID)
+	if result.RowsAffected() > 0 {
+		return nil
 	}
-	return nil
+	// Same id, DIFFERENT content: a nondeterministic replay regenerated an
+	// already-recorded emit with new data (a deploy changed event payloads
+	// mid-run — exactly what the versioning gates try to prevent, but an emit
+	// added or reshaped inside an un-gated branch slips through). The old row
+	// is frozen forever, so the honest choice is a RE-ISSUE under a fresh id:
+	// the journal keeps the fact instead of silently losing it. Without this,
+	// the conflict was a hard error — the emit failed, and when the lost emit
+	// was the run's terminal event the run became a journal zombie (the
+	// «крутится часами, а рана уже нет» class).
+	reissued := event
+	for attempt := 2; attempt <= 100; attempt++ {
+		reissued.EventID = fmt.Sprintf("%s-r%d", event.EventID, attempt)
+		reissuedPayload, marshalErr := json.Marshal(reissued)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = s.pool.Exec(ctx, `INSERT INTO kernel_event_outbox(source_id,event_id,payload) VALUES($1,$2,$3) ON CONFLICT(source_id,event_id) DO UPDATE SET last_error=kernel_event_outbox.last_error WHERE kernel_event_outbox.payload=EXCLUDED.payload`, reissued.Source.ID, reissued.EventID, reissuedPayload)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() > 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("outbox key %s/%s already exists with different content and re-issue budget exhausted", event.Source.ID, event.EventID)
 }
 
 const (
@@ -199,6 +223,16 @@ func (s *Store) deliverChunk(ctx context.Context, chunk []claimedEvent) (int, er
 	}
 	deliveredEvents, failedEvents := resolveIngestOutcome(chunk, results)
 	for _, failed := range failedEvents {
+		// A delivery-time id conflict (the journal already holds this id with
+		// different content) is recoverable the same way as the enqueue-time
+		// one: re-issue the event under a fresh id instead of burying it — the
+		// fact must land, the append-only journal simply refuses the collision.
+		if strings.Contains(failed.Reason, conflictReasonMarker) {
+			if s.reissueAndRetry(ctx, failed.Event) {
+				deliveredEvents = append(deliveredEvents, failed.Event)
+				continue
+			}
+		}
 		s.noteFailure(ctx, failed.Event.SourceID, failed.Event.EventID, failed.Reason)
 		// Poison isolation: a permanently rejected event (validation, duplicate
 		// id shape, …) must NOT hold the queue hostage. The journal answered, so
@@ -241,9 +275,68 @@ func (s *Store) quarantineIfHopeless(ctx context.Context, sourceID, eventID stri
 // conflictReasonMarker matches the journal's id-conflict rejection: an event
 // with the same id but different content already exists. The outbox row's
 // payload is frozen at enqueue time, so this answer can never change — the
-// row is deterministically undeliverable and must not consume its retry
-// budget (2026-10-30: 12.8k such rows cycled for two days).
+// row is deterministically undeliverable under this id and must not consume
+// its retry budget (2026-10-30: 12.8k such rows cycled for two days).
 const conflictReasonMarker = "already exists with different content"
+
+// reissueAndRetry renames a conflicted event's outbox row to a fresh
+// id (-r2, -r3, … — the same scheme the enqueue-time re-issue uses) and
+// delivers it again. True — the event landed under the new id and the row
+// is marked delivered; false — the re-issue could not be delivered either
+// (transport, or another conflict up to the budget), the caller falls back
+// to the ordinary failure/quarantine path.
+func (s *Store) reissueAndRetry(ctx context.Context, event claimedEvent) bool {
+	var parsed observation.Event
+	if err := json.Unmarshal(event.Payload, &parsed); err != nil {
+		return false
+	}
+	for attempt := 2; attempt <= 10; attempt++ {
+		reissued := parsed
+		reissued.EventID = fmt.Sprintf("%s-r%d", event.EventID, attempt)
+		body, err := json.Marshal(reissued)
+		if err != nil {
+			return false
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url+"/v1/observations/events", bytes.NewReader(framed(body)))
+		if err != nil {
+			return false
+		}
+		request.Header.Set("Content-Type", "application/json")
+		if token := strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")); token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response, err := s.client.Do(request)
+		if err != nil {
+			return false
+		}
+		responseBody, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil {
+			return false
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			return false
+		}
+		results, err := parseIngestResponse(responseBody)
+		if err != nil || len(results) != 1 || !isDeliveredStatus(results[0].Status) {
+			if len(results) == 1 && strings.Contains(rejectedEventReason(results[0]), conflictReasonMarker) {
+				continue // this suffix collided too — try the next
+			}
+			return false
+		}
+		// Landed under the re-issued id: move the row so dedupe and the audit
+		// trail keep pointing at what was actually delivered.
+		_, _ = s.pool.Exec(ctx, `UPDATE kernel_event_outbox SET event_id=$3, payload=$4, delivered_at=clock_timestamp(), attempts=attempts+1, last_error='', claimed_until=NULL WHERE source_id=$1 AND event_id=$2`, event.SourceID, event.EventID, reissued.EventID, body)
+		return true
+	}
+	return false
+}
+
+// framed wraps one event into the ingest request body — an array of one,
+// the shape the journal's append endpoint parses.
+func framed(event []byte) []byte {
+	return []byte(`{"events":[` + string(event) + `]}`)
+}
 
 func hopelesslyRejected(reason string) bool {
 	return strings.Contains(reason, conflictReasonMarker)
