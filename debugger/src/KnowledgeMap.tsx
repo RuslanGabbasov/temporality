@@ -153,6 +153,25 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const maxBirthRef = useRef(0)
   const pointIndexById = useMemo(() => new Map(points.map((p, i) => [p.id, i] as const)), [points])
 
+  /** Multi-selection (the editor-grade interactions the map lacked): Ctrl+click
+   *  toggles a point, Shift+click takes its whole branch (the level-1 region),
+   *  Shift/Ctrl+drag sweeps a marquee, Ctrl+A takes the filtered corpus.
+   *  Selected ids feed the clipboard hotkeys (Ctrl+C/X copy the propositions,
+   *  Ctrl+V pastes text into the map search) and render as accent rings. Kept
+   *  in a ref with a tick counter: the draw pass reads it every frame, React
+   *  only re-renders when the count itself changes. */
+  const selectedIdsRef = useRef<Set<string>>(new Set())
+  const [selectedCount, setSelectedCount] = useState(0)
+  const marqueeRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  // The current draw pass, set right after its declaration — selection
+  // interactions mutate the ref and schedule a redraw without React.
+  const drawFnRef = useRef<(() => void) | null>(null)
+  const applySelection = useCallback((next: Set<string>) => {
+    selectedIdsRef.current = next
+    setSelectedCount(next.size)
+    requestAnimationFrame(() => drawFnRef.current?.())
+  }, [])
+
   // Streaming load: batches of 400 arrive freshest-first and land on the map
   // as they come — the first paint needs one batch, not the whole corpus.
   // genRef invalidates the loop when the project flips or the tab unmounts.
@@ -509,6 +528,8 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     // Dark theme: glows and captions need less fill and dimmer text to read
     // as a heat map; light theme packs stronger fills for the same contrast.
     const dark = theme === 'dark'
+    // Selection/marquee accent — the app amber reads on both themes.
+    const accent = getComputedStyle(wrap).getPropertyValue('--tm-amber').trim() || (dark ? '#e0b341' : '#b28a00')
 
     // Position morph: dots glide from their previous layout positions to the
     // new ones instead of teleporting on every batch recompute.
@@ -750,6 +771,17 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         ctx.fillStyle = regionColor
         drawShape(ctx, shape, sx, sy, radius)
       }
+      // Selection ring: accent halo around selected points, on top of the
+      // shape — the one visual state of the editor-grade interactions
+      // (Ctrl/Ctrl+drag/Shift+drag select, Shift+click takes the branch).
+      if (selectedIdsRef.current.has(p.id)) {
+        ctx.globalAlpha = 0.95
+        ctx.strokeStyle = accent
+        ctx.lineWidth = 1.6
+        ctx.beginPath()
+        ctx.arc(sx, sy, radius + 3.2, 0, Math.PI * 2)
+        ctx.stroke()
+      }
     }
     ctx.globalAlpha = 1
     // Keep the animation frames coming while births, morphs or the camera
@@ -826,7 +858,25 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         ctx.globalAlpha = 1
       }
     }
+    // Marquee overlay: the in-progress Ctrl/Shift drag sweep, on top of
+    // everything — resolved into a world-rect selection on mouseup.
+    const marquee = marqueeRef.current
+    if (marquee) {
+      const x = Math.min(marquee.x0, marquee.x1), y = Math.min(marquee.y0, marquee.y1)
+      const wq = Math.abs(marquee.x1 - marquee.x0), hq = Math.abs(marquee.y1 - marquee.y0)
+      ctx.globalAlpha = 0.12
+      ctx.fillStyle = accent
+      ctx.fillRect(x, y, wq, hq)
+      ctx.globalAlpha = 0.8
+      ctx.strokeStyle = accent
+      ctx.lineWidth = 1
+      ctx.setLineDash([4, 3])
+      ctx.strokeRect(x, y, wq, hq)
+      ctx.setLineDash([])
+      ctx.globalAlpha = 1
+    }
   }, [points, matches, viewScale, regionColorOf])
+  drawFnRef.current = draw
 
   useEffect(() => {
     frameRef.current = requestAnimationFrame(draw)
@@ -866,6 +916,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     let lastX = 0, lastY = 0
     let downX = 0, downY = 0
     let movedFar = false
+    let marqueeJustResolved = false
     const CLICK_SLOP = 4
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
@@ -884,10 +935,24 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       dragging = true; movedFar = false
       downX = lastX = event.clientX; downY = lastY = event.clientY
       if (event.button === 0) camRef.current = null // a drag cancels the camera tween
+      // Modifier drag = marquee selection, not pan: remember the rect in wrap
+      // coordinates and let onMove update it; a plain drag still pans.
+      if ((event.ctrlKey || event.metaKey || event.shiftKey) && event.button === 0) {
+        const rect = wrap.getBoundingClientRect()
+        marqueeRef.current = { x0: event.clientX - rect.left, y0: event.clientY - rect.top, x1: event.clientX - rect.left, y1: event.clientY - rect.top }
+      }
     }
     const onMove = (event: MouseEvent) => {
       if (dragging) {
         if (Math.hypot(event.clientX - downX, event.clientY - downY) > CLICK_SLOP) movedFar = true
+        const rect0 = wrap.getBoundingClientRect()
+        // Marquee drag: grow the rect and repaint; the map does not pan.
+        if (marqueeRef.current) {
+          marqueeRef.current.x1 = event.clientX - rect0.left
+          marqueeRef.current.y1 = event.clientY - rect0.top
+          frameRef.current = requestAnimationFrame(draw)
+          return
+        }
         const transform = transformRef.current
         transform.x += event.clientX - lastX
         transform.y += event.clientY - lastY
@@ -913,15 +978,59 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         return best ? { point: best, clientX: event.clientX - rect.left, clientY: event.clientY - rect.top } : null
       })
     }
-    const onUp = () => { dragging = false }
+    const onUp = () => {
+      dragging = false
+      // Resolve the marquee: points whose world position falls inside the
+      // swept rect join the selection (additive — Ctrl semantics).
+      const marquee = marqueeRef.current
+      marqueeRef.current = null
+      if (marquee) {
+        marqueeJustResolved = true
+        const rect = wrap.getBoundingClientRect()
+        const { scale, tx, ty } = viewScale()
+        const wx0 = (Math.min(marquee.x0, marquee.x1) - tx) / scale
+        const wx1 = (Math.max(marquee.x0, marquee.x1) - tx) / scale
+        const wy0 = (Math.min(marquee.y0, marquee.y1) - ty) / scale
+        const wy1 = (Math.max(marquee.y0, marquee.y1) - ty) / scale
+        const next = new Set(selectedIdsRef.current)
+        let added = false
+        for (const p of points) {
+          if (p.x >= wx0 && p.x <= wx1 && p.y >= wy0 && p.y <= wy1) { next.add(p.id); added = true }
+        }
+        if (added || next.size !== selectedIdsRef.current.size) applySelection(next)
+        else frameRef.current = requestAnimationFrame(draw)
+      }
+    }
     const onClick = (event: MouseEvent) => {
       if (movedFar) return // a pan gesture ended where it happened to land
+      if (marqueeJustResolved) { marqueeJustResolved = false; return }
       const rect = wrap.getBoundingClientRect()
       const { scale, tx, ty } = viewScale()
       const mx = (event.clientX - rect.left - tx) / scale
       const my = (event.clientY - rect.top - ty) / scale
       const best = pickPoint(mx, my, 14 / scale)
+      // Editor-grade selection clicks: Ctrl/Cmd toggles one point, Shift takes
+      // its whole branch (the level-1 region). Neither opens the dossier —
+      // selection is a distinct gesture from navigation.
+      if (event.ctrlKey || event.metaKey) {
+        if (best) {
+          const next = new Set(selectedIdsRef.current)
+          if (next.has(best.id)) next.delete(best.id)
+          else next.add(best.id)
+          applySelection(next)
+        }
+        return
+      }
+      if (event.shiftKey) {
+        if (best) {
+          const next = new Set(selectedIdsRef.current)
+          for (const p of points) if (p.cluster === best.cluster) next.add(p.id)
+          applySelection(next)
+        }
+        return
+      }
       if (best) onOpenDossier(best.item.id)
+      else if (selectedIdsRef.current.size > 0) applySelection(new Set()) // plain click on empty space resets
     }
     wrap.addEventListener('wheel', onWheel, { passive: false })
     wrap.addEventListener('mousedown', onDown)
@@ -935,7 +1044,111 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
       window.removeEventListener('mouseup', onUp)
       wrap.removeEventListener('click', onClick)
     }
-  }, [points, draw, onOpenDossier, viewScale, pickPoint])
+  }, [points, draw, onOpenDossier, viewScale, pickPoint, applySelection])
+
+  // Copy/cut the selection: the propositions (id + text, one per line) land
+  // in the clipboard. Cut additionally clears the selection — the editor
+  // habit — the map itself is a projection and cutting never deletes data.
+  const copySelection = useCallback(async (cut: boolean) => {
+    const ids = selectedIdsRef.current
+    if (ids.size === 0) return
+    const byId = new Map(points.map((p) => [p.id, p] as const))
+    const lines: string[] = []
+    for (const id of ids) {
+      const p = byId.get(id)
+      if (p) lines.push(`[${p.item.state}] ${p.item.proposition} (${id})`)
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'))
+    } catch {
+      // Clipboard may be denied (insecure context): the fallback keeps the
+      // hotkey honest instead of silently doing nothing.
+      const area = document.createElement('textarea')
+      area.value = lines.join('\n')
+      document.body.appendChild(area)
+      area.select()
+      document.execCommand('copy')
+      area.remove()
+    }
+    if (cut) applySelection(new Set())
+  }, [points, applySelection])
+
+  // Keyboard interactions (the «привычные хоткеи»): the wrap is focusable
+  // (tabIndex), so the map owns the keys only when clicked/focused — global
+  // shortcuts stay untouched while the user types in the search field.
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const onKey = (event: KeyboardEvent) => {
+      const mod = event.ctrlKey || event.metaKey
+      if (mod && (event.key === 'c' || event.key === 'C' || event.key === 'х' || event.key === 'Х')) {
+        if (selectedIdsRef.current.size === 0) return
+        event.preventDefault()
+        void copySelection(false)
+        return
+      }
+      if (mod && (event.key === 'x' || event.key === 'X' || event.key === 'ч' || event.key === 'Ч')) {
+        if (selectedIdsRef.current.size === 0) return
+        event.preventDefault()
+        void copySelection(true)
+        return
+      }
+      if (mod && (event.key === 'a' || event.key === 'A' || event.key === 'ф' || event.key === 'Ф')) {
+        event.preventDefault()
+        applySelection(new Set(points.map((p) => p.id)))
+        return
+      }
+      if (mod && (event.key === 'v' || event.key === 'V' || event.key === 'м' || event.key === 'М')) {
+        // Paste into the map = search: the pasted text becomes the query and
+        // the map dims to what matches it — the natural «insert something
+        // here» gesture for a projection you cannot structurally edit.
+        event.preventDefault()
+        void (async () => {
+          try {
+            const text = await navigator.clipboard.readText()
+            if (text.trim()) setQuery(text.trim().split('\n')[0].slice(0, 120))
+          } catch { /* clipboard read denied — nothing to paste */ }
+        })()
+        return
+      }
+      if (event.key === 'Escape') {
+        if (selectedIdsRef.current.size > 0) applySelection(new Set())
+        return
+      }
+      // Camera keys: +/- zoom at the center, 0 refits, arrows pan.
+      const transform = transformRef.current
+      const step = 60
+      let handled = true
+      switch (event.key) {
+        case '+': case '=': {
+          const next = Math.min(8, transform.k * 1.25)
+          transform.x = (transform.x + wrap.clientWidth / 2) - ((transform.x + wrap.clientWidth / 2) - transform.x) * next / transform.k
+          transform.y = (transform.y + wrap.clientHeight / 2) - ((transform.y + wrap.clientHeight / 2) - transform.y) * next / transform.k
+          transform.k = next
+          break
+        }
+        case '-': {
+          const next = Math.max(0.2, transform.k / 1.25)
+          transform.x = (transform.x + wrap.clientWidth / 2) - ((transform.x + wrap.clientWidth / 2) - transform.x) * next / transform.k
+          transform.y = (transform.y + wrap.clientHeight / 2) - ((transform.y + wrap.clientHeight / 2) - transform.y) * next / transform.k
+          transform.k = next
+          break
+        }
+        case 'ArrowLeft': transform.x += step; break
+        case 'ArrowRight': transform.x -= step; break
+        case 'ArrowUp': transform.y += step; break
+        case 'ArrowDown': transform.y -= step; break
+        default: handled = false
+      }
+      if (handled) {
+        event.preventDefault()
+        camRef.current = null
+        frameRef.current = requestAnimationFrame(() => drawFnRef.current?.())
+      }
+    }
+    wrap.addEventListener('keydown', onKey)
+    return () => wrap.removeEventListener('keydown', onKey)
+  }, [points, applySelection, copySelection])
 
   // Filter chips read the server's whole-corpus state counts — stable from
   // the first batch instead of growing as later pages land. An older journal
@@ -972,8 +1185,18 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast />}
 
-      <div ref={wrapRef} style={{ position: 'relative', flex: 1, minHeight: '320px', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)', overflow: 'hidden', cursor: hover ? 'pointer' : 'grab' }}>
+      <div ref={wrapRef} tabIndex={0} title={t('map.hotkeys_hint') ?? 'Ctrl+click — select · Shift+click — select branch · Ctrl+drag — marquee · Ctrl+C/X/A · Ctrl+V — search · Esc — reset'} style={{ position: 'relative', flex: 1, minHeight: '320px', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-bg)', overflow: 'hidden', cursor: hover ? 'pointer' : 'grab', outline: 'none' }} onFocus={(e) => e.currentTarget.style.outline = 'none'}>
         <canvas ref={canvasRef} style={{ display: 'block' }} />
+        {/* Selection toolbar: what is selected and what the hotkeys do with
+            it. Sits top-left inside the canvas, disappears with the selection. */}
+        {selectedCount > 0 && (
+          <div style={{ position: 'absolute', top: '0.5rem', left: '0.5rem', zIndex: 5, display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.3rem 0.55rem', background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)', borderRadius: '8px', fontSize: '0.75rem', color: 'var(--tm-text-2)' }}>
+            <span>{t('map.selected_n', { count: String(selectedCount) }) ?? `${selectedCount} selected`}</span>
+            <Button size="sm" kind="ghost" onClick={() => { void copySelection(false) }}>{t('map.copy') ?? 'Copy'}</Button>
+            <Button size="sm" kind="ghost" onClick={() => { void copySelection(true) }}>{t('map.cut') ?? 'Cut'}</Button>
+            <Button size="sm" kind="ghost" onClick={() => applySelection(new Set())}>{t('map.deselect') ?? 'Deselect'}</Button>
+          </div>
+        )}
         {/* A failed load is unmissable: dead center, with a retry — the old
             placement (above the toolbar) scrolled out of sight and the map
             looked «broken» instead of saying what happened. */}

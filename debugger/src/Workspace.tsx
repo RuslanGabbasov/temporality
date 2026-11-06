@@ -472,6 +472,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const [atBottom, setAtBottom] = useState(true)
   const [unread, setUnread] = useState(0)
   const streamRef = useRef<Map<string, EventSource>>(new Map())
+  // Parallel-send guard (see sendMessage): settles atomically across renders,
+  // unlike the `loading` state which two rapid Enters can both pass.
+  const sendingRef = useRef(false)
   // Live token streams (ephemeral /runs/{id}/tokens SSE), one per conversation.
   const tokenStreamRef = useRef<Map<string, EventSource>>(new Map())
 
@@ -529,6 +532,23 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   // Pending attachments belong to the active conversation — never leak them
   // into another chat when the user switches.
   useEffect(() => { setAttachments([]) }, [activeConvId])
+
+  // Anti-stuck composer safety net: every send path settles `loading` in its
+  // finally and the API layer times out at 60s, but ANY unforeseen leak
+  // leaves the spinner spinning forever and quietly no-ops every later send
+  // (the guard above) until a page reload — the reported «крутилка крутится,
+  // ничего не начинается». A hard deadline just past the API timeout flips it
+  // back; the visible error tells the user the send died instead of leaving
+  // them guessing.
+  useEffect(() => {
+    if (!loading) return
+    const timer = window.setTimeout(() => {
+      setLoading(false)
+      sendingRef.current = false
+      setError(t('chat.send_stuck') ?? 'The send did not complete (network error?) — try again')
+    }, 70000)
+    return () => window.clearTimeout(timer)
+  }, [loading, t])
 
   const onFilesPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
@@ -1536,6 +1556,24 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
   const sendMessage = async () => {
     if ((!inputValue.trim() && attachments.length === 0) || loading || uploading || !activeConv) return
+    // Parallel-send guard: `loading` is render-scoped — two rapid Enters before
+    // the re-render BOTH pass the check above, race two tasks/runs and corrupt
+    // the conversation state (an orphaned run with no bubble, the composer
+    // spinner spinning over a dead send). A ref settles atomically.
+    if (sendingRef.current) return
+    sendingRef.current = true
+    try {
+    await sendCurrentMessage()
+    } finally { sendingRef.current = false }
+  }
+
+  // The actual send, extracted so the parallel-send guard's finally covers
+  // EVERY exit (the addendum early-returns included) — a leaked sendingRef
+  // would silently no-op every later Enter until a page reload, which is
+  // exactly the «спиннер крутится, ничего не начинается, F5 лечит» report.
+  const sendCurrentMessage = async () => {
+    const conv = activeConv
+    if (!conv) return
     const content = inputValue.trim()
     const sentAttachments = attachments
     setAttachments([])
@@ -1550,7 +1588,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     // boundary), not a new parallel run. It renders as a timestamped
     // reply under the ORIGINAL task message — not as a dangling message at
     // the bottom, below the model's answer.
-    const runningMsg = activeConv.messages.filter((m) => m.role === 'assistant' && m.status === 'running' && m.runId).pop()
+    const runningMsg = conv.messages.filter((m) => m.role === 'assistant' && m.status === 'running' && m.runId).pop()
     if (runningMsg?.runId) {
       const noteParts: string[] = []
       if (content) noteParts.push(content)
@@ -1559,10 +1597,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       try {
         await workspaceApi.appendRunNote(runningMsg.runId, noteParts.join('\n\n'), project)
         // Attach the addendum to the last user message (the task source).
-        const lastUserIdx = activeConv.messages.map((m) => m.role).lastIndexOf('user')
+        const lastUserIdx = conv.messages.map((m) => m.role).lastIndexOf('user')
         if (lastUserIdx >= 0) {
           setConversations((prev) => prev.map((c) => {
-            if (c.id !== activeConv.id) return c
+            if (c.id !== conv.id) return c
             const messages = c.messages.map((m, idx) => idx === lastUserIdx ? {
               ...m,
               addenda: [...(m.addenda ?? []), { text: content, at: new Date(), attachments: sendAttachments }],
@@ -1571,7 +1609,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           }))
         } else {
           // No user message to attach to (defensive) — keep the old marker.
-          appendStreamLine(activeConv.id, runningMsg.runId, t('chat.note.sent') ?? 'Sent to the current run')
+          appendStreamLine(conv.id, runningMsg.runId, t('chat.note.sent') ?? 'Sent to the current run')
         }
         setLoading(false)
         return
@@ -1593,7 +1631,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     stickRef.current = true
     setAtBottom(true)
     setUnread(0)
-    const updatedConv = { ...activeConv, messages: [...activeConv.messages, userMsg] }
+    const updatedConv = { ...activeConv, messages: [...conv.messages, userMsg] }
     const firstLine = content || sentAttachments[0]?.name || ''
     if (updatedConv.messages.length === 1) {
       updatedConv.title = firstLine.slice(0, 60) + (firstLine.length > 60 ? '…' : '')
@@ -1612,17 +1650,17 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       })))
 
       // Reuse existing task for follow-up messages, create new one for first message
-      let taskId = activeConv.taskId
+      let taskId = conv.taskId
       if (!taskId) {
         const task = await workspaceApi.createTask({
           project_id: project,
-          agent_id: activeConv.agentId || undefined,
+          agent_id: conv.agentId || undefined,
           title: firstLine.slice(0, 80),
           prompt: fullPrompt,
         })
         taskId = task.id
         // Store taskId on the conversation
-        setConversations((prev) => prev.map((c) => c.id === activeConv.id ? { ...c, taskId } : c))
+        setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, taskId } : c))
       } else {
         // Update the existing task's prompt with the full conversation. The
         // title is intentionally omitted: it was set from the first message
@@ -1630,14 +1668,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         await workspaceApi.updateTask(taskId, { prompt: fullPrompt })
       }
 
-      const result = await workspaceApi.startRun(taskId, { agent_id: activeConv.agentId || undefined })
+      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined })
       const runId = result.run_id
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [`${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}`] }
       const withAssistant = { ...updatedConv, messages: [...updatedConv.messages, assistantMsg] }
       setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
 
-      streamRun(runId, activeConv.id)
+      streamRun(runId, conv.id)
     } catch (f) {
       setError(message(f))
       const errMsg: ChatMessage = { role: 'assistant', content: `Error: ${message(f)}`, timestamp: new Date(), status: 'failed' }
