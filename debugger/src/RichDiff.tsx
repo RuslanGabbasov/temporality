@@ -15,9 +15,9 @@ function SourceText({ content }: { content: string }) {
   return <pre style={{ margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: 'var(--tm-mono)' }}><code>{content}</code></pre>
 }
 
-function WordStrip({ changes }: { changes: WordChange[] }) {
+function WordStrip({ changes, source }: { changes: WordChange[]; source: boolean }) {
   return (
-    <p style={{ fontSize: '0.75rem', lineHeight: 1.7, marginTop: '0.4rem', wordBreak: 'break-word' }}>
+    <p style={{ fontSize: '0.75rem', lineHeight: 1.7, marginTop: '0.4rem', wordBreak: 'break-word', whiteSpace: source ? 'pre-wrap' : undefined, fontFamily: source ? 'var(--tm-mono)' : undefined }}>
       {changes.map((change, i) => {
         if (change.op === 'add') {
           return <span key={i} style={{ background: 'color-mix(in srgb, var(--tm-success) 22%, transparent)', color: 'var(--tm-text)', borderRadius: 3, padding: '0 2px' }}>{change.text}</span>
@@ -109,7 +109,7 @@ export default function RichDiff({ oldText, newText, oldLabel, newLabel, title, 
           </div>
           {row.changes && <>
             <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.35rem' }}>{t('markdown_diff.what_changed') ?? 'What changed'}:</div>
-            <WordStrip changes={row.changes} />
+            <WordStrip changes={row.changes} source={format !== 'markdown'} />
           </>}
         </div>
       )
