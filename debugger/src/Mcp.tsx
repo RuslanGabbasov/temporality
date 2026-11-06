@@ -26,6 +26,19 @@ import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
+/** Card view of a server address: one ellipsized line, and the credentials
+ *  some servers demand inside the URL (token=/key=/password= params, or a
+ *  user:password@host pair) never render — neither in the line nor in the
+ *  hover tooltip. The full address stays available in the edit form. */
+export function maskServerAddress(raw: string): string {
+  let address = raw
+  // user:password@host → the pair collapses to •••
+  address = address.replace(/(https?:\/\/|^)([^:\/?#]+):([^@\/?#]+)@/, '$1•••@')
+  // token=…/key=…/api_key=…/password=… query values → •••
+  address = address.replace(/([?&](?:api_?key|token|key|secret|password|access_?token)=)[^&]*/gi, '$1•••')
+  return address
+}
+
 type ServerForm = Partial<MCPServer> & { envText?: string; headersText?: string }
 
 export default function Mcp() {
@@ -223,15 +236,18 @@ export default function Mcp() {
         {visibleServers.map((s) => (
           <Column key={s.id} sm={4} md={4} lg={4}>
             <Tile style={{ marginBottom: '0.75rem', opacity: s.enabled ? 1 : 0.5, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flex: 1 }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
-                    <strong>{s.name}</strong>
-                    <OrgBadge orgUnitID={s.org_unit_id} org={org} />
-                  </div>
-                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-all' }}>
-                    {s.type === 'stdio' ? (s.command + (s.args?.length ? ' ' + s.args.join(' ') : '')) : s.url}
-                  </p>
+              				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flex: 1 }}>
+              					<div style={{ minWidth: 0, flex: 1 }}>
+              						<div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+              							<strong>{s.name}</strong>
+              							<OrgBadge orgUnitID={s.org_unit_id} org={org} />
+              						</div>
+              						{/* One ellipsized line: long URLs (some servers embed tokens in
+              						 * them) must not stretch the card; credentials inside the address
+              						 * are masked even when visible. */}
+              						<p title={s.type === 'stdio' ? undefined : maskServerAddress(s.url ?? '')} style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              							{s.type === 'stdio' ? (s.command + (s.args?.length ? ' ' + s.args.join(' ') : '')) : maskServerAddress(s.url ?? '')}
+              						</p>
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem', alignItems: 'center' }}>
                     <Tag type={s.type === 'stdio' ? 'gray' : 'blue'} size="sm">{s.type}</Tag>
                     {!s.enabled && <Tag type="red" size="sm">{t('mcp.disabled') ?? 'disabled'}</Tag>}
