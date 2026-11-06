@@ -342,8 +342,43 @@ func (a *Activities) ApprovalToolsFor(servers []string) []string {
 	return a.MCP.ApprovalToolsFor(servers)
 }
 
+// resolveActorIdentity turns the run's actor id into the interlocutor's name
+// and role for the conversation context. Non-user actors (triggers, agent
+// ids) resolve to nothing — the prompt then carries no identity block
+// instead of a wrong one.
+func (a *Activities) resolveActorIdentity(actorID string) (string, string, error) {
+	body, status, err := a.workspaceDo(context.Background(), http.MethodGet,
+		fmt.Sprintf("%s/v1/workspace/users/%s", a.WorkspaceURL, url.PathEscape(actorID)), nil)
+	if err != nil {
+		return "", "", err
+	}
+	if status == http.StatusNotFound {
+		return "", "", nil // not a workspace user — no identity to show
+	}
+	if status >= 400 {
+		return "", "", fmt.Errorf("user lookup failed (HTTP %d)", status)
+	}
+	var user struct {
+		Name string `json:"name"`
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal([]byte(body), &user); err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(user.Name), strings.TrimSpace(user.Role), nil
+}
+
 func (a *Activities) PrepareRun(input *RunInput) error {
 	input.SourceID = a.SourceID
+	// Who is the interlocutor: resolve the run's actor into the name the model
+	// converses with (best-effort — an unreachable workspace or a non-user
+	// actor must never fail a run; without a name the prompt just carries no
+	// identity block).
+	if input.ActorName == "" && input.ActorID != "" {
+		if name, role, err := a.resolveActorIdentity(input.ActorID); err == nil {
+			input.ActorName, input.ActorRole = name, role
+		}
+	}
 	// Per-server honesty: a requested server with no discovered tools is one
 	// missing hand, not a dead run. Heal once on demand; whatever stays
 	// missing is named to the model (MCPUnavailable rides a system notice) and

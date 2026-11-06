@@ -78,7 +78,13 @@ type RunInput struct {
 	Project string `json:"project"`
 	TaskID  string `json:"task_id"`
 	ActorID string `json:"actor_id"`
-	Prompt  string `json:"prompt"`
+	// ActorName/ActorRole identify the interlocutor (resolved in PrepareRun
+	// from the actor id): without a visible name the model invents who it
+	// talks to — one asked «comu na review: vam ili Ruslanu Gabbasovu?» of
+	// Ruslan Gabbasov himself.
+	ActorName string `json:"actor_name,omitempty"`
+	ActorRole string `json:"actor_role,omitempty"`
+	Prompt    string `json:"prompt"`
 	// HintQuery is the user-intent text for prior-knowledge hint selection:
 	// the assembled prompt carries instruction templates («Classify it
 	// (intake_decide), search_projects, start_task…») whose words matched
@@ -555,6 +561,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	if skillSection := skillsPromptSection(input.Skills); skillSection != "" {
 		systemPrompt += "\n\n" + skillSection
+	}
+	if interlocutor := interlocutorBlock(input); interlocutor != "" {
+		systemPrompt += "\n\n" + interlocutor
 	}
 	messages := []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
 	if hintBlock != "" {
@@ -4253,6 +4262,25 @@ func systemPromptForRole(role string) string {
 		return base
 	}
 	return base + " Your assigned team role is " + role + "; stay within that responsibility and ground handoffs in observed evidence."
+}
+
+// interlocutorBlock tells the model WHO it is talking to. Without a visible
+// identity the model invents one: a review dialog asked «comu na rewью: vam
+// ili Ruslanu Gabbasovu?» — of Ruslan Gabbasov himself. The run context
+// carried only a user id, and an id only becomes a name through tools the
+// model has no reason to call mid-conversation.
+func interlocutorBlock(input RunInput) string {
+	if strings.TrimSpace(input.ActorName) == "" {
+		return ""
+	}
+	who := strings.TrimSpace(input.ActorName)
+	if role := strings.TrimSpace(input.ActorRole); role != "" {
+		who += " (" + role + ")"
+	}
+	if input.ParentRunID != "" {
+		return "## Work requester\nThis work was requested by " + who + " — the human on whose behalf the parent run delegates. Keep the final answer report-ready for them."
+	}
+	return "## Interlocutor\nYou are talking to " + who + " — the person who started this run. They ARE the user of this conversation: never offer them as an alternative to themselves, and when a tool needs reviewers, askers or recipients, that is the human in the loop."
 }
 
 // skillsPromptSection renders the agent's skills as a compact canonical
