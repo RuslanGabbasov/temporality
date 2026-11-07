@@ -19,6 +19,65 @@ import (
 	"github.com/temporality-project/temporality/observation"
 )
 
+// presentationIRCatalog is the complete per-type shape catalog embedded in
+// the present tool description (docs/presentation-engine.md §10.1). The model
+// works in a project sandbox: the repo, the schema endpoint and the artifact
+// registry are out of reach, so this catalog IS the schema — without it the
+// model invents field names (items vs data vs props) and burns turns probing
+// the validator. It must stay in sync with kernel/presentation validators.
+const presentationIRCatalog = `Presentation IR document: {version:'1.0', type:'presentation', id?, title?, content:[components]}. A component carries ONLY the fields its type lists below — invented field names are rejected. Optional on every component: id (unique string).
+
+Prose:
+- text | markdown | paragraph: content (required text)
+- heading: content + props.level (1..6)
+- quote: content + props.attribution?
+- code: content + props.language?
+- link: content = visible label + props.href (https:// or /in-app/path)
+- badge: content + props.status (success|info|warning|danger|neutral)
+- divider: no fields
+
+Data:
+- list: items ['item' | {label, description?}], props.ordered?
+- table: data {columns:[{key, title?, align:left|center|right, kind:text|number|status}], rows:[{KEY: cell}]}; a row maps COLUMN KEYS to cells; cell = scalar or {text, status?, href?}; >= 1 row
+- key-value: items [{label, value, status?}]
+- kpi: items [{label, value (number|string), status?, delta?, unit?, hint?}]
+- progress: items [{label, value >= 0, max? (default 100), status?, unit?}]; value <= max
+- comparison: items [{label, status?, fields:[{label, value}]}], >= 2 options
+- status: content + props {status?, detail?}
+- alert: content + props {severity: info|success|warning|danger (default info), title?}
+- accordion: items [{label, content}]
+
+Containers:
+- card: props {title?}, children: [components] (nested composition)
+- card-grid: props {columns: 1..4}, children: [card, ...] (cards only)
+
+Charts:
+- chart: props {chartType: line|bar|pie|donut|area, title?, showValues?, showLegend?} + data {labels:[...], values:[...] (or series:[{name, values}], <= 6 series), unit?, x_title?, y_title?}; values[i] pairs labels[i]; pie/donut need values >= 0 with a positive sum. Aliases set chartType: line-chart, bar-chart, pie-chart, area-chart, donut-chart
+- gauge: data {value, min? (0), max? (100), label?, unit?}
+
+Diagrams (node ids unique; edges reference declared ids):
+- flowchart | dependency-graph: data {nodes:[{id, label, shape?: rect|round|diamond, status?}], edges:[{from, to, label?, dashed?}]}; acyclic
+- sequence-diagram: data {participants:[{id, label}] (2..12), messages:[{from, to, label?, kind: sync|async|return}]}
+- mindmap: data {root:{label, note?, children:[same shape]}}; <= 6 levels, <= 100 nodes
+- state-diagram: data {initial?, states:[{id, label, status?}], transitions:[{from, to, label?, dashed?}]}
+- er-diagram: data {entities:[{name, attributes?: ['type name', ...]}], relations:[{from, to, label?, cardinality: 1:1|1:N|N:1|N:M|0:1|0:N}]}
+- class-diagram: data {classes:[{name, attributes?: [...], methods?: [...]}], relations:[{from, to, label?, kind: inheritance|composition|association}]}
+
+Plans:
+- timeline: items [{label, at (date or short mark), status?, description?}]
+- gantt | roadmap: data {tasks:[{id?, label, start: 'YYYY-MM-DD', end, status?, assignee?, dependsOn?: [task ids]}]}; end >= start; props {scale: day|week|month, title?}; roadmap implies month
+
+Media (src/href: in-app paths like /workspace/... — external images are disabled by the default policy):
+- image: props {src (required), caption?}; content = alt text
+- image-gallery: items [{src, alt?, caption?}], props.columns? (1..4)
+- file: props {name (required), href?, artifact_id?, size?}
+
+Interactive (the answer resumes the HITL ask; values validate server-side):
+- button: content = label + actions [{type: submit|select, target: 'operation id', payload? {decision: 'approve'|'reject', ...}}] (payload is data, <= 4KB), or [{type: open, target: 'https://...'}]
+- form: content? + props {schema: {type:'object', properties: {field: {type: string|integer|number|boolean|array, enum?, minLength?, maximum?, format?}, ...} <= 20 fields, required: [names]}, submit?: 'Button label'} + actions [{type: submit, target: 'operation id'}]
+
+Caps: document <= 256KB, one content string <= 64KB, <= 200 components, nesting <= 8, <= 40 children, <= 8 actions. Validation errors name the exact path (content[2].items[0].label) — fix those and resend.`
+
 // presentationRawArg extracts the raw document argument: the IR reaches the
 // workspace API as the model wrote it, validation happens server-side where
 // the policy lives.
@@ -60,11 +119,11 @@ func validatePresentationForTool(raw json.RawMessage) (presentationDoc, error) {
 func presentationDocArg(request ToolRequest) (presentationDoc, string) {
 	raw := presentationRawArg(request)
 	if len(raw) == 0 {
-		return presentationDoc{}, "error: document is required (Presentation IR JSON)"
+		return presentationDoc{}, "error: document is required (Presentation IR JSON; compose it by the type catalog in the present tool description)"
 	}
 	doc, err := validatePresentationForTool(raw)
 	if err != nil {
-		return presentationDoc{}, "error: " + err.Error()
+		return presentationDoc{}, "error: " + err.Error() + "\nMatch the per-type shapes in the present tool description exactly (items vs data vs props differ by type) and resend."
 	}
 	return doc, ""
 }
