@@ -179,6 +179,26 @@ func sweepOrphanedRuns(ctx context.Context, store orphanStore, liveness clientSw
 	}
 }
 
+// finishedWorkflowOutcome maps a RESOLVED Temporal status name onto the
+// honest terminal outcome. Failed and timed-out workflows are FINISHED, not
+// in flight: the old «unknown — treat as in flight» default made every sweep
+// pass walk past a dead workflow forever, so a run whose workflow died
+// without journaling its terminal event stayed «live» in the UI indefinitely
+// (the makety incident, 2026-11-06 — a workflow that failed mid-model-call
+// hung the runs list for 12 hours while the 5-minute sweep kept skipping
+// it). Anything genuinely unrecognized still stays in flight — conservative
+// by design.
+func finishedWorkflowOutcome(status string) (runOutcome, bool) {
+	switch status {
+	case "failed":
+		return runOutcome{Found: true, Status: "failed", Error: "the run's workflow failed"}, true
+	case "cancelled":
+		return runOutcome{Found: true, Status: "cancelled"}, true
+	default:
+		return runOutcome{}, false
+	}
+}
+
 // resolvedTerminalEvent maps a resolved workflow outcome onto the journal's
 // terminal vocabulary — the same shape the workflow's own emits use.
 func resolvedTerminalEvent(outcome runOutcome) (string, map[string]any) {

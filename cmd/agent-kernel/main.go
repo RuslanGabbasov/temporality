@@ -8334,10 +8334,27 @@ func (t *temporalLiveness) ResolveRunOutcome(ctx context.Context, sourceID, proj
 	if status == enums.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		return runOutcome{Found: true, Running: true}, nil
 	}
-	if status != enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
-		if status == enums.WORKFLOW_EXECUTION_STATUS_TERMINATED || status == enums.WORKFLOW_EXECUTION_STATUS_CANCELED {
-			return runOutcome{Found: true, Status: "cancelled"}, nil
+	if outcome, done := finishedWorkflowOutcome(workflowStatusName(status)); done {
+		if outcome.Status == "failed" {
+			// The failure detail rides in Get's error for a failed workflow:
+			// the sweep's derived run.failed shows WHY the run died, not just
+			// that it did. A detail-fetch hiccup keeps the generic reason —
+			// the status is already resolved.
+			var discarded agent.RunResult
+			getCtx, cancelGet := context.WithTimeout(ctx, temporalRPCTimeout())
+			gErr := t.client.GetWorkflow(getCtx, workflowIDFor(sourceID, project, runID), "").Get(getCtx, &discarded)
+			cancelGet()
+			if gErr != nil && !isTemporalRPCDeadline(gErr) {
+				detail := gErr.Error()
+				if len(detail) > 500 {
+					detail = detail[:500]
+				}
+				outcome.Error = detail
+			}
 		}
+		return outcome, nil
+	}
+	if status != enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
 		return runOutcome{Found: true, Running: true}, nil // unknown — treat as in flight
 	}
 	var result agent.RunResult

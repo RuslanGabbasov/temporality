@@ -270,3 +270,65 @@ func TestSweepOrphanedRunsClosesTerminatedWorkflow(t *testing.T) {
 	require.Len(t, events, 1)
 	mu.Unlock()
 }
+
+// Failed and timed-out workflows are FINISHED outcomes, not «in flight»: the
+// old default treated them as still running, so every sweep pass skipped a
+// dead workflow and the run hung in the UI forever (the makety incident,
+// 2026-11-06 — 12 hours of «живой» ран с мёртвым workflow).
+func TestFinishedWorkflowOutcomeTreatsFailedAsDone(t *testing.T) {
+	outcome, done := finishedWorkflowOutcome("failed")
+	require.True(t, done, "a failed workflow must resolve to a terminal outcome")
+	require.Equal(t, "failed", outcome.Status)
+	require.False(t, outcome.Running)
+
+	outcome, done = finishedWorkflowOutcome("cancelled")
+	require.True(t, done)
+	require.Equal(t, "cancelled", outcome.Status)
+
+	// Unknown statuses stay in flight — conservative by design.
+	_, done = finishedWorkflowOutcome("running")
+	require.False(t, done)
+	_, done = finishedWorkflowOutcome("continued_as_new")
+	require.False(t, done)
+}
+
+// The sweep closes a failed workflow with a derived run.failed: the row gets
+// its honest status and the journal its terminal event, so the runs list and
+// the live stream stop showing a phantom.
+func TestSweepOrphanedRunsClosesFailedWorkflow(t *testing.T) {
+	var mu sync.Mutex
+	events := []map[string]any{}
+	journal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Events []struct {
+				Type string         `json:"type"`
+				Data map[string]any `json:"data"`
+			} `json:"events"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		for _, e := range payload.Events {
+			events = append(events, map[string]any{"type": e.Type, "data": e.Data})
+		}
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []map[string]string{{"status": "accepted"}}})
+	}))
+	defer journal.Close()
+	store := &sweepStore{
+		runs:     []workspace.Run{{ID: "makety-run", ProjectID: "omni"}},
+		terminal: map[string]string{},
+		sources:  map[string]string{"makety-run": "kernel-source"},
+		updated:  map[string]string{},
+	}
+	liveness := &sweepLiveness{results: map[string]runOutcome{
+		"makety-run": {Found: true, Status: "failed", Error: "the run's workflow failed"},
+	}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sweepOrphanedRuns(context.Background(), store, liveness, journal.URL, "token", "kernel-source", log)
+
+	require.Equal(t, map[string]string{"makety-run": "failed"}, store.updated)
+	mu.Lock()
+	require.Len(t, events, 1)
+	require.Equal(t, "run.failed", events[0]["type"])
+	mu.Unlock()
+}
