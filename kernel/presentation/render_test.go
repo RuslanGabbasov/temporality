@@ -205,8 +205,9 @@ func TestAdaptFallbackOrder(t *testing.T) {
 		t.Fatalf("web must not need static attachments: %d", len(web.Attachments))
 	}
 
-	// Matrix-style: markdown yes, tables no, files yes -> markdown + SVG
-	// attachments for the visual components.
+	// Matrix-style: markdown yes, tables no, raster yes -> markdown + PNG
+	// attachments for the visual components (Element ignores SVG images, so
+	// PNG is the primary static form per §9.4's client-support clause).
 	matrix := Adapt(doc, Capabilities{Markdown: true, Images: true, Files: true})
 	if matrix.Kind != "markdown" {
 		t.Fatalf("matrix delivery kind: %s", matrix.Kind)
@@ -215,8 +216,19 @@ func TestAdaptFallbackOrder(t *testing.T) {
 		t.Fatal("matrix must carry static chart/diagram attachments")
 	}
 	for _, attachment := range matrix.Attachments {
+		if attachment.Format != "png" {
+			t.Fatalf("expected png for the raster-capable channel, got %s", attachment.Format)
+		}
+	}
+
+	// File-only channel (raster off): the SVG fallback still exists (§9.4).
+	fileOnly := Adapt(doc, Capabilities{Markdown: true, Files: true})
+	if len(fileOnly.Attachments) == 0 {
+		t.Fatal("file-only channel must carry SVG attachments")
+	}
+	for _, attachment := range fileOnly.Attachments {
 		if attachment.Format != "svg" {
-			t.Fatalf("expected svg for file-capable channel, got %s", attachment.Format)
+			t.Fatalf("expected svg for the file-only channel, got %s", attachment.Format)
 		}
 	}
 
@@ -252,12 +264,12 @@ func TestChannelPresets(t *testing.T) {
 			t.Fatalf("preset %s missing", name)
 		}
 	}
-	// Spec §9.3: Telegram receives PNG (photos, not file uploads), Matrix
-	// carries SVG as files.
+	// Spec §9.3/§7.4: PNG is the primary static form (Element ignores SVG
+	// images; Telegram takes photos), Telegram skips files for visuals.
 	if presets["telegram"].Files != false || presets["telegram"].Images != true || presets["telegram"].Charts != false {
 		t.Fatal("telegram preset drifted")
 	}
-	if presets["matrix"].Files != true {
+	if presets["matrix"].Files != true || presets["matrix"].Images != true {
 		t.Fatal("matrix preset drifted")
 	}
 }

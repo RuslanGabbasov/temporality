@@ -702,11 +702,11 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 const progressEvery = 10 * time.Second
 
 // deliverRunPresentations pushes the run's published presentations into the
-// channel as adapted static renders (docs/presentation-engine.md §9.3):
-// file-capable transports take SVG, image-capable ones PNG, and both keep
-// the markdown body out — the answer text (already delivered, fences
-// stripped) is the readable layer. Best-effort: a failed render or upload
-// costs a log line, never the answer.
+// channel as adapted static renders (docs/presentation-engine.md §9.3): the
+// answer text (already delivered, fences stripped) is the readable layer and
+// the visuals arrive as inline images — PNG for raster-capable transports,
+// SVG for file-only ones. Best-effort: a failed render or upload costs a log
+// line, never the answer.
 func (l *channelInboundLoop) deliverRunPresentations(ctx context.Context, settings agent.ChannelSettings, address, runID string) {
 	store, ok := l.store.(interface {
 		ListPresentationsByRun(ctx context.Context, runID string, limit int) ([]workspace.Presentation, error)

@@ -290,6 +290,10 @@ func (matrixDriver) SendTextThreaded(ctx context.Context, client *http.Client, s
 // SendFile uploads the bytes to the homeserver media store, then sends an
 // m.file room message referencing the returned content URI. The note, when
 // present, rides along as the message body so the recipient gets context.
+// Image payloads (PNG/JPEG/GIF/WebP) go out as m.image instead: Element
+// renders m.image inline and m.file as a bare attachment chip — charts and
+// screenshots must be pictures, not downloads (docs/presentation-engine.md
+// §9.3 Matrix row).
 func (matrixDriver) SendFile(ctx context.Context, client *http.Client, settings map[string]string, address string, file OutboundFile) error {
 	homeserver := strings.TrimRight(setting(settings, "homeserver"), "/")
 	accessToken := TrimBearerPrefix(setting(settings, "access_token"))
@@ -297,13 +301,14 @@ func (matrixDriver) SendFile(ctx context.Context, client *http.Client, settings 
 	if homeserver == "" || accessToken == "" || roomID == "" {
 		return errors.New("matrix transport is not configured")
 	}
+	mimeType := fileContentType(file.Name)
 	uploadURL := fmt.Sprintf("%s/_matrix/media/v3/upload?filename=%s", homeserver, url.QueryEscape(file.Name))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, strings.NewReader(string(file.Payload)))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", fileContentType(file.Name))
+	req.Header.Set("Content-Type", mimeType)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -323,14 +328,21 @@ func (matrixDriver) SendFile(ctx context.Context, client *http.Client, settings 
 	if strings.TrimSpace(messageBody) == "" {
 		messageBody = file.Name
 	}
-	txnID := "temporality-file-" + transactionFingerprint(roomID, file.Name+uploaded.ContentURI)
-	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
 	message := map[string]any{
-		"msgtype":  "m.file",
 		"body":     messageBody,
 		"filename": file.Name,
 		"url":      uploaded.ContentURI,
+		"info":     map[string]any{"mimetype": mimeType, "size": len(file.Payload)},
 	}
+	if width, height, isImage := imageDimensions(file.Name, file.Payload); isImage {
+		message["msgtype"] = "m.image"
+		message["info"].(map[string]any)["w"] = width
+		message["info"].(map[string]any)["h"] = height
+	} else {
+		message["msgtype"] = "m.file"
+	}
+	txnID := "temporality-file-" + transactionFingerprint(roomID, file.Name+uploaded.ContentURI)
+	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
 	encoded, err := json.Marshal(message)
 	if err != nil {
 		return err

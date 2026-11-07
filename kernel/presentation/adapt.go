@@ -79,9 +79,11 @@ func Adapt(doc Document, caps Capabilities) Delivery {
 	}
 
 	// Visual components need images when the channel cannot draw them
-	// natively (charts/diagrams off) — SVG when the channel takes files,
-	// otherwise PNG (Telegram-style image channels), and nothing at all when
-	// neither: the text body already carries the data (§7.6).
+	// natively (charts/diagrams off) — PNG is the primary static form: raster
+	// photos render inline in every client (m.image / sendPhoto), while SVG
+	// is ignored by the dominant Matrix clients. SVG serves the rare
+	// file-only channel (§9.4: SVG when channel and client support it, PNG
+	// when they do not).
 	needsImages := len(visual) > 0 && (!caps.Charts || !caps.Diagrams)
 	if !needsImages {
 		return delivery
@@ -89,15 +91,6 @@ func Adapt(doc Document, caps Capabilities) Delivery {
 	for _, component := range visual {
 		frag := Document{Version: IRVersion, Type: DocumentType, ID: doc.ID, Title: componentTitle(component), Content: []Component{component}}
 		drawing := LayoutDocument(frag, LayoutOptions{IncludeTitle: true, Width: 640})
-		if caps.Files {
-			if svg := RenderSVG(drawing); len(svg) > 0 {
-				delivery.Attachments = append(delivery.Attachments, Attachment{
-					ComponentType: component.Type, ComponentID: component.ID,
-					Format: "svg", Name: attachmentName(doc, component, "svg"), Data: svg,
-				})
-				continue
-			}
-		}
 		if caps.Images {
 			png, err := RenderPNG(drawing)
 			if err == nil && len(png) > 0 {
@@ -105,11 +98,20 @@ func Adapt(doc Document, caps Capabilities) Delivery {
 					ComponentType: component.Type, ComponentID: component.ID,
 					Format: "png", Name: attachmentName(doc, component, "png"), Data: png,
 				})
-				delivery.Notes = append(delivery.Notes, fmt.Sprintf("%s rendered as PNG (SVG unsupported)", component.Type))
 				continue
 			}
 			if err != nil {
 				delivery.Notes = append(delivery.Notes, fmt.Sprintf("%s PNG render failed: %v", component.Type, err))
+			}
+		}
+		if caps.Files {
+			if svg := RenderSVG(drawing); len(svg) > 0 {
+				delivery.Attachments = append(delivery.Attachments, Attachment{
+					ComponentType: component.Type, ComponentID: component.ID,
+					Format: "svg", Name: attachmentName(doc, component, "svg"), Data: svg,
+				})
+				delivery.Notes = append(delivery.Notes, fmt.Sprintf("%s rendered as SVG (no raster support on this channel)", component.Type))
+				continue
 			}
 		}
 		delivery.Notes = append(delivery.Notes, fmt.Sprintf("%s delivered as text: the channel cannot carry images", component.Type))
@@ -205,8 +207,8 @@ func ChannelPresets() map[string]Capabilities {
 		// Web always receives the full IR (native rendering); the preset is
 		// what the kernel reports to get_capabilities for completeness.
 		"web": {Markdown: true, Tables: true, Images: true, Charts: true, Diagrams: true, InteractiveForms: true, Buttons: true, Files: true},
-		// Matrix: markdown bodies, file uploads (SVG rides as a file), no
-		// native charts; buttons exist in some clients only.
+		// Matrix: markdown bodies; visuals ship as PNG (Element ignores SVG
+		// images), FilesOut stays true — the channel carries documents fine.
 		"matrix": {Markdown: true, Tables: false, Images: true, Charts: false, Diagrams: false, InteractiveForms: false, Buttons: true, Files: true},
 		// Telegram: photo uploads only (PNG, §9.3) — file uploads are not the
 		// delivery shape for visuals there, so the adapter skips SVG and the

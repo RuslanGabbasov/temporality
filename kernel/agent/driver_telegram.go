@@ -77,13 +77,19 @@ func (telegramDriver) SendText(ctx context.Context, client *http.Client, setting
 	return nil
 }
 
-// SendFile posts the document through the Bot API multipart endpoint; the
-// note rides along as the caption.
+// SendFile posts the attachment through the Bot API multipart endpoint; the
+// note rides along as the caption. Image payloads go through sendPhoto so
+// Telegram shows them inline — sendDocument renders as a bare file card
+// (docs/presentation-engine.md §9.3 Telegram row: photos, not documents).
 func (telegramDriver) SendFile(ctx context.Context, client *http.Client, settings map[string]string, address string, file OutboundFile) error {
 	botToken := setting(settings, "bot_token")
 	chatID := address
 	if botToken == "" || chatID == "" {
 		return errors.New("telegram transport is not configured")
+	}
+	method, field := "sendDocument", "document"
+	if _, _, isImage := imageDimensions(file.Name, file.Payload); isImage {
+		method, field = "sendPhoto", "photo"
 	}
 	var form bytes.Buffer
 	writer := multipart.NewWriter(&form)
@@ -95,7 +101,7 @@ func (telegramDriver) SendFile(ctx context.Context, client *http.Client, setting
 			return err
 		}
 	}
-	part, err := writer.CreateFormFile("document", file.Name)
+	part, err := writer.CreateFormFile(field, file.Name)
 	if err != nil {
 		return err
 	}
@@ -105,7 +111,7 @@ func (telegramDriver) SendFile(ctx context.Context, client *http.Client, setting
 	if err := writer.Close(); err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/sendDocument", botToken), bytes.NewReader(form.Bytes()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/%s", botToken, method), bytes.NewReader(form.Bytes()))
 	if err != nil {
 		return err
 	}

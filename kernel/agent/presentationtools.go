@@ -203,7 +203,8 @@ func (a *Activities) handlePresent(ctx context.Context, request ToolRequest) (To
 
 // deliverPresentation adapts the document per channel capability and pushes
 // the result through every enabled channel of the recipient (§9.3): the
-// markdown/text body rides SendText, static renders ride SendFile.
+// markdown/text body rides SendText, static renders ride SendFile — PNG for
+// raster channels (sent as inline images), SVG only for file-only channels.
 func (a *Activities) deliverPresentation(ctx context.Context, raw json.RawMessage, recipientArg, actorID string) []string {
 	doc, err := presentation.ParseDocument(raw)
 	if err != nil {
