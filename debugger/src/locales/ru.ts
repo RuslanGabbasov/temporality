@@ -2262,7 +2262,6 @@ export const ru: Record<string, string> = {
     'explorer.lifecycle_replacement': 'ID знания-приемника…',
     'explorer.relations_title': 'Граф связей',
     'explorer.relations_view_list': 'Список',
-    'explorer.relations_view_graph': 'Граф',
     'explorer.relations_view_map': 'Карта',
     'explorer.relations_map_no_vectors': 'У этой окрестности нет эмбеддингов — семантической карте нужны векторы.',
     'explorer.relations_depth': 'Глубина',

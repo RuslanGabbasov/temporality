@@ -2262,7 +2262,6 @@ export const en: Record<string, string> = {
     'explorer.lifecycle_replacement': 'Knowledge id of the replacement…',
     'explorer.relations_title': 'Relation graph',
     'explorer.relations_view_list': 'List',
-    'explorer.relations_view_graph': 'Graph',
     'explorer.relations_view_map': 'Map',
     'explorer.relations_map_no_vectors': 'No embeddings for this neighborhood — the semantic map needs vectors.',
     'explorer.relations_depth': 'Depth',

@@ -1,54 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildGraph, layoutGraph, relationColor, relationLabel, RELATION_TYPES, type GraphNode } from './RelationGraph'
+import { buildGraph, relationColor, relationLabel, RELATION_TYPES, type GraphNode } from './RelationGraph'
 import type { ExploreKnowledgeCard, ExploreRelation } from '../observationApi'
 
 const node = (id: string, depth: number): GraphNode => ({ id, label: `prop ${id}`, state: 'proposed', depth })
-
-describe('layoutGraph', () => {
-  it('places depth-0 roots in the center and deeper nodes on outer rings', () => {
-    const { positioned, height } = layoutGraph([node('root', 0), node('a', 1), node('b', 1), node('c', 2)])
-    const center = positioned.find((p) => p.node.id === 'root')!
-    const ring1 = positioned.filter((p) => p.node.depth === 1)
-    const ring2 = positioned.filter((p) => p.node.depth === 2)
-    const cx = 320, cy = height / 2
-    expect(Math.hypot(center.x - cx, center.y - cy)).toBeLessThan(1e-6)
-    for (const p of ring1) {
-      const distance = Math.hypot(p.x - cx, p.y - cy)
-      expect(distance).toBeGreaterThan(0)
-      expect(distance).toBeLessThan(Math.hypot(ring2[0].x - cx, ring2[0].y - cy))
-    }
-    for (const p of ring2) {
-      expect(Math.hypot(p.x - cx, p.y - cy)).toBeGreaterThan(Math.hypot(ring1[0].x - cx, ring1[0].y - cy))
-    }
-  })
-
-  it('is deterministic regardless of input order', () => {
-    const input = [node('b', 1), node('a', 1), node('root', 0), node('c', 2)]
-    const first = layoutGraph(input).positioned
-    const second = layoutGraph([...input].reverse()).positioned
-    expect(second.map((p) => p.node.id)).toEqual(first.map((p) => p.node.id))
-    expect(second.map((p) => [p.x, p.y])).toEqual(first.map((p) => [p.x, p.y]))
-  })
-
-  it('keeps every node inside the canvas', () => {
-    const many: GraphNode[] = [node('root', 0)]
-    for (let i = 0; i < 20; i++) many.push(node(`n${i}`, 1 + (i % 3)))
-    const { positioned, width, height } = layoutGraph(many)
-    for (const p of positioned) {
-      expect(p.x + p.r).toBeLessThanOrEqual(width + 1e-6)
-      expect(p.x - p.r).toBeGreaterThanOrEqual(-1e-6)
-      expect(p.y + p.r).toBeLessThanOrEqual(height + 1e-6)
-      expect(p.y - p.r).toBeGreaterThanOrEqual(-1e-6)
-    }
-  })
-
-  it('widens the canvas so deep rings never clip', () => {
-    const shallow = layoutGraph([node('root', 0), node('a', 1)])
-    const deep = layoutGraph([node('root', 0), node('a', 3)])
-    expect(shallow.width).toBe(640)
-    expect(deep.width).toBeGreaterThan(640)
-  })
-})
 
 describe('relation colors and labels', () => {
   it('gives every vocabulary type a color', () => {

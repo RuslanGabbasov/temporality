@@ -5,7 +5,6 @@ import { useT } from '../i18n'
 import { queryMatchesItem } from '../knowledgeQuery'
 import { STATE_FILL } from './AreaMap'
 import { stateLabel } from './shared'
-import RelationMapCanvas from './RelationMapCanvas'
 import KnowledgeMap, { type KnowledgeMapFocus } from '../KnowledgeMap'
 import type { MapItem } from '../semanticMap'
 
@@ -20,13 +19,6 @@ export interface GraphNode {
   depth: number
   basis?: string
   via?: string
-}
-
-export interface PositionedNode {
-  node: GraphNode
-  x: number
-  y: number
-  r: number
 }
 
 /** Edge color encodes the relation type only; node color encodes lifecycle
@@ -50,46 +42,6 @@ export function relationLabel(type: string, t: (key: string) => string): string 
   const key = `explorer.relation_${type}`
   const text = t(key)
   return text !== key ? text : type
-}
-
-/** Deterministic concentric layout: depth-0 roots sit in the center, every
- *  next depth forms an outer ring. Within a ring nodes are ordered by id and
- *  spread evenly, so the same expand result always draws the same graph. */
-export function layoutGraph(nodes: GraphNode[], ringGap = 104): { positioned: PositionedNode[]; width: number; height: number } {
-  const byDepth = new Map<number, GraphNode[]>()
-  for (const node of nodes) {
-    const ring = byDepth.get(node.depth) ?? []
-    ring.push(node)
-    byDepth.set(node.depth, ring)
-  }
-  for (const ring of byDepth.values()) ring.sort((a, b) => a.id.localeCompare(b.id))
-
-  const maxDepth = nodes.length ? Math.max(...nodes.map((n) => n.depth)) : 0
-  const outer = 46 + ringGap * maxDepth
-  const width = Math.max(640, outer * 2 + 40)
-  const height = Math.max(outer * 2 + 40, 160)
-  const centerX = width / 2
-  const centerY = height / 2
-  const radiusFor = (depth: number, count: number) => {
-    if (depth === 0) return count > 1 ? 46 : 0
-    return 46 + ringGap * depth
-  }
-  const nodeR = (depth: number) => (depth === 0 ? 18 : depth === 1 ? 14 : 11)
-
-  const positioned: PositionedNode[] = []
-  for (const [depth, ring] of [...byDepth.entries()].sort((a, b) => a[0] - b[0])) {
-    const ringR = radiusFor(depth, ring.length)
-    ring.forEach((node, index) => {
-      const angle = ring.length === 1 && ringR === 0 ? 0 : (2 * Math.PI * index) / ring.length - Math.PI / 2
-      positioned.push({
-        node,
-        x: centerX + ringR * Math.cos(angle),
-        y: centerY + ringR * Math.sin(angle),
-        r: nodeR(depth),
-      })
-    })
-  }
-  return { positioned, width, height }
 }
 
 /** Cards → graph nodes; relations → edges between present nodes only. */
@@ -143,7 +95,7 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
   // The MAP view is the semantic-map control over exactly this neighborhood:
   // same canvas, zoom tiers and click-through — meaning-adjacent dots sit
   // together, which the concentric rings could never show.
-  const [view, setView] = useState<'list' | 'graph' | 'map'>('list')
+  const [view, setView] = useState<'list' | 'map'>('list')
   // Neighborhood vectors for the map view, fetched id-addressed once per
   // expand result: without them the semantic layout has nothing to project.
   const [mapItems, setMapItems] = useState<MapItem[] | null>(null)
@@ -212,8 +164,6 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
   }, [mapItems, cards, center])
 
   const graph = useMemo(() => buildGraph(cards, relations, nodeFilter), [cards, relations, nodeFilter])
-  const { positioned, width, height } = useMemo(() => layoutGraph(graph.nodes), [graph.nodes])
-  const byID = useMemo(() => new Map(positioned.map((p) => [p.node.id, p])), [positioned])
   const selectedEdges = useMemo(
     () => selected ? graph.edges.filter((e) => e.from_id === selected || e.to_id === selected) : [],
     [graph.edges, selected],
@@ -235,7 +185,6 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
         <span style={{ display: 'inline-flex', border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
           <button style={{ ...chip(view === 'list'), border: 'none' }} onClick={() => setView('list')}>{t('explorer.relations_view_list') ?? 'List'}</button>
-          <button style={{ ...chip(view === 'graph'), border: 'none' }} onClick={() => setView('graph')}>{t('explorer.relations_view_graph') ?? 'Graph'}</button>
           <button style={{ ...chip(view === 'map'), border: 'none' }} onClick={() => setView('map')}>{t('explorer.relations_view_map') ?? 'Map'}</button>
         </span>
         <span style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{t('explorer.relations_depth') ?? 'Depth'}:</span>
@@ -312,25 +261,6 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
         </div>
       )}
 
-      {view === 'graph' && graph.nodes.length > 0 && (
-        <>
-          {/* The map's visual language on canvas (halo dots, verdict shapes):
-              the old concentric SVG rings read as a debug artifact. */}
-          <RelationMapCanvas
-            positioned={positioned}
-            edges={graph.edges}
-            selected={selected}
-            onSelect={setSelected}
-          />
-          {/* Legend: two independent channels — edge style/color for relation
-              type, node fill for lifecycle state (ТЗ §7.3). */}
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.4rem', fontSize: '0.68rem', color: 'var(--tm-muted)' }}>
-            <span><span style={{ display: 'inline-block', width: '1.1rem', borderTop: '2px solid var(--tm-text-2)', verticalAlign: 'middle', marginRight: '0.3rem' }} />{t('explorer.relations_legend_explicit') ?? 'explicit'}</span>
-            <span><span style={{ display: 'inline-block', width: '1.1rem', borderTop: '2px dashed var(--tm-text-2)', verticalAlign: 'middle', marginRight: '0.3rem' }} />{t('explorer.relations_legend_candidate') ?? 'candidate (heuristic)'}</span>
-          </div>
-        </>
-      )}
-
       {view === 'map' && graph.nodes.length > 0 && (
         focus ? (
           <div style={{ height: '460px', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', overflow: 'hidden' }}>
@@ -356,11 +286,6 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
         />
       )}
 
-      {graph.hiddenByFilter > 0 && view === 'graph' && (
-        <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.3rem' }}>
-          {t('explorer.relations_hidden', { count: String(graph.hiddenByFilter) }) ?? `${graph.hiddenByFilter} edges hidden by the node filter`}
-        </div>
-      )}
       {notes.length > 0 && (
         <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.3rem' }}>{notes.join(' · ')}</div>
       )}
