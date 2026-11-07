@@ -87,7 +87,22 @@ func (s *Store) Enqueue(ctx context.Context, event observation.Event) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("outbox key %s/%s already exists with different content and re-issue budget exhausted", event.Source.ID, event.EventID)
+	// Budget exhausted: every -rN id is taken and still conflicts (a
+	// pathological re-executor regenerating the id with ever-new content —
+	// the makety incident burned all 99 slots and the RUN DIED on this error
+	// mid-model-call). The event is observability: it must never kill the run
+	// that produced it. One last insert under a guaranteed-unique id (the
+	// nano suffix, the same trick model.attempt ids use) keeps the fact; a
+	// failure to even insert that is a database problem and stays an error.
+	reissued.EventID = fmt.Sprintf("%s-n%d", event.EventID, time.Now().UnixNano())
+	reissuedPayload, marshalErr := json.Marshal(reissued)
+	if marshalErr != nil {
+		return marshalErr
+	}
+	if _, err = s.pool.Exec(ctx, `INSERT INTO kernel_event_outbox(source_id,event_id,payload) VALUES($1,$2,$3)`, reissued.Source.ID, reissued.EventID, reissuedPayload); err != nil {
+		return err
+	}
+	return nil
 }
 
 const (

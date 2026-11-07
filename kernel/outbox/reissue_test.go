@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -77,6 +78,58 @@ func TestEnqueueConflictReissuesUnderFreshID(t *testing.T) {
 	}
 	if !strings.Contains(original, `"old"`) {
 		t.Fatalf("original row must keep the frozen content: %s", original)
+	}
+}
+
+// Budget exhaustion must never kill the run that produced the event (the
+// makety incident, 2026-11-06: a workflow task kept regenerating the same id
+// with ever-new content, burned all 99 re-issue slots and the workflow FAILED
+// on «budget exhausted» mid-model-call). The fact still lands — under a
+// guaranteed-unique nano-suffixed id.
+func TestEnqueueConflictBudgetExhaustedStillKeepsTheFact(t *testing.T) {
+	dsn := os.Getenv("LIVE_DSN")
+	if dsn == "" {
+		t.Skip("no live dsn")
+	}
+	journal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"results":[{"status":"delivered"}]}`))
+	}))
+	defer journal.Close()
+	store, err := Open(context.Background(), dsn, journal.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	sourceID := "reissue-exhaust-src"
+	defer func() {
+		_, _ = store.pool.Exec(ctx, `DELETE FROM kernel_event_outbox WHERE source_id=$1`, sourceID)
+	}()
+
+	// Fill the base id and EVERY re-issue slot with different content.
+	for i := 1; i <= 100; i++ {
+		eventID := "scope/event/000001"
+		if i > 1 {
+			eventID = fmt.Sprintf("scope/event/000001-r%d", i)
+		}
+		if err := store.Enqueue(ctx, reissueTestEvent(sourceID, eventID, fmt.Sprintf("filler-%d", i))); err != nil {
+			t.Fatalf("filler enqueue %s: %v", eventID, err)
+		}
+	}
+
+	// One more conflict: the budget is exhausted, the fact must still land.
+	if err := store.Enqueue(ctx, reissueTestEvent(sourceID, "scope/event/000001", "survivor")); err != nil {
+		t.Fatalf("budget exhaustion must not fail the enqueue: %v", err)
+	}
+	var payload string
+	err = store.pool.QueryRow(ctx,
+		`SELECT payload FROM kernel_event_outbox WHERE source_id=$1 AND event_id LIKE 'scope/event/000001-n%'`, sourceID).Scan(&payload)
+	if err != nil {
+		t.Fatalf("nano-suffixed fallback row missing: %v", err)
+	}
+	if !strings.Contains(payload, `"survivor"`) {
+		t.Fatalf("fallback row must carry the fact: %s", payload)
 	}
 }
 
