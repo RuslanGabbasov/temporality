@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, InlineNotification, Tag } from '@carbon/react'
 import { ChevronRight } from '@carbon/icons-react'
 import { authHeaders } from './api'
+import { SkeletonLines } from './Skeleton'
 import {
   observationApi,
   type ExploreConflict,
@@ -141,25 +142,27 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
   }, [knowledgeID, project, revision])
 
   // Semantically related knowledge (docs/supervisor-model.md §6.6): nearest
-  // vectors from the journal's neighbor lookup, resolved to propositions.
+  // vectors from the journal's neighbor lookup, resolved to propositions one
+  // id at a time. The old version fetched neighbors through the kernel proxy
+  // (which 404s — the endpoint lives on the journal) and then downloaded the
+  // whole knowledge list (8+ MB) just to resolve ≤5 ids.
   const [related, setRelated] = useState<{ id: string; proposition: string; state: string }[]>([])
   useEffect(() => {
     if (!knowledgeID || !project.trim()) { setRelated([]); return }
     let cancelled = false
     ;(async () => {
       try {
-        const resp = await fetch(`/kernel-api/v1/observations/knowledge/embeddings/neighbors?model=active&id=${encodeURIComponent(knowledgeID)}&min_score=0.5&limit=5`, { headers: { ...authHeaders() } })
-        if (!resp.ok) { if (!cancelled) setRelated([]); return }
-        const page = await resp.json()
-        const items = await observationApi.knowledge(project.trim())
-        const byID = new Map((items.knowledge ?? []).map((k) => [k.id, k]))
-        if (cancelled) return
-        setRelated(page.neighbors
-          .map((n: { id: string; score: number }) => {
-            const item = byID.get(n.id)
+        const page = await observationApi.neighbors(knowledgeID)
+        const top = (page.neighbors ?? []).slice(0, 5)
+        const resolved = await Promise.all(top.map(async (n) => {
+          try {
+            const res = await observationApi.resolveKnowledge(n.id)
+            const item = res.knowledge?.[0]
             return item ? { id: n.id, proposition: item.proposition, state: item.state ?? '' } : null
-          })
-          .filter(Boolean))
+          } catch { return null }
+        }))
+        if (cancelled) return
+        setRelated(resolved.filter((item): item is { id: string; proposition: string; state: string } => item !== null))
       } catch { if (!cancelled) setRelated([]) }
     })()
     return () => { cancelled = true }
@@ -201,7 +204,11 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
       </div>
 
       {traceError && <InlineNotification kind="error" title="Error" subtitle={traceError} onClose={() => setTraceError('')} lowContrast style={{ marginBottom: '0.6rem' }} />}
-      {traceLoading && <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', marginBottom: '0.5rem' }}>…</div>}
+      {traceLoading && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <SkeletonLines lines={6} />
+        </div>
+      )}
 
       {trace && (
         <>

@@ -203,6 +203,14 @@ export const observationApi = {
   // each miss surfaced as a 404 in the network log.
   resolveKnowledge: (knowledgeID: string) =>
     request<{ knowledge: KnowledgeItem[]; count: number; project?: string }>('/v1/observations/knowledge/resolve', undefined, { knowledge_id: knowledgeID }),
+  // Vector neighbors of one knowledge item (docs/supervisor-model.md §6.6):
+  // ids and cosine scores only — resolve each id via resolveKnowledge. The
+  // model stays empty so the lookup spans whatever embedding space the
+  // journal stores (a guessed model name is an exact SQL match and silently
+  // returns nothing). Lives on the journal, not the kernel proxy.
+  neighbors: (knowledgeID: string, minScore = 0.5) =>
+    request<{ neighbors: Array<{ id: string; score: number }>; model: string; id: string }>(
+      '/v1/observations/knowledge/embeddings/neighbors', undefined, { id: knowledgeID, min_score: minScore }),
 }
 
 /** All events of one run, oldest-first, following journal cursors to the end.

@@ -4148,38 +4148,10 @@ func main() {
 			writeError(w, 422, errors.New("project query param is required"))
 			return
 		}
-		// Get all completed runs for this project
-		runs, err := ws.ListRunsByProject(r.Context(), project)
+		trajectories, err := loadProjectTrajectories(r.Context(), ws, project)
 		if err != nil {
 			writeError(w, 500, err)
 			return
-		}
-		// Extract trajectories
-		var trajectories []agent.Trajectory
-		for _, run := range runs {
-			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, workspace.StreamCursor{}, 500)
-			if eErr != nil {
-				continue
-			}
-			var evLikes []agent.EventLike
-			for _, ev := range events {
-				var occurredAt time.Time
-				if ev.OccurredAt != "" {
-					occurredAt, _ = time.Parse(time.RFC3339Nano, ev.OccurredAt)
-				}
-				el := agent.EventLike{
-					EventID: ev.EventID, OccurredAt: occurredAt, Type: ev.Type,
-					Context: struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
-				}
-				if ev.Data != nil {
-					_ = json.Unmarshal(ev.Data, &el.Data)
-				}
-				if el.Data == nil {
-					el.Data = make(map[string]any)
-				}
-				evLikes = append(evLikes, el)
-			}
-			trajectories = append(trajectories, agent.ExtractTrajectory(evLikes))
 		}
 		chain := agent.ExtractActivationChain(knowledgeID, trajectories)
 		writeJSON(w, 200, chain)
@@ -4191,36 +4163,10 @@ func main() {
 			return
 		}
 		projectID := r.PathValue("projectID")
-		runs, err := ws.ListRunsByProject(r.Context(), projectID)
+		trajectories, err := loadProjectTrajectories(r.Context(), ws, projectID)
 		if err != nil {
 			writeError(w, 500, err)
 			return
-		}
-		var trajectories []agent.Trajectory
-		for _, run := range runs {
-			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, workspace.StreamCursor{}, 500)
-			if eErr != nil {
-				continue
-			}
-			var evLikes []agent.EventLike
-			for _, ev := range events {
-				var occurredAt time.Time
-				if ev.OccurredAt != "" {
-					occurredAt, _ = time.Parse(time.RFC3339Nano, ev.OccurredAt)
-				}
-				el := agent.EventLike{
-					EventID: ev.EventID, OccurredAt: occurredAt, Type: ev.Type,
-					Context: struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
-				}
-				if ev.Data != nil {
-					_ = json.Unmarshal(ev.Data, &el.Data)
-				}
-				if el.Data == nil {
-					el.Data = make(map[string]any)
-				}
-				evLikes = append(evLikes, el)
-			}
-			trajectories = append(trajectories, agent.ExtractTrajectory(evLikes))
 		}
 		chains := agent.ExtractAllActivationChains(trajectories)
 		slog.Info("activation chains", "project", projectID, "runs", len(trajectories), "chains", len(chains))
@@ -8395,6 +8341,63 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+// loadProjectTrajectories streams the events of every run in a project and
+// extracts agent trajectories from them. The chain endpoints used to walk
+// runs strictly one by one — one store round trip each — so wall time grew
+// linearly with the project's history (seconds on a busy project). Fetches
+// now run through a bounded worker pool; results are assembled in the
+// ListRunsByProject order so responses stay deterministic. A run whose events
+// cannot be read or are empty yields no trajectory (the chain answers stay
+// partial), matching the previous behavior.
+func loadProjectTrajectories(ctx context.Context, ws *workspace.Store, projectID string) ([]agent.Trajectory, error) {
+	runs, err := ws.ListRunsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]agent.Trajectory, len(runs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i, run := range runs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, run workspace.Run) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			events, _, err := ws.StreamRunEvents(ctx, run.ProjectID, run.RunID, workspace.StreamCursor{}, 500)
+			if err != nil {
+				return
+			}
+			var evLikes []agent.EventLike
+			for _, ev := range events {
+				var occurredAt time.Time
+				if ev.OccurredAt != "" {
+					occurredAt, _ = time.Parse(time.RFC3339Nano, ev.OccurredAt)
+				}
+				el := agent.EventLike{
+					EventID: ev.EventID, OccurredAt: occurredAt, Type: ev.Type,
+					Context: struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
+				}
+				if ev.Data != nil {
+					_ = json.Unmarshal(ev.Data, &el.Data)
+				}
+				if el.Data == nil {
+					el.Data = make(map[string]any)
+				}
+				evLikes = append(evLikes, el)
+			}
+			results[i] = agent.ExtractTrajectory(evLikes)
+		}(i, run)
+	}
+	wg.Wait()
+	trajectories := make([]agent.Trajectory, 0, len(results))
+	for _, traj := range results {
+		if traj.RunID != "" {
+			trajectories = append(trajectories, traj)
+		}
+	}
+	return trajectories, nil
 }
 
 // resolveAgentSkills loads the agent's skills, builds compact digests for the

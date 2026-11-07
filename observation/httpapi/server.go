@@ -599,8 +599,15 @@ func (s *Server) loadEvents(ctx context.Context, filter observation.Filter) ([]o
 // or via knowledge.promoted) together with the full cross-project lifecycle
 // of those knowledge items (docs/knowledge-evolution.md §5–6). Post-projection,
 // knowledgeVisibleTo still filters by effective scope.
+//
+// Every load is limited to knowledgeProjectionTypes (the projection's exact
+// vocabulary): without the allow-list the scan walks every event of the
+// project — including model.text_delta streams — at 500 per page, which made
+// a cold projection take tens of seconds of round trips. The type filter
+// rides the type_time index, so the store reads only the events the
+// projection actually consumes.
 func (s *Server) visibleKnowledgeEvents(ctx context.Context, project string, asOf, knownAt *time.Time) ([]observation.Event, []string, error) {
-	projectEvents, err := s.loadEvents(ctx, observation.Filter{Project: project, Until: asOf, KnownAt: knownAt})
+	projectEvents, err := s.loadEvents(ctx, observation.Filter{Project: project, Until: asOf, KnownAt: knownAt, Types: knowledgeProjectionTypes})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -614,13 +621,13 @@ func (s *Server) visibleKnowledgeEvents(ctx context.Context, project string, asO
 	}
 	// Shared-scope markers: knowledge.proposed born shared plus every
 	// knowledge.promoted event (they restate the target scope in data).
-	globalShared, err := s.loadEvents(ctx, observation.Filter{ScopeKind: "organization", Until: asOf, KnownAt: knownAt})
+	globalShared, err := s.loadEvents(ctx, observation.Filter{ScopeKind: "organization", Until: asOf, KnownAt: knownAt, Types: knowledgeProjectionTypes})
 	if err != nil {
 		return nil, nil, err
 	}
 	merged := mergeObservationEvents(projectEvents, globalShared)
 	if len(chain) > 0 {
-		unitShared, err := s.loadEvents(ctx, observation.Filter{ScopeKind: "org_unit", ScopeIDs: chain, Until: asOf, KnownAt: knownAt})
+		unitShared, err := s.loadEvents(ctx, observation.Filter{ScopeKind: "org_unit", ScopeIDs: chain, Until: asOf, KnownAt: knownAt, Types: knowledgeProjectionTypes})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -643,7 +650,7 @@ func (s *Server) visibleKnowledgeEvents(ctx context.Context, project string, asO
 			ids = append(ids, id)
 		}
 		sort.Strings(ids)
-		related, err := s.loadEvents(ctx, observation.Filter{KnowledgeIDs: ids, Until: asOf, KnownAt: knownAt})
+		related, err := s.loadEvents(ctx, observation.Filter{KnowledgeIDs: ids, Until: asOf, KnownAt: knownAt, Types: knowledgeProjectionTypes})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -730,12 +737,13 @@ func stringData(data map[string]any, key string) string {
 const knowledgeComputeTimeout = 5 * time.Minute
 
 // knowledgeCacheTTL bounds how long a projected knowledge listing stays
-// warm. The projection walks every knowledge event of the project (plus
-// shared-scope events) per request — the supervisor's conflict panel and the
-// explorer pay it on every call. A short TTL turns the N-lookup fallback walk
-// and page flips into single projections; any knowledge-mutating call drops
-// the project's entry immediately, so staleness is bounded by TTL anyway.
-const knowledgeCacheTTL = 15 * time.Second
+// warm. The projection is rebuilt from the knowledgeProjectionTypes allow-list
+// scan — cheap — so the TTL is only a backstop for changes that arrive
+// outside the invalidating paths. Any knowledge-mutating call drops the
+// project's entry immediately (invalidateKnowledge), so live data is never
+// staler than the write that changed it; the TTL exists so a journal restart
+// or a missed invalidation cannot pin a wrong projection forever.
+const knowledgeCacheTTL = 2 * time.Minute
 
 type knowledgeCacheEntry struct {
 	items    []observation.Knowledge
@@ -794,10 +802,28 @@ func (s *Server) cachedKnowledge(ctx context.Context, project string, asOf, know
 	return items, chain, nil
 }
 
+// knowledgeProjectionTypes is the exact event vocabulary the knowledge
+// projection consumes (observation/knowledge.go: applyHint, applyTransition,
+// relation handling) — the scan allow-list for visibleKnowledgeEvents and the
+// inventory affectsKnowledgeProjection is checked against. Both directions
+// depend on this list staying in sync with ProjectKnowledge's type switch:
+// a consumed type missing here is silently dropped from every projection, and
+// a listed type that stops being consumed only costs a redundant read. When
+// ProjectKnowledge learns a new event type, add it here (and to the
+// consistency test in knowledge_projection_types_test.go).
+var knowledgeProjectionTypes = []string{
+	"knowledge.proposed", "knowledge.promoted", "knowledge.confirmed",
+	"knowledge.challenged", "knowledge.corrected", "knowledge.invalidated",
+	"knowledge.disproved", "knowledge.superseded", "knowledge.used",
+	"knowledge.linked", "knowledge.relation_confirmed",
+	"knowledge.relation_dismissed",
+	"hint.offered", "hint.used", "hint.ignored", "hint.outcome",
+}
+
 // affectsKnowledgeProjection reports whether an ingested event type can
 // change the ProjectKnowledge output (observation/knowledge.go), and therefore
 // whether the ingest batch must drop the projection cache. The projection
-// consumes exactly:
+// consumes exactly knowledgeProjectionTypes:
 //   - hint.offered / hint.used / hint.ignored / hint.outcome (applyHint:
 //     HintOffers/ReuseCount/LastUsedAt and UpdatedAt — the listing order key);
 //   - every knowledge.* lifecycle type (proposed/promoted/confirmed/challenged/
