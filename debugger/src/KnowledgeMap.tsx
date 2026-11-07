@@ -105,9 +105,20 @@ function cacheKey(project: string): string { return project || '*' }
 
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
 
-export default function KnowledgeMap({ project, onOpenDossier }: {
+/** focus mode (the knowledge dossier's relations tab): render ONLY the
+ *  given neighborhood on the same semantic-map control — same canvas, zoom
+ *  tiers, hover and click-through — without the corpus load/filter toolbar.
+ *  The items must carry vectors (fetched id-addressed from the embeddings
+ *  map endpoint). */
+export interface KnowledgeMapFocus {
+  items: MapItem[]
+  label?: string
+}
+
+export default function KnowledgeMap({ project, onOpenDossier, focus }: {
   project: string
   onOpenDossier: (id: string) => void
+  focus?: KnowledgeMapFocus
 }) {
   const t = useT()
   const { resolved: theme } = useTheme()
@@ -119,6 +130,14 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [stateFilter, setStateFilter] = useState('')
+  // Focus mode takes over the corpus: no streaming, no cache, no toolbar —
+  // the layout/draw pipeline below is shared verbatim.
+  useEffect(() => {
+    if (!focus) return
+    setItems(focus.items.length > 0 ? focus.items : null)
+    setLoading(false); setError(''); setProgress(null)
+    setKnowledgeTotal(focus.items.length)
+  }, [focus])
   const [hover, setHover] = useState<{ point: MapPoint; clientX: number; clientY: number } | null>(null)
   const transformRef = useRef({ x: 0, y: 0, k: 1 })
   const frameRef = useRef(0)
@@ -329,7 +348,11 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
     await streamFull()
   }, [project])
 
-  useEffect(() => { void load(); return () => { loadGen.current++ } }, [load])
+  useEffect(() => {
+    if (focus) return // focus mode: the corpus effect above owns `items`
+    void load()
+    return () => { loadGen.current++ }
+  }, [load, focus])
 
   // The heavy pipeline (normalize → kNN → force → cluster pyramid) runs in a
   // worker; this effect just installs the results into the render state.
@@ -952,6 +975,16 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', height: '100%' }}>
+      {/* Focus mode (the dossier neighborhood) has no corpus toolbar: the
+          subset was chosen by the dossier, not by project-wide filters. The
+          label names what is on screen. */}
+      {focus ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)' }}>
+            {focus.label ?? t('knowledge.map_focus') ?? 'Neighborhood'} · {(items ?? []).length}
+          </span>
+        </div>
+      ) : (
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
         <TextInput
           id="knowledge-map-search" size="sm" labelText="" hideLabel style={{ width: '260px' }}
@@ -969,6 +1002,7 @@ export default function KnowledgeMap({ project, onOpenDossier }: {
         <span style={{ flex: 1 }} />
         <Button size="sm" kind="ghost" onClick={() => void load({ ignoreCache: true })} disabled={loading}>↻</Button>
       </div>
+      )}
 
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast />}
 

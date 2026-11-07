@@ -187,6 +187,19 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 			projects = visible
 		}
 	}
+	// Id-addressed mode (the knowledge dossier's neighborhood map): return
+	// ONLY the requested items' vectors, ignoring limit/offset paging. The
+	// dossier reuses the semantic-map control for the relations tab and needs
+	// true vectors for exactly the expand-walk result — no paging semantics.
+	requestedIDs := map[string]bool{}
+	if raw := r.URL.Query().Get("ids"); raw != "" {
+		for _, id := range strings.Split(raw, ",") {
+			id = strings.TrimSpace(id)
+			if id != "" && len(requestedIDs) < 128 {
+				requestedIDs[id] = true
+			}
+		}
+	}
 	store, ok := s.store.(mapStore)
 	if !ok {
 		writeError(w, 501, errors.New("this journal store does not support knowledge embeddings"))
@@ -221,6 +234,11 @@ func (s *Server) getKnowledgeEmbeddingMap(w http.ResponseWriter, r *http.Request
 		}
 		for _, item := range knowledge {
 			if seen[item.ID] {
+				continue
+			}
+			// Id-addressed mode keeps only the requested items — the whole point
+			// is a bounded neighborhood payload.
+			if len(requestedIDs) > 0 && !requestedIDs[item.ID] {
 				continue
 			}
 			seen[item.ID] = true

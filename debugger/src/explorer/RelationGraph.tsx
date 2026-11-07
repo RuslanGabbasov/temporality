@@ -6,6 +6,8 @@ import { queryMatchesItem } from '../knowledgeQuery'
 import { STATE_FILL } from './AreaMap'
 import { stateLabel } from './shared'
 import RelationMapCanvas from './RelationMapCanvas'
+import KnowledgeMap, { type KnowledgeMapFocus } from '../KnowledgeMap'
+import type { MapItem } from '../semanticMap'
 
 /** Relation neighborhood of one knowledge item (ТЗ §7). The engine's expand
  *  walk already bounds the graph: explicit edges first, heuristic candidates
@@ -138,7 +140,14 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
   // List-first (§7 rework): the graph is for shapes, the list is for reading.
   // A dense ring of unreadable dots answered nothing; the grouped list with
   // proposition snippets answers "what is related and why" at a glance.
-  const [view, setView] = useState<'list' | 'graph'>('list')
+  // The MAP view is the semantic-map control over exactly this neighborhood:
+  // same canvas, zoom tiers and click-through — meaning-adjacent dots sit
+  // together, which the concentric rings could never show.
+  const [view, setView] = useState<'list' | 'graph' | 'map'>('list')
+  // Neighborhood vectors for the map view, fetched id-addressed once per
+  // expand result: without them the semantic layout has nothing to project.
+  const [mapItems, setMapItems] = useState<MapItem[] | null>(null)
+  const mapSeq = useRef(0)
 
   const [cards, setCards] = useState<ExploreKnowledgeCard[]>([])
   const [relations, setRelations] = useState<ExploreRelation[]>([])
@@ -177,6 +186,31 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
     return () => { seq.current++ }
   }, [project, center, depth, includeCandidates, relationTypes, revision])
 
+  useEffect(() => {
+    if (view !== 'map' || cards.length === 0 || mapItems) return
+    const current = ++mapSeq.current
+    ;(async () => {
+      try {
+        const ids = cards.map((c) => c.knowledge_id)
+        const page = await observationApi.knowledgeEmbeddingMap({ project: project.trim() || undefined, ids })
+        if (current !== mapSeq.current) return
+        setMapItems(page.items ?? [])
+      } catch {
+        if (current === mapSeq.current) setMapItems([])
+      }
+    })()
+    return () => { mapSeq.current++ }
+  }, [view, cards, project, mapItems])
+
+  const focus = useMemo<KnowledgeMapFocus | undefined>(() => {
+    if (!mapItems || mapItems.length === 0) return undefined
+    const root = cards.find((c) => c.knowledge_id === center)
+    return {
+      items: mapItems,
+      label: root ? truncate(root.proposition, 80) : undefined,
+    }
+  }, [mapItems, cards, center])
+
   const graph = useMemo(() => buildGraph(cards, relations, nodeFilter), [cards, relations, nodeFilter])
   const { positioned, width, height } = useMemo(() => layoutGraph(graph.nodes), [graph.nodes])
   const byID = useMemo(() => new Map(positioned.map((p) => [p.node.id, p])), [positioned])
@@ -202,6 +236,7 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
         <span style={{ display: 'inline-flex', border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
           <button style={{ ...chip(view === 'list'), border: 'none' }} onClick={() => setView('list')}>{t('explorer.relations_view_list') ?? 'List'}</button>
           <button style={{ ...chip(view === 'graph'), border: 'none' }} onClick={() => setView('graph')}>{t('explorer.relations_view_graph') ?? 'Graph'}</button>
+          <button style={{ ...chip(view === 'map'), border: 'none' }} onClick={() => setView('map')}>{t('explorer.relations_view_map') ?? 'Map'}</button>
         </span>
         <span style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{t('explorer.relations_depth') ?? 'Depth'}:</span>
         {[1, 2, 3].map((d) => (
@@ -294,6 +329,18 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
             <span><span style={{ display: 'inline-block', width: '1.1rem', borderTop: '2px dashed var(--tm-text-2)', verticalAlign: 'middle', marginRight: '0.3rem' }} />{t('explorer.relations_legend_candidate') ?? 'candidate (heuristic)'}</span>
           </div>
         </>
+      )}
+
+      {view === 'map' && graph.nodes.length > 0 && (
+        focus ? (
+          <div style={{ height: '460px', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', overflow: 'hidden' }}>
+            <KnowledgeMap project={project} onOpenDossier={onOpenDossier} focus={focus} />
+          </div>
+        ) : (
+          <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
+            {t('explorer.relations_map_no_vectors') ?? 'No embeddings for this neighborhood — the semantic map needs vectors.'}
+          </div>
+        )
       )}
 
       {view === 'list' && graph.nodes.length > 0 && (

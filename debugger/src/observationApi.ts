@@ -179,9 +179,9 @@ export const observationApi = {
   // The map request can legitimately run for a while (the journal computes
   // the project's knowledge projection on cache misses). 120s with a clear
   // failure beats a request that hangs forever with no feedback.
-  knowledgeEmbeddingMap: async (opts?: { model?: string; project?: string; limit?: number; offset?: number; since?: string }) => {
+  knowledgeEmbeddingMap: async (opts?: { model?: string; project?: string; limit?: number; offset?: number; since?: string; ids?: string[] }) => {
     try {
-      return await request<{ items: Array<import('./semanticMap').MapItem>; model: string; total?: number; full_total?: number; knowledge_total?: number; states?: Record<string, number>; project_errors?: string[] }>('/v1/observations/knowledge/embeddings/map', { signal: AbortSignal.timeout(120_000) }, { model: opts?.model, project: opts?.project, limit: opts?.limit, offset: opts?.offset, since: opts?.since })
+      return await request<{ items: Array<import('./semanticMap').MapItem>; model: string; total?: number; full_total?: number; knowledge_total?: number; states?: Record<string, number>; project_errors?: string[] }>('/v1/observations/knowledge/embeddings/map', { signal: AbortSignal.timeout(120_000) }, { model: opts?.model, project: opts?.project, limit: opts?.limit, offset: opts?.offset, since: opts?.since, ids: opts?.ids?.join(',') })
     } catch (e) {
       if (e instanceof DOMException && (e.name === 'AbortError' || e.name === 'TimeoutError')) {
         throw new Error('journal did not answer the map request in 120 s — the knowledge projection is likely recomputing, see the journal log')
