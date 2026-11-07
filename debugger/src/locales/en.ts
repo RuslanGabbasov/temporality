@@ -1570,6 +1570,7 @@ export const en: Record<string, string> = {
     'skills.compare_with': 'Compare with:',
     'skills.attribute': 'Attribute',
     'skills.attribute_model': 'attribute model',
+    'skills.raw_yaml_compare': 'Raw skill.yaml compare',
     'diff.no_changes': 'No changes',
     'diff.hidden_lines': '{{count}} unchanged lines hidden',
     'skills.evals_suite': 'Evaluation suite',

@@ -42,7 +42,7 @@ import {
 import { observationApi, type ObservationEvent } from './observationApi'
 import { teamRunsFromEvents, type TeamRunRow } from './teamRuns'
 import { useT } from './i18n'
-import SideBySideDiff from './SideBySideDiff'
+import RichDiff from './RichDiff'
 import { runStatusLabel } from './eventPresentation'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 import { INTAKE_PROJECT_ID } from './kernelApi'
@@ -1076,7 +1076,8 @@ function TeamEvolutionTab({ team, versions, metrics, project, detecting, detectN
             )}
             {diffBase && (
               <div style={{ marginTop: '0.5rem' }}>
-                <SideBySideDiff
+                <RichDiff
+                  format="text"
                   title={t('teams.diff_vs_current') ?? 'Changes vs current revision'}
                   oldLabel={diffBase.version}
                   newLabel={version.version}

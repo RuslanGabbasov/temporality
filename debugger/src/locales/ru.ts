@@ -1570,6 +1570,7 @@ export const ru: Record<string, string> = {
     'skills.compare_with': 'Сравнить с:',
     'skills.attribute': 'Атрибут',
     'skills.attribute_model': 'атрибутивная модель',
+    'skills.raw_yaml_compare': 'Сравнение skill.yaml (исходник)',
     'diff.no_changes': 'Без изменений',
     'diff.hidden_lines': 'Скрыто неизменённых строк: {{count}}',
     'skills.evals_suite': 'Набор проверок',

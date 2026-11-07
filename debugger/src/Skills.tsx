@@ -828,20 +828,28 @@ export default function Skills() {
                               {base && (
                                 <>
                                   <div className="skill-subheading" style={{ fontSize: '0.7rem', display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                    									<span>{t('skills.compare_with') ?? 'Compare with:'}</span>
-                                    									<select
-                                    									  value={String(base.version)}
-                                    									  onChange={(e) => setDiffBases((prev) => ({ ...prev, [version.version]: e.target.value }))}
-                                    									  style={{ border: '1px solid var(--tm-border)', borderRadius: '4px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.72rem', padding: '0.15rem 0.35rem' }}
-                                    									>
-                                    									  {versions.filter((v) => v.version !== version.version).map((v) => (
-                                    									    <option key={v.version} value={String(v.version)}>{v.version}{v.version === selected.version ? ` (${t('skills.current') ?? 'current'})` : ''}</option>
-                                    									  ))}
-                                    									</select>
+                                    <span>{t('skills.compare_with') ?? 'Compare with:'}</span>
+                                    <select
+                                      value={String(base.version)}
+                                      onChange={(e) => setDiffBases((prev) => ({ ...prev, [version.version]: e.target.value }))}
+                                      style={{ border: '1px solid var(--tm-border)', borderRadius: '4px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.72rem', padding: '0.15rem 0.35rem' }}
+                                    >
+                                      {versions.filter((v) => v.version !== version.version).map((v) => (
+                                        <option key={v.version} value={String(v.version)}>{v.version}{v.version === selected.version ? ` (${t('skills.current') ?? 'current'})` : ''}</option>
+                                      ))}
+                                    </select>
                                     <span style={{ color: 'var(--tm-text-3)' }}>{base.version} → {version.version}</span>
                                   </div>
-                                  <RichDiff oldText={base.markdown ?? ''} newText={version.markdown ?? ''} oldLabel={base.version} newLabel={version.version} />
+                                  <RichDiff title="SKILL.md" oldText={base.markdown ?? ''} newText={version.markdown ?? ''} oldLabel={base.version} newLabel={version.version} />
                                   <SkillManifestDiff before={base.manifest as SkillManifest} after={version.manifest as SkillManifest} oldLabel={base.version} newLabel={version.version} />
+                                  {/* Raw fidelity (PR #10): the attribute model covers the
+                                      standard manifest fields; the exact yaml compare keeps
+                                      every unusual key visible — folded away from the default
+                                      reading order. */}
+                                  <details style={{ marginTop: '0.55rem' }}>
+                                    <summary style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', cursor: 'pointer' }}>{t('skills.raw_yaml_compare') ?? 'Raw skill.yaml compare'}</summary>
+                                    <RichDiff format="yaml" title="skill.yaml" oldLabel={base.version} newLabel={version.version} oldText={manifestToYaml(base.manifest as SkillManifest)} newText={manifestToYaml(version.manifest as SkillManifest)} />
+                                  </details>
                                 </>
                               )}
                               {!isCurrent && !isRejected && (
