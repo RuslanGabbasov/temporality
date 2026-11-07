@@ -36,10 +36,11 @@ type fakeInboundStore struct {
 	runs       map[string]workspace.Run
 
 	// artifact review rounds (docs/artifact-lifecycle.md §6 Phase 2)
-	reviews     []workspace.ArtifactReview
-	artifacts   map[string]workspace.Artifact
-	resolvedIDs []string
-	resolveErr  error
+	reviews       []workspace.ArtifactReview
+	artifacts     map[string]workspace.Artifact
+	presentations []workspace.Presentation
+	resolvedIDs   []string
+	resolveErr    error
 }
 
 // inboundUpdateRecord is one observed UpdateInboundMessage call.
@@ -123,6 +124,20 @@ func (s *fakeInboundStore) GetArtifactReview(_ context.Context, reviewID string)
 		}
 	}
 	return workspace.ArtifactReview{}, workspace.ErrNotFound
+}
+
+// ListPresentationsByRun (Presentation Engine §9.3): the fake returns the
+// seeded rows so the answer-watcher delivery path is testable.
+func (s *fakeInboundStore) ListPresentationsByRun(_ context.Context, runID string, _ int) ([]workspace.Presentation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []workspace.Presentation
+	for _, row := range s.presentations {
+		if row.RunID == runID {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 func (s *fakeInboundStore) ResolveArtifactReview(_ context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error) {

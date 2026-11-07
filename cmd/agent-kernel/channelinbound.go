@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/kernel/presentation"
 	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 )
@@ -101,6 +102,10 @@ type channelInboundStore interface {
 	// matched to an orphan-run review row resolve the round instead of a run.
 	GetArtifactReview(ctx context.Context, reviewID string) (workspace.ArtifactReview, error)
 	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
+	// Presentation Engine (docs/presentation-engine.md §9.3): the answer
+	// watcher delivers the run's published visuals as channel-appropriate
+	// static renders.
+	ListPresentationsByRun(ctx context.Context, runID string, limit int) ([]workspace.Presentation, error)
 }
 
 // run cycles until the context is cancelled. A cycle error is logged and the
@@ -653,8 +658,14 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 			return
 		}
 		if !liveRunStatus(run.Status) {
+			// Presentation Engine (docs/presentation-engine.md §9.3): the
+			// answer text loses the ```presentation fences (raw JSON is an
+			// internal transport convention), and the run's published visuals
+			// ride the channel as adapted static renders — SVG files for
+			// file-capable transports, PNG photos for image ones (§9.4).
+			answerBody := presentation.StripFences(run.Answer)
 			deliverCtx, cancel := context.WithTimeout(watchCtx, 20*time.Second)
-			dErr := l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: run.Answer})
+			dErr := l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: answerBody})
 			cancel()
 			// Clear the marker before or together with the answer landing: the
 			// server expires it only after the full 30s timeout.
@@ -663,6 +674,7 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 				l.log.Warn("run answer delivery", "channel", l.driver.Type(), "chat", address, "error", dErr)
 				return
 			}
+			l.deliverRunPresentations(watchCtx, settings, address, runID)
 			if markAnswered {
 				_ = l.store.UpdateInboundMessage(watchCtx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusAnswered})
 			}
@@ -688,6 +700,50 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 // progressEvery paces the chat progress lines: a fast tool loop must not
 // spam the dialog, so at most one line lands per interval.
 const progressEvery = 10 * time.Second
+
+// deliverRunPresentations pushes the run's published presentations into the
+// channel as adapted static renders (docs/presentation-engine.md §9.3):
+// file-capable transports take SVG, image-capable ones PNG, and both keep
+// the markdown body out — the answer text (already delivered, fences
+// stripped) is the readable layer. Best-effort: a failed render or upload
+// costs a log line, never the answer.
+func (l *channelInboundLoop) deliverRunPresentations(ctx context.Context, settings agent.ChannelSettings, address, runID string) {
+	store, ok := l.store.(interface {
+		ListPresentationsByRun(ctx context.Context, runID string, limit int) ([]workspace.Presentation, error)
+	})
+	if !ok || store == nil {
+		return
+	}
+	rows, err := store.ListPresentationsByRun(ctx, runID, 10)
+	if err != nil {
+		l.log.Warn("run presentation delivery", "run", runID, "error", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	presets := presentation.ChannelPresets()
+	caps, ok := presets[l.driver.Type()]
+	if !ok || (!caps.Files && !caps.Images) {
+		return
+	}
+	channelSettings := settings.Channels[l.driver.Type()]
+	for _, row := range rows {
+		doc, perr := presentation.ParseDocument(row.Document)
+		if perr != nil {
+			continue
+		}
+		delivery := presentation.Adapt(doc, caps)
+		for _, attachment := range delivery.Attachments {
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			sendErr := l.driver.SendFile(ctx, l.httpClient, channelSettings, address, agent.OutboundFile{Name: attachment.Name, Note: row.Title, Payload: attachment.Data})
+			cancel()
+			if sendErr != nil {
+				l.log.Warn("run presentation attachment", "channel", l.driver.Type(), "run", runID, "file", attachment.Name, "error", sendErr)
+			}
+		}
+	}
+}
 
 // runProgress carries the watcher's announcement state across polls.
 type runProgress struct {

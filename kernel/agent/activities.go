@@ -1615,6 +1615,18 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleHumanContacts(ctx, request)
 	case "send_file":
 		return a.handleSendFile(ctx, request)
+	case "present":
+		return a.handlePresent(ctx, request)
+	case "create_presentation":
+		return a.handleCreatePresentation(ctx, request)
+	case "update_presentation":
+		return a.handleUpdatePresentation(ctx, request)
+	case "attach_artifact":
+		return a.handleAttachArtifact(ctx, request)
+	case "get_presentation":
+		return a.handleGetPresentation(ctx, request)
+	case "get_capabilities":
+		return a.handleGetCapabilities(ctx, request)
 	case "create_trigger":
 		return a.handleCreateTrigger(ctx, request)
 	case "update_trigger":

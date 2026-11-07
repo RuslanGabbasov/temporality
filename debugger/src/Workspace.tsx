@@ -11,9 +11,36 @@ import {
 } from '@carbon/react'
 import { Add, ArrowDown, Attachment, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile, ApiError } from './workspaceApi'
-import { runCost, taskCost, KERNEL_API, whoami, type Whoami } from './kernelApi'
+import { runCost, taskCost, KERNEL_API, whoami, interactWithPresentation, type Whoami } from './kernelApi'
 import { authHeaders } from './api'
 import Markdown, { linkifyWorkspacePaths } from './Markdown'
+import PresentationView from './PresentationView'
+
+// stripPresentationFences removes ```presentation fenced blocks from an
+// answer before rendering: the IR arrives separately (presentation.published
+// event → PresentationView), and the raw JSON is an internal transport
+// convention, never user-facing (docs/presentation-engine.md §2.1). The
+// replacement marker keeps the prose flow honest.
+function stripPresentationFences(content: string): string {
+  const lines = content.split('\n')
+  const out: string[] = []
+  let skipping = false
+  for (const line of lines) {
+    if (!skipping && line.startsWith('```')) {
+      if (line.slice(3).trim().split(/\s+/)[0] === 'presentation') {
+        skipping = true
+        out.push('📊 _[structured answer rendered below]_')
+      }
+      continue
+    }
+    if (skipping) {
+      if (line.startsWith('```')) skipping = false
+      continue
+    }
+    out.push(line)
+  }
+  return out.join('\n')
+}
 import { CallReportView } from './AgentRuns'
 import { observationApi, type ObservationEvent } from './observationApi'
 import HumanForm, { normalizeFormValues, validateFormValues, type FormSchema } from './HumanForm'
@@ -125,6 +152,11 @@ interface ChatMessage {
   /** Open (or last resolved) ask_human question of this run — the interactive
    *  HITL card. A newer human.requested replaces it. */
   question?: ChatQuestion
+  /** Structured presentation (docs/presentation-engine.md): the Presentation
+   *  IR published by the run (present tool or a ```presentation answer block),
+   *  rendered by PresentationView below the answer text. The raw IR is plain
+   *  data — PresentationView treats it as untrusted. */
+  presentation?: unknown
 }
 
 interface Conversation {
@@ -1193,6 +1225,29 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       } catch { /* ignore */ }
     })
 
+    // Presentation Engine (docs/presentation-engine.md): a published
+    // presentation rides the run stream with its full IR — attach it to the
+    // run's message so the bubble renders the visual. A newer publication
+    // replaces the older one (update_presentation re-publishes).
+    es.addEventListener('presentation.published', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        if (d.presentation && typeof d.presentation === 'object') {
+          updateMsg(convId, runId, { presentation: d.presentation })
+        }
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('presentation.updated', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        if (d.presentation && typeof d.presentation === 'object') {
+          updateMsg(convId, runId, { presentation: d.presentation })
+        }
+      } catch { /* ignore */ }
+    })
+
     // Approval events — show in stream lines
     es.addEventListener('approval.requested', (e) => {
       try {
@@ -1858,10 +1913,32 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     )}
 
                     {msg.content && msg.role === 'assistant' ? (
-                      <Markdown content={linkifyWorkspacePaths(msg.content, project)} onFile={(path) => void onFileLink(path)} />
+                      <Markdown content={linkifyWorkspacePaths(stripPresentationFences(msg.content), project)} onFile={(path) => void onFileLink(path)} />
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}
+
+                    {/* Presentation Engine (docs/presentation-engine.md): the
+                        structured visual attached to this answer. Actions
+                        (§11) land in the interaction handler, which resumes
+                        the paused run through the HITL signal. */}
+                    {msg.role === 'assistant' && msg.presentation
+                      ? <PresentationView
+                          document={msg.presentation}
+                          onFile={(path) => void onFileLink(path)}
+                          onInteract={async (presentationID, componentID, target, payload) => {
+                            try {
+                              await interactWithPresentation(presentationID, { component_id: componentID, target, payload })
+                              return true
+                            } catch (err) {
+                              setError((err as Error).message === 'already answered'
+                                ? (t('presentation.already_answered') ?? 'This action was already answered.')
+                                : (t('presentation.action_failed') ?? 'Action failed') + ': ' + (err as Error).message)
+                              return false
+                            }
+                          }}
+                        />
+                      : null}
 
                     {/* send_file chips: the run delivered a file — download it
                         straight from the chat bubble. */}

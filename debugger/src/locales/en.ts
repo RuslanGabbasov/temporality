@@ -484,6 +484,8 @@ export const en: Record<string, string> = {
     'chat.run_failed': 'Run failed',
     'chat.no_answer': 'No answer received',
     'chat.answer_received': 'Answer received',
+    'presentation.already_answered': 'This action was already answered.',
+    'presentation.action_failed': 'Action failed',
     'chat.delegation.title': 'Delegation',
     'chat.delegation.completed': 'completed',
     'chat.delegation.failed': 'failed',

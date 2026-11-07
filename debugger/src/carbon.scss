@@ -3205,3 +3205,250 @@ button.header-nav-link {
 #agent-temp .cds--slider-container {
   align-items: baseline;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Presentation Engine (docs/presentation-engine.md §8): the web
+// renderer of structured agent answers. Every component reads the
+// shared --tm-* tokens only — the IR carries no styling of its
+// own (§8.2: agents never set CSS), so light and dark themes
+// come free.
+// ═══════════════════════════════════════════════════════════════
+:root {
+  --tm-chart-1: #4589ff;
+  --tm-chart-2: #24a148;
+  --tm-chart-3: #f1c21b;
+  --tm-chart-4: #fa4d56;
+  --tm-chart-5: #be95ff;
+  --tm-chart-6: #0891a2;
+}
+:root[data-theme='light'] {
+  --tm-chart-1: #0f62fe;
+  --tm-chart-2: #198038;
+  --tm-chart-3: #d09900;
+  --tm-chart-4: #da1e28;
+  --tm-chart-5: #8a3ffc;
+  --tm-chart-6: #0e7c86;
+}
+
+.presentation-view {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  font-size: 0.82rem;
+}
+.presentation-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--tm-text-1);
+  border-bottom: 1px solid var(--tm-border);
+  padding-bottom: 0.35rem;
+}
+.presentation-text { white-space: pre-wrap; }
+.presentation-markdown :global .markdown-body,
+.presentation-markdown .markdown-body { margin: 0; }
+.presentation-heading { margin: 0.15rem 0; color: var(--tm-text-1); }
+.presentation-h1 { font-size: 1.15rem; }
+.presentation-h2 { font-size: 1.02rem; }
+.presentation-h3 { font-size: 0.92rem; }
+.presentation-h4, .presentation-h5, .presentation-h6 { font-size: 0.85rem; }
+
+.presentation-list { margin: 0; padding-left: 1.2rem; }
+.presentation-list li { margin: 0.15rem 0; }
+.presentation-list-label { color: var(--tm-text-1); }
+.presentation-list-desc { display: block; color: var(--tm-text-3); font-size: 0.75rem; }
+
+.presentation-quote {
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border-left: 3px solid var(--tm-teal);
+  color: var(--tm-text-2);
+  footer { color: var(--tm-text-3); font-size: 0.75rem; margin-top: 0.2rem; }
+}
+.presentation-code {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.74rem;
+}
+.presentation-link { color: var(--tm-teal); text-decoration: none; &:hover { text-decoration: underline; } }
+.presentation-divider { border: none; border-top: 1px solid var(--tm-border); margin: 0.1rem 0; }
+.presentation-placeholder {
+  padding: 0.35rem 0.6rem;
+  border: 1px dashed var(--tm-border);
+  border-radius: 6px;
+  color: var(--tm-text-3);
+  font-size: 0.74rem;
+}
+.presentation-tag { margin: 0; }
+
+.presentation-table-wrap { overflow-x: auto; }
+.presentation-table-title { color: var(--tm-text-2); font-size: 0.75rem; margin-bottom: 0.25rem; }
+.presentation-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.76rem;
+  th, td { padding: 0.35rem 0.55rem; border-bottom: 1px solid var(--tm-border); text-align: left; }
+  th { color: var(--tm-text-2); font-weight: 600; background: var(--tm-surface); }
+  tbody tr:nth-child(even) { background: var(--tm-surface); }
+}
+.presentation-card {
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+}
+.presentation-card-title { font-weight: 600; color: var(--tm-text-1); margin-bottom: 0.35rem; }
+.presentation-card-grid { display: grid; gap: 0.55rem; }
+
+.presentation-keyvalue { margin: 0; }
+.presentation-keyvalue-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 40%) 1fr;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--tm-border);
+  &:last-child { border-bottom: none; }
+  dt { color: var(--tm-text-3); }
+  dd { margin: 0; color: var(--tm-text-1); }
+}
+
+.presentation-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: 0.55rem; }
+.presentation-kpi {
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+}
+.presentation-kpi-label { color: var(--tm-text-3); font-size: 0.7rem; }
+.presentation-kpi-value { font-size: 1.3rem; font-weight: 700; color: var(--tm-text-1); line-height: 1.2; }
+.presentation-kpi-unit { font-size: 0.78rem; font-weight: 400; color: var(--tm-text-3); }
+.presentation-kpi-note { font-size: 0.7rem; color: var(--tm-text-3); }
+.presentation-tone-success .presentation-kpi-value { color: var(--tm-success); }
+.presentation-tone-warning .presentation-kpi-value { color: var(--tm-warning); }
+.presentation-tone-danger .presentation-kpi-value { color: var(--tm-danger); }
+.presentation-tone-info .presentation-kpi-value { color: var(--tm-teal); }
+
+.presentation-progress-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.presentation-progress-head { display: flex; justify-content: space-between; font-size: 0.74rem; }
+.presentation-progress-label { color: var(--tm-text-2); }
+.presentation-progress-value { color: var(--tm-text-3); }
+.presentation-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  overflow: hidden;
+  margin-top: 0.2rem;
+}
+.presentation-progress-fill { height: 100%; background: var(--tm-teal); border-radius: 3px; }
+.presentation-progress-fill.presentation-tone-success { background: var(--tm-success); }
+.presentation-progress-fill.presentation-tone-warning { background: var(--tm-warning); }
+.presentation-progress-fill.presentation-tone-danger { background: var(--tm-danger); }
+
+.presentation-status { display: flex; gap: 0.5rem; align-items: flex-start; }
+.presentation-status-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--tm-neutral); margin-top: 0.28rem; flex: none;
+}
+.presentation-tone-success .presentation-status-dot { background: var(--tm-success); }
+.presentation-tone-info .presentation-status-dot { background: var(--tm-teal); }
+.presentation-tone-warning .presentation-status-dot { background: var(--tm-warning); }
+.presentation-tone-danger .presentation-status-dot { background: var(--tm-danger); }
+.presentation-status-text { font-weight: 600; color: var(--tm-text-1); }
+.presentation-status-detail { color: var(--tm-text-3); font-size: 0.74rem; }
+.presentation-alert { max-width: 100%; }
+
+.presentation-accordion-item {
+  border: 1px solid var(--tm-border);
+  border-radius: 6px;
+  margin-bottom: 0.35rem;
+  summary {
+    cursor: pointer;
+    padding: 0.4rem 0.6rem;
+    font-weight: 600;
+    color: var(--tm-text-1);
+  }
+}
+.presentation-accordion-body { padding: 0 0.6rem 0.5rem; color: var(--tm-text-2); }
+
+.presentation-chart { margin: 0; }
+.presentation-chart-title { font-weight: 600; color: var(--tm-text-1); margin-bottom: 0.3rem; }
+.presentation-chart-svg { width: 100%; max-width: 480px; height: auto; }
+.presentation-chart-pie { max-width: 240px; }
+.presentation-chart-grid { stroke: var(--tm-border); stroke-width: 0.5; stroke-dasharray: 2 3; }
+.presentation-chart-axis-line { stroke: var(--tm-border); stroke-width: 1; }
+.presentation-chart-axis { fill: var(--tm-text-3); font-size: 9px; }
+.presentation-chart-value { fill: var(--tm-text-2); font-size: 9px; }
+.presentation-chart-unit { color: var(--tm-text-3); font-size: 0.7rem; }
+.presentation-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.3rem; }
+.presentation-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; color: var(--tm-text-2); }
+.presentation-legend-chip { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+.presentation-diagram { margin: 0; }
+.presentation-timeline { list-style: none; margin: 0; padding: 0; }
+.presentation-timeline-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 0.7rem 4.6rem 1fr;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  &::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: -0.45rem;
+    bottom: -0.45rem;
+    width: 1px;
+    background: var(--tm-border);
+  }
+  &:first-child::before { top: 0.6rem; }
+  &:last-child::before { bottom: auto; height: 0.9rem; }
+}
+.presentation-timeline-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--tm-neutral);
+  margin-top: 0.22rem;
+  position: relative;
+  z-index: 1;
+}
+.presentation-tone-success .presentation-timeline-dot { background: var(--tm-success); }
+.presentation-tone-info .presentation-timeline-dot { background: var(--tm-teal); }
+.presentation-tone-warning .presentation-timeline-dot { background: var(--tm-warning); }
+.presentation-tone-danger .presentation-timeline-dot { background: var(--tm-danger); }
+.presentation-timeline-at { color: var(--tm-text-3); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
+.presentation-timeline-label { color: var(--tm-text-1); font-weight: 600; font-size: 0.78rem; }
+.presentation-timeline-desc { color: var(--tm-text-3); font-size: 0.72rem; }
+
+.presentation-image { margin: 0; img { max-width: 100%; border-radius: 6px; border: 1px solid var(--tm-border); } figcaption { color: var(--tm-text-3); font-size: 0.72rem; margin-top: 0.2rem; } }
+.presentation-gallery { display: grid; gap: 0.55rem; }
+.presentation-file { display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.presentation-file-chip { border: 1px solid var(--tm-teal); background: var(--tm-elevated); border-radius: 6px; color: var(--tm-teal); font-size: 0.72rem; padding: 0.25rem 0.6rem; cursor: pointer; }
+.presentation-file-note { color: var(--tm-text-3); font-size: 0.72rem; }
+
+// Presentation Engine, P2/P3 additions: gauge, gantt and interactive
+// components (docs/presentation-engine.md §6.7, §11).
+.presentation-chart-gauge { max-width: 190px; }
+.presentation-chart-gantt { max-width: 100%; }
+.presentation-gauge-value { fill: var(--tm-text-1); font-size: 18px; font-weight: 700; }
+.presentation-button {
+  border: 1px solid var(--tm-teal);
+  background: var(--tm-elevated);
+  color: var(--tm-teal);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  &:hover { background: var(--tm-teal); color: var(--tm-bg); }
+}
+.presentation-button-static {
+  display: inline-block;
+  color: var(--tm-text-2);
+  cursor: default;
+}
+.presentation-form { display: flex; flex-direction: column; }
+.presentation-form-static { opacity: 0.75; }
+.presentation-form-note { color: var(--tm-text-2); font-size: 0.78rem; margin-bottom: 0.3rem; }

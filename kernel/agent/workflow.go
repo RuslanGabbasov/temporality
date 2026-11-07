@@ -1721,6 +1721,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
 			}
+			publishAnswerPresentations(ctx, activityCtx, &input, result.Answer)
 			startKnowledgeExtraction(ctx, activityCtx, state, input)
 			return result, nil
 		}
@@ -2897,6 +2898,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
 			}
+			publishAnswerPresentations(ctx, activityCtx, &input, result.Answer)
 			startKnowledgeExtraction(ctx, activityCtx, state, input)
 			return result, nil
 		}
@@ -3076,6 +3078,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if err := emitAgentSummary(activityCtx, state, result.Answer, frames, finaleTurn); err != nil {
 			return result, err
 		}
+		publishAnswerPresentations(ctx, activityCtx, &input, result.Answer)
 	}
 	startKnowledgeExtraction(ctx, activityCtx, state, input)
 	return result, nil
@@ -4257,7 +4260,7 @@ func emitAgentSummary(ctx workflow.Context, state *eventState, answer string, fr
 }
 
 func systemPromptForRole(role string) string {
-	base := "You are a careful project agent. Use tools when useful and converge to a final answer before the turn budget runs out. Every command sandbox has a writable /scratch directory (HOME and TMPDIR point there) whose files survive between the commands of one run and are wiped after the run — use it for multi-step file preparation, build scratch and package caches, and never write caches into the workspace, which may be read-only for your role. Successful verification and build command outcomes are recorded as knowledge automatically; do not restate them with remember. Call remember only when you are highly confident in a durable conclusion that goes beyond the recorded execution results, and include evidence refs. Treat retrieved memory as fallible and respect cautions."
+	base := "You are a careful project agent. Use tools when useful and converge to a final answer before the turn budget runs out. Every command sandbox has a writable /scratch directory (HOME and TMPDIR point there) whose files survive between the commands of one run and are wiped after the run — use it for multi-step file preparation, build scratch and package caches, and never write caches into the workspace, which may be read-only for your role. Successful verification and build command outcomes are recorded as knowledge automatically; do not restate them with remember. Call remember only when you are highly confident in a durable conclusion that goes beyond the recorded execution results, and include evidence refs. Treat retrieved memory as fallible and respect cautions. " + PresentationPromptSection
 	if role == "" {
 		return base
 	}
@@ -5397,5 +5400,31 @@ func KernelTools() []llm.ToolDef {
 			},
 			"required": []string{"tasks"},
 		}},
+
+		// Presentation Engine (docs/presentation-engine.md §10): structured
+		// answers. Simple tables/cards/KPIs/charts do not need a tool — embed
+		// a ```presentation fenced block in the final answer; these tools
+		// cover presenting mid-run, drafts, updates, artifact links and
+		// channel capability lookups.
+		{Name: "present", Description: "Show the user a structured, visual answer NOW: a report with KPI tiles, tables, charts (line/bar/pie), flowcharts, mindmaps, timelines, gantt plans, images — rendered in the web UI; text channels get the automatic fallback, and deliver=true additionally pushes the adapted visuals (SVG/PNG) through the recipient's messaging channels. Pass the presentation document as JSON (version '1.0', type 'presentation', content blocks); invalid documents come back with exact errors to fix. Always accompany the visual with a short text summary in your final answer", Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"document":  map[string]any{"type": "object", "description": "Presentation IR: {version:'1.0', type:'presentation', title:'...', content:[{type:'kpi', items:[{label:'Passed', value:942, status:'success'}]}, {type:'chart', props:{chartType:'pie'}, data:{labels:[...], values:[...]}}, {type:'table', data:{columns:[{key:'name'}], rows:[{name:'login'}]}}]}. Block types: text, markdown, heading, list, quote, code, link, badge, divider, table, card, card-grid, comparison, key-value, kpi, progress, status, alert, accordion, chart (+ line-chart/bar-chart/pie-chart aliases), gauge, flowchart, sequence-diagram, mindmap, dependency-graph, state-diagram, er-diagram, class-diagram, timeline, gantt/roadmap, image, image-gallery, file, button, form", "properties": map[string]any{}},
+			"deliver":   map[string]any{"type": "boolean", "description": "Also deliver through the recipient's messaging channels (Matrix: markdown+SVG file; Telegram: photo PNG)"},
+			"recipient": map[string]any{"type": "string", "description": "Logical recipient like ask_human: user id/name, role:admin, org:<unit>, project_owner. Required with deliver"},
+		}, "required": []string{"document"}}},
+		{Name: "create_presentation", Description: "Create a presentation as a DRAFT without publishing it — prepare a document early in the run, publish or hand it over later. Same document format as present", Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"document": map[string]any{"type": "object", "description": "Presentation IR (same format as present)", "properties": map[string]any{}},
+		}, "required": []string{"document"}}},
+		{Name: "update_presentation", Description: "Publish a new version of an existing presentation: the previous version moves to the history and the run stream shows the update. Correct or extend an already published document instead of sending a new one", Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"id":       map[string]any{"type": "string", "description": "Presentation id from present/create_presentation"},
+			"document": map[string]any{"type": "object", "description": "The full new document (Presentation IR)", "properties": map[string]any{}},
+		}, "required": []string{"id", "document"}}},
+		{Name: "attach_artifact", Description: "Link an existing artifact (from artifact_search/artifact_create) to a presentation so readers can open the source document from the visual", Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"presentation_id": map[string]any{"type": "string"},
+			"artifact_id":     map[string]any{"type": "string"},
+		}, "required": []string{"presentation_id", "artifact_id"}}},
+		{Name: "get_presentation", Description: "Read a presentation's current state: title, status, version and the text fallback — check what you already published before updating it", Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"id": map[string]any{"type": "string"},
+		}, "required": []string{"id"}}},
+		{Name: "get_capabilities", Description: "List the delivery channels reachable from this workspace and what each can render (markdown, tables, charts, images, forms). Call it when the answer's target channel matters — visuals you send adapt to these capabilities automatically", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 	}
 }

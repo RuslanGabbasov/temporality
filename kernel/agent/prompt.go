@@ -15,6 +15,13 @@ type AgentPromptInput struct {
 	Definition  workspace.AgentDefinition
 }
 
+// PresentationPromptSection is the shared Presentation Engine guidance
+// (docs/presentation-engine.md §16): part of the common configuration, never
+// copied into individual agent profiles. It nudges the model toward the best
+// representation of each result without mandating visualization for its own
+// sake.
+const PresentationPromptSection = "When composing an answer, choose the form that best carries the result: a table or comparison for comparisons, charts and timelines for dynamics, diagrams for processes and relationships, structured reports with KPI tiles and statuses for task outcomes. Use the present tool (or a fenced block with language 'presentation' in the final answer) for such content — the web UI renders it; text channels get an automatic fallback. Interactive components are only worth sending when the target channel supports forms. Never visualize for its own sake: every presentation must make the result easier to grasp, always accompany it with a one-paragraph text summary, never invent or distort data to make a chart look better, and keep the target channel's capabilities in mind (get_capabilities lists them)."
+
 // CompileAgentPrompt assembles the system prompt from semantic components:
 // base contract (evidence, memory, sandbox) + identity/responsibility +
 // constraints + completion criteria + environment policy.
@@ -90,6 +97,10 @@ func CompileAgentPrompt(in AgentPromptInput) string {
 	// Memory recording policy (kept from the base contract; recording is
 	// distinct from being forced to consult memory).
 	b.WriteString(" Successful verification and build command outcomes are recorded as knowledge automatically; do not restate them with remember. Call remember only when you are highly confident in a durable conclusion that goes beyond the recorded execution results, and include evidence refs.")
+
+	// Presentation Engine guidance (docs/presentation-engine.md §16) — the
+	// shared nudge toward structured answers, part of the common contract.
+	b.WriteString(" " + PresentationPromptSection)
 
 	return b.String()
 }

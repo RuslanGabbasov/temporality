@@ -620,6 +620,9 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.WriteTeamContract, activity.RegisterOptions{Name: agent.ActivityWriteTeamContract})
 	temporalWorker.RegisterActivityWithOptions(activities.NotifyChannel, activity.RegisterOptions{Name: agent.ActivityNotifyChannel})
 	temporalWorker.RegisterActivityWithOptions(activities.CloseHumanRequest, activity.RegisterOptions{Name: agent.ActivityCloseHumanRequest})
+	// Presentation Engine (docs/presentation-engine.md §10.1.1): publish the
+	// ```presentation fenced blocks of a final answer, best-effort.
+	temporalWorker.RegisterActivityWithOptions(activities.PublishPresentations, activity.RegisterOptions{Name: agent.ActivityPublishPresentations})
 	registerExampleWorkflow(temporalWorker)
 	// Graceful drain on SIGTERM: temporalWorker.Run(worker.InterruptCh())
 	// stops polling and waits for in-flight activities — but unbounded, and
@@ -3091,6 +3094,12 @@ func main() {
 	RegisterSagaRoutes(mux, gate, events, observationURL)
 	// Server-side chat persistence (docs/resilience-and-scale.md §4).
 	RegisterChatRoutes(mux, gate, ws)
+	// Presentation Engine (docs/presentation-engine.md §9–§15): structured
+	// agent documents — create/update/lifecycle, static rendering (SVG/PNG/
+	// text/pdf), channel adaptation preview, the IR JSON Schema, the channel
+	// capability matrix and the interaction handler (§11: buttons and forms
+	// land in the existing HITL machinery).
+	registerPresentationRoutes(mux, gate, ws, events, temporalClient, ws, activities.SourceID)
 	// Research sessions (docs/human-knowledge-explorer.md §11): saved
 	// knowledge-explorer investigations — list/read for everyone with read
 	// access, create/update/delete for writers.

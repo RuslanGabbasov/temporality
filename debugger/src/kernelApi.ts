@@ -812,3 +812,24 @@ export function runAgentCheckCases(agentID: string, target: number | { proposal:
   const query = typeof target === 'number' ? `version=${target}` : `proposal=${target.proposal}`
   return request(`${agentPath(agentID)}/check-cases/run?${query}`)
 }
+
+// Presentation Engine interaction (docs/presentation-engine.md §11): submit
+// one declared action of a presentation (button click / form values). The
+// handler routes it into the HITL machinery; a 409 means the ask was already
+// answered (stale button), 403/422 mean the action is not declared or the
+// payload is invalid.
+export async function interactWithPresentation(presentationID: string, body: {
+  component_id: string
+  action_type?: string
+  target?: string
+  payload?: Record<string, unknown>
+}): Promise<{ accepted: boolean; target: string }> {
+  const response = await fetch(`${KERNEL_API}/v1/workspace/presentations/${encodeURIComponent(presentationID)}/interact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  })
+  if (response.status === 409) throw new Error('already answered')
+  if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+  return response.json() as Promise<{ accepted: boolean; target: string }>
+}

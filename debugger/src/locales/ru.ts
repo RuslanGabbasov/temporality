@@ -484,6 +484,8 @@ export const ru: Record<string, string> = {
     'chat.run_failed': 'Запуск завершился ошибкой',
     'chat.no_answer': 'Ответ не получен',
     'chat.answer_received': 'Ответ получен',
+    'presentation.already_answered': 'Это действие уже выполнено.',
+    'presentation.action_failed': 'Не удалось выполнить действие',
     'chat.delegation.title': 'Делегирование',
     'chat.delegation.completed': 'завершено',
     'chat.delegation.failed': 'ошибка',

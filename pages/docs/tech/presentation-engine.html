@@ -1,0 +1,1272 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="">
+<title>Техническое задание: Presentation Engine для Temporality — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/presentation-engine.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row active" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Техническое задание: Presentation Engine для Temporality</h1>
+
+<p><strong>Компонент:</strong> Presentation Engine<br><strong>Продукт:</strong> Temporality<br><strong>Тип:</strong> Подсистема Agent Runtime / Communication<br><strong>Приоритет:</strong> P0<br><strong>Статус:</strong> Ready for implementation</p>
+<hr>
+<h1 id="1-цель-проекта"><a class="anchor" href="#1-цель-проекта" aria-label="Section link">#</a>1. Цель проекта</h1><p>Разработать универсальную подсистему визуальной и интерактивной коммуникации между агентами Temporality и пользователями.</p>
+<p>В настоящее время взаимодействие с агентами преимущественно осуществляется посредством текстовых сообщений. Это ограничивает эффективность коммуникации: результаты анализа, сложные взаимосвязи, планы, сравнения и промежуточные результаты приходится описывать длинными текстовыми сообщениями.</p>
+<p>Presentation Engine должен предоставить агентам универсальные средства выразительности, позволяющие самостоятельно выбирать оптимальную форму представления информации.</p>
+<p>Подсистема должна поддерживать:</p>
+<ul>
+<li>Форматированный текст и Markdown.</li>
+<li>Таблицы и структурированные карточки.</li>
+<li>Графики и диаграммы.</li>
+<li>Блок-схемы и графы взаимосвязей.</li>
+<li>Timeline, roadmap и Gantt.</li>
+<li>Изображения, иллюстрации и скриншоты.</li>
+<li>Интерактивные формы и элементы управления.</li>
+<li>Составные визуальные представления.</li>
+<li>Статические визуальные представления для каналов, не поддерживающих интерактивный UI.</li>
+</ul>
+<h2 id="11-основной-принцип"><a class="anchor" href="#11-основной-принцип" aria-label="Section link">#</a>1.1. Основной принцип</h2><p><strong>Агент должен не просто формировать текстовый ответ, а выбирать наиболее подходящий способ представления результата своей работы.</strong></p>
+<p>Presentation Engine обеспечивает единый декларативный контракт между агентами и пользовательскими интерфейсами.</p>
+<p>При этом:</p>
+<ul>
+<li>Агент определяет содержание и семантику представления.</li>
+<li>Runtime контролирует доступность возможностей и допустимые действия.</li>
+<li>Presentation IR описывает структуру содержимого.</li>
+<li>Web Renderer обеспечивает интерактивное отображение.</li>
+<li>Server-side Channel Adapters адаптируют представления к внешним каналам.</li>
+<li>Artifact Storage обеспечивает хранение файлов и бинарных артефактов.</li>
+</ul>
+<h2 id="12-целевые-результаты"><a class="anchor" href="#12-целевые-результаты" aria-label="Section link">#</a>1.2. Целевые результаты</h2><ol>
+<li>Сокращение избыточных текстовых ответов.</li>
+<li>Повышение понятности результатов агентной работы.</li>
+<li>Поддержка визуальной аналитики.</li>
+<li>Возможность интерактивного взаимодействия с результатами.</li>
+<li>Единый механизм представления для всех типов агентов.</li>
+<li>Независимость от конкретной LLM и её возможностей.</li>
+<li>Независимость семантического описания от конкретного UI-фреймворка.</li>
+<li>Возможность добавления новых компонентов без изменения Agent Runtime.</li>
+<li>Единообразное представление информации в разных каналах коммуникации.</li>
+</ol>
+<h1 id="2-архитектурные-принципы"><a class="anchor" href="#2-архитектурные-принципы" aria-label="Section link">#</a>2. Архитектурные принципы</h1><p>При реализации необходимо придерживаться следующих принципов.</p>
+<h3 id="21-расширение-существующего-механизма-сообщений"><a class="anchor" href="#21-расширение-существующего-механизма-сообщений" aria-label="Section link">#</a>2.1. Расширение существующего механизма сообщений</h3><p>Presentation Engine не должен создавать параллельную систему коммуникации.</p>
+<p>Необходимо расширить существующий формат сообщений Temporality, предусмотрев поддержку структурированного содержимого и вложенных визуальных компонентов.</p>
+<p>Обычные текстовые сообщения должны продолжать работать без изменений.</p>
+<h3 id="22-единый-декларативный-формат"><a class="anchor" href="#22-единый-декларативный-формат" aria-label="Section link">#</a>2.2. Единый декларативный формат</h3><p>Все визуальные компоненты описываются через Presentation IR.</p>
+<p>IR не должен зависеть от:</p>
+<ul>
+<li>React или другого UI-фреймворка.</li>
+<li>Mermaid или другой библиотеки диаграмм.</li>
+<li>Конкретной модели LLM.</li>
+<li>Конкретного канала коммуникации.</li>
+</ul>
+<h3 id="23-разделение-серверной-и-клиентской-ответственности"><a class="anchor" href="#23-разделение-серверной-и-клиентской-ответственности" aria-label="Section link">#</a>2.3. Разделение серверной и клиентской ответственности</h3><p>Web Renderer располагается на стороне клиентского приложения.</p>
+<p>Серверная часть отвечает за:</p>
+<ul>
+<li>Валидацию Presentation IR.</li>
+<li>Проверку политик.</li>
+<li>Управление жизненным циклом представлений.</li>
+<li>Адаптацию к каналам коммуникации.</li>
+<li>Генерацию статических представлений SVG и PNG.</li>
+<li>Управление артефактами.</li>
+<li>Обработку пользовательских действий.</li>
+</ul>
+<h3 id="24-универсальность"><a class="anchor" href="#24-универсальность" aria-label="Section link">#</a>2.4. Универсальность</h3><p>Все агенты используют единый Presentation Engine.</p>
+<p>Не допускается создание отдельных механизмов визуализации для Coder, Reviewer, QA, Researcher, Delivery Manager и других ролей.</p>
+<h1 id="3-общая-архитектура"><a class="anchor" href="#3-общая-архитектура" aria-label="Section link">#</a>3. Общая архитектура</h1><pre><code class="language-mermaid">flowchart TD
+    A[Agent] --&gt; B[Existing Message API]
+    B --&gt; C[Presentation IR]
+    C --&gt; D[Validation and Policy]
+    D --&gt; E[Presentation Runtime]
+    E --&gt; F[Component Registry]
+    E --&gt; G[Artifact Storage]
+    E --&gt; H[Web Message]
+    E --&gt; I[Channel Adapter]
+    F --&gt; J[Renderer Contracts]
+    J --&gt; K[Native Renderer]
+    J --&gt; L[SVG Renderer]
+    J --&gt; M[PNG Renderer]
+    J --&gt; N[Text Renderer]
+    K --&gt; O[Web UI]
+    I --&gt; P[Matrix]
+    I --&gt; Q[Telegram]
+    H --&gt; O
+</code></pre>
+<h2 id="31-основные-компоненты"><a class="anchor" href="#31-основные-компоненты" aria-label="Section link">#</a>3.1. Основные компоненты</h2><table>
+<thead>
+<tr>
+<th>Компонент</th>
+<th>Ответственность</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Presentation IR</td>
+<td>Декларативное описание содержимого</td>
+</tr>
+<tr>
+<td>Presentation API</td>
+<td>Интерфейс создания представлений агентами</td>
+</tr>
+<tr>
+<td>Validation &amp; Policy</td>
+<td>Проверка структуры и безопасности</td>
+</tr>
+<tr>
+<td>Presentation Runtime</td>
+<td>Управление жизненным циклом</td>
+</tr>
+<tr>
+<td>Component Registry</td>
+<td>Реестр типов компонентов</td>
+</tr>
+<tr>
+<td>Web Renderer</td>
+<td>Интерактивное отображение</td>
+</tr>
+<tr>
+<td>Static Renderer</td>
+<td>Генерация SVG и PNG</td>
+</tr>
+<tr>
+<td>Text Renderer</td>
+<td>Текстовое представление</td>
+</tr>
+<tr>
+<td>Channel Adapter</td>
+<td>Адаптация для каналов</td>
+</tr>
+<tr>
+<td>Interaction Handler</td>
+<td>Обработка действий пользователей</td>
+</tr>
+<tr>
+<td>Artifact Storage</td>
+<td>Хранение бинарных артефактов</td>
+</tr>
+</tbody></table>
+<h1 id="4-presentation-ir"><a class="anchor" href="#4-presentation-ir" aria-label="Section link">#</a>4. Presentation IR</h1><h2 id="41-общие-требования"><a class="anchor" href="#41-общие-требования" aria-label="Section link">#</a>4.1. Общие требования</h2><p>Presentation IR — промежуточное декларативное представление содержимого сообщения.</p>
+<p>Базовый формат — JSON.</p>
+<p>Требования:</p>
+<ul>
+<li>Машиночитаемость.</li>
+<li>Версионирование.</li>
+<li>Расширяемость.</li>
+<li>Формальная схема валидации.</li>
+<li>Поддержка вложенных компонентов.</li>
+<li>Независимость от renderer.</li>
+<li>Безопасная обработка недоверенного содержимого.</li>
+<li>Возможность частичного обновления представлений.</li>
+</ul>
+<h2 id="42-структура"><a class="anchor" href="#42-структура" aria-label="Section link">#</a>4.2. Структура</h2><p>Пример:</p>
+<pre><code class="language-json">{
+  &quot;version&quot;: &quot;1.0&quot;,
+  &quot;type&quot;: &quot;presentation&quot;,
+  &quot;id&quot;: &quot;presentation-123&quot;,
+  &quot;title&quot;: &quot;Test execution report&quot;,
+  &quot;content&quot;: [
+    {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;content&quot;: &quot;Тестирование завершено.&quot;
+    },
+    {
+      &quot;type&quot;: &quot;kpi&quot;,
+      &quot;items&quot;: [
+        {
+          &quot;label&quot;: &quot;Passed&quot;,
+          &quot;value&quot;: 942,
+          &quot;status&quot;: &quot;success&quot;
+        },
+        {
+          &quot;label&quot;: &quot;Failed&quot;,
+          &quot;value&quot;: 31,
+          &quot;status&quot;: &quot;danger&quot;
+        }
+      ]
+    },
+    {
+      &quot;type&quot;: &quot;chart&quot;,
+      &quot;chartType&quot;: &quot;pie&quot;,
+      &quot;data&quot;: {
+        &quot;labels&quot;: [&quot;Passed&quot;, &quot;Failed&quot;, &quot;Skipped&quot;],
+        &quot;values&quot;: [942, 31, 27]
+      }
+    }
+  ]
+}
+</code></pre>
+<p>Это иллюстрация структуры. Окончательная JSON Schema определяется в ходе реализации.</p>
+<h2 id="43-свойства-компонентов"><a class="anchor" href="#43-свойства-компонентов" aria-label="Section link">#</a>4.3. Свойства компонентов</h2><p>Каждый компонент должен поддерживать применимые к нему свойства:</p>
+<ul>
+<li><code>type</code> — тип компонента.</li>
+<li><code>id</code> — уникальный идентификатор.</li>
+<li><code>content</code> — содержимое.</li>
+<li><code>data</code> — структурированные данные.</li>
+<li><code>props</code> — параметры отображения.</li>
+<li><code>actions</code> — разрешённые интерактивные действия.</li>
+</ul>
+<p>Не следует требовать наличия всех полей у каждого типа компонента.</p>
+<h2 id="44-композиция"><a class="anchor" href="#44-композиция" aria-label="Section link">#</a>4.4. Композиция</h2><p>IR должен поддерживать составные представления.</p>
+<p>Например, карточка может содержать:</p>
+<ul>
+<li>Заголовок.</li>
+<li>Текст.</li>
+<li>Изображение.</li>
+<li>KPI.</li>
+<li>Таблицу.</li>
+<li>Список.</li>
+<li>Ссылки.</li>
+<li>Кнопки действий.</li>
+</ul>
+<p>Необходимо предусмотреть ограничения глубины вложенности, размера документа и количества компонентов.</p>
+<h1 id="5-component-registry"><a class="anchor" href="#5-component-registry" aria-label="Section link">#</a>5. Component Registry</h1><p>Необходимо реализовать централизованный реестр визуальных компонентов.</p>
+<p>Для каждого компонента регистрируются:</p>
+<ul>
+<li>Уникальный тип.</li>
+<li>Версия.</li>
+<li>JSON Schema.</li>
+<li>Native Renderer.</li>
+<li>SVG Renderer.</li>
+<li>PNG Renderer.</li>
+<li>Text Renderer.</li>
+<li>Поддерживаемые свойства.</li>
+<li>Поддерживаемые действия.</li>
+<li>Ограничения.</li>
+<li>Возможности fallback.</li>
+</ul>
+<p>Реестр должен позволять подключать новые компоненты без модификации основного Agent Runtime.</p>
+<p>Отсутствие реализации одного из обязательных renderer&#39;ов должно обнаруживаться при регистрации компонента или прохождении тестов.</p>
+<h1 id="6-каталог-компонентов"><a class="anchor" href="#6-каталог-компонентов" aria-label="Section link">#</a>6. Каталог компонентов</h1><h2 id="61-rich-text"><a class="anchor" href="#61-rich-text" aria-label="Section link">#</a>6.1. Rich Text</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>text</td>
+<td>Обычный текст</td>
+</tr>
+<tr>
+<td>markdown</td>
+<td>Форматированный Markdown</td>
+</tr>
+<tr>
+<td>heading</td>
+<td>Заголовки</td>
+</tr>
+<tr>
+<td>paragraph</td>
+<td>Абзацы</td>
+</tr>
+<tr>
+<td>list</td>
+<td>Списки</td>
+</tr>
+<tr>
+<td>quote</td>
+<td>Цитаты</td>
+</tr>
+<tr>
+<td>code</td>
+<td>Блоки кода</td>
+</tr>
+<tr>
+<td>math</td>
+<td>Математические формулы</td>
+</tr>
+<tr>
+<td>link</td>
+<td>Ссылки</td>
+</tr>
+<tr>
+<td>badge</td>
+<td>Статусные метки</td>
+</tr>
+<tr>
+<td>icon</td>
+<td>Иконки</td>
+</tr>
+<tr>
+<td>divider</td>
+<td>Разделители</td>
+</tr>
+</tbody></table>
+<p>Markdown должен поддерживаться как базовый способ текстовой коммуникации.</p>
+<h2 id="62-structured-data"><a class="anchor" href="#62-structured-data" aria-label="Section link">#</a>6.2. Structured Data</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>table</td>
+<td>Таблицы</td>
+</tr>
+<tr>
+<td>card</td>
+<td>Карточки</td>
+</tr>
+<tr>
+<td>card-grid</td>
+<td>Сетка карточек</td>
+</tr>
+<tr>
+<td>comparison</td>
+<td>Сравнение вариантов</td>
+</tr>
+<tr>
+<td>key-value</td>
+<td>Пары ключ-значение</td>
+</tr>
+<tr>
+<td>kpi</td>
+<td>Ключевые показатели</td>
+</tr>
+<tr>
+<td>progress</td>
+<td>Индикаторы прогресса</td>
+</tr>
+<tr>
+<td>status</td>
+<td>Статусы</td>
+</tr>
+<tr>
+<td>alert</td>
+<td>Предупреждения</td>
+</tr>
+<tr>
+<td>accordion</td>
+<td>Раскрываемые блоки</td>
+</tr>
+</tbody></table>
+<p>Таблицы должны поддерживать:</p>
+<ul>
+<li>Заголовки.</li>
+<li>Типизацию значений.</li>
+<li>Выравнивание.</li>
+<li>Ссылки и действия в ячейках.</li>
+<li>Адаптивное представление.</li>
+<li>Сортировку при наличии соответствующей интерактивности.</li>
+</ul>
+<h2 id="63-data-visualization"><a class="anchor" href="#63-data-visualization" aria-label="Section link">#</a>6.3. Data Visualization</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>line-chart</td>
+<td>Линейные графики</td>
+</tr>
+<tr>
+<td>bar-chart</td>
+<td>Столбчатые диаграммы</td>
+</tr>
+<tr>
+<td>pie-chart</td>
+<td>Круговые диаграммы</td>
+</tr>
+<tr>
+<td>area-chart</td>
+<td>Диаграммы областей</td>
+</tr>
+<tr>
+<td>scatter-chart</td>
+<td>Диаграммы рассеяния</td>
+</tr>
+<tr>
+<td>heatmap</td>
+<td>Тепловые карты</td>
+</tr>
+<tr>
+<td>histogram</td>
+<td>Гистограммы</td>
+</tr>
+<tr>
+<td>gauge</td>
+<td>Индикаторы значений</td>
+</tr>
+<tr>
+<td>timeline-chart</td>
+<td>Временные ряды</td>
+</tr>
+</tbody></table>
+<p>Требования:</p>
+<ul>
+<li>Исходные данные передаются в структурированном виде.</li>
+<li>Поддерживаются названия осей и легенды.</li>
+<li>Поддерживаются единицы измерения.</li>
+<li>Поддерживаются подсказки и отображение значений.</li>
+<li>Обеспечивается адаптивная ширина.</li>
+<li>Обрабатываются нулевые и отрицательные значения.</li>
+<li>Для больших наборов данных предусмотрены ограничения.</li>
+<li>Визуализация не должна искажать исходные данные.</li>
+</ul>
+<h2 id="64-diagrams"><a class="anchor" href="#64-diagrams" aria-label="Section link">#</a>6.4. Diagrams</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>flowchart</td>
+<td>Блок-схемы</td>
+</tr>
+<tr>
+<td>sequence-diagram</td>
+<td>Диаграммы последовательности</td>
+</tr>
+<tr>
+<td>class-diagram</td>
+<td>Диаграммы классов</td>
+</tr>
+<tr>
+<td>er-diagram</td>
+<td>ER-диаграммы</td>
+</tr>
+<tr>
+<td>state-diagram</td>
+<td>Диаграммы состояний</td>
+</tr>
+<tr>
+<td>dependency-graph</td>
+<td>Граф зависимостей</td>
+</tr>
+<tr>
+<td>architecture-diagram</td>
+<td>Архитектурные схемы</td>
+</tr>
+<tr>
+<td>mindmap</td>
+<td>Интеллект-карты</td>
+</tr>
+<tr>
+<td>network-graph</td>
+<td>Графы взаимосвязей</td>
+</tr>
+</tbody></table>
+<p>Для первой реализации допустимо использовать существующие движки визуализации, включая Mermaid.</p>
+<p>При этом IR не должен быть привязан к конкретному движку.</p>
+<p>Для графов необходимо предусмотреть:</p>
+<ul>
+<li>Узлы.</li>
+<li>Направленные и ненаправленные связи.</li>
+<li>Типы узлов.</li>
+<li>Метки связей.</li>
+<li>Группировку.</li>
+<li>Выделение узлов.</li>
+<li>Переходы к связанным сущностям Temporality.</li>
+</ul>
+<h2 id="65-planning-amp-timeline"><a class="anchor" href="#65-planning-amp-timeline" aria-label="Section link">#</a>6.5. Planning &amp; Timeline</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>timeline</td>
+<td>Хронология событий</td>
+</tr>
+<tr>
+<td>gantt</td>
+<td>Диаграмма Ганта</td>
+</tr>
+<tr>
+<td>roadmap</td>
+<td>Дорожная карта</td>
+</tr>
+<tr>
+<td>calendar</td>
+<td>Календарь</td>
+</tr>
+<tr>
+<td>milestone</td>
+<td>Контрольные точки</td>
+</tr>
+<tr>
+<td>dependency-map</td>
+<td>Карта зависимостей</td>
+</tr>
+</tbody></table>
+<p>Данные должны поддерживать временные интервалы, статусы, исполнителей и зависимости.</p>
+<p>Для отображения существующих задач и проектов необходимо использовать ссылки на существующие сущности Temporality, не создавая дублирующие модели.</p>
+<h2 id="66-media"><a class="anchor" href="#66-media" aria-label="Section link">#</a>6.6. Media</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>image</td>
+<td>Изображения</td>
+</tr>
+<tr>
+<td>image-gallery</td>
+<td>Галерея</td>
+</tr>
+<tr>
+<td>video</td>
+<td>Видео</td>
+</tr>
+<tr>
+<td>audio</td>
+<td>Аудиофайлы</td>
+</tr>
+<tr>
+<td>screenshot</td>
+<td>Скриншоты</td>
+</tr>
+<tr>
+<td>file</td>
+<td>Файловые вложения</td>
+</tr>
+<tr>
+<td>generated-image</td>
+<td>Сгенерированные изображения</td>
+</tr>
+</tbody></table>
+<p>Источники:</p>
+<ul>
+<li>Артефакты агентов.</li>
+<li>Artifact Storage.</li>
+<li>Разрешённые внешние источники.</li>
+<li>Сервисы генерации изображений.</li>
+<li>Инструменты браузерной автоматизации и тестирования.</li>
+</ul>
+<p>Генерация изображений не входит в обязательную ответственность Presentation Engine. Engine должен обеспечивать стандартизированное включение результатов генерации.</p>
+<h2 id="67-interactive-components"><a class="anchor" href="#67-interactive-components" aria-label="Section link">#</a>6.7. Interactive Components</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>button</td>
+<td>Кнопка действия</td>
+</tr>
+<tr>
+<td>form</td>
+<td>Форма</td>
+</tr>
+<tr>
+<td>input</td>
+<td>Текстовый ввод</td>
+</tr>
+<tr>
+<td>textarea</td>
+<td>Многострочный ввод</td>
+</tr>
+<tr>
+<td>checkbox</td>
+<td>Флажок</td>
+</tr>
+<tr>
+<td>radio</td>
+<td>Выбор одного значения</td>
+</tr>
+<tr>
+<td>select</td>
+<td>Выпадающий список</td>
+</tr>
+<tr>
+<td>tabs</td>
+<td>Переключение представлений</td>
+</tr>
+<tr>
+<td>filter</td>
+<td>Фильтрация</td>
+</tr>
+<tr>
+<td>date-picker</td>
+<td>Выбор даты</td>
+</tr>
+<tr>
+<td>slider</td>
+<td>Числовой выбор</td>
+</tr>
+</tbody></table>
+<p>Интерактивные компоненты должны быть декларативными. Произвольный код, переданный агентом, не исполняется.</p>
+<h1 id="7-multi-format-rendering-contract"><a class="anchor" href="#7-multi-format-rendering-contract" aria-label="Section link">#</a>7. Multi-format Rendering Contract</h1><p>Это один из ключевых архитектурных контрактов Presentation Engine.</p>
+<p><strong>Каждый визуализатор обязан уметь формировать интерактивное представление для Web и статические представления для внешних каналов.</strong></p>
+<h2 id="71-обязательные-форматы"><a class="anchor" href="#71-обязательные-форматы" aria-label="Section link">#</a>7.1. Обязательные форматы</h2><table>
+<thead>
+<tr>
+<th>Формат</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Native UI</td>
+<td>Интерактивное отображение в Web</td>
+</tr>
+<tr>
+<td>SVG</td>
+<td>Статическое векторное изображение для Matrix</td>
+</tr>
+<tr>
+<td>PNG</td>
+<td>Растровое изображение для Telegram</td>
+</tr>
+<tr>
+<td>Text</td>
+<td>Текстовый fallback</td>
+</tr>
+</tbody></table>
+<h2 id="72-контракт-визуализатора"><a class="anchor" href="#72-контракт-визуализатора" aria-label="Section link">#</a>7.2. Контракт визуализатора</h2><p>Каждый визуализатор должен реализовывать следующие операции:</p>
+<pre><code class="language-typescript">interface Visualizer {
+  render(
+    component: PresentationComponent,
+    context: RenderContext
+  ): NativeView;
+
+  renderSvg(
+    component: PresentationComponent,
+    context: RenderContext
+  ): Promise&lt;SVGArtifact&gt;;
+
+  renderPng(
+    component: PresentationComponent,
+    context: RenderContext
+  ): Promise&lt;PNGArtifact&gt;;
+
+  renderText(
+    component: PresentationComponent,
+    context: RenderContext
+  ): string;
+}
+</code></pre>
+<p>Интерфейс приведён концептуально. Конкретная реализация определяется используемым технологическим стеком.</p>
+<h2 id="73-единый-источник-данных"><a class="anchor" href="#73-единый-источник-данных" aria-label="Section link">#</a>7.3. Единый источник данных</h2><p>Все renderer&#39;ы должны получать одинаковый исходный компонент и данные.</p>
+<p>Запрещается:</p>
+<ul>
+<li>Повторно обращаться к LLM для генерации статической версии.</li>
+<li>Создавать отдельные наборы данных для разных каналов.</li>
+<li>Изменять значения при экспорте.</li>
+<li>Терять подписи, единицы измерения и существенные элементы легенды.</li>
+</ul>
+<p>Допускается адаптация геометрии, масштаба, компоновки и типографики под конкретный формат.</p>
+<h2 id="74-требования-к-svg"><a class="anchor" href="#74-требования-к-svg" aria-label="Section link">#</a>7.4. Требования к SVG</h2><p>SVG должен:</p>
+<ul>
+<li>Быть автономным.</li>
+<li>Не зависеть от внешних CSS и ресурсов.</li>
+<li>Содержать все необходимые элементы изображения.</li>
+<li>Корректно отображаться в распространённых SVG-совместимых клиентах.</li>
+<li>Не содержать исполняемого JavaScript.</li>
+<li>Проходить безопасную обработку перед отправкой.</li>
+<li>Иметь корректные размеры и viewBox.</li>
+</ul>
+<p>Для Matrix SVG следует передавать как отдельный файловый или графический артефакт в зависимости от возможностей клиента. Нельзя полагаться на inline SVG внутри сообщения.</p>
+<p>Если конкретный клиент Matrix не отображает SVG, используется PNG fallback.</p>
+<h2 id="75-требования-к-png"><a class="anchor" href="#75-требования-к-png" aria-label="Section link">#</a>7.5. Требования к PNG</h2><p>PNG должен:</p>
+<ul>
+<li>Иметь достаточное разрешение для читаемого отображения.</li>
+<li>Поддерживать адаптивный выбор размеров.</li>
+<li>Не содержать обрезанных элементов.</li>
+<li>Сохранять подписи и легенды.</li>
+<li>Не искажать данные.</li>
+<li>Оптимизироваться по размеру файла.</li>
+</ul>
+<p>Для Telegram PNG передаётся как обычное изображение.</p>
+<h2 id="76-text-fallback"><a class="anchor" href="#76-text-fallback" aria-label="Section link">#</a>7.6. Text Fallback</h2><p>Текстовый fallback должен передавать основную смысловую информацию визуализации.</p>
+<p>Например, вместо графика без возможности отображения пользователь должен получить:</p>
+<ul>
+<li>Заголовок.</li>
+<li>Основные значения.</li>
+<li>Ключевые выводы.</li>
+<li>Краткое описание взаимосвязей.</li>
+</ul>
+<h2 id="77-проверка-соответствия"><a class="anchor" href="#77-проверка-соответствия" aria-label="Section link">#</a>7.7. Проверка соответствия</h2><p>Для каждого визуализатора обязательны тесты:</p>
+<ul>
+<li>Соответствие данных во всех форматах.</li>
+<li>Наличие подписей.</li>
+<li>Наличие легенды, если она предусмотрена.</li>
+<li>Корректность размеров.</li>
+<li>Отсутствие обрезанного содержимого.</li>
+<li>Корректное отображение кириллицы.</li>
+<li>Корректная работа на светлой и тёмной темах там, где это применимо.</li>
+</ul>
+<p>Все четыре формата являются частью Definition of Done нового визуализатора.</p>
+<h1 id="8-web-renderer"><a class="anchor" href="#8-web-renderer" aria-label="Section link">#</a>8. Web Renderer</h1><h2 id="81-общие-требования"><a class="anchor" href="#81-общие-требования" aria-label="Section link">#</a>8.1. Общие требования</h2><p>Web Renderer реализуется на стороне клиентского приложения.</p>
+<p>Рекомендуется использовать существующий UI-стек Temporality и его компонентную архитектуру.</p>
+<p>Renderer должен:</p>
+<ul>
+<li>Поддерживать все компоненты MVP.</li>
+<li>Использовать общую дизайн-систему.</li>
+<li>Поддерживать desktop и mobile.</li>
+<li>Обрабатывать отсутствующие и некорректные данные.</li>
+<li>Показывать понятные ошибки визуализации.</li>
+<li>Поддерживать темы оформления.</li>
+<li>Обеспечивать accessibility.</li>
+<li>Не исполнять произвольный код из IR.</li>
+</ul>
+<h2 id="82-design-system"><a class="anchor" href="#82-design-system" aria-label="Section link">#</a>8.2. Design System</h2><p>Все компоненты должны использовать единые:</p>
+<ul>
+<li>Цветовые токены.</li>
+<li>Типографику.</li>
+<li>Размеры.</li>
+<li>Отступы.</li>
+<li>Радиусы.</li>
+<li>Иконки.</li>
+<li>Состояния элементов.</li>
+<li>Адаптивные правила.</li>
+</ul>
+<p>Агенты не должны самостоятельно задавать CSS, цвета и геометрию компонентов.</p>
+<p>Оформление контролируется клиентским renderer&#39;ом.</p>
+<h1 id="9-channel-adapters"><a class="anchor" href="#9-channel-adapters" aria-label="Section link">#</a>9. Channel Adapters</h1><h2 id="91-общие-требования"><a class="anchor" href="#91-общие-требования" aria-label="Section link">#</a>9.1. Общие требования</h2><p>Серверная часть должна адаптировать представления к возможностям целевого канала.</p>
+<p>Первоначально необходимо поддержать:</p>
+<ul>
+<li>Web UI.</li>
+<li>Matrix.</li>
+<li>Telegram.</li>
+</ul>
+<h2 id="92-capability-negotiation"><a class="anchor" href="#92-capability-negotiation" aria-label="Section link">#</a>9.2. Capability Negotiation</h2><p>Каждый канал объявляет список поддерживаемых возможностей.</p>
+<p>Пример:</p>
+<pre><code class="language-json">{
+  &quot;channel&quot;: &quot;matrix&quot;,
+  &quot;capabilities&quot;: {
+    &quot;markdown&quot;: true,
+    &quot;tables&quot;: false,
+    &quot;images&quot;: true,
+    &quot;charts&quot;: false,
+    &quot;diagrams&quot;: false,
+    &quot;interactive_forms&quot;: false,
+    &quot;buttons&quot;: true,
+    &quot;files&quot;: true
+  }
+}
+</code></pre>
+<p>Это пример конфигурации, а не утверждение о возможностях всех клиентов Matrix.</p>
+<p>Фактические capabilities должны определяться конкретным адаптером и, где необходимо, клиентом.</p>
+<h2 id="93-стратегия-адаптации"><a class="anchor" href="#93-стратегия-адаптации" aria-label="Section link">#</a>9.3. Стратегия адаптации</h2><table>
+<thead>
+<tr>
+<th>Канал</th>
+<th>Представление</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Web</td>
+<td>Native UI</td>
+</tr>
+<tr>
+<td>Matrix</td>
+<td>SVG</td>
+</tr>
+<tr>
+<td>Matrix fallback</td>
+<td>PNG</td>
+</tr>
+<tr>
+<td>Telegram</td>
+<td>PNG</td>
+</tr>
+<tr>
+<td>Telegram fallback</td>
+<td>Text / Markdown</td>
+</tr>
+<tr>
+<td>Прочие каналы</td>
+<td>По capabilities</td>
+</tr>
+</tbody></table>
+<p>Для Matrix необходимо учитывать, что поддержка SVG зависит от конкретного клиента. Адаптер должен иметь возможность переключиться на PNG.</p>
+<p>Для Telegram использовать PNG как основной формат визуализаций, учитывая ограничения платформы на размеры и типы вложений.</p>
+<h2 id="94-fallback"><a class="anchor" href="#94-fallback" aria-label="Section link">#</a>9.4. Fallback</h2><p>Если канал не поддерживает компонент, используется следующая стратегия:</p>
+<ol>
+<li>Нативное представление, если поддерживается.</li>
+<li>SVG, если поддерживается каналом и клиентом.</li>
+<li>PNG.</li>
+<li>Текстовое представление.</li>
+</ol>
+<p>Порядок должен учитывать capabilities и особенности канала.</p>
+<p>Fallback не должен приводить к потере критически важной информации.</p>
+<p>Если визуальное представление невозможно сформировать, система должна отправить текстовое описание и сообщить об ограничении.</p>
+<h1 id="10-agent-presentation-api"><a class="anchor" href="#10-agent-presentation-api" aria-label="Section link">#</a>10. Agent Presentation API</h1><h2 id="101-общие-требования"><a class="anchor" href="#101-общие-требования" aria-label="Section link">#</a>10.1. Общие требования</h2><p>Агент должен иметь возможность создавать представления через существующий механизм сообщений.</p>
+<p>Необходимо поддержать:</p>
+<ol>
+<li>Формирование представления непосредственно в составе ответа.</li>
+<li>Создание отдельного представления с последующей отправкой.</li>
+<li>Обновление ранее созданного представления.</li>
+<li>Добавление артефактов.</li>
+<li>Получение информации о возможностях канала.</li>
+</ol>
+<p>Не следует заставлять агента вызывать отдельный инструмент для каждой простой таблицы, карточки или графика.</p>
+<p>Простые компоненты должны быть доступны непосредственно через декларативный формат ответа.</p>
+<h2 id="102-операции"><a class="anchor" href="#102-операции" aria-label="Section link">#</a>10.2. Операции</h2><table>
+<thead>
+<tr>
+<th>Операция</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>present</td>
+<td>Отправить представление</td>
+</tr>
+<tr>
+<td>create_presentation</td>
+<td>Создать представление</td>
+</tr>
+<tr>
+<td>update_presentation</td>
+<td>Обновить представление</td>
+</tr>
+<tr>
+<td>attach_artifact</td>
+<td>Добавить артефакт</td>
+</tr>
+<tr>
+<td>get_capabilities</td>
+<td>Получить возможности канала</td>
+</tr>
+<tr>
+<td>get_presentation</td>
+<td>Получить существующее представление</td>
+</tr>
+</tbody></table>
+<p>Конкретная реализация может использовать встроенный API runtime и специализированные tools для тяжёлых операций.</p>
+<h1 id="11-interaction-handler"><a class="anchor" href="#11-interaction-handler" aria-label="Section link">#</a>11. Interaction Handler</h1><h2 id="111-общие-требования"><a class="anchor" href="#111-общие-требования" aria-label="Section link">#</a>11.1. Общие требования</h2><p>Интерактивные компоненты должны передавать действия через контролируемый механизм Interaction Handler.</p>
+<p>Пример:</p>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;button&quot;,
+  &quot;label&quot;: &quot;Approve&quot;,
+  &quot;action&quot;: {
+    &quot;type&quot;: &quot;submit&quot;,
+    &quot;target&quot;: &quot;approval-123&quot;,
+    &quot;payload&quot;: {
+      &quot;decision&quot;: &quot;approve&quot;
+    }
+  }
+}
+</code></pre>
+<h2 id="112-безопасность-действий"><a class="anchor" href="#112-безопасность-действий" aria-label="Section link">#</a>11.2. Безопасность действий</h2><p>Каждое действие должно:</p>
+<ul>
+<li>Иметь зарегистрированный тип.</li>
+<li>Проверяться на соответствие политике доступа.</li>
+<li>Иметь однозначного адресата.</li>
+<li>Проверять права пользователя.</li>
+<li>Поддерживать защиту от повторного выполнения.</li>
+<li>Иметь срок действия при необходимости.</li>
+<li>Логироваться.</li>
+</ul>
+<p>Запрещается передавать в интерактивных компонентах произвольные shell-команды, JavaScript, SQL или другие исполняемые инструкции.</p>
+<h2 id="113-интеграция-с-hitl"><a class="anchor" href="#113-интеграция-с-hitl" aria-label="Section link">#</a>11.3. Интеграция с HITL</h2><p>Presentation Engine интегрируется с существующим HITL Temporality.</p>
+<p>Формы и кнопки могут использоваться для:</p>
+<ul>
+<li>Согласования результатов.</li>
+<li>Выбора вариантов.</li>
+<li>Подтверждения действий.</li>
+<li>Предоставления недостающей информации.</li>
+<li>Проверки промежуточных результатов.</li>
+<li>Передачи решений человеку.</li>
+</ul>
+<p>Presentation Engine отвечает за отображение и передачу ввода.</p>
+<p>Бизнес-логика согласования, маршрутизация, полномочия и переходы состояний остаются в существующих механизмах Temporality.</p>
+<p>Для каналов без поддержки интерактивных форм необходимо предусмотреть адаптацию к доступным средствам взаимодействия.</p>
+<h1 id="12-artifact-management"><a class="anchor" href="#12-artifact-management" aria-label="Section link">#</a>12. Artifact Management</h1><p>Presentation Engine должен использовать существующий механизм хранения артефактов Temporality, если он соответствует требованиям.</p>
+<p>Не следует создавать независимое хранилище без необходимости.</p>
+<p>Поддерживаемые артефакты:</p>
+<ul>
+<li>Изображения.</li>
+<li>SVG.</li>
+<li>PNG.</li>
+<li>Скриншоты.</li>
+<li>PDF.</li>
+<li>Документы.</li>
+<li>Таблицы.</li>
+<li>Видео.</li>
+<li>Аудио.</li>
+<li>Экспортированные диаграммы.</li>
+</ul>
+<p>Метаданные:</p>
+<ul>
+<li>ID.</li>
+<li>Тип.</li>
+<li>MIME type.</li>
+<li>Размер.</li>
+<li>Источник.</li>
+<li>Время создания.</li>
+<li>Область доступа.</li>
+<li>Контрольная сумма.</li>
+<li>Связь с Agent Run.</li>
+<li>Связь с Presentation.</li>
+</ul>
+<p>Необходимо исключить обход политик доступа через прямые ссылки на артефакты.</p>
+<h1 id="13-lifecycle-представлений"><a class="anchor" href="#13-lifecycle-представлений" aria-label="Section link">#</a>13. Lifecycle представлений</h1><p>Необходимо поддержать следующие состояния:</p>
+<ul>
+<li>Draft — создано, но не опубликовано.</li>
+<li>Published — опубликовано.</li>
+<li>Updated — обновлено.</li>
+<li>Archived — архивировано.</li>
+<li>Expired — срок действия завершён.</li>
+</ul>
+<p>Функциональность:</p>
+<ul>
+<li>Сохранение истории версий.</li>
+<li>Обновление существующего представления.</li>
+<li>Повторное отображение.</li>
+<li>Связь с Agent Run.</li>
+<li>Связь с Work Item.</li>
+<li>Связь с автором.</li>
+<li>Временные метки создания и обновления.</li>
+</ul>
+<p>Важно: представление является результатом коммуникации, а не автоматически накопленным знанием.</p>
+<p>Presentation Engine не должен создавать новые memory entries только на основании факта отображения диаграммы или таблицы.</p>
+<p>Необходимо сохранять связь с исходными данными и артефактами, но не создавать параллельную систему памяти.</p>
+<h1 id="14-security"><a class="anchor" href="#14-security" aria-label="Section link">#</a>14. Security</h1><p>Обязательные требования:</p>
+<ol>
+<li>Запрет произвольного JavaScript в IR.</li>
+<li>Запрет небезопасного HTML.</li>
+<li>Строгая JSON Schema validation.</li>
+<li>Ограничения размера документов.</li>
+<li>Ограничения глубины вложенности.</li>
+<li>Ограничения количества компонентов.</li>
+<li>Защита от XSS.</li>
+<li>Контроль внешних ссылок и изображений.</li>
+<li>Контроль доступа к артефактам.</li>
+<li>Проверка пользовательских действий.</li>
+<li>Защита от подмены идентификаторов.</li>
+<li>Защита от повторного выполнения действий.</li>
+<li>Безопасная обработка SVG.</li>
+<li>Ограничение ресурсов при генерации графиков и диаграмм.</li>
+</ol>
+<p>Renderer должен рассматривать содержимое IR как недоверенные данные.</p>
+<p>Внешние изображения не должны получать доступ к внутренним ресурсам.</p>
+<p>Необходимо предусмотреть возможность отключения отдельных типов компонентов политиками организации.</p>
+<h1 id="15-observability"><a class="anchor" href="#15-observability" aria-label="Section link">#</a>15. Observability</h1><p>Необходимо регистрировать следующие события:</p>
+<table>
+<thead>
+<tr>
+<th>Событие</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>presentation.created</td>
+<td>Создание</td>
+</tr>
+<tr>
+<td>presentation.validated</td>
+<td>Успешная валидация</td>
+</tr>
+<tr>
+<td>presentation.validation_failed</td>
+<td>Ошибка валидации</td>
+</tr>
+<tr>
+<td>presentation.rendered</td>
+<td>Успешный рендеринг</td>
+</tr>
+<tr>
+<td>presentation.render_failed</td>
+<td>Ошибка рендеринга</td>
+</tr>
+<tr>
+<td>presentation.published</td>
+<td>Публикация</td>
+</tr>
+<tr>
+<td>presentation.updated</td>
+<td>Обновление</td>
+</tr>
+<tr>
+<td>presentation.interaction</td>
+<td>Действие пользователя</td>
+</tr>
+<tr>
+<td>presentation.fallback</td>
+<td>Использование fallback</td>
+</tr>
+<tr>
+<td>artifact.attached</td>
+<td>Добавление артефакта</td>
+</tr>
+</tbody></table>
+<p>Метрики:</p>
+<ul>
+<li>Количество созданных представлений.</li>
+<li>Распределение по типам компонентов.</li>
+<li>Успешность валидации.</li>
+<li>Успешность рендеринга.</li>
+<li>Частота использования fallback.</li>
+<li>Время рендеринга.</li>
+<li>Ошибки взаимодействия.</li>
+<li>Размер представлений.</li>
+<li>Количество пользовательских действий.</li>
+</ul>
+<p>Необходимо избегать избыточной аналитики, не влияющей на эксплуатацию и качество продукта.</p>
+<h1 id="16-инструкции-агентам"><a class="anchor" href="#16-инструкции-агентам" aria-label="Section link">#</a>16. Инструкции агентам</h1><p>В общие инструкции агентов необходимо добавить правила использования Presentation Engine.</p>
+<p>Рекомендуемый текст:</p>
+<blockquote>
+<p>При формировании ответа выбирай наиболее подходящий способ представления информации.</p>
+<p>Не ограничивайся текстом, если таблица, график, диаграмма, схема, карточка или изображение позволяют существенно улучшить понимание результата.</p>
+<p>Для сравнений используй таблицы или сравнительные карточки.</p>
+<p>Для временной динамики используй графики и timeline.</p>
+<p>Для процессов и взаимосвязей используй диаграммы.</p>
+<p>Для результатов выполнения задач используй структурированные отчёты с KPI и статусами.</p>
+<p>Для сложных технических объяснений используй схемы и визуализации.</p>
+<p>Для взаимодействия с пользователем используй интерактивные компоненты, если они доступны.</p>
+<p>Не используй визуализацию ради визуализации. Каждое представление должно упрощать понимание результата.</p>
+<p>Всегда сопровождай сложные визуальные представления кратким текстовым резюме.</p>
+<p>Не создавай фиктивные данные и не искажай результаты ради наглядности.</p>
+<p>Учитывай возможности целевого канала коммуникации.</p>
+</blockquote>
+<p>Инструкции должны быть частью общей конфигурации агентов, а не копироваться вручную в каждый профиль.</p>
+<h1 id="17-этапы-реализации"><a class="anchor" href="#17-этапы-реализации" aria-label="Section link">#</a>17. Этапы реализации</h1><h2 id="p0-базовая-инфраструктура-и-web-renderer"><a class="anchor" href="#p0-базовая-инфраструктура-и-web-renderer" aria-label="Section link">#</a>P0. Базовая инфраструктура и Web Renderer</h2><p>Цель: обеспечить полноценную работу структурированных сообщений в Web UI.</p>
+<p>Работы:</p>
+<ol>
+<li>Исследовать существующий механизм сообщений Temporality.</li>
+<li>Определить способ расширения формата сообщений.</li>
+<li>Разработать Presentation IR.</li>
+<li>Разработать JSON Schema.</li>
+<li>Реализовать Component Registry.</li>
+<li>Реализовать Validation &amp; Policy.</li>
+<li>Реализовать Presentation Runtime.</li>
+<li>Интегрировать Agent Presentation API.</li>
+<li>Реализовать базовый Web Renderer.</li>
+<li>Реализовать адаптивную дизайн-систему.</li>
+<li>Реализовать базовые компоненты.</li>
+</ol>
+<p>Компоненты P0:</p>
+<ul>
+<li>Text.</li>
+<li>Markdown.</li>
+<li>Heading.</li>
+<li>List.</li>
+<li>Table.</li>
+<li>Card.</li>
+<li>Card Grid.</li>
+<li>Badge.</li>
+<li>Icon.</li>
+<li>Link.</li>
+<li>KPI.</li>
+<li>Progress.</li>
+<li>Alert.</li>
+<li>Image.</li>
+<li>File.</li>
+</ul>
+<p>Результат: любой агент может формировать структурированный ответ, который корректно отображается в Web UI.</p>
+<h2 id="p1-визуализация-и-multi-format-rendering"><a class="anchor" href="#p1-визуализация-и-multi-format-rendering" aria-label="Section link">#</a>P1. Визуализация и Multi-format Rendering</h2><p>Цель: обеспечить полноценную визуальную коммуникацию.</p>
+<p>Работы:</p>
+<ol>
+<li>Реализовать контракт Visualizer.</li>
+<li>Реализовать Native Renderer.</li>
+<li>Реализовать SVG Renderer.</li>
+<li>Реализовать PNG Renderer.</li>
+<li>Реализовать Text Renderer.</li>
+<li>Добавить Line Chart.</li>
+<li>Добавить Bar Chart.</li>
+<li>Добавить Pie Chart.</li>
+<li>Добавить Flowchart.</li>
+<li>Добавить Sequence Diagram.</li>
+<li>Добавить Timeline.</li>
+<li>Реализовать тесты соответствия форматов.</li>
+<li>Реализовать генерацию SVG и PNG.</li>
+<li>Реализовать поддержку изображений и скриншотов.</li>
+<li>Реализовать подключение генерации изображений через инструменты.</li>
+</ol>
+<p>Результат: агенты могут формировать визуальные отчёты, графики и схемы, доступные как в Web UI, так и в статическом виде.</p>
+<h2 id="p2-интерактивность"><a class="anchor" href="#p2-интерактивность" aria-label="Section link">#</a>P2. Интерактивность</h2><p>Цель: обеспечить взаимодействие пользователей с результатами работы агентов.</p>
+<p>Работы:</p>
+<ol>
+<li>Реализовать Interaction Handler.</li>
+<li>Добавить кнопки и формы.</li>
+<li>Добавить Select, Checkbox, Radio и другие элементы.</li>
+<li>Интегрировать с HITL.</li>
+<li>Реализовать обновление представлений.</li>
+<li>Реализовать версионирование.</li>
+<li>Реализовать защищённые пользовательские действия.</li>
+<li>Реализовать адаптацию интерактивных компонентов для поддерживаемых каналов.</li>
+</ol>
+<p>Результат: пользователь может взаимодействовать с результатами работы агентов непосредственно в интерфейсе.</p>
+<h2 id="p3-многоканальность-и-расширение"><a class="anchor" href="#p3-многоканальность-и-расширение" aria-label="Section link">#</a>P3. Многоканальность и расширение</h2><p>Цель: обеспечить адаптацию представлений для разных каналов.</p>
+<p>Работы:</p>
+<ol>
+<li>Реализовать Channel Adapter API.</li>
+<li>Реализовать Capability Negotiation.</li>
+<li>Интегрировать Matrix.</li>
+<li>Интегрировать Telegram.</li>
+<li>Реализовать SVG/PNG fallback.</li>
+<li>Добавить Gantt.</li>
+<li>Добавить Roadmap.</li>
+<li>Добавить Mindmap.</li>
+<li>Добавить сложные графы.</li>
+<li>Реализовать экспорт в SVG, PNG и PDF.</li>
+<li>Предусмотреть подключение сторонних renderer&#39;ов.</li>
+</ol>
+<p>Результат: один агент формирует представление, которое адаптируется к разным интерфейсам и каналам коммуникации.</p>
+<h1 id="18-тестирование-и-критерии-приёмки"><a class="anchor" href="#18-тестирование-и-критерии-приёмки" aria-label="Section link">#</a>18. Тестирование и критерии приёмки</h1><h2 id="181-functional-tests"><a class="anchor" href="#181-functional-tests" aria-label="Section link">#</a>18.1. Functional Tests</h2><p>Проверить:</p>
+<ul>
+<li>Валидацию корректных и некорректных IR.</li>
+<li>Отображение всех компонентов MVP.</li>
+<li>Вложенность компонентов.</li>
+<li>Обработку отсутствующих данных.</li>
+<li>Большие таблицы.</li>
+<li>Некорректные данные графиков.</li>
+<li>Подключение артефактов.</li>
+<li>Обновление представлений.</li>
+<li>Сохранение истории.</li>
+<li>Интерактивные действия.</li>
+<li>Генерацию всех форматов.</li>
+</ul>
+<h2 id="182-security-tests"><a class="anchor" href="#182-security-tests" aria-label="Section link">#</a>18.2. Security Tests</h2><p>Проверить:</p>
+<ul>
+<li>XSS.</li>
+<li>HTML-инъекции.</li>
+<li>Вредоносные SVG.</li>
+<li>Попытки выполнения JavaScript.</li>
+<li>Подмену идентификаторов.</li>
+<li>Повторное выполнение действий.</li>
+<li>Обход политик доступа.</li>
+<li>Доступ к чужим артефактам.</li>
+<li>Чрезмерную вложенность.</li>
+<li>Чрезмерный объём данных.</li>
+<li>Злоупотребление внешними ссылками.</li>
+</ul>
+<h2 id="183-compatibility-tests"><a class="anchor" href="#183-compatibility-tests" aria-label="Section link">#</a>18.3. Compatibility Tests</h2><p>Проверить:</p>
+<ul>
+<li>Desktop.</li>
+<li>Mobile.</li>
+<li>Различные размеры экрана.</li>
+<li>Светлую и тёмную темы.</li>
+<li>Поддерживаемые браузеры.</li>
+<li>Web UI.</li>
+<li>Matrix.</li>
+<li>Telegram.</li>
+</ul>
+<h2 id="184-acceptance-criteria"><a class="anchor" href="#184-acceptance-criteria" aria-label="Section link">#</a>18.4. Acceptance Criteria</h2><p>Система считается готовой к базовой эксплуатации, если:</p>
+<ol>
+<li>Агент может сформировать структурированный ответ без написания HTML и JavaScript.</li>
+<li>Presentation IR валидируется по формальной схеме.</li>
+<li>Все компоненты MVP отображаются в Web UI.</li>
+<li>Представления могут содержать несколько типов компонентов.</li>
+<li>Представления адаптируются к мобильным экранам.</li>
+<li>Renderer не исполняет произвольный код.</li>
+<li>Представления связаны с соответствующими Agent Run.</li>
+<li>Артефакты используют существующие механизмы хранения и доступа.</li>
+<li>Реализован расширяемый Component Registry.</li>
+<li>Ошибки визуализации не приводят к потере основного текстового ответа.</li>
+<li>Агент может узнать возможности целевого канала.</li>
+<li>Каждый визуализатор реализует Native, SVG, PNG и Text rendering.</li>
+<li>Данные и смысловое содержание сохраняются между форматами.</li>
+<li>Matrix получает SVG с возможностью PNG fallback.</li>
+<li>Telegram получает PNG с возможностью текстового fallback.</li>
+<li>Не требуется изменение бизнес-логики существующих агентов для добавления новых компонентов.</li>
+</ol>
+<h1 id="19-нефункциональные-требования"><a class="anchor" href="#19-нефункциональные-требования" aria-label="Section link">#</a>19. Нефункциональные требования</h1><ul>
+<li>Минимальное влияние на скорость обычных текстовых ответов.</li>
+<li>Асинхронная обработка тяжёлых визуализаций.</li>
+<li>Ограничение ресурсов рендеринга.</li>
+<li>Возможность горизонтального масштабирования.</li>
+<li>Совместимость с инфраструктурой Temporality.</li>
+<li>Версионирование Presentation IR.</li>
+<li>Обратная совместимость.</li>
+<li>Отсутствие обязательной зависимости от внешнего SaaS.</li>
+<li>Возможность работы в изолированной корпоративной инфраструктуре.</li>
+</ul>
+<p>Генерация изображений, экспорт PDF и построение больших графов не должны блокировать основной цикл выполнения агента.</p>
+<h1 id="20-архитектурные-ограничения"><a class="anchor" href="#20-архитектурные-ограничения" aria-label="Section link">#</a>20. Архитектурные ограничения</h1><ol>
+<li>Не создавать отдельный frontend для каждого типа агента.</li>
+<li>Не привязывать Presentation IR к конкретному UI-фреймворку.</li>
+<li>Не смешивать представление и бизнес-логику.</li>
+<li>Не создавать собственную систему памяти.</li>
+<li>Не ограничивать архитектуру Web UI.</li>
+<li>Не разрешать агентам исполнять произвольный UI-код.</li>
+<li>Не заставлять LLM вручную создавать сложные графические спецификации там, где доступны специализированные инструменты.</li>
+<li>Не дублировать данные для разных форматов отображения.</li>
+<li>Не считать визуализатор готовым без всех обязательных renderer&#39;ов.</li>
+<li>Не создавать отдельные реализации визуализации для разных каналов.</li>
+</ol>
+<h1 id="21-ожидаемый-результат"><a class="anchor" href="#21-ожидаемый-результат" aria-label="Section link">#</a>21. Ожидаемый результат</h1><p>После реализации Temporality получает универсальную подсистему визуальной и интерактивной коммуникации.</p>
+<p>Агенты смогут:</p>
+<ul>
+<li>Формировать структурированные отчёты.</li>
+<li>Строить графики и диаграммы.</li>
+<li>Визуализировать архитектуру и зависимости.</li>
+<li>Создавать планы и дорожные карты.</li>
+<li>Показывать изображения и скриншоты.</li>
+<li>Формировать интерактивные интерфейсы.</li>
+<li>Запрашивать информацию через формы.</li>
+<li>Представлять результаты в разных каналах коммуникации.</li>
+</ul>
+<p>При этом все представления используют единый декларативный контракт и общие механизмы безопасности.</p>
+<p><strong>Ключевой архитектурный результат: Presentation Engine становится стандартным способом коммуникации между агентами Temporality и людьми.</strong></p>
+<p>Агент перестаёт быть исключительно генератором текстовых сообщений и получает возможность создавать полноценные пользовательские представления результатов своей работы.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="plan-priming-relevance.html"><small>← Назад</small><strong>Priming v2: от каталога знаний к полезным рекомендациям</strong></a>
+    <a class="pager-next" href="replay-model.html"><small>Далее →</small><strong>Replay model (Phase 2 audit)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
