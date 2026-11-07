@@ -72,7 +72,7 @@ services:
     stop_grace_period: 40s
 
   temporal:
-    image: temporalio/temporal:latest
+    image: temporalio/temporal:${TEMPORALITY_TEMPORAL_VERSION:-latest}
     container_name: temporality-dev
     depends_on:
       temporal-data-init:
@@ -86,17 +86,21 @@ services:
     command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal-dev.db"]
     volumes:
       - temporality-temporal:/data
-    # The kernel hard-depends on Temporal (its worker dials 7233 before
-    # serving anything) — compose must wait for the frontend port, not just
-    # "started": the server takes tens of seconds over its SQLite init, and
-    # that gap was the flaky agent-kernel dependency failure on cold starts.
+    # The kernel hard-depends on Temporal but waits for it itself (ca96d01);
+    # this healthcheck is for humans and other observers — compose ordering
+    # does not depend on it anymore (see agent-kernel's depends_on note).
+    # The server takes tens of seconds over its SQLite init.
     # Alpine image: nc (busybox) probes the gRPC port.
+    # Alpine image: nc (busybox) probes the gRPC port. The budget is generous
+    # on purpose: on a slow disk the SQLite dev db of a long-lived stack can
+    # take minutes to open, and giving up early fails every dependent's
+    # health condition.
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 7233 || exit 1"]
       interval: 3s
       timeout: 3s
-      retries: 40
-      start_period: 10s
+      retries: 90
+      start_period: 30s
     restart: unless-stopped
     ports:
       - "7233:7233"
@@ -105,14 +109,16 @@ services:
   # The named volume lands root-owned (the image has no /data to inherit from)
   # while the server runs as uid 1000 — SQLite cannot create its file and the
   # server crash-loops (unable to open database file 14). One-shot chown fixes
-  # the ownership once, then stays out of the way.
+  # the ownership once, then stays out of the way. on-failure: a transient
+  # chown hiccup must retry instead of blocking the whole chain forever
+  # (service_completed_successfully below waits for the final exit).
   temporal-data-init:
-    image: temporalio/temporal:latest
+    image: temporalio/temporal:${TEMPORALITY_TEMPORAL_VERSION:-latest}
     user: root
     entrypoint: ["sh", "-c", "chown -R 1000:1000 /data"]
     volumes:
       - temporality-temporal:/data
-    restart: "no"
+    restart: on-failure:2
 
   # Self-hosted meta-search backing the agents' web_search tool. JSON output
   # must stay enabled in searxng-settings.yml — the kernel parses format=json.
@@ -285,13 +291,20 @@ services:
     networks:
       - default
       - browser
+    # The kernel self-waits for Temporal since ca96d01 (its dial retries every
+    # 2s with a warn instead of exiting), so compose must NOT hard-block the
+    # start on Temporal's health: a slow SQLite init on a cold host then
+    # surfaces as the flaky «dependency agent-kernel failed to start» cascade
+    # (debugger → agent-kernel → temporal) instead of a healthy kernel that is
+    # simply waiting. service_started + the kernel's own retry loop is the
+    # same contract the journal honors with Postgres.
     depends_on:
       postgres:
         condition: service_healthy
       journal:
         condition: service_healthy
       temporal:
-        condition: service_healthy
+        condition: service_started
       searxng:
         condition: service_started
     healthcheck:
