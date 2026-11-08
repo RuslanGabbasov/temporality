@@ -3407,9 +3407,16 @@ const (
 	// lines of a command output carry the verdict.
 	toolOutputTailBytes = 16 << 10
 	// maxModelRequestBytes bounds the serialized call_model activity input.
-	// The exact JSON payload must stay well under the scheduler's ~2 MiB blob
-	// error limit: the request is only one blob of the workflow-task upload.
-	maxModelRequestBytes = 1200 << 10
+	// Temporal caps a single event payload at limit.blobSize.error = 2 MiB
+	// (dynamic configuration reference) and fails the whole workflow-task
+	// upload above it (TMPRL1103) — an unrecoverable silent retry loop. The
+	// request is one event payload, so the budget minus a small envelope is
+	// the ceiling. Calibration (2026-11, live data): ~2.4-3.0 wire bytes per
+	// prompt token; a healthy run reached 730k tokens (~1.8-2.0 MB payload)
+	// and the wedged one crossed the limit at 163k tokens plus four
+	// screenshot blocks (1.66 MB of base64) — healthy runs live close to the
+	// ceiling, so the guard must sit just under it, not at half.
+	maxModelRequestBytes = (2 << 20) - (32 << 10)
 )
 
 // BoundedNarrative produces a bounded display representation of an
