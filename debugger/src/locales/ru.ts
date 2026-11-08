@@ -599,6 +599,8 @@ export const ru: Record<string, string> = {
     'runs.event.note_dropped_detail': 'бюджет запуска исчерпан до доставки',
     'runs.event.model_nudged': 'Вызов модели подтолкнут',
     'runs.event.model_nudged_detail': 'ход {{turn}} отменён и повторён вручную',
+    'runs.event.context_compacted': 'Контекст сжат в карту состояния',
+    'runs.event.context_compaction_failed': 'Сжатие контекста не удалось',
     'runs.event.model_attempt': 'Повтор вызова модели',
     'runs.event.model_attempt_retry': 'повтор после неудачной попытки',
     'runs.event.model_route': 'Маршрут вызова',

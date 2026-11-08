@@ -32,6 +32,7 @@ const (
 	ActivityKnowledgeLookup   = "kernel.knowledge_lookup"
 	ActivityResolveAgent      = "kernel.resolve_agent"
 	ActivityGenerateTitle     = "kernel.generate_run_title"
+	ActivityCompactContext    = "kernel.compact_context"
 	ActivityExtractKnowledge  = "kernel.extract_knowledge"
 	ActivitySummarizeChildRun = "kernel.summarize_child_run"
 	ActivityWriteTeamContract = "kernel.team_contract_write"
@@ -496,6 +497,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// admission verdict before their first model call and queue (deterministic
 	// sleeps, outside any activity timeout) while the host is at capacity.
 	modelGate := workflow.GetVersion(ctx, "model-gate", workflow.DefaultVersion, 1)
+	// Context compaction (docs/context-compaction.md): version 1 turns on the
+	// state-card rebuild of the conversation when the request outgrows the
+	// compaction budget. A pre-gate history must replay without the extra
+	// activity and without the messages rewrite.
+	compaction := workflow.GetVersion(ctx, "context-compaction", workflow.DefaultVersion, 1)
 	// The team root seeds the shared context handle: every child run of the
 	// program (slots, reviewers, delegates below them) inherits it so scratch
 	// paths and run-scoped hints stay addressable across the tree.
@@ -1563,11 +1569,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				return result, err
 			}
 		}
+		finalTurnReminder := llm.Message{Role: "system", Content: "This is the final turn with tools. Complete only the remaining essential checks; your next message must be the final answer to the request."}
 		turnMessages := messages
 		if turn == input.MaxTurns {
 			// Budget awareness: without a reminder the model reliably spends the
 			// last tool turn on more calls and the run ends with an empty handoff.
-			turnMessages = append(slices.Clone(messages), llm.Message{Role: "system", Content: "This is the final turn with tools. Complete only the remaining essential checks; your next message must be the final answer to the request."})
+			turnMessages = append(slices.Clone(messages), finalTurnReminder)
 		}
 		// Conversation history invariant: `messages` is strictly append-only —
 		// turns only append the assistant response and tool results, never
@@ -1575,6 +1582,42 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// PromptCacheKey) relies on the prefix being byte-stable across turns;
 		// mutating history would silently invalidate the cache and reset billing.
 		modelReq := ModelRequest{Model: input.Model, ProviderID: input.ProviderID, Messages: turnMessages, Tools: runTools, RunID: input.RunID, Turn: turn, Project: input.Project, PromptCacheKey: input.TaskID}
+		// Context compaction (docs/context-compaction.md) is the one deliberate
+		// exception to the invariant above: when the request outgrows the
+		// compaction budget, the elided middle of the conversation is replaced
+		// with a state card BEFORE the call is scheduled — the alternative is
+		// creeping into the payload guard and losing the run. The rebuild is
+		// deterministic (the card comes back as a journaled activity result),
+		// and the price is one prompt-cache re-write when the boundary moves.
+		if compaction == 1 {
+			if size := modelRequestBytes(modelReq); size > compactionTriggerBytes {
+				var compact CompactResult
+				compactCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Minute, ScheduleToCloseTimeout: 12 * time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 2}})
+				cErr := workflow.ExecuteActivity(compactCtx, ActivityCompactContext, CompactRequest{Prompt: input.Prompt, Digest: compactionDigest(messages)}).Get(ctx, &compact)
+				card := strings.TrimSpace(compact.Card)
+				if cErr == nil && card != "" {
+					var kept, dropped int
+					messages, kept, dropped = compactMessages(messages, card)
+					turnMessages = messages
+					if turn == input.MaxTurns {
+						turnMessages = append(slices.Clone(messages), finalTurnReminder)
+					}
+					modelReq.Messages = turnMessages
+					if err := emit(activityCtx, state, "context.compacted", map[string]any{"turn": turn, "bytes_before": size, "bytes_after": modelRequestBytes(modelReq), "card": card, "kept_messages": kept, "dropped_messages": dropped}); err != nil {
+						return result, err
+					}
+				} else {
+					if cErr == nil {
+						cErr = errors.New("compaction returned an empty card")
+					}
+					// Compaction is an optimization: its failure must never stop the
+					// run — the payload guard remains the honest backstop.
+					if err := emit(activityCtx, state, "context.compaction_failed", map[string]any{"turn": turn, "bytes_before": size, "error": boundedFailureDetail(cErr)}); err != nil {
+						return result, err
+					}
+				}
+			}
+		}
 		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": turn, "model": input.Model}); err != nil {
 			return result, err
 		}

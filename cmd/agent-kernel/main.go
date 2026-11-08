@@ -615,6 +615,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.ModelGateBudget, activity.RegisterOptions{Name: agent.ActivityModelGateBudget})
 	temporalWorker.RegisterActivityWithOptions(activities.NotifyActorText, activity.RegisterOptions{Name: agent.ActivityNotifyActorText})
 	temporalWorker.RegisterActivityWithOptions(activities.GenerateTitle, activity.RegisterOptions{Name: agent.ActivityGenerateTitle})
+	temporalWorker.RegisterActivityWithOptions(activities.CompactContext, activity.RegisterOptions{Name: agent.ActivityCompactContext})
 	temporalWorker.RegisterActivityWithOptions(activities.ExtractKnowledge, activity.RegisterOptions{Name: agent.ActivityExtractKnowledge})
 	temporalWorker.RegisterActivityWithOptions(activities.SummarizeChildRun, activity.RegisterOptions{Name: agent.ActivitySummarizeChildRun})
 	temporalWorker.RegisterActivityWithOptions(activities.WriteTeamContract, activity.RegisterOptions{Name: agent.ActivityWriteTeamContract})

@@ -317,6 +317,21 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
     }
   },
   'model.nudged': (d, { t }) => ({ title: t('runs.event.model_nudged'), fact: t('runs.event.model_nudged_detail', { turn: squash(d.turn ?? '?') }) }),
+  // ── §5.2b context compaction (docs/context-compaction.md): the elided
+  // middle of a long conversation was replaced with a state card; the fact
+  // shows the request payload before and after. ──
+  'context.compacted': (d, { t }) => ({
+    title: t('runs.event.context_compacted'),
+    fact: `${formatBytes(Number(d.bytes_before ?? 0))} → ${formatBytes(Number(d.bytes_after ?? 0))}`,
+    status: 'ok',
+    category: 'model',
+  }),
+  'context.compaction_failed': (d, { t }) => ({
+    title: t('runs.event.context_compaction_failed'),
+    fact: squash(d.error ?? ''),
+    status: 'error',
+    category: 'model',
+  }),
   // ── §5.3 tools ──
   'tool.started': (d, { t }) => ({ title: toolTitle(d, t), fact: toolFact(d) }),
   'tool.completed': (d, { t }) => {

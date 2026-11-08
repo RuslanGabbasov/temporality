@@ -599,6 +599,8 @@ export const en: Record<string, string> = {
     'runs.event.note_dropped_detail': "the run's budget ran out before delivery",
     'runs.event.model_nudged': 'Model call nudged',
     'runs.event.model_nudged_detail': 'turn {{turn}} cancelled and retried manually',
+    'runs.event.context_compacted': 'Context compacted into a state card',
+    'runs.event.context_compaction_failed': 'Context compaction failed',
     'runs.event.model_attempt': 'Model call retry',
     'runs.event.model_attempt_retry': 'retrying after a failed attempt',
     'runs.event.model_route': 'Call route',
