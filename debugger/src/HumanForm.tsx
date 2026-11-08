@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { useI18n } from './i18n'
 
 // HITL form renderer (docs/interactive-HITL.md §7): one component shared by
-// the chat question card and the runs page tiles. Renders the supported
-// JSON Schema subset the kernel enforces server-side (workspace/forms.go):
-// string (+enum, pattern, minLength/maxLength, format), integer/number
-// (+minimum/maximum), boolean, array (+enum → multi-select checkbox group,
-// minItems/maxItems, items format date + minItems=maxItems=2 → date range).
-// Unknown keywords are ignored.
+// the chat question card, the runs page tiles and presentation forms. Renders
+// the supported JSON Schema subset the kernel enforces server-side
+// (workspace/forms.go): string (+enum, pattern, minLength/maxLength, format),
+// integer/number (+minimum/maximum), boolean, array (+enum → multi-select
+// checkbox group, minItems/maxItems, items format date + minItems=maxItems=2
+// → date range). A string enum with <= 5 options renders as radio buttons,
+// longer lists fall back to a dropdown. Unknown keywords are ignored.
 
 export interface FormSchema {
   type?: string
@@ -313,6 +314,27 @@ function FieldInput({ name, field, value, disabled, onChange }: {
   const isDateLike = field.type === 'string' && !!field.format && ['date', 'date-time', 'time'].includes(field.format)
   const hintKey = field.format === 'date-time' ? 'form.hint_datetime' : field.format === 'time' ? 'form.hint_time' : field.format === 'date' ? 'form.hint_date' : ''
   if (field.enum && field.enum.length > 0) {
+    // Short choice lists render as radio buttons: every option is visible at
+    // once and picking takes one click (docs/interactive-HITL.md §7, the
+    // «radio» rendering of §6.7 catalog). Long lists stay a compact dropdown.
+    if (field.enum.length <= 5) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }} role="radiogroup" aria-label={field.title || name}>
+          {field.enum.map((option) => (
+            <label key={option} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', cursor: disabled ? 'default' : 'pointer' }}>
+              <input
+                type="radio"
+                name={name}
+                disabled={disabled}
+                checked={stringValue === option}
+                onChange={() => onChange(option)}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+        </div>
+      )
+    }
     return (
       <select
         value={typeof value === 'string' ? (value as string) : ''}
