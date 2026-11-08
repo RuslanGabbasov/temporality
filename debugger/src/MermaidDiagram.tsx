@@ -102,7 +102,7 @@ function splitQuoted(text: string, sep: string): string[] {
  *  clusters, edges and labels stay readable in both themes and match the
  *  hand-rolled presentation charts. `darkMode` follows the `data-theme`
  *  attribute theme.tsx writes on <html>. */
-function mermaidTheme(): { darkMode: boolean; themeVariables: Record<string, string> } {
+export function mermaidTheme(): { darkMode: boolean; themeVariables: Record<string, string> } {
   const styles = getComputedStyle(document.documentElement)
   const token = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback
   const darkMode = document.documentElement.getAttribute('data-theme') !== 'light'
@@ -125,9 +125,15 @@ function mermaidTheme(): { darkMode: boolean; themeVariables: Record<string, str
   for (let n = 1; n <= 8; n++) {
     const fill = chart(((n - 1) % 6) + 1)
     ramp[`cScale${n}`] = fill
-    ramp[`cScaleLabel${n}`] = readableOnFill(fill)
     ramp[`cScaleInv${n}`] = fill
+    // The neo look paints the node BOXES with mainBkg (the vivid colors live
+    // in the gradient borders and edges), so node labels must read against
+    // the canvas color — not against the band. The root's tspan variant is
+    // the one label that sits ON a vivid fill (the teal box).
+    ramp[`cScaleLabel${n}`] = text
   }
+  ramp.cScale0 = teal
+  ramp.cScaleLabel0 = readableOnFill(teal)
   return {
     darkMode,
     themeVariables: {

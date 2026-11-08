@@ -122,6 +122,16 @@ $css--font-face: false;
   color: var(--tm-text) !important;
 }
 
+:root[data-theme="light"] .cds--btn--tertiary {
+  border-color: var(--tm-teal) !important;
+  color: var(--tm-teal) !important;
+}
+
+:root[data-theme="light"] .cds--btn--tertiary:hover {
+  background-color: rgba(42, 107, 99, 0.08) !important;
+  border-color: var(--tm-teal) !important;
+}
+
 :root[data-theme="light"] .cds--text-input,
 :root[data-theme="light"] .cds--text-area,
 :root[data-theme="light"] .cds--select-input,
@@ -622,7 +632,19 @@ body, #root, #main-content {
 }
 
 .cds--btn--tertiary {
+  background-color: transparent !important;
+  border: 1px solid rgba(235, 155, 82, 0.5) !important;
+  color: #eb9b52 !important;
   border-radius: var(--tm-radius-md) !important;
+}
+
+.cds--btn--tertiary:hover {
+  background-color: rgba(235, 155, 82, 0.08) !important;
+  border-color: #eb9b52 !important;
+}
+
+.cds--btn--tertiary svg {
+  fill: currentColor !important;
 }
 
 .cds--btn--danger--ghost {
