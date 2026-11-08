@@ -759,7 +759,11 @@ function GaugeView({ component }: { component: PresentationComponent }) {
   const sweep = Math.PI * share
   const endX = cx + r * Math.cos(Math.PI + sweep)
   const endY = cy + r * Math.sin(Math.PI + sweep)
-  const valuePath = sweep > 0.01 ? `M ${cx - r} ${cy} A ${r} ${r} 0 ${share > 0.5 ? 1 : 0} 1 ${endX} ${endY}` : ''
+  // The value arc covers sweep = π·share ≤ π — NEVER a large arc. The old
+  // `share > 0.5 ? 1 : 0` flag made every gauge above 50% draw the long way
+  // around (72% wrapped under the bottom, past the track) — the crooked
+  // presentation chart. large-arc stays 0 for the whole half-donut.
+  const valuePath = sweep > 0.01 ? `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${endX} ${endY}` : ''
   return (
     <figure className="presentation-chart">
       <svg viewBox={`0 0 ${size} ${size * 0.72}`} className="presentation-chart-svg presentation-chart-gauge" role="img">

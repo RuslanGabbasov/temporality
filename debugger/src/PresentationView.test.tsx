@@ -118,6 +118,15 @@ describe('PresentationView', () => {
     expect(out).toContain('загрузка')
   })
 
+  it('keeps the gauge value arc within the half-donut above 50%', () => {
+    // Regression: share > 0.5 flipped large-arc to 1, so every gauge above
+    // 50% drew its value the long way around (72% wrapped under the bottom,
+    // past the grey track) — the crooked presentation chart in artifacts.
+    const out = renderToStaticMarkup(<PresentationBlock component={{ type: 'gauge', data: { value: 72, label: 'Готовность', unit: '%' } }} />)
+    expect(out).not.toContain('A 64 64 0 1 1')
+    expect(out).toContain('A 64 64 0 0 1')
+  })
+
   it('renders gantt bars with a grid', () => {
     const out = renderToStaticMarkup(
       <PresentationBlock
