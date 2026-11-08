@@ -38,9 +38,12 @@ const (
 	// high-fidelity tile limit.
 	imageMaxSide = 1568
 	// imageEncodedCap bounds the final encoded payload. The block crosses the
-	// Temporal activity boundary (result -> workflow history): the cap leaves
-	// headroom under the default payload limits after base64 expansion.
-	imageEncodedCap = 1500 << 10 // ~1.5 MiB
+	// Temporal activity boundary (result -> workflow history) and then the
+	// call_model activity input: base64 expansion is ×4/3, and a single block
+	// must not push the scheduler upload toward its blob error limit
+	// (TMPRL1103). 1568px screenshots still encode well below this at JPEG
+	// q85; the quality ladder in encodeFitting handles the rest.
+	imageEncodedCap = 512 << 10
 )
 
 var viewImageTool = llm.ToolDef{

@@ -2002,7 +2002,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "duplicate_of": original.operationID}); err != nil {
 					return result, err
 				}
-				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: original.result.Content})
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(original.result.Content)})
 				continue
 			}
 			// Must outlive the sandbox command ceiling (10 min) — see
@@ -2099,7 +2099,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
 						return result, err
 					}
-					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: toolResult.Content})
+					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(toolResult.Content)})
 					executed[callKey] = executedCall{operationID: operationID, result: toolResult}
 					continue
 				}
@@ -2832,7 +2832,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					}
 				}
-				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: toolResult.Content})
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(toolResult.Content)})
 				turnImages = append(turnImages, toolResult.Images...)
 				for _, evidence := range toolResult.Evidence {
 					if err := emit(activityCtx, state, "evidence.observed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool_call_id": call.ID, "ref": evidence.Ref, "type": evidence.Type}); err != nil {
@@ -3396,6 +3396,20 @@ func toolFailureMessage(name string, err error) string {
 const (
 	narrativeMaxBytes  = 4096
 	failureDetailBytes = 512
+	// toolOutputMaxBytes bounds one tool result as it joins the conversation
+	// history (the call_model activity input rides the scheduler upload with
+	// it: TMPRL1103 wedges a run whose request grows over the blob limit).
+	// The budget sits above the tool-level read caps (read_file returns
+	// maxFileReadBytes plus its truncation marker verbatim) and only clips
+	// genuinely huge fetches (web/artifact download caps are 2 MiB).
+	toolOutputMaxBytes = 512 << 10
+	// toolOutputTailBytes is the tail kept by boundedToolOutput: the closing
+	// lines of a command output carry the verdict.
+	toolOutputTailBytes = 16 << 10
+	// maxModelRequestBytes bounds the serialized call_model activity input.
+	// The exact JSON payload must stay well under the scheduler's ~2 MiB blob
+	// error limit: the request is only one blob of the workflow-task upload.
+	maxModelRequestBytes = 1200 << 10
 )
 
 // BoundedNarrative produces a bounded display representation of an
@@ -3409,6 +3423,30 @@ func BoundedNarrative(value string) (string, bool) {
 		return clean[:narrativeMaxBytes] + "…", true
 	}
 	return clean, false
+}
+
+// boundedToolOutput keeps one tool result inside the history budget: head
+// and tail survive (the closing lines carry the verdict), the middle is
+// elided with an explicit notice. Applied where tool output becomes durable
+// conversation history — the tool-level result contracts (read_file markers,
+// artifact bodies) stay untouched at the activity boundary.
+func boundedToolOutput(content string) string {
+	if len(content) <= toolOutputMaxBytes {
+		return content
+	}
+	head := toolOutputMaxBytes - toolOutputTailBytes
+	return content[:head] + fmt.Sprintf("\n…[tool output truncated: %d bytes total; showing the first %d and the last %d bytes]…\n", len(content), head, toolOutputTailBytes) + content[len(content)-toolOutputTailBytes:]
+}
+
+// modelRequestBytes returns the exact serialized activity-input size of a
+// model request. Deterministic (struct fields and JSON map-key ordering are
+// stable), so it is safe to branch on inside workflow code.
+func modelRequestBytes(request ModelRequest) int {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return 0 // the activity would fail the same marshal with its own error
+	}
+	return len(payload)
 }
 
 // boundedFailureDetail reduces an activity error to a bounded, redacted
@@ -4379,6 +4417,13 @@ func awaitAgentReply(ctx workflow.Context, requestID string, timeout time.Durati
 // gets only the remaining budget, so the total patience per model call is
 // bounded by configuration no matter how many nudges land.
 func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, state *eventState, opts workflow.ActivityOptions, request ModelRequest, turn int, out *llm.Completion) error {
+	// The request rides the workflow-task upload as one activity-input blob:
+	// over the scheduler's payload limit every attempt dies on upload
+	// (TMPRL1103) and the run wedges in a silent retry loop that never emits
+	// model.failed. Stop honestly instead — the caller journals the failure.
+	if size := modelRequestBytes(request); size > maxModelRequestBytes {
+		return fmt.Errorf("model request payload is %d bytes (budget %d) — the conversation grew too large to schedule the call; reduce tool output volume or split the work into more runs", size, maxModelRequestBytes)
+	}
 	nudgeChannel := workflow.GetSignalChannel(ctx, NudgeSignal)
 	deadline := workflow.Now(ctx).Add(opts.ScheduleToCloseTimeout)
 	for {
