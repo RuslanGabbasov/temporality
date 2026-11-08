@@ -3456,6 +3456,45 @@ func modelRequestBytes(request ModelRequest) int {
 	return len(payload)
 }
 
+// elideRequestImages returns the request with vision blocks stripped from the
+// oldest image-bearing messages until the serialized input fits the budget.
+// Screenshots accumulate across turns (each rides every later request), and a
+// handful of them alone can exceed the scheduler's 2 MiB event-payload limit
+// (the 2026-11-08 wedge: four blocks of 1.66 MB base64 over a 0.4 MB text).
+// Only the REQUEST copy is touched — the conversation state stays strictly
+// append-only — and the cost is one prompt-cache re-write when the elision
+// boundary moves. The newest screenshots (the working context) survive; the
+// model can re-open any elided one by path with view_image.
+func elideRequestImages(request ModelRequest, budget int) ModelRequest {
+	if modelRequestBytes(request) <= budget {
+		return request
+	}
+	messages := slices.Clone(request.Messages)
+	changed := false
+	for i := range messages {
+		if len(messages[i].Images) == 0 {
+			continue
+		}
+		count := len(messages[i].Images)
+		messages[i].Images = nil
+		messages[i].Content += fmt.Sprintf("\n\n[%d screenshot(s) from this message were elided to fit the model request budget; re-open them by path with view_image if you need them]", count)
+		changed = true
+		if modelRequestBytes(withMessages(request, messages)) <= budget {
+			break
+		}
+	}
+	if !changed {
+		return request
+	}
+	request.Messages = messages
+	return request
+}
+
+func withMessages(request ModelRequest, messages []llm.Message) ModelRequest {
+	request.Messages = messages
+	return request
+}
+
 // boundedFailureDetail reduces an activity error to a bounded, redacted
 // description suitable for inclusion in failure events.
 func boundedFailureDetail(err error) string {
@@ -4427,7 +4466,10 @@ func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, s
 	// The request rides the workflow-task upload as one activity-input blob:
 	// over the scheduler's payload limit every attempt dies on upload
 	// (TMPRL1103) and the run wedges in a silent retry loop that never emits
-	// model.failed. Stop honestly instead — the caller journals the failure.
+	// model.failed. Shed the oldest screenshot blocks first (they accumulate
+	// across turns and alone can cross the limit); only when the text itself
+	// is over budget stop honestly — the caller journals the failure.
+	request = elideRequestImages(request, maxModelRequestBytes)
 	if size := modelRequestBytes(request); size > maxModelRequestBytes {
 		return fmt.Errorf("model request payload is %d bytes (budget %d) — the conversation grew too large to schedule the call; reduce tool output volume or split the work into more runs", size, maxModelRequestBytes)
 	}

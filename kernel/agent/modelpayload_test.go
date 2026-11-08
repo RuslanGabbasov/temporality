@@ -74,3 +74,58 @@ func TestModelRequestBytesFlagsOversizedRequest(t *testing.T) {
 		t.Fatalf("oversized request measured %d, want > %d", size, maxModelRequestBytes)
 	}
 }
+
+// Screenshots accumulate across turns and can cross the payload limit alone
+// (the 2026-11-08 wedge). Elision sheds the oldest vision blocks first and
+// never touches the stored conversation.
+func TestElideRequestImagesKeepsNewest(t *testing.T) {
+	image := make([]byte, 100<<10)
+	messages := []llm.Message{
+		{Role: "user", Content: "shot 1", Images: []llm.ImageBlock{{MIMEType: "image/png", Data: image}}},
+		{Role: "user", Content: "shot 2", Images: []llm.ImageBlock{{MIMEType: "image/png", Data: image}}},
+		{Role: "user", Content: "shot 3", Images: []llm.ImageBlock{{MIMEType: "image/png", Data: image}}},
+	}
+	request := ModelRequest{Model: "m", RunID: "r", Turn: 3, Messages: messages}
+	budget := 160 << 10 // fits the text and one base64 image, not three
+	result := elideRequestImages(request, budget)
+
+	if modelRequestBytes(result) > budget {
+		t.Fatalf("elided request is %d bytes, want <= %d", modelRequestBytes(result), budget)
+	}
+	if len(result.Messages[0].Images) != 0 || len(result.Messages[1].Images) != 0 {
+		t.Fatal("the two oldest image blocks must be elided")
+	}
+	if len(result.Messages[2].Images) != 1 {
+		t.Fatal("the newest image block must survive")
+	}
+	if !strings.Contains(result.Messages[0].Content, "elided") || !strings.Contains(result.Messages[1].Content, "elided") {
+		t.Fatal("elided messages must carry an explicit notice")
+	}
+	// The conversation state is append-only: elision must not touch it.
+	if len(request.Messages[0].Images) != 1 || len(request.Messages[1].Images) != 1 || len(request.Messages[2].Images) != 1 {
+		t.Fatal("elision must not mutate the stored messages")
+	}
+}
+
+func TestElideRequestImagesNoOpUnderBudget(t *testing.T) {
+	request := ModelRequest{Model: "m", Messages: []llm.Message{{
+		Role: "user", Content: "shot", Images: []llm.ImageBlock{{MIMEType: "image/png", Data: make([]byte, 1024)}},
+	}}}
+	result := elideRequestImages(request, 1<<20)
+	if len(result.Messages[0].Images) != 1 {
+		t.Fatal("a request under budget must keep its images")
+	}
+	if elideRequestImages(request, 1<<20).Messages[0].Content != result.Messages[0].Content {
+		t.Fatal("elision must be deterministic")
+	}
+}
+
+// Text alone over the budget cannot be shed by elision — the guard's honest
+// failure is the right outcome there.
+func TestElideRequestImagesLeavesTextOnlyRequest(t *testing.T) {
+	request := ModelRequest{Model: "m", Messages: []llm.Message{{Role: "tool", Content: strings.Repeat("z", 300<<10)}}}
+	result := elideRequestImages(request, 100<<10)
+	if result.Messages[0].Content != request.Messages[0].Content {
+		t.Fatal("a text-only request has nothing to elide")
+	}
+}
