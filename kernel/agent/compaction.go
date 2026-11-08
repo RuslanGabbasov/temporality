@@ -12,31 +12,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
-)
-
-const (
-	// compactionTriggerBytes is the serialized request size that starts a
-	// compaction. ~1.2 MB is 400-500k prompt tokens at the measured 2.4-3.0
-	// wire bytes per token: far above the normal run (p90 ≈ 150k tokens),
-	// far below the 2 MiB scheduler ceiling the payload guard enforces.
-	compactionTriggerBytes = 1200 << 10
-	// compactionCardMaxBytes bounds the state card. It rides every later
-	// request, so it must stay small enough to matter less than a tool
-	// output yet dense enough to hold every identifier the work produced.
-	compactionCardMaxBytes = 8 << 10
-	// compactionDigestMessageHead/Tail bound one message inside the digest
-	// sent for summarization: head and tail survive (the verdict usually
-	// closes a tool output), the middle is elided. Whole messages, not the
-	// whole conversation — the summarizer needs the facts, not every byte.
-	compactionDigestMessageHead = 3584
-	compactionDigestMessageTail = 512
-	// compactionTailBytes and the group bounds limit the verbatim tail kept
-	// after the card. Only whole groups are kept: a tool result never splits
-	// from its tool_calls message (the API contiguity contract).
-	compactionTailBytes     = 256 << 10
-	compactionKeepGroupsMin = 2
-	compactionKeepGroupsMax = 8
 )
 
 // CompactRequest carries what the summarizer needs: the task prompt (the
@@ -84,14 +61,35 @@ Rules:
 // model treats it as the record of elided work, not as a new user request.
 const compactionCardPrefix = "The earlier transcript of this conversation was compacted into the state card below (the raw messages were elided). Treat the card as the authoritative record of everything before the recent turns; the task continues from its \"Next step\" section.\n\n"
 
+// HarnessBudgetsRequest pins the workflow-facing budget snapshot for a run.
+type HarnessBudgetsRequest struct{}
+
+// HarnessBudgetsLocal pins the workflow-facing harness budgets once per run:
+// AgentRun reads the result so compaction and payload decisions replay
+// identically even when the installation settings change while the run is in
+// flight (docs/harness-settings.md). A local-activity hook (the
+// RecordEventLocal pattern): no worker registration, the result is recorded
+// as a history marker and replay-stable.
+var HarnessBudgetsLocal = func(context.Context, HarnessBudgetsRequest) (harness.Budgets, error) {
+	return harness.Current().Budgets, nil
+}
+
 // CompactContext is the activity: one model call over the digest produces
-// the state card. Failures are the caller's to handle — the run continues
-// uncompacted and the payload guard stays the backstop.
+// the state card. It runs on the installation's compaction model (the
+// supervisor panel's harness.compaction.model slot, judge model as the
+// designated background-work fallback). Failures are the caller's to handle —
+// the run continues uncompacted and the payload guard stays the backstop.
 func (a *Activities) CompactContext(ctx context.Context, request CompactRequest) (CompactResult, error) {
-	if a.Model == nil {
-		return CompactResult{}, fmt.Errorf("context compaction needs the model client")
+	model := a.Model
+	if a.HarnessModel != nil {
+		if client, err := a.HarnessModel(ctx, harness.RoleCompaction); err == nil && client != nil {
+			model = client
+		}
 	}
-	completion, err := a.Model.Complete(ctx, []llm.Message{
+	if model == nil {
+		return CompactResult{}, fmt.Errorf("context compaction needs a model: set harness.compaction.model in the supervisor settings or configure the default model")
+	}
+	completion, err := model.Complete(ctx, []llm.Message{
 		{Role: "system", Content: compactionSystemPrompt},
 		{Role: "user", Content: "Task prompt (verbatim goal anchor):\n\n" + request.Prompt + "\n\nConversation digest to compact:\n\n" + request.Digest},
 	}, nil)
@@ -106,8 +104,9 @@ func (a *Activities) CompactContext(ctx context.Context, request CompactRequest)
 	if card == "" {
 		return CompactResult{}, fmt.Errorf("compaction returned an empty card")
 	}
-	if len(card) > compactionCardMaxBytes {
-		card = card[:compactionCardMaxBytes] + "…"
+	cardMax := harness.Current().Budgets.CompactionCardMaxBytes
+	if len(card) > cardMax {
+		card = card[:cardMax] + "…"
 	}
 	return CompactResult{Card: card}, nil
 }
@@ -115,14 +114,14 @@ func (a *Activities) CompactContext(ctx context.Context, request CompactRequest)
 // compactionDigest renders the conversation for the summarizer: role-labeled
 // text blocks with per-message head-and-tail bounds and screenshot counts in
 // place of the image bytes (the vision blocks carry no text to summarize).
-func compactionDigest(messages []llm.Message) string {
+func compactionDigest(messages []llm.Message, head, tail int) string {
 	var b strings.Builder
 	for _, m := range messages {
 		content := m.Content
-		if len(content) > compactionDigestMessageHead+compactionDigestMessageTail {
-			content = content[:compactionDigestMessageHead] +
-				fmt.Sprintf("\n…[%d bytes elided]…\n", len(content)-compactionDigestMessageHead-compactionDigestMessageTail) +
-				content[len(content)-compactionDigestMessageTail:]
+		if len(content) > head+tail {
+			content = content[:head] +
+				fmt.Sprintf("\n…[%d bytes elided]…\n", len(content)-head-tail) +
+				content[len(content)-tail:]
 		}
 		if len(m.Images) > 0 {
 			content += fmt.Sprintf("\n[%d screenshot(s) attached to this message]", len(m.Images))
@@ -137,7 +136,7 @@ func compactionDigest(messages []llm.Message) string {
 // user), the card replaces the elided middle as one system message, and the
 // newest turn groups stay whole at the end. Returns the rebuilt history plus
 // kept/dropped message counts for the context.compacted event.
-func compactMessages(messages []llm.Message, card string) (out []llm.Message, kept, dropped int) {
+func compactMessages(messages []llm.Message, card string, tailBytes, keepMin, keepMax int) (out []llm.Message, kept, dropped int) {
 	if len(messages) < 3 {
 		return messages, len(messages), 0
 	}
@@ -163,7 +162,7 @@ func compactMessages(messages []llm.Message, card string) (out []llm.Message, ke
 		for _, m := range messages[groups[g].start:groups[g].end] {
 			size += len(m.Content)
 		}
-		if take >= compactionKeepGroupsMin && (take >= compactionKeepGroupsMax || bytes+size > compactionTailBytes) {
+		if take >= keepMin && (take >= keepMax || bytes+size > tailBytes) {
 			break
 		}
 		bytes += size

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 )
 
@@ -36,8 +37,16 @@ type TitleRequest struct {
 
 // GenerateTitle is the activity wrapper. Failures are returned to the
 // workflow, which treats them as "no title" and falls back to the run ID.
+// The model is the installation's title role (harness.title.model), with the
+// env default as the caller-visible fallback.
 func (a *Activities) GenerateTitle(ctx context.Context, request TitleRequest) (string, error) {
-	return GenerateRunTitle(ctx, a.Model, request.Prompt)
+	model := a.Model
+	if a.HarnessModel != nil {
+		if client, err := a.HarnessModel(ctx, harness.RoleTitle); err == nil && client != nil {
+			model = client
+		}
+	}
+	return GenerateRunTitle(ctx, model, request.Prompt)
 }
 
 // GenerateRunTitle runs the minimal model call. A missing model client is not

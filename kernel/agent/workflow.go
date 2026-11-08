@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
@@ -520,7 +521,19 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		ScheduleToCloseTimeout: 5 * time.Minute,
 		RetryPolicy:            &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3},
 	})
-	state := &eventState{run: input, sequence: 0, eventScope: eventScope(input.SourceID, input.Project, input.RunID), parentFrame: input.ParentFrameID, previousEventID: input.ParentEventID, recordLocal: recordLocal}
+	// The workflow-facing harness budgets are pinned per run through an
+	// activity result: decisions that add or skip commands (the compaction
+	// trigger, the payload guard) must replay identically even when the
+	// installation settings change while the run is in flight. Pre-gate runs
+	// keep the compile-time defaults, exactly as their history recorded.
+	budgets := harness.DefaultBudgets()
+	if compaction == 1 {
+		budgetCtx := workflow.WithLocalActivityOptions(ctx, workflow.LocalActivityOptions{ScheduleToCloseTimeout: 30 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 5 * time.Second, MaximumAttempts: 3}})
+		if err := workflow.ExecuteLocalActivity(budgetCtx, HarnessBudgetsLocal, HarnessBudgetsRequest{}).Get(ctx, &budgets); err != nil {
+			budgets = harness.DefaultBudgets()
+		}
+	}
+	state := &eventState{run: input, sequence: 0, eventScope: eventScope(input.SourceID, input.Project, input.RunID), parentFrame: input.ParentFrameID, previousEventID: input.ParentEventID, recordLocal: recordLocal, budgets: budgets}
 	var frames []string
 	defer func() {
 		if errors.Is(ctx.Err(), workflow.ErrCanceled) {
@@ -1590,14 +1603,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// deterministic (the card comes back as a journaled activity result),
 		// and the price is one prompt-cache re-write when the boundary moves.
 		if compaction == 1 {
-			if size := modelRequestBytes(modelReq); size > compactionTriggerBytes {
+			if size := modelRequestBytes(modelReq); size > state.budget().CompactionTriggerBytes {
 				var compact CompactResult
 				compactCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Minute, ScheduleToCloseTimeout: 12 * time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 2}})
-				cErr := workflow.ExecuteActivity(compactCtx, ActivityCompactContext, CompactRequest{Prompt: input.Prompt, Digest: compactionDigest(messages)}).Get(ctx, &compact)
+				cErr := workflow.ExecuteActivity(compactCtx, ActivityCompactContext, CompactRequest{Prompt: input.Prompt, Digest: compactionDigest(messages, state.budget().CompactionDigestHeadBytes, state.budget().CompactionDigestTailBytes)}).Get(ctx, &compact)
 				card := strings.TrimSpace(compact.Card)
 				if cErr == nil && card != "" {
 					var kept, dropped int
-					messages, kept, dropped = compactMessages(messages, card)
+					messages, kept, dropped = compactMessages(messages, card, state.budget().CompactionTailBytes, state.budget().CompactionKeepGroupsMin, state.budget().CompactionKeepGroupsMax)
 					turnMessages = messages
 					if turn == input.MaxTurns {
 						turnMessages = append(slices.Clone(messages), finalTurnReminder)
@@ -2045,7 +2058,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "duplicate_of": original.operationID}); err != nil {
 					return result, err
 				}
-				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(original.result.Content)})
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(original.result.Content, state.budget().ToolOutputMaxBytes, state.budget().ToolOutputTailBytes)})
 				continue
 			}
 			// Must outlive the sandbox command ceiling (10 min) — see
@@ -2142,7 +2155,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
 						return result, err
 					}
-					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(toolResult.Content)})
+					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(toolResult.Content, state.budget().ToolOutputMaxBytes, state.budget().ToolOutputTailBytes)})
 					executed[callKey] = executedCall{operationID: operationID, result: toolResult}
 					continue
 				}
@@ -2875,7 +2888,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					}
 				}
-				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(toolResult.Content)})
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(toolResult.Content, state.budget().ToolOutputMaxBytes, state.budget().ToolOutputTailBytes)})
 				turnImages = append(turnImages, toolResult.Images...)
 				for _, evidence := range toolResult.Evidence {
 					if err := emit(activityCtx, state, "evidence.observed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool_call_id": call.ID, "ref": evidence.Ref, "type": evidence.Type}); err != nil {
@@ -3439,27 +3452,6 @@ func toolFailureMessage(name string, err error) string {
 const (
 	narrativeMaxBytes  = 4096
 	failureDetailBytes = 512
-	// toolOutputMaxBytes bounds one tool result as it joins the conversation
-	// history (the call_model activity input rides the scheduler upload with
-	// it: TMPRL1103 wedges a run whose request grows over the blob limit).
-	// The budget sits above the tool-level read caps (read_file returns
-	// maxFileReadBytes plus its truncation marker verbatim) and only clips
-	// genuinely huge fetches (web/artifact download caps are 2 MiB).
-	toolOutputMaxBytes = 512 << 10
-	// toolOutputTailBytes is the tail kept by boundedToolOutput: the closing
-	// lines of a command output carry the verdict.
-	toolOutputTailBytes = 16 << 10
-	// maxModelRequestBytes bounds the serialized call_model activity input.
-	// Temporal caps a single event payload at limit.blobSize.error = 2 MiB
-	// (dynamic configuration reference) and fails the whole workflow-task
-	// upload above it (TMPRL1103) — an unrecoverable silent retry loop. The
-	// request is one event payload, so the budget minus a small envelope is
-	// the ceiling. Calibration (2026-11, live data): ~2.4-3.0 wire bytes per
-	// prompt token; a healthy run reached 730k tokens (~1.8-2.0 MB payload)
-	// and the wedged one crossed the limit at 163k tokens plus four
-	// screenshot blocks (1.66 MB of base64) — healthy runs live close to the
-	// ceiling, so the guard must sit just under it, not at half.
-	maxModelRequestBytes = (2 << 20) - (32 << 10)
 )
 
 // BoundedNarrative produces a bounded display representation of an
@@ -3475,17 +3467,18 @@ func BoundedNarrative(value string) (string, bool) {
 	return clean, false
 }
 
-// boundedToolOutput keeps one tool result inside the history budget: head
-// and tail survive (the closing lines carry the verdict), the middle is
-// elided with an explicit notice. Applied where tool output becomes durable
+// boundedToolOutput keeps one tool result inside the history budget (head
+// and tail survive — the closing lines carry the verdict — the middle is
+// elided with an explicit notice). Applied where tool output becomes durable
 // conversation history — the tool-level result contracts (read_file markers,
-// artifact bodies) stay untouched at the activity boundary.
-func boundedToolOutput(content string) string {
-	if len(content) <= toolOutputMaxBytes {
+// artifact bodies) stay untouched at the activity boundary. The budget is
+// harness-pinned per run (docs/harness-settings.md).
+func boundedToolOutput(content string, max, tail int) string {
+	if len(content) <= max {
 		return content
 	}
-	head := toolOutputMaxBytes - toolOutputTailBytes
-	return content[:head] + fmt.Sprintf("\n…[tool output truncated: %d bytes total; showing the first %d and the last %d bytes]…\n", len(content), head, toolOutputTailBytes) + content[len(content)-toolOutputTailBytes:]
+	head := max - tail
+	return content[:head] + fmt.Sprintf("\n…[tool output truncated: %d bytes total; showing the first %d and the last %d bytes]…\n", len(content), head, tail) + content[len(content)-tail:]
 }
 
 // modelRequestBytes returns the exact serialized activity-input size of a
@@ -4512,9 +4505,9 @@ func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, s
 	// model.failed. Shed the oldest screenshot blocks first (they accumulate
 	// across turns and alone can cross the limit); only when the text itself
 	// is over budget stop honestly — the caller journals the failure.
-	request = elideRequestImages(request, maxModelRequestBytes)
-	if size := modelRequestBytes(request); size > maxModelRequestBytes {
-		return fmt.Errorf("model request payload is %d bytes (budget %d) — the conversation grew too large to schedule the call; reduce tool output volume or split the work into more runs", size, maxModelRequestBytes)
+	request = elideRequestImages(request, state.budget().MaxModelRequestBytes)
+	if size := modelRequestBytes(request); size > state.budget().MaxModelRequestBytes {
+		return fmt.Errorf("model request payload is %d bytes (budget %d) — the conversation grew too large to schedule the call; reduce tool output volume or split the work into more runs", size, state.budget().MaxModelRequestBytes)
 	}
 	nudgeChannel := workflow.GetSignalChannel(ctx, NudgeSignal)
 	deadline := workflow.Now(ctx).Add(opts.ScheduleToCloseTimeout)
@@ -5012,6 +5005,19 @@ type eventState struct {
 	eventScope      string
 	previousEventID string
 	recordLocal     workflow.Version
+	// budgets is the run-pinned harness snapshot: workflow decisions that
+	// flip commands (compaction trigger, payload guard) must replay
+	// identically even when installation settings change mid-run.
+	budgets harness.Budgets
+}
+
+// budget returns the pinned harness budgets, falling back to the compile-time
+// defaults for states built without a pin (tests, helper workflows).
+func (s *eventState) budget() harness.Budgets {
+	if s.budgets.MaxModelRequestBytes == 0 {
+		return harness.DefaultBudgets()
+	}
+	return s.budgets
 }
 
 func emit(ctx workflow.Context, state *eventState, kind string, data map[string]any) error {

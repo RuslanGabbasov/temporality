@@ -12,6 +12,7 @@ import (
 
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/workspace"
 )
@@ -110,31 +111,56 @@ func judgeModelClient(ctx context.Context, ws *workspace.Store, masterKey []byte
 	if !config.Configured {
 		return nil, fmt.Errorf("judge model is not configured — pick one in Agents → Quality settings (the same judge the quality loop uses)")
 	}
-	providerID := config.ProviderID
+	return providerModelClient(ctx, ws, masterKey, config.Model, config.ProviderID)
+}
+
+// harnessModelClient resolves an installation model ROLE
+// (docs/harness-settings.md): the role's supervisor-settings slot first, then
+// the judge model — the designated background-work fallback. A missing slot
+// and a missing judge both return an error so the caller falls back down its
+// own cascade (project default, env default model).
+func harnessModelClient(ctx context.Context, ws *workspace.Store, masterKey []byte, role harness.ModelRole) (*llm.Client, error) {
+	key := map[harness.ModelRole]string{
+		harness.RoleCompaction: workspace.SettingCompactionModel,
+		harness.RoleTitle:      workspace.SettingTitleModel,
+		harness.RoleExtraction: workspace.SettingExtractionModel,
+	}[role]
+	if key == "" {
+		return nil, fmt.Errorf("unknown harness model role %q", role)
+	}
+	if model, err := ws.GetSetting(ctx, key); err == nil && strings.TrimSpace(model) != "" {
+		return providerModelClient(ctx, ws, masterKey, strings.TrimSpace(model), "")
+	}
+	return judgeModelClient(ctx, ws, masterKey)
+}
+
+// providerModelClient builds an llm client for a model served by a configured
+// workspace provider (the shared tail of the judge/role model resolution).
+func providerModelClient(ctx context.Context, ws *workspace.Store, masterKey []byte, model, providerID string) (*llm.Client, error) {
 	if providerID == "" {
-		id, ok, pErr := ws.ProviderOfModel(ctx, config.Model)
+		id, ok, pErr := ws.ProviderOfModel(ctx, model)
 		if pErr != nil {
 			return nil, pErr
 		}
 		if !ok {
-			return nil, fmt.Errorf("judge model %q is not listed by any configured provider", config.Model)
+			return nil, fmt.Errorf("model %q is not listed by any configured provider", model)
 		}
 		providerID = id
 	}
 	provider, err := ws.GetProvider(ctx, providerID)
 	if err != nil {
-		return nil, fmt.Errorf("judge provider %q: %w", providerID, err)
+		return nil, fmt.Errorf("provider %q: %w", providerID, err)
 	}
 	apiKey, err := resolveProviderAPIKey(ctx, ws, provider.APIKeyRef, masterKey)
 	if err != nil {
-		return nil, fmt.Errorf("judge provider %q credential: %w", providerID, err)
+		return nil, fmt.Errorf("provider %q credential: %w", providerID, err)
 	}
 	optional, err := llm.OptionalConfigFromEnv()
 	if err != nil {
-		return nil, fmt.Errorf("judge model config: %w", err)
+		return nil, fmt.Errorf("model config: %w", err)
 	}
 	optional.BaseURL = provider.BaseURL
-	optional.Model = config.Model
+	optional.Model = model
 	optional.APIKey = apiKey
 	return llm.New(optional), nil
 }

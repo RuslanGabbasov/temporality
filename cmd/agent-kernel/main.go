@@ -32,6 +32,7 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/cost"
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/outbox"
@@ -499,6 +500,12 @@ func main() {
 	// judge model when no project/run default model is configured.
 	activities.JudgeModel = func(ctx context.Context) (*llm.Client, error) {
 		return judgeModelClient(ctx, ws, secretMasterKey)
+	}
+	// Installation model roles (docs/harness-settings.md): compaction, title
+	// and extraction pick their supervisor-settings slot first, then the
+	// judge model — the designated background-work fallback.
+	activities.HarnessModel = func(ctx context.Context, role harness.ModelRole) (*llm.Client, error) {
+		return harnessModelClient(ctx, ws, secretMasterKey, role)
 	}
 	// qualityModelClient serves every model need that is NOT a live run turn:
 	// the draft wizards (agent, skill, team — via wizardModelClient below) and

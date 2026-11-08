@@ -4,24 +4,26 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/temporality-project/temporality/kernel/harness"
 )
 
 // ModelCallActivityTimeout bounds one kernel.call_model activity execution,
 // covering both the streaming attempt and the blocking fallback with its
 // client-side retries. Long generations (large contexts, reasoning models,
 // high max output tokens) legitimately exceed the previous hardcoded 10
-// minutes, so the ceiling is configurable per deployment. Read once at
-// process start; changing it between worker versions is a compatible change —
-// activity timeouts are not part of the replay command identity.
-var ModelCallActivityTimeout = durationFromEnv("TEMPORALITY_MODEL_ACTIVITY_TIMEOUT", 20*time.Minute)
+// minutes, so the ceiling is configurable per deployment. The value lives in
+// the central harness settings (docs/harness-settings.md); activity timeouts
+// are not part of the replay command identity.
+var ModelCallActivityTimeout = harness.Current().ModelCallActivityTimeout
 
 // ToolActivityTimeout bounds one kernel.run_tool activity execution. It must
 // exceed the sandbox command ceiling (kernel/sandbox maxTimeout = 15 min)
 // with head room for container teardown, or every long command — e2e suites,
 // builds — dies as a StartToClose timeout while the sandbox is still happily
-// running (the mismatch happened: activity 4m < sandbox 10m). Configurable
-// per deployment like the model timeout; read once at process start.
-var ToolActivityTimeout = durationFromEnv("TEMPORALITY_TOOL_ACTIVITY_TIMEOUT", 16*time.Minute)
+// running (the mismatch happened: activity 4m < sandbox 10m). The value
+// lives in the central harness settings (docs/harness-settings.md).
+var ToolActivityTimeout = harness.Current().ToolActivityTimeout
 
 // modelHeartbeatInterval is how often kernel.call_model heartbeats while a
 // provider call is in flight. Temporal delivers activity cancellation only

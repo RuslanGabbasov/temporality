@@ -4,26 +4,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 )
 
 func TestBoundedToolOutput(t *testing.T) {
+	budgets := harness.DefaultBudgets()
 	small := "git status: clean"
-	if got := boundedToolOutput(small); got != small {
+	if got := boundedToolOutput(small, budgets.ToolOutputMaxBytes, budgets.ToolOutputTailBytes); got != small {
 		t.Fatalf("small output must pass through unchanged, got %q", got)
 	}
 
 	// A multi-megabyte output (the web/artifact fetch caps are 2 MiB) must
 	// shrink to the budget with head, tail and an explicit notice — unbounded
 	// outputs are what pushed the scheduler upload over its blob limit.
-	head := strings.Repeat("H", toolOutputMaxBytes)
-	tail := strings.Repeat("T", toolOutputTailBytes)
+	head := strings.Repeat("H", budgets.ToolOutputMaxBytes)
+	tail := strings.Repeat("T", budgets.ToolOutputTailBytes)
 	big := head + strings.Repeat("M", 3<<20) + tail
-	got := boundedToolOutput(big)
+	got := boundedToolOutput(big, budgets.ToolOutputMaxBytes, budgets.ToolOutputTailBytes)
 	if len(got) >= len(big) {
 		t.Fatalf("bounded output %d bytes, want << %d", len(got), len(big))
 	}
-	wantHead := toolOutputMaxBytes - toolOutputTailBytes
+	wantHead := budgets.ToolOutputMaxBytes - budgets.ToolOutputTailBytes
 	if !strings.HasPrefix(got, strings.Repeat("H", wantHead)) {
 		t.Fatal("bounded output must keep the head")
 	}
@@ -33,14 +35,16 @@ func TestBoundedToolOutput(t *testing.T) {
 	if !strings.Contains(got, "tool output truncated") {
 		t.Fatal("bounded output must carry an explicit truncation notice")
 	}
-	if len(got) > toolOutputMaxBytes+256 {
+	if len(got) > budgets.ToolOutputMaxBytes+256 {
 		t.Fatalf("bounded output %d bytes, want <= budget plus notice", len(got))
 	}
 }
 
 func TestBoundedToolOutputStaysDeterministic(t *testing.T) {
-	big := strings.Repeat("x", toolOutputMaxBytes+1)
-	if boundedToolOutput(big) != boundedToolOutput(big) {
+	budgets := harness.DefaultBudgets()
+	big := strings.Repeat("x", budgets.ToolOutputMaxBytes+1)
+	first := boundedToolOutput(big, budgets.ToolOutputMaxBytes, budgets.ToolOutputTailBytes)
+	if first != boundedToolOutput(big, budgets.ToolOutputMaxBytes, budgets.ToolOutputTailBytes) {
 		t.Fatal("two calls over the same content must produce identical bytes")
 	}
 }
@@ -69,9 +73,10 @@ func TestModelRequestBytesCountsContentAndImages(t *testing.T) {
 // The guard turns an unschedulable request into an honest failure instead of
 // a TMPRL1103 upload loop. modelRequestBytes is the seam it branches on.
 func TestModelRequestBytesFlagsOversizedRequest(t *testing.T) {
-	huge := ModelRequest{Model: "m", RunID: "r", Turn: 58, Messages: []llm.Message{{Role: "tool", Content: strings.Repeat("z", maxModelRequestBytes+1)}}}
-	if size := modelRequestBytes(huge); size <= maxModelRequestBytes {
-		t.Fatalf("oversized request measured %d, want > %d", size, maxModelRequestBytes)
+	budgets := harness.DefaultBudgets()
+	huge := ModelRequest{Model: "m", RunID: "r", Turn: 58, Messages: []llm.Message{{Role: "tool", Content: strings.Repeat("z", budgets.MaxModelRequestBytes+1)}}}
+	if size := modelRequestBytes(huge); size <= budgets.MaxModelRequestBytes {
+		t.Fatalf("oversized request measured %d, want > %d", size, budgets.MaxModelRequestBytes)
 	}
 }
 

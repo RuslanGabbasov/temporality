@@ -22,6 +22,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
 )
@@ -193,6 +194,13 @@ type existingKnowledge struct {
 // so extraction must not depend on a.Model alone or every run would end with
 // knowledge.extraction.failed (docs/workspace-providers.md).
 func (a *Activities) extractionModelClient(ctx context.Context, project, model string) (*llm.Client, error) {
+	// An explicitly configured extraction role wins: the operator picked that
+	// model for exactly this background work (docs/harness-settings.md).
+	if a.HarnessModel != nil {
+		if client, err := a.HarnessModel(ctx, harness.RoleExtraction); err == nil && client != nil {
+			return client, nil
+		}
+	}
 	if a.Model != nil && (model == "" || model == a.Model.Model()) {
 		return a.Model, nil
 	}

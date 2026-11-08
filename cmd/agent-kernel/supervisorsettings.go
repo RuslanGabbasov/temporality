@@ -9,6 +9,7 @@ import (
 
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 )
@@ -34,10 +35,16 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 		// Semantic-layer health rides along (docs/supervisor-model.md §6.5):
 		// the operator sees degradation without digging kernel logs.
 		writeJSON(w, 200, map[string]any{
-			"judge_model":  settings.JudgeModel,
-			"vision_model": settings.VisionModel,
-			"hab":          settings.HAB,
-			"embeddings":   activities.EmbeddingsStatus(),
+			"judge_model":      settings.JudgeModel,
+			"vision_model":     settings.VisionModel,
+			"compaction_model": settings.CompactionModel,
+			"title_model":      settings.TitleModel,
+			"extraction_model": settings.ExtractionModel,
+			"hab":              settings.HAB,
+			"embeddings":       activities.EmbeddingsStatus(),
+			// Effective harness knobs (env-resolved, read-only): one look shows
+			// what the kernel actually runs with (docs/harness-settings.md).
+			"harness": harness.Current(),
 		})
 	})
 
@@ -48,7 +55,13 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 		var req struct {
 			JudgeModel  string `json:"judge_model"`
 			VisionModel string `json:"vision_model"`
-			HAB         struct {
+			// Harness role models use pointer semantics: an omitted field keeps
+			// the stored value (older clients predate the roles), an empty
+			// string clears the role so its cascade fallback applies.
+			CompactionModel *string `json:"compaction_model"`
+			TitleModel      *string `json:"title_model"`
+			ExtractionModel *string `json:"extraction_model"`
+			HAB             struct {
 				ApprovalSeconds   *int `json:"approval_seconds,omitempty"`
 				AnswerBaseSeconds *int `json:"answer_base_seconds,omitempty"`
 				ReadingWPM        *int `json:"reading_wpm,omitempty"`
@@ -58,11 +71,33 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 			writeError(w, 400, err)
 			return
 		}
+		current, err := ws.SupervisorSettings(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		next := workspace.SupervisorSettings{
+			JudgeModel:  req.JudgeModel,
+			VisionModel: req.VisionModel,
+			HAB:         current.HAB,
+		}
+		pick := func(value *string, stored string) string {
+			if value == nil {
+				return stored
+			}
+			return strings.TrimSpace(*value)
+		}
+		next.CompactionModel = pick(req.CompactionModel, current.CompactionModel)
+		next.TitleModel = pick(req.TitleModel, current.TitleModel)
+		next.ExtractionModel = pick(req.ExtractionModel, current.ExtractionModel)
 		// Every non-empty model must be served by a configured provider: a
 		// typo'd model would otherwise fail silently at first use.
 		for name, model := range map[string]string{
-			"judge_model":  req.JudgeModel,
-			"vision_model": req.VisionModel,
+			"judge_model":      next.JudgeModel,
+			"vision_model":     next.VisionModel,
+			"compaction_model": next.CompactionModel,
+			"title_model":      next.TitleModel,
+			"extraction_model": next.ExtractionModel,
 		} {
 			if strings.TrimSpace(model) == "" {
 				continue
@@ -75,25 +110,15 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 				return
 			}
 		}
-		current, err := ws.SupervisorSettings(r.Context())
-		if err != nil {
-			writeError(w, 500, err)
-			return
-		}
 		// Partial update semantics: omitted HAB fields keep their stored value.
 		if req.HAB.ApprovalSeconds != nil {
-			current.HAB.ApprovalSeconds = *req.HAB.ApprovalSeconds
+			next.HAB.ApprovalSeconds = *req.HAB.ApprovalSeconds
 		}
 		if req.HAB.AnswerBaseSeconds != nil {
-			current.HAB.AnswerBaseSeconds = *req.HAB.AnswerBaseSeconds
+			next.HAB.AnswerBaseSeconds = *req.HAB.AnswerBaseSeconds
 		}
 		if req.HAB.ReadingWPM != nil {
-			current.HAB.ReadingWPM = *req.HAB.ReadingWPM
-		}
-		next := workspace.SupervisorSettings{
-			JudgeModel:  req.JudgeModel,
-			VisionModel: req.VisionModel,
-			HAB:         current.HAB,
+			next.HAB.ReadingWPM = *req.HAB.ReadingWPM
 		}
 		if err := ws.SaveSupervisorSettings(r.Context(), next); err != nil {
 			writeError(w, 500, err)
@@ -106,6 +131,7 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 		}
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSettingChanged, "supervisor_settings", "installation", map[string]any{
 			"judge_model": saved.JudgeModel, "vision_model": saved.VisionModel,
+			"compaction_model": saved.CompactionModel, "title_model": saved.TitleModel, "extraction_model": saved.ExtractionModel,
 		})
 		writeJSON(w, 200, saved)
 	})

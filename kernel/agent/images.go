@@ -20,6 +20,7 @@ import (
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp" // registers the webp decoder with image
 
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 )
 
@@ -30,20 +31,20 @@ import (
 // workflow injects the blocks as one follow-up user message after every tool
 // reply of the turn landed.
 
-const (
+var (
 	// imageSourceCap bounds the raw file/download before decoding.
-	imageSourceCap = 5 << 20 // 5 MiB
+	imageSourceCap = harness.Current().ImageSourceMaxBytes
 	// imageMaxSide is the long-side budget: providers charge vision input by
 	// tiles and reject oversized images. ~1568px matches the common
 	// high-fidelity tile limit.
-	imageMaxSide = 1568
+	imageMaxSide = harness.Current().ImageMaxSide
 	// imageEncodedCap bounds the final encoded payload. The block crosses the
 	// Temporal activity boundary (result -> workflow history) and then the
 	// call_model activity input: base64 expansion is ×4/3, and a single block
 	// must not push the scheduler upload toward its blob error limit
 	// (TMPRL1103). 1568px screenshots still encode well below this at JPEG
 	// q85; the quality ladder in encodeFitting handles the rest.
-	imageEncodedCap = 512 << 10
+	imageEncodedCap = harness.Current().ImageEncodedMaxBytes
 )
 
 var viewImageTool = llm.ToolDef{
@@ -208,7 +209,7 @@ func (a *Activities) handleViewImage(request ToolRequest) (ToolResult, error) {
 	if info.IsDir() {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q is a directory", cleanPath(pathArg)))
 	}
-	if info.Size() > imageSourceCap {
+	if info.Size() > int64(imageSourceCap) {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q is %d bytes; the cap is %d", cleanPath(pathArg), info.Size(), imageSourceCap))
 	}
 	data, err := os.ReadFile(abs)
@@ -260,7 +261,7 @@ func (a *Activities) handleFetchImage(ctx context.Context, request ToolRequest) 
 		return ToolResult{}, temporal.NewNonRetryableApplicationError(
 			fmt.Sprintf("fetch_image: %q is an HTML page — use web_fetch for pages", mediaType), "UnsupportedContent", nil)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, imageSourceCap+1))
+	data, err := io.ReadAll(io.LimitReader(response.Body, int64(imageSourceCap)+1))
 	if err != nil {
 		return ToolResult{}, fmt.Errorf("fetch_image: read body: %w", err)
 	}

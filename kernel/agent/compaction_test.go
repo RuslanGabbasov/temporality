@@ -4,16 +4,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 )
 
 func TestCompactionDigestCapsMessages(t *testing.T) {
-	big := strings.Repeat("x", compactionDigestMessageHead+compactionDigestMessageTail+4096)
+	budgets := harness.DefaultBudgets()
+	big := strings.Repeat("x", budgets.CompactionDigestHeadBytes+budgets.CompactionDigestTailBytes+4096)
 	digest := compactionDigest([]llm.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "hi", Images: []llm.ImageBlock{{MIMEType: "image/png", Data: make([]byte, 128)}}},
 		{Role: "tool", Content: big},
-	})
+	}, budgets.CompactionDigestHeadBytes, budgets.CompactionDigestTailBytes)
 	if strings.Contains(digest, big) {
 		t.Fatal("digest must cap oversized messages")
 	}
@@ -33,6 +35,7 @@ func TestCompactionDigestCapsMessages(t *testing.T) {
 // the tail only at whole turn groups (tool replies never split from their
 // tool_calls message).
 func TestCompactMessagesKeepsContract(t *testing.T) {
+	budgets := harness.DefaultBudgets()
 	messages := []llm.Message{
 		{Role: "system", Content: "SYS"},
 		{Role: "user", Content: "the original request"},
@@ -45,7 +48,7 @@ func TestCompactMessagesKeepsContract(t *testing.T) {
 			llm.Message{Role: "tool", ToolCallID: "c", Content: strings.Repeat("o", 30<<10)},
 		)
 	}
-	out, kept, dropped := compactMessages(messages, "CARD")
+	out, kept, dropped := compactMessages(messages, "CARD", budgets.CompactionTailBytes, budgets.CompactionKeepGroupsMin, budgets.CompactionKeepGroupsMax)
 
 	if out[0].Content != "SYS" || out[1].Content != "the original request" {
 		t.Fatal("system prompt and original request must stay verbatim")
@@ -78,6 +81,7 @@ func TestCompactMessagesKeepsContract(t *testing.T) {
 }
 
 func TestCompactMessagesTailBounds(t *testing.T) {
+	budgets := harness.DefaultBudgets()
 	messages := []llm.Message{
 		{Role: "system", Content: "SYS"},
 		{Role: "user", Content: "req"},
@@ -89,21 +93,21 @@ func TestCompactMessagesTailBounds(t *testing.T) {
 			llm.Message{Role: "tool", ToolCallID: "x", Content: strings.Repeat("b", 50<<10)},
 		)
 	}
-	out, kept, dropped := compactMessages(messages, "CARD")
+	out, kept, dropped := compactMessages(messages, "CARD", budgets.CompactionTailBytes, budgets.CompactionKeepGroupsMin, budgets.CompactionKeepGroupsMax)
 	tailBytes := 0
 	for _, m := range out[3:] {
 		tailBytes += len(m.Content)
 	}
-	if tailBytes > compactionTailBytes {
-		t.Fatalf("tail is %d bytes, want <= %d", tailBytes, compactionTailBytes)
+	if tailBytes > budgets.CompactionTailBytes {
+		t.Fatalf("tail is %d bytes, want <= %d", tailBytes, budgets.CompactionTailBytes)
 	}
 	// Whole groups only: every group is two messages, so the kept tail is an
 	// even count and at least the minimum number of groups survives.
 	if (len(out)-3)%2 != 0 {
 		t.Fatalf("tail of %d messages splits a group", len(out)-3)
 	}
-	if len(out)-3 < compactionKeepGroupsMin*2 {
-		t.Fatalf("tail kept %d messages, want at least %d", len(out)-3, compactionKeepGroupsMin*2)
+	if len(out)-3 < budgets.CompactionKeepGroupsMin*2 {
+		t.Fatalf("tail kept %d messages, want at least %d", len(out)-3, budgets.CompactionKeepGroupsMin*2)
 	}
 	if kept+dropped != len(messages) || dropped == 0 {
 		t.Fatalf("kept=%d dropped=%d of %d — elision must account for everything", kept, dropped, len(messages))
@@ -111,8 +115,9 @@ func TestCompactMessagesTailBounds(t *testing.T) {
 }
 
 func TestCompactMessagesShortHistoryUnchanged(t *testing.T) {
+	budgets := harness.DefaultBudgets()
 	messages := []llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}}
-	out, kept, dropped := compactMessages(messages, "CARD")
+	out, kept, dropped := compactMessages(messages, "CARD", budgets.CompactionTailBytes, budgets.CompactionKeepGroupsMin, budgets.CompactionKeepGroupsMax)
 	if len(out) != 2 || kept != 2 || dropped != 0 {
 		t.Fatalf("a short history must pass through, got %d messages (kept=%d dropped=%d)", len(out), kept, dropped)
 	}

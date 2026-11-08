@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
@@ -68,6 +69,11 @@ type Activities struct {
 	// fallback for background quality work (skill builder, area normalization)
 	// when the run/project carries no default model.
 	JudgeModel func(ctx context.Context) (*llm.Client, error)
+	// HarnessModel resolves an installation model ROLE (docs/harness-settings.md):
+	// compaction, title and extraction each have a settings slot in the
+	// supervisor panel; an empty slot falls back to the judge model and the
+	// caller's own cascade. Injected by main.
+	HarnessModel func(ctx context.Context, role harness.ModelRole) (*llm.Client, error)
 	// EvalModel resolves the model that answers agent-evaluation cases when
 	// the env gateway (Model) is absent: the same chain the draft wizards use
 	// (configured judge model, then the first chat-capable provider model),

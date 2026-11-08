@@ -24,6 +24,14 @@ const (
 	SettingHabApprovalSeconds   = "supervisor.hab.approval_seconds"    // per approval/reconcile decision
 	SettingHabAnswerBaseSeconds = "supervisor.hab.answer_base_seconds" // per ask_human answer, base
 	SettingHabReadingWPM        = "supervisor.hab.reading_wpm"         // reading speed, words per minute
+
+	// Harness model roles (docs/harness-settings.md): the models that serve
+	// the harness's own background work — context compaction, run titles,
+	// knowledge extraction. Empty = fall back down the role cascade (judge
+	// model, project default, env default model).
+	SettingCompactionModel = "harness.compaction.model"
+	SettingTitleModel      = "harness.title.model"
+	SettingExtractionModel = "harness.extraction.model"
 )
 
 // Defaults for the human-attention estimate. An approval decision (reading
@@ -39,9 +47,12 @@ const (
 // Embeddings have no model setting: inference is local (rembed in-process),
 // the model id travels via KERNEL_EMBEDDINGS_MODEL for operators.
 type SupervisorSettings struct {
-	JudgeModel  string       `json:"judge_model"`
-	VisionModel string       `json:"vision_model"`
-	HAB         HumanFactors `json:"hab"`
+	JudgeModel      string       `json:"judge_model"`
+	VisionModel     string       `json:"vision_model"`
+	CompactionModel string       `json:"compaction_model"`
+	TitleModel      string       `json:"title_model"`
+	ExtractionModel string       `json:"extraction_model"`
+	HAB             HumanFactors `json:"hab"`
 }
 
 // HumanFactors carries the human-attention estimate coefficients (HAB) and is
@@ -85,14 +96,29 @@ func (s *Store) SupervisorSettings(ctx context.Context) (SupervisorSettings, err
 	if err != nil && err != ErrNotFound {
 		return SupervisorSettings{}, err
 	}
+	compaction, err := s.GetSetting(ctx, SettingCompactionModel)
+	if err != nil && err != ErrNotFound {
+		return SupervisorSettings{}, err
+	}
+	title, err := s.GetSetting(ctx, SettingTitleModel)
+	if err != nil && err != ErrNotFound {
+		return SupervisorSettings{}, err
+	}
+	extraction, err := s.GetSetting(ctx, SettingExtractionModel)
+	if err != nil && err != ErrNotFound {
+		return SupervisorSettings{}, err
+	}
 	hab, err := s.HumanFactors(ctx)
 	if err != nil {
 		return SupervisorSettings{}, err
 	}
 	return SupervisorSettings{
-		JudgeModel:  judge,
-		VisionModel: vision,
-		HAB:         hab,
+		JudgeModel:      judge,
+		VisionModel:     vision,
+		CompactionModel: compaction,
+		TitleModel:      title,
+		ExtractionModel: extraction,
+		HAB:             hab,
 	}, nil
 }
 
@@ -110,6 +136,15 @@ func (s *Store) SaveSupervisorSettings(ctx context.Context, settings SupervisorS
 		return err
 	}
 	if err := write(SettingSupervisorVisionModel, strings.TrimSpace(settings.VisionModel)); err != nil {
+		return err
+	}
+	if err := write(SettingCompactionModel, strings.TrimSpace(settings.CompactionModel)); err != nil {
+		return err
+	}
+	if err := write(SettingTitleModel, strings.TrimSpace(settings.TitleModel)); err != nil {
+		return err
+	}
+	if err := write(SettingExtractionModel, strings.TrimSpace(settings.ExtractionModel)); err != nil {
 		return err
 	}
 	hab := settings.HAB
