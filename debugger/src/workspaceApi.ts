@@ -1759,3 +1759,29 @@ export const workspaceApi = {
   setResourceBinding: (kind: OrgResourceKind, id: string, orgUnitID: string) =>
     request<{ kind: string; resource_id: string; org_unit_id: string }>(`/v1/org/resources/${kind}/${id}/binding`, { method: 'PUT', body: JSON.stringify({ org_unit_id: orgUnitID }) }),
 }
+// Artifact export (docs/presentation-engine.md): downloads the compiled,
+// self-contained markdown copy — presentation fences compile into embedded
+// PNG data-URI images on the server, the file opens in any standalone viewer.
+export async function exportArtifactMarkdown(artifactID: string, version?: number): Promise<void> {
+  const query = version ? `?version=${version}` : ''
+  const response = await fetch(`${KERNEL_API}/v1/workspace/artifacts/${encodeURIComponent(artifactID)}/export${query}`, {
+    headers: authHeaders(),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(payload.error ?? `HTTP ${response.status}`)
+  }
+  const blob = await response.blob()
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i)
+  const fallback = `${artifactID}.md`
+  const name = match ? decodeURIComponent(match[1]) : fallback
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = name
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}

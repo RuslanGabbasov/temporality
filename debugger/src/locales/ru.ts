@@ -1744,6 +1744,7 @@ export const ru: Record<string, string> = {
     'artifacts.saga_helper': 'Необязательно: сага, к которой относится рабочий продукт; регламентам для всей компании или отдельного подразделения сага не нужна',
     'artifacts.saga_helper_edit': 'Сага, к которой относится рабочий продукт; очистите поле, чтобы отвязать — у регламентов саги обычно нет',
     'artifacts.submit_review': 'На согласование',
+    'artifacts.download_md': 'Скачать .md',
     'artifacts.open_reviews': 'Очередь согласования',
     'artifacts.review_history': 'История согласований',
     'artifacts.reviews_title': 'Согласования — {{name}}',

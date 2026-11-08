@@ -1744,6 +1744,7 @@ export const en: Record<string, string> = {
     'artifacts.saga_helper': 'Optional: the saga this work product belongs to; company/department regulations do not need one',
     'artifacts.saga_helper_edit': 'Saga this work product belongs to; clear the field to detach — regulations usually carry none',
     'artifacts.submit_review': 'Send to review',
+    'artifacts.download_md': 'Download .md',
     'artifacts.open_reviews': 'Review queue',
     'artifacts.review_history': 'Review history',
     'artifacts.reviews_title': 'Reviews — {{name}}',

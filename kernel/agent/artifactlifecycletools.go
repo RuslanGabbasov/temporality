@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/temporality-project/temporality/kernel/presentation"
 	"github.com/temporality-project/temporality/observation"
 )
 
@@ -125,6 +126,11 @@ func (a *Activities) handleArtifactCreate(ctx context.Context, request ToolReque
 		payload["kind"] = kind
 	}
 	if content := artifactStringArg(request, "content"); content != "" {
+		// Presentation fences are validated at authoring time: the agent fixes
+		// broken visuals before the artifact exists, not at download time.
+		if err := presentation.ValidateMarkdownFences([]byte(content), presentation.Policy{}); err != nil {
+			return ToolResult{Content: "error: " + err.Error() + "\nCompose visual blocks by the catalog in the present tool description."}, nil
+		}
 		payload["content"] = content
 	}
 	if mimeType := artifactStringArg(request, "mime_type"); mimeType != "" {
@@ -206,6 +212,9 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 		payload["saga_id"] = saga
 	}
 	if strings.TrimSpace(content) != "" {
+		if err := presentation.ValidateMarkdownFences([]byte(content), presentation.Policy{}); err != nil {
+			return ToolResult{Content: "error: " + err.Error() + "\nCompose visual blocks by the catalog in the present tool description."}, nil
+		}
 		payload["content"] = content
 	}
 	if mimeType := artifactStringArg(request, "mime_type"); mimeType != "" {
@@ -243,6 +252,11 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 // artifact_submit. The approval decision remains human. The body arrives
 // already patched (or as the raw content argument).
 func (a *Activities) handleArtifactNewVersion(ctx context.Context, request ToolRequest, artifactID, content string) (ToolResult, error) {
+	if strings.TrimSpace(content) != "" {
+		if err := presentation.ValidateMarkdownFences([]byte(content), presentation.Policy{}); err != nil {
+			return ToolResult{Content: "error: " + err.Error() + "\nCompose visual blocks by the catalog in the present tool description."}, nil
+		}
+	}
 	payload := map[string]any{
 		"title":       artifactStringArg(request, "title"),
 		"description": artifactStringArg(request, "description"),

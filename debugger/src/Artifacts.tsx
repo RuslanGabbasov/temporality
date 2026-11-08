@@ -12,8 +12,9 @@ import {
   SelectItem,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close } from '@carbon/icons-react'
-import { workspaceApi, type Artifact, type ArtifactInboxEntry, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
+import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download } from '@carbon/icons-react'
+import { workspaceApi, exportArtifactMarkdown, type Artifact, type ArtifactInboxEntry, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
+import { MarkdownWithPresentations } from './PresentationView'
 import { whoami, canReconcile } from './kernelApi'
 import { useT } from './i18n'
 import { shortTime } from './eventSummary'
@@ -785,8 +786,21 @@ export default function Artifacts() {
                       {selected.id}{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
                     </p>
                   </div>
-                  				<Stack orientation="horizontal" gap={2}>
-                  					{(reviewable || (revisionOpen && revisionEditable)) && (
+				<Stack orientation="horizontal" gap={2}>
+					{selected.provider !== 'url' && (
+						<Button
+							size="sm"
+							kind="tertiary"
+							renderIcon={Download}
+							onClick={() => {
+								setError('')
+								void exportArtifactMarkdown(selected.id, showRevisionBody && revision ? revision.version : undefined).catch((f) => setError(String((f as Error).message ?? f)))
+							}}
+						>
+							{t('artifacts.download_md') ?? 'Download .md'}
+						</Button>
+					)}
+					{(reviewable || (revisionOpen && revisionEditable)) && (
                   						<Button size="sm" onClick={() => {
                   							setSubmitReviewerTokens([])
                   							setSubmitNote('')
@@ -1001,7 +1015,7 @@ export default function Artifacts() {
                   ) : bodyText ? (
                     <>
                       <div className="artifact-body">
-                        <Markdown content={bodyText} />
+                        <MarkdownWithPresentations content={bodyText} />
                       </div>
                       {bodyTruncated && !showRevisionBody && (
                         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', marginTop: '0.5rem' }}>
@@ -1269,7 +1283,7 @@ function VersionHistory({ artifactID }: { artifactID: string }) {
               {expanded === v.version && (
                 <div style={{ padding: '0 0.55rem 0.55rem' }}>
                   <div className="artifact-body" style={{ border: '1px dashed var(--tm-border)', borderRadius: '6px', padding: '0.5rem', maxHeight: '22rem', overflowY: 'auto' }}>
-                    <Markdown content={v.content || ''} />
+                    <MarkdownWithPresentations content={v.content || ''} />
                   </div>
                 </div>
               )}

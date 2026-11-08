@@ -3100,6 +3100,10 @@ func main() {
 	// capability matrix and the interaction handler (§11: buttons and forms
 	// land in the existing HITL machinery).
 	registerPresentationRoutes(mux, gate, ws, events, temporalClient, ws, activities.SourceID)
+	// Artifact export (docs/presentation-engine.md): the compiled,
+	// self-contained markdown copy — presentation fences become embedded PNG
+	// images, the file opens in any standalone viewer.
+	registerArtifactExportRoute(mux, gate, ws, events, visibleUnits)
 	// Research sessions (docs/human-knowledge-explorer.md §11): saved
 	// knowledge-explorer investigations — list/read for everyone with read
 	// access, create/update/delete for writers.

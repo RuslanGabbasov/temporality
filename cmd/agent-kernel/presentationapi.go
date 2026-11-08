@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -708,6 +709,113 @@ func presentationFileBase(raw string) string {
 	out := b.String()
 	if out == "" {
 		out = "presentation"
+	}
+	if len(out) > 60 {
+		out = out[:60]
+	}
+	return out
+}
+
+// artifactExportStore is the storage surface of the artifact export route.
+type artifactExportStore interface {
+	GetArtifactRange(ctx context.Context, id string, offset, limit int) (workspace.Artifact, error)
+	ListArtifactVersions(ctx context.Context, id string) ([]workspace.ArtifactVersion, error)
+	GetPresentation(ctx context.Context, id string) (workspace.Presentation, error)
+	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
+}
+
+// registerArtifactExportRoute serves a compiled, self-contained markdown copy
+// of an artifact (docs/presentation-engine.md × docs/artifact-registry.md):
+// presentation fences compile into embedded PNG data-URI images, so the
+// downloaded file opens in any standalone viewer with the visuals in place.
+// The stored artifact keeps its readable source — versions keep diffing
+// clean.
+func registerArtifactExportRoute(mux *http.ServeMux, gate *controlplane.Gate, store artifactExportStore, events presentationOutbox, resolveOrgUnits func(r *http.Request) []string) {
+	mux.HandleFunc("GET /v1/workspace/artifacts/{artifactID}/export", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		id := r.PathValue("artifactID")
+		var body string
+		var title, hash string
+		versionParam := strings.TrimSpace(r.URL.Query().Get("version"))
+		if versionParam == "" {
+			artifact, err := store.GetArtifactRange(r.Context(), id, 0, 0)
+			if err != nil {
+				writeError(w, 404, workspace.ErrNotFound)
+				return
+			}
+			if !workspace.OrgVisible(artifact.OrgUnitID, resolveOrgUnits(r)) {
+				writeError(w, 404, workspace.ErrNotFound)
+				return
+			}
+			body, title, hash = artifact.Content, artifact.Title, artifact.ContentHash
+		} else {
+			version, err := strconv.Atoi(versionParam)
+			if err != nil {
+				writeError(w, 400, errors.New("version must be an integer"))
+				return
+			}
+			versions, err := store.ListArtifactVersions(r.Context(), id)
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			for _, v := range versions {
+				if v.Version == version {
+					body, title, hash = v.Content, v.Title, v.ContentHash
+					break
+				}
+			}
+			if body == "" && hash == "" {
+				writeError(w, 404, workspace.ErrNotFound)
+				return
+			}
+		}
+		resolver := func(presentationID string) (json.RawMessage, error) {
+			row, err := store.GetPresentation(r.Context(), presentationID)
+			if err != nil {
+				return nil, fmt.Errorf("presentation %q not found", presentationID)
+			}
+			return row.Document, nil
+		}
+		compiled, images, err := presentation.CompileMarkdownCapped([]byte(body), defaultPresentationPolicy(), resolver)
+		if err != nil {
+			emitPresentationEvent(r.Context(), events, "presentation.render_failed", workspace.Presentation{ID: id, ProjectID: projectOfRequest(r)}, map[string]any{"format": "artifact_export", "error": truncateDetail(err.Error())})
+			writeError(w, 422, err)
+			return
+		}
+		if images > 0 {
+			// The export is a render in the observability sense (§15).
+			emitPresentationEvent(r.Context(), events, "presentation.rendered", workspace.Presentation{ID: id, ProjectID: projectOfRequest(r)}, map[string]any{"format": "artifact_export", "images": images})
+			_ = store.RecordAccessAudit(r.Context(), requestUserID(r), "artifact.exported", "artifact", id, map[string]any{"version": versionParam, "images": images})
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.md\"", artifactFileBase(title, id)))
+		w.Header().Set("ETag", fmt.Sprintf("\"%s\"", hash))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(compiled)
+	})
+}
+
+// artifactFileBase builds a download-safe file name from the artifact title.
+func artifactFileBase(title, id string) string {
+	base := strings.TrimSpace(title)
+	if base == "" {
+		base = id
+	}
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteRune('-')
+		}
+	}
+	out := b.String()
+	if out == "" {
+		out = "artifact"
 	}
 	if len(out) > 60 {
 		out = out[:60]

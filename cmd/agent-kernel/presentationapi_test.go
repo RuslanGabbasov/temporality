@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,16 +26,20 @@ import (
 )
 
 type fakePresentationStore struct {
-	mu        sync.Mutex
-	rows      map[string]workspace.Presentation
-	revisions map[string][]presentation.Revision
-	audit     []string
+	mu               sync.Mutex
+	rows             map[string]workspace.Presentation
+	revisions        map[string][]presentation.Revision
+	audit            []string
+	artifacts        map[string]workspace.Artifact
+	artifactVersions map[string][]workspace.ArtifactVersion
 }
 
 func newFakePresentationStore() *fakePresentationStore {
 	return &fakePresentationStore{
-		rows:      map[string]workspace.Presentation{},
-		revisions: map[string][]presentation.Revision{},
+		rows:             map[string]workspace.Presentation{},
+		revisions:        map[string][]presentation.Revision{},
+		artifacts:        map[string]workspace.Artifact{},
+		artifactVersions: map[string][]workspace.ArtifactVersion{},
 	}
 }
 
@@ -138,6 +143,29 @@ func (f *fakePresentationStore) RecordAccessAudit(_ context.Context, actor, acti
 	defer f.mu.Unlock()
 	f.audit = append(f.audit, actor+":"+action+":"+entityKind+":"+entityID)
 	return nil
+}
+
+// Artifact export surface (docs/presentation-engine.md): the fake keeps
+// artifacts with presentation fences and one referenced presentation for the
+// ref resolution.
+func (f *fakePresentationStore) GetArtifactRange(_ context.Context, id string, _, _ int) (workspace.Artifact, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	row, ok := f.artifacts[id]
+	if !ok {
+		return workspace.Artifact{}, workspace.ErrNotFound
+	}
+	return row, nil
+}
+
+func (f *fakePresentationStore) ListArtifactVersions(_ context.Context, id string) ([]workspace.ArtifactVersion, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rows, ok := f.artifactVersions[id]
+	if !ok {
+		return nil, workspace.ErrNotFound
+	}
+	return rows, nil
 }
 
 type fakePresentationOutbox struct {
@@ -616,4 +644,96 @@ func TestPresentationInteractionDeadRun(t *testing.T) {
 	row, err := hitl.GetHumanRequest(context.Background(), "dead-ask")
 	require.NoError(t, err)
 	require.Equal(t, "cancelled", row.Status)
+}
+
+// Artifact export (docs/presentation-engine.md): the compiled copy carries
+// embedded PNG images instead of fences, versions export by number, a broken
+// fence is a 422 with the exact error.
+func TestArtifactExport(t *testing.T) {
+	store := newFakePresentationStore()
+	outbox := &fakePresentationOutbox{}
+	gate, err := controlplane.NewGate("readertoken:reader:reader:*")
+	require.NoError(t, err)
+	mux := http.NewServeMux()
+	registerArtifactExportRoute(mux, gate, store, outbox, func(*http.Request) []string { return nil })
+	server := httptest.NewServer(gate.Authenticate(mux))
+	defer server.Close()
+
+	chartIR := `{"version":"1.0","type":"presentation","title":"Latency","content":[
+		{"type":"kpi","items":[{"label":"p95","value":120,"unit":"ms","status":"success"}]}
+	]}`
+	store.artifacts["report-1"] = workspace.Artifact{
+		ID: "report-1", Title: "Load Test Report", ContentHash: "hash-1",
+		Content: "# Отчёт\n\n```presentation\n" + chartIR + "\n```\n\nХвост.\n```presentation\n{\"ref\": \"presentation-42\"}\n```\n",
+	}
+	store.artifactVersions["report-1"] = []workspace.ArtifactVersion{
+		{Version: 1, Title: "Load Test Report v1", Content: "# Старая версия без визуалов", ContentHash: "hash-v1"},
+		{Version: 2, Title: "Load Test Report v2", Content: "# Отчёт v2\n\n```presentation\n" + chartIR + "\n```", ContentHash: "hash-v2"},
+	}
+	store.rows["presentation-42"] = workspace.Presentation{
+		ID: "presentation-42", Document: json.RawMessage(`{"version":"1.0","type":"presentation","title":"Traffic","content":[{"type":"chart","props":{"chartType":"bar"},"data":{"labels":["a"],"values":[1]}}]}`),
+	}
+
+	// Current artifact: fences compile to two embedded PNGs, prose survives.
+	resp, err := server.Client().Do(auth(mustRequest(t, http.MethodGet, server.URL+"/v1/workspace/artifacts/report-1/export"), "readertoken"))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "text/markdown")
+	require.Contains(t, resp.Header.Get("Content-Disposition"), "attachment")
+	body := readAll(t, resp)
+	require.Equal(t, 2, strings.Count(body, "data:image/png;base64,"))
+	require.Contains(t, body, "# Отчёт")
+	require.Contains(t, body, "![Latency](data:image/png;base64,")
+	require.Contains(t, body, "![Traffic](data:image/png;base64,")
+	require.NotContains(t, body, "```presentation")
+	require.NotContains(t, body, "presentation-42")
+
+	// Version export picks the requested snapshot.
+	vresp, err := server.Client().Do(auth(mustRequest(t, http.MethodGet, server.URL+"/v1/workspace/artifacts/report-1/export?version=1"), "readertoken"))
+	require.NoError(t, err)
+	defer vresp.Body.Close()
+	require.Equal(t, 200, vresp.StatusCode)
+	vbody := readAll(t, vresp)
+	require.Contains(t, vbody, "Старая версия без визуалов")
+	require.NotContains(t, vbody, "data:image/png")
+
+	// Unknown version → 404.
+	missing, err := server.Client().Do(auth(mustRequest(t, http.MethodGet, server.URL+"/v1/workspace/artifacts/report-1/export?version=99"), "readertoken"))
+	require.NoError(t, err)
+	defer missing.Body.Close()
+	require.Equal(t, 404, missing.StatusCode)
+
+	// Broken fence → 422 with the fence error.
+	store.artifacts["broken"] = workspace.Artifact{ID: "broken", Title: "Broken", Content: "```presentation\nnot json\n```"}
+	badResp, err := server.Client().Do(auth(mustRequest(t, http.MethodGet, server.URL+"/v1/workspace/artifacts/broken/export"), "readertoken"))
+	require.NoError(t, err)
+	defer badResp.Body.Close()
+	require.Equal(t, 422, badResp.StatusCode)
+	badBody := readAll(t, badResp)
+	require.Contains(t, badBody, "presentation fences are invalid")
+
+	// A rendered export journals presentation.rendered + audits.
+	rendered := 0
+	for _, event := range outbox.events {
+		if event.Type == "presentation.rendered" {
+			rendered++
+		}
+	}
+	require.GreaterOrEqual(t, rendered, 1)
+	require.GreaterOrEqual(t, len(store.audit), 1)
+}
+
+func mustRequest(t *testing.T, method, url string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, url, nil)
+	require.NoError(t, err)
+	return req
+}
+
+func readAll(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(raw)
 }

@@ -453,3 +453,42 @@ func presentationIDFromTitle(title, operationID string) string {
 	}
 	return ""
 }
+
+// compileMarkdownDelivery compiles presentation fences in a markdown payload
+// before the payload rides a channel: ```presentation blocks become embedded
+// PNG data-URI images, so the single delivered file is self-contained
+// (docs/presentation-engine.md §9 — the export applies everywhere an agent
+// ships files to messengers). Non-markdown files pass through untouched; a
+// document without fences passes through unchanged. Ref fences resolve
+// against the workspace presentation store.
+func (a *Activities) compileMarkdownDelivery(ctx context.Context, name string, payload []byte) ([]byte, error) {
+	lower := strings.ToLower(name)
+	if !strings.HasSuffix(lower, ".md") && !strings.HasSuffix(lower, ".markdown") {
+		return payload, nil
+	}
+	resolver := func(id string) (json.RawMessage, error) {
+		body, status, err := a.workspaceDo(ctx, http.MethodGet,
+			fmt.Sprintf("%s/v1/workspace/presentations/%s", a.WorkspaceURL, id), nil)
+		if err != nil {
+			return nil, err
+		}
+		if status == 404 {
+			return nil, fmt.Errorf("presentation %q not found", id)
+		}
+		if status >= 400 {
+			return nil, fmt.Errorf("presentation read failed (HTTP %d)", status)
+		}
+		var row struct {
+			Document json.RawMessage `json:"document"`
+		}
+		if err := json.Unmarshal([]byte(body), &row); err != nil {
+			return nil, err
+		}
+		return row.Document, nil
+	}
+	compiled, _, err := presentation.CompileMarkdownCapped(payload, presentation.Policy{}, resolver)
+	if err != nil {
+		return nil, fmt.Errorf("compile presentation fences in %s: %w", name, err)
+	}
+	return compiled, nil
+}

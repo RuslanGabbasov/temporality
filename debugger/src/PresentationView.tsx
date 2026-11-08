@@ -12,6 +12,7 @@ import { InlineNotification, Tag } from '@carbon/react'
 import HumanForm, { type FormSchema } from './HumanForm'
 import Markdown from './Markdown'
 import MermaidDiagram from './MermaidDiagram'
+import { splitMarkdownBlocks } from './markdownBlocks'
 
 // ---------- IR shapes (mirror kernel/presentation) --------------------------
 
@@ -1131,3 +1132,29 @@ export const PresentationView = memo(function PresentationView({ document: doc, 
 })
 
 export default PresentationView
+
+// MarkdownWithPresentations renders artifact markdown: presentation fences
+// become live PresentationView blocks (the same pattern mermaid fences use in
+// Markdown.tsx), everything else goes through the sanitized Markdown
+// component. A fence with invalid JSON stays visible as plain text rather
+// than disappearing (docs/presentation-engine.md × docs/artifact-registry.md).
+export function MarkdownWithPresentations({ content }: { content: string }) {
+  const blocks = useMemo(() => splitMarkdownBlocks(content), [content])
+  return (
+    <>
+      {blocks.map((block) =>
+        block.kind === 'presentation'
+          ? <PresentationView key={block.id} document={block.ir} />
+          : <Markdown key={md5like(block.text)} content={block.text} />,
+      )}
+    </>
+  )
+}
+
+// md5like builds a stable render key from the block text (position + length
+// is enough for React reconciliation; no crypto needed).
+function md5like(text: string): string {
+  return `md-${text.length}-${text.slice(0, 32).replace(/\W/g, '')}`
+}
+
+export { splitMarkdownBlocks } from './markdownBlocks'

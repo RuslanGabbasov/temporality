@@ -73,6 +73,15 @@ func (a *Activities) handleSendFile(ctx context.Context, request ToolRequest) (T
 	if err != nil {
 		return ToolResult{}, nonRetryable(fmt.Errorf("read %q: %w", name, err))
 	}
+	// Markdown files compile presentation fences into embedded PNG images
+	// before delivery (docs/presentation-engine.md): a report sent to a
+	// messenger must be a self-contained file the recipient opens anywhere —
+	// not one that requires the Temporality UI to show the visuals. A broken
+	// fence fails the call with the exact error (deterministic, model-fixable).
+	payload, compileErr := a.compileMarkdownDelivery(ctx, name, payload)
+	if compileErr != nil {
+		return ToolResult{}, nonRetryable(compileErr)
+	}
 	users, ok := a.fetchWorkspaceUsers(ctx)
 	if !ok {
 		return ToolResult{}, nonRetryable(errors.New("workspace users are unavailable"))
