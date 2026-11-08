@@ -116,6 +116,18 @@ function mermaidTheme(): { darkMode: boolean; themeVariables: Record<string, str
   const text3 = token('--tm-text-3', text2)
   const teal = token('--tm-teal', '#2A6B63')
   const chart = (n: number) => token(`--tm-chart-${n}`, teal)
+  // Mindmap (and git-graph) paint branches, node fills and labels from the
+  // cScale/git ramp — mermaid's defaults there are the dark git palette, the
+  // «страшно чёрные» mindmaps. The brand ramp gives every branch its chart
+  // color (xmind-like), and the label color is picked for contrast on the
+  // fill — the yellow band gets dark text, the blue band white.
+  const ramp: Record<string, string> = {}
+  for (let n = 1; n <= 8; n++) {
+    const fill = chart(((n - 1) % 6) + 1)
+    ramp[`cScale${n}`] = fill
+    ramp[`cScaleLabel${n}`] = readableOnFill(fill)
+    ramp[`cScaleInv${n}`] = fill
+  }
   return {
     darkMode,
     themeVariables: {
@@ -150,8 +162,35 @@ function mermaidTheme(): { darkMode: boolean; themeVariables: Record<string, str
       pieSectionTextColor: background,
       pieOuterStrokeColor: border,
       pieStrokeColor: background,
+      // ER attribute rows: mermaid derives their fill from primaryColor and
+      // lands on light pastels that clash with the theme text («white on
+      // light» inside entity boxes). Explicit subtle tints keep the
+      // attribute text readable in both themes.
+      attributeBackgroundColorEven: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(15,31,29,0.05)',
+      attributeBackgroundColorOdd: darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(15,31,29,0.09)',
+      // Branch palette for mindmap/git-graph (see the ramp above).
+      git0: teal,
+      gitBranchLabel0: readableOnFill(teal),
+      THEME_COLOR_LIMIT: '8',
+      ...ramp,
     },
   }
+}
+
+/** Picks a readable label color for text ON a brand fill — the same
+ *  luminance rule as the on-color helpers of the design system: yellow
+ *  bands get dark text, blue/purple bands get light text. Exported for
+ *  tests. */
+export function readableOnFill(fill: string): string {
+  const m = fill.trim().match(/^#([0-9a-fA-F]{6})$/)
+  if (!m) return '#FBF8F2'
+  const n = parseInt(m[1], 16)
+  const linear = (v: number) => {
+    const s = v / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  }
+  const luminance = 0.2126 * linear((n >> 16) & 255) + 0.7152 * linear((n >> 8) & 255) + 0.0722 * linear(n & 255)
+  return luminance > 0.45 ? '#14201D' : '#FBF8F2'
 }
 
 /** Renders one ```mermaid fenced block as an SVG diagram.

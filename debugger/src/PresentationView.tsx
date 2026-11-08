@@ -935,14 +935,25 @@ export interface MindNodeIR { label?: string; note?: string; children?: MindNode
 // byte-identical bare text. The root line is already quoted `root((label))`.
 const MINDMAP_HOSTILE = /[()[\]{}"'#;]/
 
+/** Mindmap node shape: the rounded `(label)` form — the xmind-like look —
+ *  is also the escape hatch for grammar-hostile text (the bare `mindmap`
+ *  keyword breaks the lexer; stray brackets break the shape). Anything the
+ *  rounded form cannot carry goes into the quoted square form, which takes
+ *  arbitrary text after clean()'s quote swap. */
 export function sanitizeMindmapLabel(label: string): string {
-  return /^mindmap$/i.test(label) || MINDMAP_HOSTILE.test(label) ? `(${label})` : label
+  if (!/^mindmap$/i.test(label) && !MINDMAP_HOSTILE.test(label)) return `(${label})`
+  return `["${label}"]`
 }
 
 export function mindmapMermaid(root: MindNodeIR): string | undefined {
   if (!root || !text(root.label)) return undefined
   const clean = (value: unknown) => text(value).replace(/"/g, "'").replace(/\n/g, ' ')
-  const lines = ['mindmap', `  root((${clean(root.label)}))`]
+  // The root only accepts the shaped forms (`root((label))` parses; the
+  // quoted-square root does NOT), so grammar-hostile characters are stripped
+  // from the root label instead of shape-wrapped — the rare edge case trades
+  // two brackets for a parseable diagram.
+  const rootLabel = clean(root.label).replace(/[()[\]{}'"#;]/g, ' ').replace(/\s+/g, ' ').trim()
+  const lines = ['mindmap', `  root((${rootLabel}))`]
   const walk = (node: MindNodeIR, depth: number) => {
     for (const child of node.children ?? []) {
       const label = clean(child.label)

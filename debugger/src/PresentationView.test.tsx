@@ -175,17 +175,23 @@ describe('PresentationView', () => {
     // Regression: mermaid's mindmap lexer treats a bare line as a shapeless
     // node and fails to parse when that line is exactly the `mindmap` keyword
     // (`mindmap\n  root((X))\n    mindmap` breaks; `flowchart` is fine).
-    // Fragile labels go out in the `(text)` rounded form; safe labels stay
-    // byte-identical bare text.
+    // Nodes go out in the rounded `(label)` form — the xmind look — and
+    // fragile ones fall back to the quoted `["label"]` form.
     const source = mindmapMermaid({ label: 'X', children: [{ label: 'mindmap' }, { label: 'MiNdMaP' }, { label: 'flowchart' }] })
-    expect(source).toBe('mindmap\n  root((X))\n      (mindmap)\n      (MiNdMaP)\n      flowchart')
+    expect(source).toBe('mindmap\n  root((X))\n      ["mindmap"]\n      ["MiNdMaP"]\n      (flowchart)')
     // The diagram header is the only line that is the bare keyword.
     expect(source!.split('\n').filter((line) => /^\s*mindmap$/i.test(line))).toEqual(['mindmap'])
   })
 
   it('quotes mindmap child labels carrying grammar-hostile characters', () => {
     const source = mindmapMermaid({ label: 'R', children: [{ label: 'a (b) #1' }] })
-    expect(source).toContain('      (a (b) #1)')
+    expect(source).toContain('      ["a (b) #1"]')
+  })
+
+  it('strips grammar-hostile characters from the root label (the quoted-square root does not parse)', () => {
+    const source = mindmapMermaid({ label: 'a (b)', children: [{ label: 'ok' }] })
+    expect(source!.split('\n')[1]).toBe('  root((a b))')
+    expect(source).toContain('      (ok)')
   })
 
   it('renders a button as a static chip when no interaction handler is given', () => {

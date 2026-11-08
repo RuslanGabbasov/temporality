@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeErDiagram } from './MermaidDiagram'
+import { normalizeErDiagram, readableOnFill } from './MermaidDiagram'
 
 describe('normalizeErDiagram', () => {
   it('passes a valid diagram through unchanged', () => {
@@ -118,5 +118,21 @@ describe('normalizeErDiagram', () => {
     expect(normalized).toContain('int report_id')
     // Quoted range-comments survive verbatim.
     expect(normalized).toContain('"snapshot|reports|media|purge|users|verify"')
+  })
+})
+
+describe('readableOnFill', () => {
+  it('picks dark text on light brand fills and light text on dark ones', () => {
+    // The mindmap ramp labels sit ON the chart palette: the yellow band is
+    // light and needs dark text; the blue/purple bands need light text.
+    expect(readableOnFill('#f1c21b')).toBe('#14201D')
+    expect(readableOnFill('#d09900')).toBe('#FBF8F2')
+    expect(readableOnFill('#4589ff')).toBe('#FBF8F2')
+    expect(readableOnFill('#24a148')).toBe('#FBF8F2')
+  })
+
+  it('falls back to light text for non-hex values', () => {
+    expect(readableOnFill('rgba(1,2,3,0.5)')).toBe('#FBF8F2')
+    expect(readableOnFill('')).toBe('#FBF8F2')
   })
 })
