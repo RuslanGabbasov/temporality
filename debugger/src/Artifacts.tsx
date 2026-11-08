@@ -50,7 +50,7 @@ function statusTagType(status?: string): 'red' | 'warm-gray' | 'green' | 'purple
   }
 }
 
-export default function Artifacts() {
+export default function Artifacts({ project }: { project?: string }) {
   const t = useT()
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
@@ -1015,7 +1015,7 @@ export default function Artifacts() {
                   ) : bodyText ? (
                     <>
                       <div className="artifact-body">
-                        <MarkdownWithPresentations content={bodyText} />
+                        <MarkdownWithPresentations content={bodyText} project={project} />
                       </div>
                       {bodyTruncated && !showRevisionBody && (
                         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', marginTop: '0.5rem' }}>
@@ -1032,7 +1032,7 @@ export default function Artifacts() {
                     approved revision is archived when a new revision opens.
                     Bodies are viewable — the point of history is reading what
                     the old version actually said. */}
-                <VersionHistory artifactID={selected.id} />
+                <VersionHistory artifactID={selected.id} project={project} />
               </Tile>
             )
           })()}
@@ -1223,7 +1223,7 @@ export default function Artifacts() {
  *  approved revisions, newest first. The discloser stays collapsed — history
  *  matters after the first «Новая редакция», not before. A version row
  *  expands into its stored body. */
-function VersionHistory({ artifactID }: { artifactID: string }) {
+function VersionHistory({ artifactID, project }: { artifactID: string; project?: string }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [versions, setVersions] = useState<ArtifactVersion[] | null>(null)
@@ -1283,7 +1283,7 @@ function VersionHistory({ artifactID }: { artifactID: string }) {
               {expanded === v.version && (
                 <div style={{ padding: '0 0.55rem 0.55rem' }}>
                   <div className="artifact-body" style={{ border: '1px dashed var(--tm-border)', borderRadius: '6px', padding: '0.5rem', maxHeight: '22rem', overflowY: 'auto' }}>
-                    <MarkdownWithPresentations content={v.content || ''} />
+                    <MarkdownWithPresentations content={v.content || ''} project={project} />
                   </div>
                 </div>
               )}

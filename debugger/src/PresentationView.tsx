@@ -7,11 +7,12 @@
 // Markdown component (raw HTML is not rendered), URLs are scheme-checked
 // again at render time (defense in depth — the server already validated).
 
-import { memo, useMemo, ReactNode } from 'react'
+import { memo, useEffect, useMemo, useState, ReactNode } from 'react'
 import { InlineNotification, Tag } from '@carbon/react'
 import HumanForm, { type FormSchema } from './HumanForm'
 import Markdown from './Markdown'
 import MermaidDiagram from './MermaidDiagram'
+import { storageDownloadFile, storageFileContent, storageFileURL } from './kernelApi'
 import { splitMarkdownBlocks } from './markdownBlocks'
 
 // ---------- IR shapes (mirror kernel/presentation) --------------------------
@@ -688,13 +689,80 @@ function TimelineView({ component }: { component: PresentationComponent }) {
 
 // ---------- media ------------------------------------------------------------
 
-function ImageView({ component }: { component: PresentationComponent }) {
+/** In-app references (`/workspace/<rel>`, `/cache/<rel>`) point at files
+ *  behind the kernel storage API: the bare URL 404s on the debugger origin
+ *  and the endpoint wants the auth header, so <img>/<a> cannot use it
+ *  directly. This pure mapper classifies a src — http(s) URLs and plain
+ *  origin paths pass through untouched — and resolves storage references to
+ *  the project/area/path triple plus the storage URL (content fetches still
+ *  need the auth header; see storageFileContent in kernelApi.ts). */
+export interface ResolvedImageRef {
+  /** <img src> value for pass-through references, visible fallback otherwise. */
+  src: string
+  storage?: { project: string; area: 'workspace' | 'cache'; path: string; url: string }
+}
+
+const IN_APP_STORAGE_PATH = /^\/(workspace|cache)\/(.+)$/
+
+export function resolveImageSource(raw: string, project?: string): ResolvedImageRef {
+  const match = IN_APP_STORAGE_PATH.exec(raw)
+  if (!match || !project) return { src: raw }
+  const area = match[1] as 'workspace' | 'cache'
+  const path = match[2]
+  return { src: raw, storage: { project, area, path, url: storageFileURL(project, area, path) } }
+}
+
+// Blobs are cached per src+project so repeated renders of the same artifact
+// never refetch. Blobs (not object URLs) are what gets cached because object
+// URLs are revoked on unmount — every mount creates and revokes its own.
+const imageBlobCache = new Map<string, Promise<Blob>>()
+
+/** Resolve an image src for <img>: http(s) passes through untouched; in-app
+ *  storage paths become blob object URLs (fetched with the auth header,
+ *  revoked on unmount). Undefined while a storage image is in flight; on
+ *  failure the raw path stays as the src — a visible fallback, never silent. */
+export function useResolvedImage(src: string | undefined, project?: string): string | undefined {
+  const ref = useMemo(() => (src ? resolveImageSource(src, project) : undefined), [src, project])
+  const [resolved, setResolved] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    const storage = ref?.storage
+    if (!storage) return
+    setResolved(undefined)
+    const key = `${storage.project}|${ref.src}`
+    let entry = imageBlobCache.get(key)
+    if (!entry) {
+      entry = storageFileContent(storage.project, storage.area, storage.path).then((response) => response.blob())
+      imageBlobCache.set(key, entry)
+      // A failed fetch must not poison the cache — the next mount retries.
+      entry.catch(() => { imageBlobCache.delete(key) })
+    }
+    let cancelled = false
+    let objectUrl: string | undefined
+    entry
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob)
+        if (cancelled) URL.revokeObjectURL(objectUrl)
+        else setResolved(objectUrl)
+      })
+      .catch(() => { if (!cancelled) setResolved(ref.src) })
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [ref])
+
+  return ref ? (ref.storage ? resolved : ref.src) : undefined
+}
+
+function ImageView({ component, project }: { component: PresentationComponent; project?: string }) {
   const src = safeURL(component.props?.src)
+  const resolved = useResolvedImage(src, project)
   if (!src) return <Placeholder what="image without a safe src" />
   const caption = text(component.props?.caption) || text(component.content)
   return (
     <figure className="presentation-image">
-      <img src={src} alt={caption || 'image'} loading="lazy" />
+      {resolved ? <img src={resolved} alt={caption || 'image'} loading="lazy" /> : null}
       {caption ? <figcaption>{caption}</figcaption> : null}
     </figure>
   )
@@ -702,34 +770,50 @@ function ImageView({ component }: { component: PresentationComponent }) {
 
 interface GalleryIR { src?: string; alt?: string; caption?: string }
 
-function GalleryView({ component }: { component: PresentationComponent }) {
+// One gallery item per component instance: hooks cannot run in a list map.
+function GalleryItem({ item, project }: { item: GalleryIR & { src: string }; project?: string }) {
+  const resolved = useResolvedImage(item.src, project)
+  return (
+    <figure className="presentation-image">
+      {resolved ? <img src={resolved} alt={text(item.alt) || text(item.caption) || 'image'} loading="lazy" /> : null}
+      {(item.caption || item.alt) ? <figcaption>{text(item.caption) || text(item.alt)}</figcaption> : null}
+    </figure>
+  )
+}
+
+function GalleryView({ component, project }: { component: PresentationComponent; project?: string }) {
   const items = Array.isArray(component.items) ? (component.items as GalleryIR[]) : []
   const columns = Math.min(4, Math.max(1, Number(component.props?.columns ?? 3) || 3))
-  const safe = items.map((item) => ({ ...item, src: safeURL(item.src) })).filter((item) => item.src)
+  const safe = items
+    .map((item) => ({ ...item, src: safeURL(item.src) }))
+    .filter((item): item is GalleryIR & { src: string } => Boolean(item.src))
   if (safe.length === 0) return <Placeholder what="gallery without safe images" />
   return (
     <div className="presentation-gallery" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
-      {safe.map((item, i) => (
-        <figure key={i} className="presentation-image">
-          <img src={item.src} alt={text(item.alt) || text(item.caption) || 'image'} loading="lazy" />
-          {(item.caption || item.alt) ? <figcaption>{text(item.caption) || text(item.alt)}</figcaption> : null}
-        </figure>
-      ))}
+      {safe.map((item, i) => <GalleryItem key={i} item={item} project={project} />)}
     </div>
   )
 }
 
 interface FileIR { name?: string; href?: string; artifact_id?: string; size?: string }
 
-function FileView({ component, onFile }: { component: PresentationComponent; onFile?: (path: string) => void }) {
+function FileView({ component, onFile, project }: { component: PresentationComponent; onFile?: (path: string) => void; project?: string }) {
   const props = (component.props ?? {}) as FileIR
   const name = text(props.name)
   if (!name) return <Placeholder what="file without a name" />
   const href = safeURL(props.href)
+  const open = () => {
+    if (!href) return
+    if (onFile) { onFile(href); return }
+    // No handler at this call site: in-app files download through the storage
+    // API (fetch + object URL) so the auth header rides along.
+    const ref = resolveImageSource(href, project)
+    if (ref.storage) void storageDownloadFile(ref.storage.project, ref.storage.area, ref.storage.path).catch(() => {})
+  }
   return (
     <span className="presentation-file">
       {href ? (
-        <button className="chat-attachment-chip presentation-file-chip" onClick={() => onFile?.(href)} title={href}>📎 {name}{props.size ? ` · ${text(props.size)}` : ''}</button>
+        <button className="chat-attachment-chip presentation-file-chip" onClick={open} title={href}>📎 {name}{props.size ? ` · ${text(props.size)}` : ''}</button>
       ) : (
         <span className="chat-attachment-chip">📎 {name}{props.size ? ` · ${text(props.size)}` : ''}</span>
       )}
@@ -841,9 +925,21 @@ function GanttView({ component }: { component: PresentationComponent }) {
 
 // ---------- mindmap / state / er / class (mermaid conversions) ---------------
 
-interface MindNodeIR { label?: string; note?: string; children?: MindNodeIR[] }
+export interface MindNodeIR { label?: string; note?: string; children?: MindNodeIR[] }
 
-function mindmapMermaid(root: MindNodeIR): string | undefined {
+// Mermaid's mindmap lexer treats a bare line as a shapeless node: a child
+// label that is exactly the `mindmap` keyword (any case) at line start breaks
+// the parse, and shape/quote characters (`()[]{}"'#;`) corrupt the node
+// grammar the same way. Fragile labels are emitted in the `(text)`
+// rounded-shape form — `(mindmap)` parses fine — while safe labels stay
+// byte-identical bare text. The root line is already quoted `root((label))`.
+const MINDMAP_HOSTILE = /[()[\]{}"'#;]/
+
+export function sanitizeMindmapLabel(label: string): string {
+  return /^mindmap$/i.test(label) || MINDMAP_HOSTILE.test(label) ? `(${label})` : label
+}
+
+export function mindmapMermaid(root: MindNodeIR): string | undefined {
   if (!root || !text(root.label)) return undefined
   const clean = (value: unknown) => text(value).replace(/"/g, "'").replace(/\n/g, ' ')
   const lines = ['mindmap', `  root((${clean(root.label)}))`]
@@ -851,7 +947,7 @@ function mindmapMermaid(root: MindNodeIR): string | undefined {
     for (const child of node.children ?? []) {
       const label = clean(child.label)
       if (!label) continue
-      lines.push(`${'  '.repeat(depth + 2)}${label}`)
+      lines.push(`${'  '.repeat(depth + 2)}${sanitizeMindmapLabel(label)}`)
       walk(child, depth + 1)
     }
   }
@@ -1070,14 +1166,16 @@ export interface PresentationInteract {
   (presentationID: string, componentID: string, target?: string, payload?: Record<string, unknown>): Promise<boolean>
 }
 
-export function PresentationBlock({ component, onFile, onInteract, presentationID }: {
+export function PresentationBlock({ component, onFile, onInteract, presentationID, project }: {
   component: PresentationComponent
   onFile?: (path: string) => void
   onInteract?: PresentationInteract
   presentationID?: string
+  /** Project whose workspace storage serves in-app `/workspace/...` refs. */
+  project?: string
 }): ReactNode {
   const renderChildren = (children?: PresentationComponent[]): ReactNode => (
-    <>{(children ?? []).map((child, i) => <PresentationBlock key={child.id ?? i} component={child} onFile={onFile} onInteract={onInteract} presentationID={presentationID} />)}</>
+    <>{(children ?? []).map((child, i) => <PresentationBlock key={child.id ?? i} component={child} onFile={onFile} onInteract={onInteract} presentationID={presentationID} project={project} />)}</>
   )
   switch (component.type) {
     case 'text': return <TextView component={component} />
@@ -1111,16 +1209,16 @@ export function PresentationBlock({ component, onFile, onInteract, presentationI
     case 'class-diagram': return <ClassView component={component} />
     case 'timeline': return <TimelineView component={component} />
     case 'gantt': case 'roadmap': return <GanttView component={component} />
-    case 'image': return <ImageView component={component} />
-    case 'image-gallery': return <GalleryView component={component} />
-    case 'file': return <FileView component={component} onFile={onFile} />
+    case 'image': return <ImageView component={component} project={project} />
+    case 'image-gallery': return <GalleryView component={component} project={project} />
+    case 'file': return <FileView component={component} onFile={onFile} project={project} />
     case 'button': return <ButtonView component={component} onInteract={onInteract} presentationID={presentationID} />
     case 'form': return <FormView component={component} onInteract={onInteract} presentationID={presentationID} />
     default: return <Placeholder what={`unknown component "${text(component.type)}"`} />
   }
 }
 
-export const PresentationView = memo(function PresentationView({ document: doc, onFile, onInteract }: { document: unknown; onFile?: (path: string) => void; onInteract?: PresentationInteract }) {
+export const PresentationView = memo(function PresentationView({ document: doc, onFile, onInteract, project }: { document: unknown; onFile?: (path: string) => void; onInteract?: PresentationInteract; project?: string }) {
   if (!doc || typeof doc !== 'object') return null
   const parsed = doc as PresentationDocument
   const content = Array.isArray(parsed.content) ? parsed.content : []
@@ -1129,7 +1227,7 @@ export const PresentationView = memo(function PresentationView({ document: doc, 
     <div className="presentation-view">
       {parsed.title ? <div className="presentation-title">{parsed.title}</div> : null}
       {content.map((component, i) => (
-        <PresentationBlock key={component.id ?? i} component={component} onFile={onFile} onInteract={onInteract} presentationID={parsed.id} />
+        <PresentationBlock key={component.id ?? i} component={component} onFile={onFile} onInteract={onInteract} presentationID={parsed.id} project={project} />
       ))}
     </div>
   )
@@ -1142,13 +1240,13 @@ export default PresentationView
 // Markdown.tsx), everything else goes through the sanitized Markdown
 // component. A fence with invalid JSON stays visible as plain text rather
 // than disappearing (docs/presentation-engine.md × docs/artifact-registry.md).
-export function MarkdownWithPresentations({ content }: { content: string }) {
+export function MarkdownWithPresentations({ content, project }: { content: string; project?: string }) {
   const blocks = useMemo(() => splitMarkdownBlocks(content), [content])
   return (
     <>
       {blocks.map((block) =>
         block.kind === 'presentation'
-          ? <PresentationView key={block.id} document={block.ir} />
+          ? <PresentationView key={block.id} document={block.ir} project={project} />
           : <Markdown key={md5like(block.text)} content={block.text} />,
       )}
     </>

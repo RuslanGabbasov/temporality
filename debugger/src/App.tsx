@@ -115,7 +115,7 @@ export default function App() {
           case 'skills':
             return <Skills />
           case 'artifacts':
-            return <Artifacts />
+            return <Artifacts project={project} />
           case 'mcp':
             return <Mcp />
           case 'secrets':

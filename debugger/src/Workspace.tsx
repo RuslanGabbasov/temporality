@@ -1925,6 +1925,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     {msg.role === 'assistant' && msg.presentation
                       ? <PresentationView
                           document={msg.presentation}
+                          project={project}
                           onFile={(path) => void onFileLink(path)}
                           onInteract={async (presentationID, componentID, target, payload) => {
                             try {

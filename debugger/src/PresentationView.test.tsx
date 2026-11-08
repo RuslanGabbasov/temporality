@@ -5,7 +5,7 @@
 
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import PresentationView, { PresentationBlock, type PresentationDocument } from './PresentationView'
+import PresentationView, { PresentationBlock, mindmapMermaid, resolveImageSource, type PresentationDocument } from './PresentationView'
 
 const sample: PresentationDocument = {
   version: '1.0',
@@ -171,6 +171,23 @@ describe('PresentationView', () => {
     expect(cls).toContain('mermaid-diagram')
   })
 
+  it('never emits a bare `mindmap` node line (the keyword breaks the mindmap lexer)', () => {
+    // Regression: mermaid's mindmap lexer treats a bare line as a shapeless
+    // node and fails to parse when that line is exactly the `mindmap` keyword
+    // (`mindmap\n  root((X))\n    mindmap` breaks; `flowchart` is fine).
+    // Fragile labels go out in the `(text)` rounded form; safe labels stay
+    // byte-identical bare text.
+    const source = mindmapMermaid({ label: 'X', children: [{ label: 'mindmap' }, { label: 'MiNdMaP' }, { label: 'flowchart' }] })
+    expect(source).toBe('mindmap\n  root((X))\n      (mindmap)\n      (MiNdMaP)\n      flowchart')
+    // The diagram header is the only line that is the bare keyword.
+    expect(source!.split('\n').filter((line) => /^\s*mindmap$/i.test(line))).toEqual(['mindmap'])
+  })
+
+  it('quotes mindmap child labels carrying grammar-hostile characters', () => {
+    const source = mindmapMermaid({ label: 'R', children: [{ label: 'a (b) #1' }] })
+    expect(source).toContain('      (a (b) #1)')
+  })
+
   it('renders a button as a static chip when no interaction handler is given', () => {
     const out = renderToStaticMarkup(
       <PresentationBlock component={{ type: 'button', id: 'b1', content: 'Approve', actions: [{ type: 'submit', target: 'ask-1' }] }} />,
@@ -192,5 +209,35 @@ describe('PresentationView', () => {
       />,
     )
     expect(out).toContain('presentation-form-static')
+  })
+})
+
+describe('resolveImageSource', () => {
+  it('passes http(s) and plain origin paths through untouched', () => {
+    expect(resolveImageSource('https://example.com/a.png', 'proj')).toEqual({ src: 'https://example.com/a.png' })
+    expect(resolveImageSource('/artifacts/deep-link', 'proj')).toEqual({ src: '/artifacts/deep-link' })
+    expect(resolveImageSource('//evil.example/x.png', 'proj')).toEqual({ src: '//evil.example/x.png' })
+  })
+
+  it('maps /workspace/<rel> onto the storage URL of the given project', () => {
+    const ref = resolveImageSource('/workspace/reports/chart.png', 'proj')
+    expect(ref.storage).toEqual({
+      project: 'proj',
+      area: 'workspace',
+      path: 'reports/chart.png',
+      url: '/kernel-api/v1/workspace/storage/projects/proj/file?area=workspace&path=reports%2Fchart.png',
+    })
+  })
+
+  it('maps /cache/<rel> onto the cache area', () => {
+    const ref = resolveImageSource('/cache/tmp/shot.png', 'proj')
+    expect(ref.storage?.area).toBe('cache')
+    expect(ref.storage?.path).toBe('tmp/shot.png')
+    expect(ref.storage?.url).toBe('/kernel-api/v1/workspace/storage/projects/proj/file?area=cache&path=tmp%2Fshot.png')
+  })
+
+  it('falls back to the raw path when no project is known', () => {
+    expect(resolveImageSource('/workspace/reports/chart.png')).toEqual({ src: '/workspace/reports/chart.png' })
+    expect(resolveImageSource('/workspace/reports/chart.png', '')).toEqual({ src: '/workspace/reports/chart.png' })
   })
 })

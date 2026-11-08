@@ -3391,6 +3391,17 @@ button.header-nav-link {
 .presentation-legend-chip { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 
 .presentation-diagram { margin: 0; }
+// Mermaid SVGs carry intrinsic widths from their viewBox; clamp them to the
+// artifact column and let wide diagrams scroll instead of blowing out the
+// body layout. Colors come from mermaidTheme() in MermaidDiagram.tsx.
+.mermaid-diagram {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
 .presentation-timeline { list-style: none; margin: 0; padding: 0; }
 .presentation-timeline-item {
   position: relative;
