@@ -1083,15 +1083,27 @@ func keepAliveProcessesOnly(top string) bool {
 	return sawProcess
 }
 
-// isKeepAliveProcess recognizes the hold-open chain: the sleeper itself and
-// the init/entrypoint layers wrapping it.
+// isKeepAliveProcess recognizes the hold-open chain: the sleeper itself
+// (any path — docker top renders /usr/bin/sleep infinity on debian bases and
+// bare "sleep infinity" on busybox; the exact-match-only version read the
+// pathed sleeper as WORK, so every idle run container survived the orphan
+// reaper forever — 31 stale sandboxes against 8 live runs) and the
+// init/entrypoint layers wrapping it. A command whose ARGV merely MENTIONS
+// sleep infinity (`bash -lc "sleep infinity && build"`) is still work: it
+// only matches when sleep infinity is the ENTIRE tail argument.
 func isKeepAliveProcess(command string) bool {
-	trimmed := strings.TrimSpace(command)
-	if trimmed == "sleep infinity" {
-		return true
+	fields := strings.Fields(strings.TrimSpace(command))
+	if len(fields) == 0 {
+		return false
 	}
-	return strings.HasSuffix(trimmed, "sleep infinity") &&
-		(strings.Contains(trimmed, "docker-init") || strings.Contains(trimmed, "tini") || strings.Contains(trimmed, "docker-entrypoint"))
+	// The sleeper: [path/]sleep infinity — nothing else in ARGV.
+	sleeper := strings.HasSuffix(fields[len(fields)-1], "infinity") && len(fields) >= 2 &&
+		(strings.HasSuffix(fields[len(fields)-2], "sleep") || strings.HasSuffix(filepath.Base(fields[len(fields)-2]), "sleep"))
+	if len(fields) == 2 {
+		return sleeper
+	}
+	// An init/entrypoint wrapper around the sleeper: docker-init -- sleep infinity.
+	return sleeper && (strings.Contains(command, "docker-init") || strings.Contains(command, "tini") || strings.Contains(command, "docker-entrypoint"))
 }
 
 // dockerRunningForAge parses docker ps RunningFor ("3 minutes ago",

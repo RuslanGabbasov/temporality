@@ -104,15 +104,38 @@ func TestScratchHasUnfinishedOps(t *testing.T) {
 // reads as idle. Anything else — a running command, a background wrapper —
 // keeps the container, and an unparseable listing keeps it too.
 func TestKeepAliveProcessesOnly(t *testing.T) {
-	idle := "PID USER TIME COMMAND\n" +
-		"3652402 root 0:00 /sbin/docker-init -- docker-entrypoint.sh sleep infinity\n" +
-		"3652416 root 0:00 sleep infinity\n"
-	busy := idle + "3652480 root 0:01 node build.js\n"
-	if !keepAliveProcessesOnly(idle) {
-		t.Fatal("the sleeper chain alone is idle")
+	idles := []string{
+		// busybox-style bare argv + the init wrapper
+		"PID USER TIME COMMAND\n" +
+			"3652402 root 0:00 /sbin/docker-init -- docker-entrypoint.sh sleep infinity\n" +
+			"3652416 root 0:00 sleep infinity\n",
+		// debian-style pathed sleeper (the regression: the pathed argv read as
+		// WORK, so idle containers survived the reaper — 31 stale sandboxes)
+		"PID USER TIME COMMAND\n" +
+			"12 root 0:00 /sbin/docker-init -- /usr/bin/sleep infinity\n" +
+			"13 root 0:00 /usr/bin/sleep infinity\n",
+		// alpine tini flavour
+		"PID USER TIME COMMAND\n" +
+			"7 root 0:00 /sbin/tini -- /bin/sleep infinity\n",
 	}
-	if keepAliveProcessesOnly(busy) {
-		t.Fatal("a process beyond the sleeper chain is work")
+	busy := []string{
+		// a real process beyond the chain
+		"PID USER TIME COMMAND\n" +
+			"3652402 root 0:00 /sbin/docker-init -- /usr/bin/sleep infinity\n" +
+			"3652480 root 0:01 node build.js\n",
+		// a command that MENTIONS sleep infinity but is real work
+		"PID USER TIME COMMAND\n" +
+			"3652480 root 0:01 bash -lc sleep infinity && make build\n",
+	}
+	for _, listing := range idles {
+		if !keepAliveProcessesOnly(listing) {
+			t.Fatal("the sleeper chain alone is idle")
+		}
+	}
+	for _, listing := range busy {
+		if keepAliveProcessesOnly(listing) {
+			t.Fatal("a process beyond the sleeper chain is work")
+		}
 	}
 	if keepAliveProcessesOnly("") {
 		t.Fatal("an unparseable listing must keep the container")
