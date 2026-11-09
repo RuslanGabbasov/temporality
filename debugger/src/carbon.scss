@@ -557,6 +557,20 @@ body, #root, #main-content {
   background: transparent !important;
   border: none !important;
 }
+// Narrow inline NumberInputs (settings rows): the Carbon wrapper is
+// inline-block and shrinks to content, so the visible field reads "half
+// dead" — the right part of the row is bare background. Stretch the whole
+// form item: the input and its (hidden steppers) shell fill the same box,
+// clicks land anywhere on the visible field.
+.tm-number-input {
+  width: 100%;
+}
+.tm-number-input .cds--number {
+  width: 100%;
+}
+.tm-number-input .cds--number input[type="number"] {
+  width: 100%;
+}
 .cds--number__control-btn {
   background: transparent !important;
   color: var(--tm-text-2) !important;

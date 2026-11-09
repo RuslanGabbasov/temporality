@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Accordion, AccordionItem, Button, TextInput, InlineNotification, Tag } from '@carbon/react'
+import { Button, TextInput, InlineNotification, Tag, Tile, Grid, Column, Heading } from '@carbon/react'
 import { TrashCan, Save, Renew } from '@carbon/icons-react'
 import {
   workspaceApi,
@@ -43,8 +43,8 @@ export default function ChannelSettingsPage() {
   const [values, setValues] = useState<Record<string, string>>({})
   const [uiUrl, setUiUrl] = useState('')
   const [secrets, setSecrets] = useState<Record<string, SecretFieldState>>({})
-  // Which accordion sections are open, keyed by channel type.
-  const [open, setOpen] = useState<Record<string, boolean>>({})
+  // Which channel cards are expanded, keyed by channel type.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
   // Until the admin toggles a section, (re)loading applies the defaults
   // (configured sections open); after that their choice survives reloads.
   const userToggled = useRef(false)
@@ -79,20 +79,6 @@ export default function ChannelSettingsPage() {
   const isConfigured = (group: ChannelSettingsGroupSchema): boolean =>
     channelConfigured(group, types.find((s) => s.type === group.type), settings)
 
-  // Default sections: configured ones open (the first one when nothing is
-  // configured yet). Computed from freshly loaded data — state updates are
-  // async, so reading types/settings here would race one render behind.
-  const defaultOpen = (
-    schema: ChannelSettingsGroupSchema[],
-    registry: ChannelTypeSpec[],
-    data: ChannelSettings,
-  ): Record<string, boolean> => {
-    const configured = schema.filter((group) =>
-      channelConfigured(group, registry.find((s) => s.type === group.type), data))
-    const openTypes = configured.length > 0 ? configured : schema.slice(0, 1)
-    return Object.fromEntries(openTypes.map((group) => [group.type, true]))
-  }
-
   const apply = (data: ChannelSettings) => {
     setSettings(data)
     const next: Record<string, string> = {}
@@ -108,6 +94,20 @@ export default function ChannelSettingsPage() {
     setSecrets({})
   }
 
+  // Which cards start expanded: the CONFIGURED ones (there is real state to
+  // read); when nothing is configured, the first card — so the empty page
+  // still shows one open example instead of a wall of collapsed shells.
+  const expandedDefault = (
+    schema: ChannelSettingsGroupSchema[],
+    registry: ChannelTypeSpec[],
+    data: ChannelSettings,
+  ): Record<string, boolean> => {
+    const configured = schema.filter((group) =>
+      channelConfigured(group, registry.find((s) => s.type === group.type), data))
+    const openTypes = configured.length > 0 ? configured : schema.slice(0, 1)
+    return Object.fromEntries(openTypes.map((group) => [group.type, true]))
+  }
+
   const load = async () => {
     setLoading(true)
     setError('')
@@ -118,7 +118,7 @@ export default function ChannelSettingsPage() {
       ])
       apply(data)
       setTypes(registry.types)
-      if (!userToggled.current) setOpen(defaultOpen(data.schema, registry.types, data))
+      if (!userToggled.current) setOpenSections(expandedDefault(data.schema, registry.types, data))
     } catch (e) {
       setError(message(e))
     } finally {
@@ -158,7 +158,7 @@ export default function ChannelSettingsPage() {
       apply(data)
       const registry = await workspaceApi.channelTypes().catch(() => ({ types: [] as ChannelTypeSpec[] }))
       setTypes(registry.types)
-      if (!userToggled.current) setOpen(defaultOpen(data.schema, registry.types, data))
+      if (!userToggled.current) setOpenSections(expandedDefault(data.schema, registry.types, data))
       setSaved(true)
     } catch (e) {
       setError(message(e))
@@ -169,7 +169,7 @@ export default function ChannelSettingsPage() {
 
   const toggleSection = (type: string, next: boolean) => {
     userToggled.current = true
-    setOpen((current) => ({ ...current, [type]: next }))
+    setOpenSections((current) => ({ ...current, [type]: next }))
   }
 
   // Configured channels first, schema order preserved within each group.
@@ -252,70 +252,91 @@ export default function ChannelSettingsPage() {
 
   return (
     <div className="tm-page">
-      <h2 style={{ marginTop: 0 }}>{t('channels_admin.title') ?? 'Delivery channels'}</h2>
-      <p style={{ color: 'var(--tm-text-3)', maxWidth: '46rem' }}>
+      <Heading>{t('channels_admin.title') ?? 'Delivery channels'}</Heading>
+      <p style={{ color: 'var(--tm-text-3)', maxWidth: '46rem', fontSize: '0.8rem', margin: '0.25rem 0 1rem' }}>
         {t('channels_admin.intro') ?? 'Kernel-side credentials for delivering agent questions. Values set here take effect immediately and override the environment variables.'}
       </p>
 
-      {error && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={error} lowContrast />}
-      {saved && <InlineNotification kind="success" title={t('channels_admin.saved') ?? 'Saved'} subtitle={t('channels_admin.saved_body') ?? 'Transport settings applied.'} lowContrast />}
+      {error && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={error} lowContrast style={{ marginBottom: '0.75rem' }} />}
+      {saved && <InlineNotification kind="success" title={t('channels_admin.saved') ?? 'Saved'} subtitle={t('channels_admin.saved_body') ?? 'Transport settings applied.'} lowContrast style={{ marginBottom: '0.75rem' }} />}
 
-      <div style={{ maxWidth: '40rem' }}>
-        <Accordion size="lg">
-          {groups.map((group) => {
-            const configured = isConfigured(group)
-            const hint = types.find((s) => s.type === group.type)?.not_configured_hint
-            return (
-              <AccordionItem
-                key={group.type}
-                title={
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-                    {group.label}
-                    <Tag size="sm" type={configured ? 'green' : 'gray'} title={hint}>
-                      {configured
-                        ? (t('channels_admin.ready') ?? 'ready')
-                        : (t('channels_admin.not_set') ?? 'not configured')}
-                    </Tag>
-                  </span>
-                }
-                open={open[group.type] === true}
-                onHeadingClick={({ isOpen }) => toggleSection(group.type, isOpen)}
-              >
-                {group.fields.map((field) =>
-                  field.secret
-                    ? secretRow(group, field.name, field.label)
-                    : plainRow(group, field.name, field.label, field.name === 'homeserver' ? 'https://matrix.org' : ''),
+      {/* Card grid, the Secrets/MCP pattern: one Tile per channel — configured
+          first, each card carries its readiness state and its own fields.
+          The accordion of pre-filled templates read as mandatory work. */}
+      <Grid>
+        {groups.map((group) => {
+          const configured = isConfigured(group)
+          const hint = types.find((s) => s.type === group.type)?.not_configured_hint
+          const open = openSections[group.type] === true
+          return (
+            <Column key={group.type} sm={4} md={4} lg={8}>
+              <Tile style={{ marginBottom: '0.75rem', opacity: configured ? 1 : 0.75, display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.6rem' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{group.label}</div>
+                    <div style={{ marginTop: '0.3rem' }}>
+                      <Tag size="sm" type={configured ? 'green' : 'gray'} title={hint}>
+                        {configured
+                          ? (t('channels_admin.ready') ?? 'ready')
+                          : (t('channels_admin.not_set') ?? 'not configured')}
+                      </Tag>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    kind="ghost"
+                    onClick={() => toggleSection(group.type, !open)}
+                  >
+                    {open ? (t('channels_admin.collapse') ?? 'Collapse') : (t('channels_admin.expand') ?? 'Set up')}
+                  </Button>
+                </div>
+                {open ? (
+                  <div>
+                    {group.fields.map((field) =>
+                      field.secret
+                        ? secretRow(group, field.name, field.label)
+                        : plainRow(group, field.name, field.label, field.name === 'homeserver' ? 'https://matrix.org' : ''),
+                    )}
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: 0 }}>
+                    {hint ?? (t('channels_admin.collapsed_hint') ?? 'Credentials are set through the environment or here.')}
+                  </p>
                 )}
-              </AccordionItem>
-            )
-          })}
-        </Accordion>
+              </Tile>
+            </Column>
+          )
+        })}
 
-        <div style={{ marginTop: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-            <span className="cds--label" style={{ marginBottom: 0 }}>UI URL</span>
-            {settings && settings.ui_url.source !== 'none' && <Tag size="sm" type="gray">{sourceLabel(settings.ui_url.source)}</Tag>}
-          </div>
-          <TextInput
-            id="channel-ui-url"
-            labelText=""
-            placeholder={settings && settings.ui_url.source === 'env' ? settings.ui_url.value : 'http://localhost:3000'}
-            value={uiUrl}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUiUrl(e.target.value)}
-          />
-          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0' }}>
-            {t('channels_admin.ui_url_hint') ?? 'Base URL of this UI — used for answer links inside notifications.'}
-          </p>
-        </div>
+        {/* The UI URL rides as its own card — a global knob, not a channel. */}
+        <Column sm={4} md={4} lg={8}>
+          <Tile style={{ marginBottom: '0.75rem', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+              <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>UI URL</span>
+              {settings && settings.ui_url.source !== 'none' && <Tag size="sm" type="gray">{sourceLabel(settings.ui_url.source)}</Tag>}
+            </div>
+            <TextInput
+              id="channel-ui-url"
+              labelText=""
+              hideLabel
+              placeholder={settings && settings.ui_url.source === 'env' ? settings.ui_url.value : 'http://localhost:3000'}
+              value={uiUrl}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUiUrl(e.target.value)}
+            />
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: '0.3rem 0 0' }}>
+              {t('channels_admin.ui_url_hint') ?? 'Base URL of this UI — used for answer links inside notifications.'}
+            </p>
+          </Tile>
+        </Column>
+      </Grid>
 
-        <div className="form-actions" style={{ marginTop: '1rem' }}>
-          <Button size="sm" renderIcon={Save} disabled={saving} onClick={() => void save()}>
-            {saving ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}
-          </Button>
-          <Button size="sm" kind="secondary" renderIcon={Renew} disabled={saving} onClick={() => void load()}>
-            {t('action.refresh') ?? 'Refresh'}
-          </Button>
-        </div>
+      <div className="form-actions" style={{ maxWidth: '72rem' }}>
+        <Button size="sm" renderIcon={Save} disabled={saving} onClick={() => void save()}>
+          {saving ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}
+        </Button>
+        <Button size="sm" kind="secondary" renderIcon={Renew} disabled={saving} onClick={() => void load()}>
+          {t('action.refresh') ?? 'Refresh'}
+        </Button>
       </div>
     </div>
   )

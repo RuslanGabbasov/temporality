@@ -125,46 +125,50 @@ export default function Harness() {
       <Heading>{t('harness.title') ?? 'Harness'}</Heading>
       <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 1rem', maxWidth: '46rem' }}>{t('harness.subtitle') ?? ''}</p>
 
-      <div style={{ maxWidth: '40rem' }}>
-        <Select id="supervisor-vision-model" labelText={t('quality.vision_model') ?? 'Vision model (image fallback)'} value={visionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setVisionDraft(e.target.value)}>
-          <SelectItem value="" text={t('quality.model_off') ?? '— main model —'} />
-          {providers.flatMap((p) => (p.models ?? []).map((m) => (
-            <SelectItem key={`v/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-          )))}
-        </Select>
-        <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.vision_model_hint') ?? ''}</p>
+      {/* Two-column settings layout: model roles left, budget knobs right.
+          The old 40rem single column left the page a narrow left strip. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.5rem', alignItems: 'start', maxWidth: '80rem' }}>
+        <section>
+          <Select id="supervisor-vision-model" labelText={t('quality.vision_model') ?? 'Vision model (image fallback)'} value={visionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setVisionDraft(e.target.value)}>
+            <SelectItem value="" text={t('quality.model_off') ?? '— main model —'} />
+            {providers.flatMap((p) => (p.models ?? []).map((m) => (
+              <SelectItem key={`v/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+            )))}
+          </Select>
+          <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.vision_model_hint') ?? ''}</p>
 
-        {/* Harness model roles (docs/harness-settings.md): the models that
-            serve the harness's own background work. Empty = the role's
-            cascade fallback (judge model, then the default model). */}
-        <div style={{ marginTop: '1.25rem' }}>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.roles_title') ?? 'Harness models'}</div>
-          <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.roles_hint') ?? ''}</p>
-          <Select id="harness-compaction-model" labelText={t('quality.compaction_model') ?? 'Compaction model (state card)'} value={compactionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCompactionDraft(e.target.value)}>
-            <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
-            {providers.flatMap((p) => (p.models ?? []).map((m) => (
-              <SelectItem key={`c/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-            )))}
-          </Select>
-          <Select id="harness-title-model" labelText={t('quality.title_model') ?? 'Run title model'} value={titleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTitleDraft(e.target.value)} style={{ marginTop: '0.6rem' }}>
-            <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
-            {providers.flatMap((p) => (p.models ?? []).map((m) => (
-              <SelectItem key={`t/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-            )))}
-          </Select>
-          <Select id="harness-extraction-model" labelText={t('quality.extraction_model') ?? 'Knowledge extraction model'} value={extractionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setExtractionDraft(e.target.value)} style={{ marginTop: '0.6rem' }}>
-            <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
-            {providers.flatMap((p) => (p.models ?? []).map((m) => (
-              <SelectItem key={`e/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-            )))}
-          </Select>
-        </div>
+          {/* Harness model roles (docs/harness-settings.md): the models that
+              serve the harness's own background work. Empty = the role's
+              cascade fallback (judge model, then the default model). */}
+          <div style={{ marginTop: '1.25rem' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.roles_title') ?? 'Harness models'}</div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.roles_hint') ?? ''}</p>
+            <Select id="harness-compaction-model" labelText={t('quality.compaction_model') ?? 'Compaction model (state card)'} value={compactionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCompactionDraft(e.target.value)}>
+              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
+              {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                <SelectItem key={`c/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+              )))}
+            </Select>
+            <Select id="harness-title-model" labelText={t('quality.title_model') ?? 'Run title model'} value={titleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTitleDraft(e.target.value)} style={{ marginTop: '0.6rem' }}>
+              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
+              {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                <SelectItem key={`t/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+              )))}
+            </Select>
+            <Select id="harness-extraction-model" labelText={t('quality.extraction_model') ?? 'Knowledge extraction model'} value={extractionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setExtractionDraft(e.target.value)} style={{ marginTop: '0.6rem' }}>
+              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
+              {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                <SelectItem key={`e/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+              )))}
+            </Select>
+          </div>
+        </section>
 
         {/* Harness budgets (docs/harness-settings.md §6): env is the base
             layer, a saved override applies to new runs only, and a reset
             returns the knob to env/default. */}
         {supervisor?.harness && (
-          <div style={{ marginTop: '1.25rem' }}>
+          <section>
             <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.harness_title') ?? 'Effective harness settings'}</div>
             <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('quality.harness_hint') ?? ''}</p>
             <p style={{ fontSize: '0.72rem', color: 'var(--tm-warning, var(--tm-text-3))', margin: '0 0 0.5rem' }}>⚠ {t('quality.harness_new_runs_hint') ?? ''}</p>
@@ -176,28 +180,9 @@ export default function Harness() {
                 const raw = (budgetDrafts[knob.key] ?? '').trim()
                 const readout = knob.kind === 'bytes' && /^\d+$/.test(raw) ? `≈ ${formatBytes(Number(raw), locale)}` : ''
                 return (
-                  <div key={knob.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '0.35rem 1rem', alignItems: 'start', borderTop: '1px solid var(--tm-border)', padding: '0.55rem 0' }}>
-                    <div>
-                      <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>{t(`quality.harness_knob_${knob.key}`)}</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.1rem' }}>{t(`quality.harness_knob_${knob.key}_hint`)}</div>
-                      {error_ && <div style={{ fontSize: '0.68rem', color: 'var(--tm-danger)', marginTop: '0.15rem' }}>{t(`quality.harness_err_${error_.code}`, error_.vars)}</div>}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      <NumberInput
-                        id={`harness-knob-${knob.key}`}
-                        size="sm"
-                        hideSteppers
-                        hideLabel
-                        label={t(`quality.harness_knob_${knob.key}`)}
-                        value={budgetDrafts[knob.key] ?? ''}
-                        min={1}
-                        max={knob.ceiling}
-                        invalid={!!error_}
-                        disabled={staged}
-                        style={{ width: '9rem' }}
-                        onChange={(_event, { value }) => setBudgetDrafts((prev) => ({ ...prev, [knob.key]: String(value) }))}
-                      />
-                      {readout && <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{readout}</span>}
+                  <div key={knob.key} style={{ borderTop: '1px solid var(--tm-border)', padding: '0.55rem 0' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.3rem' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>{t(`quality.harness_knob_${knob.key}`)}</span>
                       <Tag type={origin === 'saved' ? 'purple' : origin === 'env' ? 'warm-gray' : 'gray'} size="sm">{t(`quality.harness_origin_${origin}`)}</Tag>
                       {staged && <Tag type="red" size="sm">{t('quality.harness_reset_pending')}</Tag>}
                       {origin === 'saved' && (
@@ -206,19 +191,42 @@ export default function Harness() {
                         </Button>
                       )}
                     </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t(`quality.harness_knob_${knob.key}_hint`)}</div>
+                    {/* The tm-number-input class stretches the Carbon wrapper:
+                        the old inline width made the visible field a dead zone
+                        right of the actual <input> (clicks didn't land). */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <div className="tm-number-input" style={{ flex: '1 1 10rem', maxWidth: '14rem' }}>
+                        <NumberInput
+                          id={`harness-knob-${knob.key}`}
+                          size="sm"
+                          hideSteppers
+                          hideLabel
+                          label={t(`quality.harness_knob_${knob.key}`)}
+                          value={budgetDrafts[knob.key] ?? ''}
+                          min={1}
+                          max={knob.ceiling}
+                          invalid={!!error_}
+                          disabled={staged}
+                          onChange={(_event, { value }) => setBudgetDrafts((prev) => ({ ...prev, [knob.key]: String(value) }))}
+                        />
+                      </div>
+                      {readout && <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{readout}</span>}
+                    </div>
+                    {error_ && <div style={{ fontSize: '0.68rem', color: 'var(--tm-danger)', marginTop: '0.2rem' }}>{t(`quality.harness_err_${error_.code}`, error_.vars)}</div>}
                   </div>
                 )
               })}
             </div>
-          </div>
+          </section>
         )}
+      </div>
 
-        <div className="form-actions">
-          <Button renderIcon={Save} disabled={busy || !supervisor || hasBudgetErrors} onClick={() => void save()}>
-            {busy ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}
-          </Button>
-          <Button kind="secondary" renderIcon={Renew} disabled={busy} onClick={() => void load()}>{t('action.refresh') ?? 'Refresh'}</Button>
-        </div>
+      <div className="form-actions" style={{ maxWidth: '80rem' }}>
+        <Button renderIcon={Save} disabled={busy || !supervisor || hasBudgetErrors} onClick={() => void save()}>
+          {busy ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}
+        </Button>
+        <Button kind="secondary" renderIcon={Renew} disabled={busy} onClick={() => void load()}>{t('action.refresh') ?? 'Refresh'}</Button>
       </div>
     </div>
   )
