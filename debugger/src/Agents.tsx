@@ -1859,7 +1859,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     toggle left, limit right. Off denies the vision tools and
                     keeps pixels out of the conversation. */}
                 <div style={{ borderTop: '1px solid var(--tm-border)', paddingTop: '0.8rem', marginTop: '0.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                  {/* Bottom-aligned row: the toggle and the inputs share one
+                      baseline — their bottom edges line up (the inputs' box
+                      sets the row height). */}
+                  <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
                     <Toggle
                       id="agent-cap-vision"
                       labelText={t('agents.cap.vision') ?? 'Работа с изображениями'}
