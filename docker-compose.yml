@@ -83,7 +83,17 @@ services:
     # stay "started" forever while their executions are gone (the 2026-10-26
     # orphaned-turn incident). The SQLite file survives restarts and rebuilds;
     # the orphan sweep (kernel startup) covers whatever still slips through.
-    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal-dev.db"]
+    #
+    # History-size ceiling: every call_model activity input (the full message
+    # array, screenshots included) is part of the workflow history, so a long
+    # run crosses the default 50 MB limit and the history service TERMINATES
+    # it mid-work (the 2026-11-09 incident: four delegated children killed,
+    # «Workflow history size exceeds limit»). 500 MiB keeps such runs alive;
+    # the structural fix (ContinueAsNew at compaction boundaries) is tracked
+    # in docs/context-compaction.md.
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal-dev.db",
+              "--dynamic-config-value", "limit.historySize.error=524288000",
+              "--dynamic-config-value", "limit.historySize.warn=104857600"]
     volumes:
       - temporality-temporal:/data
     # The kernel hard-depends on Temporal but waits for it itself (ca96d01);

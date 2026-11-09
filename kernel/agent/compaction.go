@@ -131,6 +131,18 @@ func compactionDigest(messages []llm.Message, head, tail int) string {
 	return b.String()
 }
 
+// messageBytes approximates a message's contribution to the request payload:
+// the text plus the base64 expansion of any vision blocks (the wire size —
+// what the scheduler actually uploads; raw image bytes alone understate it by
+// a third).
+func messageBytes(m llm.Message) int {
+	size := len(m.Content) + len(m.Role) + len(m.ToolCallID) + 64
+	for _, image := range m.Images {
+		size += (len(image.Data) + 2) / 3 * 4
+	}
+	return size
+}
+
 // compactMessages rebuilds the conversation around a state card: the system
 // prompt and the original user prompt stay verbatim (the contract with the
 // user), the card replaces the elided middle as one system message, and the
@@ -153,14 +165,17 @@ func compactMessages(messages []llm.Message, card string, tailBytes, keepMin, ke
 		}
 		groups = append(groups, group{start: start, end: i})
 	}
-	// Keep the newest groups whole, bounded by count and by bytes, but never
-	// fewer than the minimum (a tail smaller than one model turn is useless).
+	// Keep the newest groups whole, bounded by count and by bytes. Vision
+	// blocks COUNT against the tail budget (their base64 is what the
+	// scheduler uploads — ignoring it left "compacted" requests at 1.2+ MB
+	// and forced a compaction every turn) and are stripped from the oldest
+	// kept messages when the floor keeps an over-budget tail.
 	bytes := 0
 	take := 0
 	for g := len(groups) - 1; g >= 0; g-- {
 		size := 0
 		for _, m := range messages[groups[g].start:groups[g].end] {
-			size += len(m.Content)
+			size += messageBytes(m)
 		}
 		if take >= keepMin && (take >= keepMax || bytes+size > tailBytes) {
 			break
@@ -172,6 +187,24 @@ func compactMessages(messages []llm.Message, card string, tailBytes, keepMin, ke
 	out = append(out, messages[0], messages[1],
 		llm.Message{Role: "system", Content: compactionCardPrefix + card})
 	out = append(out, messages[tail[0].start:tail[len(tail)-1].end]...)
+	// Enforce the tail budget on what actually landed: strip vision blocks
+	// from the oldest kept messages first (the newest screenshots are the
+	// working context), text stays verbatim.
+	tailBytesUsed := 0
+	for _, m := range out[3:] {
+		tailBytesUsed += messageBytes(m)
+	}
+	for i := 3; i < len(out) && tailBytesUsed > tailBytes; i++ {
+		if len(out[i].Images) == 0 {
+			continue
+		}
+		for _, image := range out[i].Images {
+			tailBytesUsed -= (len(image.Data) + 2) / 3 * 4
+		}
+		count := len(out[i].Images)
+		out[i].Images = nil
+		out[i].Content += fmt.Sprintf("\n\n[%d screenshot(s) from this message were elided by context compaction; re-open them by path with view_image if you need them]", count)
+	}
 	kept = 2 + len(out) - 3
 	dropped = len(messages) - kept
 	return out, kept, dropped

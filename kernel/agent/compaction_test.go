@@ -122,3 +122,44 @@ func TestCompactMessagesShortHistoryUnchanged(t *testing.T) {
 		t.Fatalf("a short history must pass through, got %d messages (kept=%d dropped=%d)", len(out), kept, dropped)
 	}
 }
+
+// Vision blocks must count against the tail budget (their base64 is what the
+// scheduler uploads) and old screenshots must come off the kept tail before
+// the budget is ignored — the 2026-11-09 incident: a "compacted" request
+// stayed at 1.2+ MB and the run compacted every turn until the workflow
+// history limit killed it.
+func TestCompactMessagesCountsAndStripsImages(t *testing.T) {
+	budgets := harness.DefaultBudgets()
+	shot := make([]byte, 200<<10) // 200KB raw -> ~273KB base64
+	messages := []llm.Message{
+		{Role: "system", Content: "SYS"},
+		{Role: "user", Content: "req"},
+		{Role: "user", Content: "shot A", Images: []llm.ImageBlock{{MIMEType: "image/png", Data: shot}}},
+		{Role: "user", Content: "shot B", Images: []llm.ImageBlock{{MIMEType: "image/png", Data: shot}}},
+		{Role: "assistant", Content: "working", ToolCalls: []llm.ToolCall{{ID: "c", Name: "t"}}},
+		{Role: "tool", ToolCallID: "c", Content: strings.Repeat("o", 1000)},
+	}
+	out, _, _ := compactMessages(messages, "CARD", budgets.CompactionTailBytes, budgets.CompactionKeepGroupsMin, budgets.CompactionKeepGroupsMax)
+
+	tailBytes := 0
+	images := 0
+	for _, m := range out[3:] {
+		tailBytes += messageBytes(m)
+		images += len(m.Images)
+	}
+	if tailBytes > budgets.CompactionTailBytes {
+		t.Fatalf("tail is %d bytes after compaction, want <= %d", tailBytes, budgets.CompactionTailBytes)
+	}
+	if images != 0 {
+		t.Fatalf("%d image blocks survived the over-budget tail, want the old ones stripped", images)
+	}
+	stripped := false
+	for _, m := range out[3:] {
+		if strings.Contains(m.Content, "elided by context compaction") {
+			stripped = true
+		}
+	}
+	if !stripped {
+		t.Fatal("stripped messages must carry an explicit notice")
+	}
+}
