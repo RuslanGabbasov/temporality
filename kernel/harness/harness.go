@@ -65,6 +65,12 @@ type Budgets struct {
 	// joins the conversation history (head and tail survive).
 	ToolOutputMaxBytes  int `json:"tool_output_max_bytes"`
 	ToolOutputTailBytes int `json:"tool_output_tail_bytes"`
+	// ContinueAsNewBytes is the per-execution history growth budget: every
+	// call_model input is workflow history forever, and the history service
+	// TERMINATES runs that cross limit.historySize.error. When the accumulated
+	// request bytes reach this budget at a clean turn boundary, AgentRun hands
+	// the carried state to a fresh execution (the history resets).
+	ContinueAsNewBytes int `json:"continue_as_new_bytes"`
 }
 
 // Settings is the whole harness surface: budgets plus the activity ceilings
@@ -102,6 +108,7 @@ func DefaultBudgets() Budgets {
 		CompactionDigestTailBytes: 512,
 		ToolOutputMaxBytes:        512 << 10,
 		ToolOutputTailBytes:       16 << 10,
+		ContinueAsNewBytes:        128 << 20,
 	}
 }
 
@@ -133,6 +140,7 @@ func FromEnv() Settings {
 	intEnv("TEMPORALITY_COMPACTION_DIGEST_TAIL_BYTES", &b.CompactionDigestTailBytes)
 	intEnv("TEMPORALITY_TOOL_OUTPUT_MAX_BYTES", &b.ToolOutputMaxBytes)
 	intEnv("TEMPORALITY_TOOL_OUTPUT_TAIL_BYTES", &b.ToolOutputTailBytes)
+	intEnv("TEMPORALITY_CONTINUE_AS_NEW_BYTES", &b.ContinueAsNewBytes)
 	durationEnv("TEMPORALITY_MODEL_ACTIVITY_TIMEOUT", &s.ModelCallActivityTimeout)
 	durationEnv("TEMPORALITY_TOOL_ACTIVITY_TIMEOUT", &s.ToolActivityTimeout)
 	intEnv("TEMPORALITY_IMAGE_MAX_SIDE", &s.ImageMaxSide)
@@ -172,4 +180,10 @@ var current = FromEnv()
 // Current returns the process-wide harness settings.
 func Current() Settings {
 	return current
+}
+
+// SetCurrent replaces the process snapshot. A test hook: the environment is
+// otherwise read once at startup and never changes under a running kernel.
+func SetCurrent(settings Settings) {
+	current = settings
 }

@@ -235,6 +235,40 @@ type RunInput struct {
 	// spawned continuations (the run id gains an -r2/-r3 suffix and the trace
 	// shows run.restarted between the attempts).
 	RestartAttempt int `json:"restart_attempt,omitempty"`
+	// Resume carries the conversation state across ContinueAsNew (history
+	// hygiene, docs/context-compaction.md §5): the workflow sheds its history
+	// mid-run and a fresh execution continues the same run from this state.
+	// Nil = a fresh start.
+	Resume *RunState `json:"resume,omitempty"`
+}
+
+// RunState is the workflow-local state carried across ContinueAsNew: every
+// field is what replay normally rebuilds from history — history the
+// continuation deliberately sheds. The journal chain (event sequence and the
+// caused_by link) rides along, so the run keeps one continuous event stream.
+// Tool futures (background ops, inflight delegations) are NOT carried: the
+// boundary is only taken when they are settled.
+type RunState struct {
+	Messages           []llm.Message           `json:"messages"`
+	NextTurn           int                     `json:"next_turn"`
+	UsedTokens         int                     `json:"used_tokens"`
+	UsedCostUSD        float64                 `json:"used_cost_usd"`
+	StartedAt          time.Time               `json:"started_at"`
+	PlanAnswers        map[string]string       `json:"plan_answers,omitempty"`
+	Plans              int                     `json:"plans"`
+	Delegations        int                     `json:"delegations"`
+	SubtreeTokens      int                     `json:"subtree_tokens"`
+	SubtreeCostUSD     float64                 `json:"subtree_cost_usd"`
+	GateQueuedTotal    time.Duration           `json:"gate_queued_total"`
+	ForcedFinaleReason string                  `json:"forced_finale_reason,omitempty"`
+	DeferredReplies    []AgentReply            `json:"deferred_replies,omitempty"`
+	CollabIncoming     map[string]AgentMessage `json:"collab_incoming,omitempty"`
+	AnsweredAsks       map[string]bool         `json:"answered_asks,omitempty"`
+	Continues          int                     `json:"continues"`
+	Frames             []string                `json:"frames,omitempty"`
+	EventSequence      int                     `json:"event_sequence"`
+	PreviousEventID    string                  `json:"previous_event_id"`
+	Frame              string                  `json:"frame"`
 }
 
 // subtreeTotals accumulates the spend of a run's child runs as their results
@@ -503,6 +537,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// compaction budget. A pre-gate history must replay without the extra
 	// activity and without the messages rewrite.
 	compaction := workflow.GetVersion(ctx, "context-compaction", workflow.DefaultVersion, 1)
+	// ContinueAsNew (docs/context-compaction.md §5): version 1 lets a run shed
+	// its workflow history at a clean turn boundary and continue in a fresh
+	// execution — otherwise the server's history-size ceiling eventually
+	// terminates long runs mid-work. A pre-gate history must replay without
+	// the continuation.
+	continuation := workflow.GetVersion(ctx, "run-continue-as-new", workflow.DefaultVersion, 1)
 	// The team root seeds the shared context handle: every child run of the
 	// program (slots, reviewers, delegates below them) inherits it so scratch
 	// paths and run-scoped hints stay addressable across the tree.
@@ -570,29 +610,37 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	// Title and prior-knowledge hints, with the run.started entry between their
 	// result handling. The wait order is replay-gated, see runTitleAndHints.
-	hintBlock, err := runTitleAndHints(ctx, activityCtx, state, input, started, titleParallel)
-	if err != nil {
-		return result, err
-	}
-	systemPrompt := systemPromptForRole(input.Role)
-	if input.SystemPrompt != "" {
-		systemPrompt = input.SystemPrompt
-	}
-	if skillSection := skillsPromptSection(input.Skills); skillSection != "" {
-		systemPrompt += "\n\n" + skillSection
-	}
-	if interlocutor := interlocutorBlock(input); interlocutor != "" {
-		systemPrompt += "\n\n" + interlocutor
-	}
-	messages := []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
-	if hintBlock != "" {
-		messages = append(messages, llm.Message{Role: "system", Content: hintBlock})
-	}
-	if input.PriorTail != "" {
-		messages = append(messages, llm.Message{Role: "system", Content: input.PriorTail})
-	}
-	if len(input.MCPUnavailable) > 0 {
-		messages = append(messages, llm.Message{Role: "system", Content: mcpUnavailableNotice(input.MCPUnavailable)})
+	// A continued execution (ContinueAsNew) skips all of it: the conversation,
+	// the title and the hint block ride in the resume state, and run.started
+	// belongs to the original execution.
+	var messages []llm.Message
+	if input.Resume != nil {
+		messages = input.Resume.Messages
+	} else {
+		hintBlock, err := runTitleAndHints(ctx, activityCtx, state, input, started, titleParallel)
+		if err != nil {
+			return result, err
+		}
+		systemPrompt := systemPromptForRole(input.Role)
+		if input.SystemPrompt != "" {
+			systemPrompt = input.SystemPrompt
+		}
+		if skillSection := skillsPromptSection(input.Skills); skillSection != "" {
+			systemPrompt += "\n\n" + skillSection
+		}
+		if interlocutor := interlocutorBlock(input); interlocutor != "" {
+			systemPrompt += "\n\n" + interlocutor
+		}
+		messages = []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
+		if hintBlock != "" {
+			messages = append(messages, llm.Message{Role: "system", Content: hintBlock})
+		}
+		if input.PriorTail != "" {
+			messages = append(messages, llm.Message{Role: "system", Content: input.PriorTail})
+		}
+		if len(input.MCPUnavailable) > 0 {
+			messages = append(messages, llm.Message{Role: "system", Content: mcpUnavailableNotice(input.MCPUnavailable)})
+		}
 	}
 	// Hint usage is NOT recorded here: injection is an offer, not a use. The
 	// honest used/ignored signal is derived from the run's own output after it
@@ -1448,6 +1496,44 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// continues counts continue-runs launched on this run's behalf — the
 	// deterministic ordinal of <target>/continue/NN run ids.
 	continues := 0
+	// History-growth accounting for the ContinueAsNew boundary: every
+	// call_model input is workflow history forever, so the accumulated
+	// request bytes are the honest proxy for what the history holds.
+	historyBytes := int64(0)
+	firstTurn := 1
+	// A continued execution (ContinueAsNew) restores the workflow-local state
+	// the fresh history no longer replays: the conversation itself rides in
+	// the messages branch above; counters and the journal chain come here.
+	if resume := input.Resume; resume != nil {
+		usedTokens = resume.UsedTokens
+		usedCostUSD = resume.UsedCostUSD
+		runStartedAt = resume.StartedAt
+		planAnswers = resume.PlanAnswers
+		if planAnswers == nil {
+			planAnswers = map[string]string{}
+		}
+		plans = resume.Plans
+		delegations = resume.Delegations
+		subtree = subtreeTotals{tokens: resume.SubtreeTokens, costUSD: resume.SubtreeCostUSD}
+		gateQueuedTotal = resume.GateQueuedTotal
+		forcedFinaleReason = resume.ForcedFinaleReason
+		deferredReplies = resume.DeferredReplies
+		continues = resume.Continues
+		frames = resume.Frames
+		if frames == nil {
+			frames = []string{}
+		}
+		firstTurn = resume.NextTurn
+		for id, ask := range resume.CollabIncoming {
+			incomingAsks[id] = ask
+		}
+		for id := range resume.AnsweredAsks {
+			answeredAsks[id] = true
+		}
+		state.sequence = resume.EventSequence
+		state.previousEventID = resume.PreviousEventID
+		state.frame = resume.Frame
+	}
 	// Memory quota gate: while the host is at capacity the run queues here —
 	// deterministic sleeps, no activity timeouts, no wall-clock spend. The
 	// starter's channels get one notice on entry and one at the milestones
@@ -1534,8 +1620,40 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 	}
-	for turn := 1; turn <= input.MaxTurns; turn++ {
+	for turn := firstTurn; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
+		// History hygiene (docs/context-compaction.md §5): every call_model
+		// input is workflow history forever, and the history service TERMINATES
+		// executions that cross limit.historySize.error mid-work. At a clean
+		// turn boundary (nothing holds activity futures) a run over the
+		// accumulated budget continues in a FRESH execution with the same run
+		// id — the journal chain stays continuous, the history resets.
+		if continuation == 1 && historyBytes >= int64(state.budget().ContinueAsNewBytes) && len(background) == 0 {
+			next := input
+			next.Resume = &RunState{
+				Messages:           messages,
+				NextTurn:           turn,
+				UsedTokens:         usedTokens,
+				UsedCostUSD:        usedCostUSD,
+				StartedAt:          runStartedAt,
+				PlanAnswers:        planAnswers,
+				Plans:              plans,
+				Delegations:        delegations,
+				SubtreeTokens:      subtree.tokens,
+				SubtreeCostUSD:     subtree.costUSD,
+				GateQueuedTotal:    gateQueuedTotal,
+				ForcedFinaleReason: forcedFinaleReason,
+				DeferredReplies:    deferredReplies,
+				CollabIncoming:     collabState.incoming,
+				AnsweredAsks:       collabState.answered,
+				Continues:          continues,
+				Frames:             frames,
+				EventSequence:      state.sequence,
+				PreviousEventID:    state.previousEventID,
+				Frame:              state.frame,
+			}
+			return result, workflow.NewContinueAsNewError(ctx, AgentRun, next)
+		}
 		// Queued time at the memory gate does not spend the run's budget: the
 		// wall clock ran, but the run was honest about its planned work.
 		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt)-gateQueuedTotal >= time.Duration(input.TimeoutSeconds)*time.Second {
@@ -1595,6 +1713,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// PromptCacheKey) relies on the prefix being byte-stable across turns;
 		// mutating history would silently invalidate the cache and reset billing.
 		modelReq := ModelRequest{Model: input.Model, ProviderID: input.ProviderID, Messages: turnMessages, Tools: runTools, RunID: input.RunID, Turn: turn, Project: input.Project, PromptCacheKey: input.TaskID}
+		requestSize := modelRequestBytes(modelReq)
+		historyBytes += int64(requestSize)
 		// Context compaction (docs/context-compaction.md) is the one deliberate
 		// exception to the invariant above: when the request outgrows the
 		// compaction budget, the elided middle of the conversation is replaced
@@ -1603,7 +1723,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// deterministic (the card comes back as a journaled activity result),
 		// and the price is one prompt-cache re-write when the boundary moves.
 		if compaction == 1 {
-			if size := modelRequestBytes(modelReq); size > state.budget().CompactionTriggerBytes {
+			if requestSize > state.budget().CompactionTriggerBytes {
+				size := requestSize
 				var compact CompactResult
 				compactCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Minute, ScheduleToCloseTimeout: 12 * time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 2}})
 				cErr := workflow.ExecuteActivity(compactCtx, ActivityCompactContext, CompactRequest{Prompt: input.Prompt, Digest: compactionDigest(messages, state.budget().CompactionDigestHeadBytes, state.budget().CompactionDigestTailBytes)}).Get(ctx, &compact)

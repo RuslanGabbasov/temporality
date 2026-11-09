@@ -42,6 +42,7 @@ Env-модель по умолчанию (`TEMPORALITY_MODEL_BASE_URL` / `_ID` /
 | `TEMPORALITY_COMPACTION_KEEP_GROUPS_MIN` / `_MAX` | 2 / 8 | сколько целых групп ходов сохранять в хвосте |
 | `TEMPORALITY_COMPACTION_DIGEST_HEAD_BYTES` / `_TAIL_BYTES` | 3584 / 512 | кап одного сообщения в дайджесте для суммаризации |
 | `TEMPORALITY_TOOL_OUTPUT_MAX_BYTES` / `_TAIL_BYTES` | 512 КиБ / 16 КиБ | кап тул-результата в истории (head+tail с пометкой) |
+| `TEMPORALITY_CONTINUE_AS_NEW_BYTES` | 128 МиБ | бюджет роста истории одного исполнения: при достижении ран продолжается через ContinueAsNew (docs/context-compaction.md §5) |
 | `TEMPORALITY_IMAGE_ENCODED_MAX_BYTES` | 512 КиБ | кап закодированного vision-блока (base64 ×4/3 на проводе) |
 | `TEMPORALITY_IMAGE_MAX_SIDE` | 1568 | длинная сторона картинки (тайлы провайдера) |
 | `TEMPORALITY_IMAGE_SOURCE_MAX_BYTES` | 5 МиБ | кап исходного файла/загрузки до декодирования |
