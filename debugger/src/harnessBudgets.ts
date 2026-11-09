@@ -10,6 +10,11 @@ export interface HarnessKnob {
   kind: 'bytes' | 'count'
   /** Inclusive per-key ceiling, mirrored from the server. */
   ceiling: number
+  /** Operator-facing knobs show by default; the rest — the compaction
+   * machinery internals — hide behind «Advanced»: tuning them without
+   * understanding the pipeline mostly breaks runs (a tiny digest loses
+   * context, a huge card overflows the model request). */
+  advanced?: boolean
 }
 
 /** The ceiling for byte knobs unless a key needs a tighter/looser bound. */
@@ -17,18 +22,23 @@ const BYTES_CEILING = 67108864 // 64 MiB
 
 export const HARNESS_KNOBS: HarnessKnob[] = [
   // 2 MiB: above the Temporal payload limit the run wedges in TMPRL1103 retries.
-  { key: 'max_model_request_bytes', kind: 'bytes', ceiling: 2097152 },
+  { key: 'max_model_request_bytes', kind: 'bytes', ceiling: 2097152, advanced: true },
+  // The operator-useful three: when compaction kicks in, how much tool
+  // output a run keeps, and the execution-history budget behind
+  // ContinueAsNew — the knobs an operator legitimately reaches for.
   { key: 'compaction_trigger_bytes', kind: 'bytes', ceiling: BYTES_CEILING },
-  { key: 'compaction_card_max_bytes', kind: 'bytes', ceiling: BYTES_CEILING },
-  { key: 'compaction_tail_bytes', kind: 'bytes', ceiling: BYTES_CEILING },
-  { key: 'compaction_keep_groups_min', kind: 'count', ceiling: 64 },
-  { key: 'compaction_keep_groups_max', kind: 'count', ceiling: 64 },
-  { key: 'compaction_digest_head_bytes', kind: 'bytes', ceiling: BYTES_CEILING },
-  { key: 'compaction_digest_tail_bytes', kind: 'bytes', ceiling: BYTES_CEILING },
   { key: 'tool_output_max_bytes', kind: 'bytes', ceiling: BYTES_CEILING },
-  { key: 'tool_output_tail_bytes', kind: 'bytes', ceiling: BYTES_CEILING },
-  // 512 MiB: the execution-history budget that triggers ContinueAsNew.
   { key: 'continue_as_new_bytes', kind: 'bytes', ceiling: 536870912 },
+  // Compaction internals (advanced): the card layout, kept groups and
+  // digest windows shape HOW the summary is built — not what an operator
+  // tunes; wrong values quietly degrade every compacted run.
+  { key: 'compaction_card_max_bytes', kind: 'bytes', ceiling: BYTES_CEILING, advanced: true },
+  { key: 'compaction_tail_bytes', kind: 'bytes', ceiling: BYTES_CEILING, advanced: true },
+  { key: 'compaction_keep_groups_min', kind: 'count', ceiling: 64, advanced: true },
+  { key: 'compaction_keep_groups_max', kind: 'count', ceiling: 64, advanced: true },
+  { key: 'compaction_digest_head_bytes', kind: 'bytes', ceiling: BYTES_CEILING, advanced: true },
+  { key: 'compaction_digest_tail_bytes', kind: 'bytes', ceiling: BYTES_CEILING, advanced: true },
+  { key: 'tool_output_tail_bytes', kind: 'bytes', ceiling: BYTES_CEILING, advanced: true },
 ]
 
 /** Rough human readout for byte knobs: 512 → «512 Б», 16384 → «16 КиБ»,

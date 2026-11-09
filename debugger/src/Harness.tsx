@@ -31,6 +31,9 @@ export default function Harness() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  // The compaction-machinery internals default to hidden (they mostly let
+  // you break things); an override already saved on one still surfaces it.
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const syncBudgetDrafts = useCallback((sup: SupervisorSettings) => {
     const budgets = sup.harness?.budgets ?? {}
@@ -173,7 +176,7 @@ export default function Harness() {
             <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('quality.harness_hint') ?? ''}</p>
             <p style={{ fontSize: '0.72rem', color: 'var(--tm-warning, var(--tm-text-3))', margin: '0 0 0.5rem' }}>⚠ {t('quality.harness_new_runs_hint') ?? ''}</p>
             <div>
-              {HARNESS_KNOBS.map((knob) => {
+              {HARNESS_KNOBS.filter((knob) => showAdvanced || !knob.advanced || (supervisor?.harness_saved ?? []).includes(knob.key)).map((knob) => {
                 const error_ = budgetErrors[knob.key]
                 const staged = stagedResets.has(knob.key)
                 const origin = originOf(knob.key)
@@ -218,6 +221,15 @@ export default function Harness() {
                 )
               })}
             </div>
+            {/* The hidden internals stay one click away — «узнать» beats both
+                «изменить случайно» and «вообще не найти». */}
+            {HARNESS_KNOBS.some((knob) => knob.advanced && !(supervisor?.harness_saved ?? []).includes(knob.key)) && (
+              <Button kind="ghost" size="sm" style={{ marginTop: '0.5rem', padding: 0 }} onClick={() => setShowAdvanced((v) => !v)}>
+                {showAdvanced
+                  ? (t('quality.harness_hide_advanced') ?? 'Hide compaction internals')
+                  : (t('quality.harness_show_advanced') ?? 'Show compaction internals')}
+              </Button>
+            )}
           </section>
         )}
       </div>

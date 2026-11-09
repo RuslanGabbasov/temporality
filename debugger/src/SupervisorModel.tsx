@@ -110,6 +110,30 @@ export default function SupervisorModel() {
         </section>
       </div>
 
+      {/* Where the supervisor model actually works (docs/supervisor-model.md,
+          docs/agent-quality-loop.md): the roles were invisible — an operator
+          picking a judge had no way to learn WHAT it judges and WHEN it runs.
+          Documentation, not settings: each consumer has its own trigger and
+          nothing here is configurable per-consumer. */}
+      <section style={{ marginTop: '1.5rem', maxWidth: '72rem' }}>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.usage_title') ?? 'Where this model works'}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '0.5rem' }}>
+          {([
+            { key: 'eval_gate', when: 'quality.usage_eval_gate_when' },
+            { key: 'triage', when: 'quality.usage_triage_when' },
+            { key: 'extraction', when: 'quality.usage_extraction_when' },
+            { key: 'areas', when: 'quality.usage_areas_when' },
+            { key: 'relations', when: 'quality.usage_relations_when' },
+            { key: 'intake', when: 'quality.usage_intake_when' },
+          ] as const).map((item) => (
+            <div key={item.key} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.7rem' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--tm-text-2)' }}>{t(`quality.usage_${item.key}`)}</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.15rem' }}>{t(item.when)}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <div className="form-actions" style={{ maxWidth: '72rem' }}>
         <Button renderIcon={Save} disabled={busy || !supervisor} onClick={() => void save()}>
           {busy ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}

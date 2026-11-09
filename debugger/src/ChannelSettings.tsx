@@ -270,7 +270,7 @@ export default function ChannelSettingsPage() {
           const open = openSections[group.type] === true
           return (
             <Column key={group.type} sm={4} md={4} lg={8}>
-              <Tile style={{ marginBottom: '0.75rem', opacity: configured ? 1 : 0.75, display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <Tile style={{ marginBottom: '0.75rem', opacity: configured ? 1 : 0.75, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.6rem' }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{group.label}</div>
