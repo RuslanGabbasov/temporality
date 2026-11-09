@@ -126,6 +126,25 @@
 <p>Env-модель по умолчанию (<code>TEMPORALITY_MODEL_BASE_URL</code> / <code>_ID</code> / <code>_API_KEY</code>) —
 точка отсчёта для <code>activities.Model</code> (дефолтный aux-клиент) и для
 роутинга живых ходов (модель рана → workspace-провайдер → env-fallback).</p>
+<h3 id="политики-агента-per-agent"><a class="anchor" href="#политики-агента-per-agent" aria-label="Section link">#</a>Политики агента (per-agent)</h3><table>
+<thead>
+<tr>
+<th>Настройка</th>
+<th>Где</th>
+<th>Что делает</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vision_keep_images</code></td>
+<td>дефинишен агента</td>
+<td>сколько свежих сообщений со скриншотами держать в контексте; старые vision-блоки вытесняются по мере появления новых (однократная мутация на сообщение, явная пометка). 0 = держать все. Для дизайн-агентов ставьте 2–4</td>
+</tr>
+<tr>
+<td>тула <code>inspect_image</code></td>
+<td>каталог тулов агента</td>
+<td>осмотр картинки vision-моделью (роль <code>vision</code>) с возвратом <strong>текста</strong>: изображение вообще не входит в контекст — главный инструмент дизайн-ревью</td>
+</tr>
+</tbody></table>
 <h2 id="2-бюджеты-таймауты-капы-env-единая-таблица"><a class="anchor" href="#2-бюджеты-таймауты-капы-env-единая-таблица" aria-label="Section link">#</a>2. Бюджеты, таймауты, капы (env, единая таблица)</h2><p>Дом — пакет <code>kernel/harness</code> (<code>Settings</code>, <code>FromEnv</code>, <code>Current</code>); дефолты =
 сегодняшние значения. Невалидное значение деградирует до дефолта.</p>
 <table>
@@ -219,7 +238,45 @@
 (<code>compaction_model</code>/<code>title_model</code>/<code>extraction_model</code> — pointer-семантика:
 пропущенное поле хранится как есть, пустая строка сбрасывает роль);
 валидация имён — по реестру провайдеров.</p>
-<h2 id="5-ограничения"><a class="anchor" href="#5-ограничения" aria-label="Section link">#</a>5. Ограничения</h2><ul>
+<h2 id="5-prompt-cache-и-его-инвалидация"><a class="anchor" href="#5-prompt-cache-и-его-инвалидация" aria-label="Section link">#</a>5. Prompt cache и его инвалидация</h2><p>Кэш — провайдерский префиксный (KV): <code>prompt_cache_key</code> = TaskID, живёт на
+байт-стабильном префиксе сообщений. Мутация старого сообщения инвалидирует
+кэш от её позиции до конца; цена пересчёта видна в событиях
+(<code>cache_rewritten_bytes</code>). Сводка по механизмам:</p>
+<table>
+<thead>
+<tr>
+<th>Механизм</th>
+<th>Влияние</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>ContinueAsNew</td>
+<td>ничего — сообщения переносятся дословно</td>
+</tr>
+<tr>
+<td>кап тул-вывода</td>
+<td>ничего — сообщение стабилизируется один раз</td>
+</tr>
+<tr>
+<td>компакция</td>
+<td>один re-write (маленького) префикса на событие</td>
+</tr>
+<tr>
+<td>окно скриншотов (<code>vision_keep_images</code>)</td>
+<td>один re-write хвоста на вытесненный скриншот; точка мутации ползёт к концу</td>
+</tr>
+<tr>
+<td>бюджетная элисия картинок</td>
+<td>точечно, как окно; редко (за порогом гарда)</td>
+</tr>
+<tr>
+<td><code>inspect_image</code></td>
+<td>улучшает — картинки не входят в префикс</td>
+</tr>
+</tbody></table>
+<p>Правило проектирования мутаций: каждое сообщение меняется <strong>один раз</strong>
+(детерминированная пометка), и точка мутации — ближе к концу.</p>
+<h2 id="6-ограничения"><a class="anchor" href="#6-ограничения" aria-label="Section link">#</a>6. Ограничения</h2><ul>
 <li>Бюджеты редактируются через env и применяются к <strong>новым</strong> ранам
 (пин на старте); UI-редактирование бюджетов — следующий шаг, место уже
 есть (<code>harness</code>-секция ответа).</li>
