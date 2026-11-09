@@ -3508,3 +3508,15 @@ button.header-nav-link {
 .presentation-form { display: flex; flex-direction: column; }
 .presentation-form-static { opacity: 0.75; }
 .presentation-form-note { color: var(--tm-text-2); font-size: 0.78rem; margin-bottom: 0.3rem; }
+
+// Deep-link focus in the runs list (?run=...): the linked tile scrolls into
+// view and flashes once, so a hundred-row list answers «где твой текущий»
+// without hunting. The flash layers over both themes via the amber accent.
+@keyframes run-flash {
+  0% { border-color: var(--tm-amber); background: var(--tm-elevated); }
+  60% { border-color: var(--tm-amber); background: var(--tm-elevated); }
+  100% { border-color: var(--tm-border); background: transparent; }
+}
+.run-flash {
+  animation: run-flash 2.2s ease-out;
+}

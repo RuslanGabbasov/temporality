@@ -305,6 +305,11 @@ export default function AgentRuns({ project }: { project: string }) {
   // /agents?project=…&run=…) — an initializer, not an effect, so the first
   // loadRuns call sees it through its closure and skips auto-select.
   const [selected, setSelected] = useState(() => new URLSearchParams(window.location.search).get('run') ?? '')
+  // The runs list container: deep links (?run=...) scroll the list to the
+  // linked run and flash it, so a hundred-row list still answers "где твой
+  // текущий" at a glance.
+  const runsListRef = useRef<HTMLDivElement | null>(null)
+  const scrolledForRef = useRef('')
   // Detail tab (docs aside: the run page used to stack answer + approvals +
   // disputes + trees + the whole trace + trajectory + budget in one column
   // that could not be scrolled to the end). URL-initialized so a link can
@@ -910,6 +915,27 @@ export default function AgentRuns({ project }: { project: string }) {
     }
   }, [loadRuns, pageVisible])
   useEffect(() => { if (selected) void loadRun(selected) }, [selected, loadRun])
+
+  // Deep-link focus (docs: ?run=...): once the rows land, scroll the list to
+  // the selected run and flash it. Runs once per selection change — not per
+  // poll refresh. When filters hide the run, the container just scrolls to
+  // the nearest boundary; the selection itself stays visible in the header
+  // and the detail pane.
+  useEffect(() => {
+    if (!selected || !runsLoaded) return
+    if (scrolledForRef.current === selected) return
+    scrolledForRef.current = selected
+    const container = runsListRef.current
+    if (!container) return
+    const target = container.querySelector(`[data-run-id="${CSS.escape(selected)}"]`)
+    if (target) {
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      target.classList.add('run-flash')
+      const timer = window.setTimeout(() => target.classList.remove('run-flash'), 2400)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
+  }, [selected, runsLoaded])
   // Tab switches update the URL so a trace/trajectory/budget view is
   // shareable; loadRun preserves the current tab via viewRef.
   useEffect(() => {
@@ -1215,7 +1241,7 @@ export default function AgentRuns({ project }: { project: string }) {
                 )}
               </div>
             </div>
-            <Stack gap={1}>
+            <div ref={runsListRef} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {/* An empty list only means «no runs» after a real fetch landed
                   (runsLoaded): before that it is the loading skeleton — the
                   old blank-rows render showed «Запусков пока нет» during the
@@ -1231,6 +1257,7 @@ export default function AgentRuns({ project }: { project: string }) {
                 return (
                 <Tile
                   key={row.id}
+                  data-run-id={row.id}
                   onClick={() => setSelected(row.id)}
                   className={`workspace-tile ${selected === row.id ? 'selected' : ''}`}
                   style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', minWidth: 0, overflow: 'hidden', marginLeft: row.depth > 0 ? `${row.depth * 0.75}rem` : undefined }}
@@ -1290,7 +1317,7 @@ export default function AgentRuns({ project }: { project: string }) {
                 </Tile>
                 )
               })}
-            </Stack>
+            </div>
           </div>
         </Column>
 
