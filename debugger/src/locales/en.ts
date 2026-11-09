@@ -34,6 +34,7 @@ export const en: Record<string, string> = {
     'nav.projects': 'Projects',
     'nav.settings': 'Settings',
     'nav.group_agents': 'Agents & automation',
+    'nav.group_models': 'Models & harness',
     'nav.group_infra': 'Infrastructure',
     'nav.group_org': 'Organization & access',
     'nav.org': 'Organization',
@@ -42,6 +43,8 @@ export const en: Record<string, string> = {
     'nav.teams': 'Teams',
     'nav.dashboard': 'Dashboard',
     'nav.supervisor': 'Supervisor',
+    'nav.supervisor_model': 'Supervisor model',
+    'nav.harness': 'Harness',
 
     // Project overview (docs/sagas.md)
     'project.title': 'Project overview',
@@ -376,9 +379,12 @@ export const en: Record<string, string> = {
     'action.create': 'Create',
     'action.save': 'Save',
     'action.saving': 'Saving…',
-    'quality.show_settings': 'Supervisor model',
     'quality.settings_title': 'Supervisor model',
-    'quality.settings_hint': 'Works for the administrator, not on user tasks: tidies knowledge areas, watches harness problems. Hosts the vision model and the human-attention estimate coefficients.',
+    'quality.settings_hint': 'Works for the administrator, not on user tasks: tidies knowledge areas, watches harness problems.',
+    'quality.judge_model': 'Judge model',
+    'quality.judge_model_hint': 'Judging: run evaluations, knowledge conflicts, area summaries. Empty — the judge is off. This is the same eval.judge.model setting the knowledge contours read; EVAL_JUDGE_MODEL applies only until a value is saved here.',
+    'quality.model_off_judge': '— off —',
+    'quality.saved': 'Saved',
     'quality.vision_model': 'Vision model (image fallback)',
     'quality.vision_model_hint': 'Image-bearing calls route to this model when the main one is not multimodal. Empty — images go to the main model.',
     'quality.model_off': '— main model —',
@@ -395,6 +401,10 @@ export const en: Record<string, string> = {
     'quality.hab_approval': 'Approval, sec',
     'quality.hab_answer': 'Answer base, sec',
     'quality.hab_wpm': 'Reading, wpm',
+    // Harness page (docs/harness-settings.md): the vision model, the harness
+    // model roles and the effective budget snapshot.
+    'harness.title': 'Harness',
+    'harness.subtitle': 'The vision model and the harness background-work models: the context-compaction state card, run titles and knowledge extraction. Below — the effective budgets the kernel is running with right now.',
     'action.cancel': 'Cancel',
     'action.delete': 'Delete',
     'action.delete_warning': 'This cannot be undone.',

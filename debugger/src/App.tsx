@@ -22,6 +22,8 @@ import Storage from './Storage'
 import Org from './Org'
 import ChannelSettingsPage from './ChannelSettings'
 import InboundMessages from './InboundMessages'
+import SupervisorModel from './SupervisorModel'
+import Harness from './Harness'
 
 const Routes = {
   dashboard: /^\/dashboard(\/|$)/,
@@ -47,9 +49,11 @@ const Routes = {
   org: /^\/org(\/|$)/,
   channels: /^\/channels(\/|$)/,
   inbound: /^\/inbound(\/|$)/,
+  'supervisor-model': /^\/supervisor-model(\/|$)/,
+  harness: /^\/harness(\/|$)/,
 } as const
 
-type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound' | 'supervisor-model' | 'harness'
 
 function pageFor(pathname: string): Page {
   if (Routes.dashboard.test(pathname)) return 'dashboard'
@@ -72,6 +76,8 @@ function pageFor(pathname: string): Page {
   if (Routes.org.test(pathname)) return 'org'
   if (Routes.channels.test(pathname)) return 'channels'
   if (Routes.inbound.test(pathname)) return 'inbound'
+  if (Routes['supervisor-model'].test(pathname)) return 'supervisor-model'
+  if (Routes.harness.test(pathname)) return 'harness'
   return 'workspace'
 }
 
@@ -137,6 +143,10 @@ export default function App() {
             return <ChannelSettingsPage />
           case 'inbound':
             return <InboundMessages />
+          case 'supervisor-model':
+            return <SupervisorModel />
+          case 'harness':
+            return <Harness />
           default:
             return <ExperienceTimeline project={project} />
         }

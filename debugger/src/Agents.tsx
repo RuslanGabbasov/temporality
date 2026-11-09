@@ -18,7 +18,7 @@ import {
 
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, Copy, Star, Renew, Settings } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Copy, Star, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import {
   listEvolutionVersions,
@@ -59,7 +59,6 @@ import {
   type MCPToolInfo,
   type Secret,
   type SandboxProfile,
-  type SupervisorSettings,
   type TransferReport,
   type TransferResultItem,
 } from './workspaceApi'
@@ -159,10 +158,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [secretsList, setSecretsList] = useState<Secret[]>([])
   const [sandboxProfiles, setSandboxProfiles] = useState<SandboxProfile[]>([])
   const [builtinTools, setBuiltinTools] = useState<MCPToolInfo[]>([])
-  // Supervisor model settings (docs/supervisor-model.md): the vision model
-  // and the human-attention estimate coefficients. Collapsed by default — a
-  // rarely used operator surface that must not push the agent list down.
-  const [qualityOpen, setQualityOpen] = useState(false)
   // Stand-to-stand transfer (temporality.transfer/v1): agents export/import.
   const transferFileRef = useRef<HTMLInputElement | null>(null)
   const [transferBusy, setTransferBusy] = useState(false)
@@ -192,16 +187,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     } catch (f) { setError(message(f)) }
     finally { setTransferBusy(false) }
   }
-  // Supervisor panel drafts: vision model override and the human-attention
-  // estimate coefficients (docs/supervisor-model.md).
-  const [supervisor, setSupervisor] = useState<SupervisorSettings | null>(null)
-  const [visionDraft, setVisionDraft] = useState('')
-  const [compactionDraft, setCompactionDraft] = useState('')
-  const [titleDraft, setTitleDraft] = useState('')
-  const [extractionDraft, setExtractionDraft] = useState('')
-  const [habDraft, setHabDraft] = useState({ approval: 45, answerBase: 20, readingWpm: 180 })
-  const [qualityBusy, setQualityBusy] = useState(false)
-  const [qualityError, setQualityError] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -308,52 +293,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       setAgents((prev) => prev.map((x) => (x.id === a.id ? { ...x, enabled: a.enabled } : x)))
       setError(message(f))
     }
-  }
-
-  // Quality settings are independent of the agent list: a failure here must
-  // not break the page, and the panel just shows its own error.
-  // Supervisor settings are independent of the agent list: a failure here must
-  // not break the page, and the panel just shows its own error.
-  const loadQualitySettings = useCallback(async () => {
-    try {
-      const sup = await workspaceApi.getSupervisorSettings().catch(() => null)
-      if (sup) {
-        setSupervisor(sup)
-        setVisionDraft(sup.vision_model ?? '')
-        setCompactionDraft(sup.compaction_model ?? '')
-        setTitleDraft(sup.title_model ?? '')
-        setExtractionDraft(sup.extraction_model ?? '')
-        setHabDraft({
-          approval: sup.hab.approval_seconds,
-          answerBase: sup.hab.answer_base_seconds,
-          readingWpm: sup.hab.reading_wpm,
-        })
-      }
-    } catch { /* panel shows its own empty state */ }
-  }, [])
-  useEffect(() => { void loadQualitySettings() }, [loadQualitySettings])
-
-  // One Save for the supervisor panel: the vision model and the HAB
-  // coefficients change together in practice.
-  const saveQualitySettings = async () => {
-    setQualityBusy(true); setQualityError('')
-    try {
-      const sup = await workspaceApi.updateSupervisorSettings({
-        judge_model: supervisor?.judge_model ?? '',
-        vision_model: visionDraft.trim(),
-        compaction_model: compactionDraft.trim(),
-        title_model: titleDraft.trim(),
-        extraction_model: extractionDraft.trim(),
-        hab: {
-          approval_seconds: Number(habDraft.approval) || 45,
-          answer_base_seconds: Number(habDraft.answerBase) || 20,
-          reading_wpm: Number(habDraft.readingWpm) || 180,
-        },
-      })
-      setSupervisor(sup)
-      setQualityOpen(false)
-    } catch (e) { setQualityError(message(e)) }
-    finally { setQualityBusy(false) }
   }
 
   const touch = (section: SectionKey) =>
@@ -1005,7 +944,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
           />
           <Button kind="ghost" disabled={transferBusy} onClick={() => void runTransferExport()}>{t('agents.transfer_export') ?? 'Export…'}</Button>
           <Button kind="ghost" disabled={transferBusy} onClick={() => transferFileRef.current?.click()}>{t('agents.transfer_import') ?? 'Import…'}</Button>
-          <Button kind="ghost" renderIcon={Settings} iconDescription={t('quality.show_settings') ?? 'Quality settings'} onClick={() => setQualityOpen(true)}>{t('quality.show_settings') ?? 'Quality settings'}</Button>
           <Button kind="secondary" onClick={() => setShowTemplates(true)}>{t('agents.from_template') ?? 'From template'}</Button>
           <Button renderIcon={Add} onClick={openWizard}>{t('agents.new_agent') ?? 'New Agent'}</Button>
         </Stack>
@@ -2309,81 +2247,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             <div className="form-actions">
               <Button kind="secondary" onClick={() => setShowTemplates(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>
-        </AppModal>
-      )}
-
-      {/* Installation-level supervisor settings (judge + vision models,
-          re-run schedule, HAB coefficients): one modal, one Save.
-          The button lives in the page header — an operator surface, not part
-          of the everyday agent browsing flow. */}
-      {qualityOpen && (
-        <AppModal onClose={() => setQualityOpen(false)} panelStyle={{ width: '560px', maxHeight: '85vh', overflowY: 'auto' }}>
-          <Heading>{t('quality.settings_title') ?? 'Quality settings'}</Heading>
-          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: '0.25rem 0 1rem' }}>{t('quality.settings_hint') ?? ''}</p>
-          {qualityError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={qualityError} onClose={() => setQualityError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
-          <div style={{ marginTop: '1rem' }}>
-            <Select id="supervisor-vision-model" labelText={t('quality.vision_model') ?? 'Vision model (image fallback)'} value={visionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setVisionDraft(e.target.value)}>
-              <SelectItem value="" text={t('quality.model_off') ?? '— main model —'} />
-              {providers.flatMap((p) => (p.models ?? []).map((m) => (
-                <SelectItem key={`v/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-              )))}
-            </Select>
-            <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.vision_model_hint') ?? ''}</p>
-          </div>
-          {/* Harness model roles (docs/harness-settings.md): the models that
-              serve the harness's own background work. Empty = the role's
-              cascade fallback (judge model, then the default model). */}
-          <div style={{ marginTop: '1.25rem' }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.roles_title') ?? 'Harness models'}</div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.roles_hint') ?? ''}</p>
-            <Select id="harness-compaction-model" labelText={t('quality.compaction_model') ?? 'Compaction model (state card)'} value={compactionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCompactionDraft(e.target.value)}>
-              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
-              {providers.flatMap((p) => (p.models ?? []).map((m) => (
-                <SelectItem key={`c/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-              )))}
-            </Select>
-            <Select id="harness-title-model" labelText={t('quality.title_model') ?? 'Run title model'} value={titleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTitleDraft(e.target.value)} style={{ marginTop: '0.6rem' }}>
-              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
-              {providers.flatMap((p) => (p.models ?? []).map((m) => (
-                <SelectItem key={`t/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-              )))}
-            </Select>
-            <Select id="harness-extraction-model" labelText={t('quality.extraction_model') ?? 'Knowledge extraction model'} value={extractionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setExtractionDraft(e.target.value)} style={{ marginTop: '0.6rem' }}>
-              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
-              {providers.flatMap((p) => (p.models ?? []).map((m) => (
-                <SelectItem key={`e/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-              )))}
-            </Select>
-          </div>
-          {/* Effective harness knobs (env-resolved, read-only): one place to
-              see what the kernel actually runs with. */}
-          {supervisor?.harness && (
-            <div style={{ marginTop: '1.25rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.harness_title') ?? 'Effective harness settings'}</div>
-              <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.harness_hint') ?? ''}</p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.25rem 0.8rem', fontSize: '0.72rem', color: 'var(--tm-text-2)' }}>
-                {Object.entries(supervisor.harness.budgets ?? {}).map(([key, value]) => (
-                  <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
-                    <code style={{ fontFamily: 'var(--tm-font-mono)', fontSize: '0.68rem' }}>{key}</code>
-                    <span>{value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <div style={{ marginTop: '1.25rem' }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.hab_title') ?? 'Human Attention Budget (estimates)'}</div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.hab_hint') ?? ''}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.6rem' }}>
-              <TextInput id="hab-approval" labelText={t('quality.hab_approval') ?? 'Approval, sec'} value={String(habDraft.approval)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHabDraft({ ...habDraft, approval: Number(e.target.value) })} />
-              <TextInput id="hab-answer" labelText={t('quality.hab_answer') ?? 'Answer base, sec'} value={String(habDraft.answerBase)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHabDraft({ ...habDraft, answerBase: Number(e.target.value) })} />
-              <TextInput id="hab-wpm" labelText={t('quality.hab_wpm') ?? 'Reading, wpm'} value={String(habDraft.readingWpm)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHabDraft({ ...habDraft, readingWpm: Number(e.target.value) })} />
-            </div>
-          </div>
-          <div className="form-actions">
-            <Button kind="secondary" disabled={qualityBusy} onClick={() => setQualityOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
-            <Button disabled={qualityBusy} onClick={() => void saveQualitySettings()}>{qualityBusy ? '…' : (t('action.save') ?? 'Save')}</Button>
-          </div>
         </AppModal>
       )}
     </div>

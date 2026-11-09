@@ -75,6 +75,13 @@ const CONFIG_GROUPS: { title: string; items: { path: string; label: string; admi
     ],
   },
   {
+    title: 'nav.group_models',
+    items: [
+      { path: '/supervisor-model', label: 'nav.supervisor_model' },
+      { path: '/harness', label: 'nav.harness' },
+    ],
+  },
+  {
     title: 'nav.group_infra',
     items: [
       { path: '/providers', label: 'nav.providers' },

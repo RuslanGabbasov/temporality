@@ -34,6 +34,7 @@ export const ru: Record<string, string> = {
     'nav.projects': 'Проекты',
     'nav.settings': 'Настройки',
     'nav.group_agents': 'Агенты и автоматизация',
+    'nav.group_models': 'Модели и харнес',
     'nav.group_infra': 'Инфраструктура',
     'nav.group_org': 'Организация и доступы',
     'nav.org': 'Организация',
@@ -42,6 +43,8 @@ export const ru: Record<string, string> = {
     'nav.teams': 'Команды',
     'nav.dashboard': 'Дашборд',
     'nav.supervisor': 'Супервайзер',
+    'nav.supervisor_model': 'Модель-супервайзер',
+    'nav.harness': 'Харнес',
 
     // Project overview (docs/sagas.md)
     'project.title': 'Обзор проекта',
@@ -376,9 +379,12 @@ export const ru: Record<string, string> = {
     'action.create': 'Создать',
     'action.save': 'Сохранить',
     'action.saving': 'Сохраняем…',
-    'quality.show_settings': 'Модель-супервайзер',
     'quality.settings_title': 'Модель-супервайзер',
-    'quality.settings_hint': 'Работает для администратора, а не над задачами: упорядочивает области знаний, следит за проблемами харнеса. Здесь же — модель зрения и коэффициенты внимания человека.',
+    'quality.settings_hint': 'Работает для администратора, а не над задачами: упорядочивает области знаний, следит за проблемами харнеса.',
+    'quality.judge_model': 'Модель-судья',
+    'quality.judge_model_hint': 'Судейство: оценки ранов, конфликты знаний, area-саммари. Пусто — судья выключен. Это та же установка eval.judge.model, которую читают контуры знаний; env EVAL_JUDGE_MODEL действует, пока значение ни разу не сохраняли здесь.',
+    'quality.model_off_judge': '— выключен —',
+    'quality.saved': 'Сохранено',
     'quality.vision_model': 'Модель зрения (fallback для изображений)',
     'quality.vision_model_hint': 'Вызовы с изображениями уходят на эту модель, если основная не мультимодальная. Пусто — изображения идут в основную модель.',
     'quality.model_off': '— основная модель —',
@@ -395,6 +401,10 @@ export const ru: Record<string, string> = {
     'quality.hab_approval': 'Подтверждение, сек',
     'quality.hab_answer': 'Ответ, сек (база)',
     'quality.hab_wpm': 'Чтение, слов/мин',
+    // Harness page (docs/harness-settings.md): the vision model, the harness
+    // model roles and the effective budget snapshot.
+    'harness.title': 'Харнес',
+    'harness.subtitle': 'Модель зрения и модели служебной работы харнеса: карточка сжатия контекста, заголовки ранов, извлечение знаний. Ниже — эффективные бюджеты, с которыми ядро работает сейчас.',
     'action.cancel': 'Отмена',
     'action.delete': 'Удалить',
     'action.delete_warning': 'Действие необратимо.',
