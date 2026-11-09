@@ -759,10 +759,15 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 	// Vision fallback (docs/supervisor-model.md §4): when a call carries images
 	// and the supervisor panel pins a vision model, route the call there — the
 	// main model may be text-only. Routing reuse means the vision model just
-	// needs to be declared by a provider.
+	// needs to be declared by ANY provider (the general lookup below), because
+	// the agent's provider pin binds its OWN model, not the supervisor's
+	// vision pick: a z.ai-pinned agent viewing a screenshot must reach the
+	// Xiaomi vision model, not fail because z.ai does not serve it.
+	visionOverride := false
 	if a.hasImages(request) {
 		if vision := a.visionModelFor(ctx); vision != "" && vision != request.Model {
 			request.Model = vision
+			visionOverride = true
 		}
 	}
 	if request.Model != "" && (a.Model == nil || request.Model != a.Model.Model()) {
@@ -774,12 +779,14 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		// only when no provider claims the model do we fall back to the env
 		// config with the model name swapped in — the pre-routing behavior.
 		routed := false
-		if a.WorkspaceURL != "" && request.ProviderID != "" {
+		if !visionOverride && a.WorkspaceURL != "" && request.ProviderID != "" {
 			// The agent pins its provider (docs/agents.md §routing): serve from
 			// THAT provider or fail loudly. A duplicate-model conflict on some
 			// other provider must not silently hijack the run, and an env
 			// fallback must not mask the pin either — the operator explicitly
-			// chose this provider/model pair.
+			// chose this provider/model pair. The pin applies to the agent's
+			// own model only: a vision override routes through the general
+			// lookup (docs/supervisor-model.md §4).
 			pinnedConfig, pName, perr := a.modelConfigForPinned(ctx, request.Project, request.ProviderID, request.Model)
 			if perr != nil {
 				// Nothing was sent — there is no request/response pair, but the
