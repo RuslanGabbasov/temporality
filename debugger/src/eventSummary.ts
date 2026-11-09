@@ -42,9 +42,46 @@ export function friendlyRunFailure(t: TranslateFn, d: Record<string, unknown>): 
       : t('chat.fail_model_timeout_noname', { wait: waitLabel(t, elapsedMs) })
   }
   if (modelCall) {
-    return t('chat.fail_model', { cause: explained.cause.slice(0, 200) })
+    const rejected = providerRejection(explained.cause)
+    if (rejected) {
+      return t('chat.fail_model_status', { name: provider || '—', status: rejected.status, message: rejected.message })
+    }
+    return t('chat.fail_model', { cause: friendlyCause(explained.cause) })
   }
-  return t('chat.stream.failed', { error: explained.cause.slice(0, 300) || 'unknown' })
+  return t('chat.stream.failed', { error: friendlyCause(explained.cause).slice(0, 300) || 'unknown' })
+}
+
+/** Peel a provider status failure («provider status 400: {json…}») into the
+ *  HTTP status and the human message inside the body. The kernel appends
+ *  plumbing parentheticals after the body — they are not part of it. */
+export function providerRejection(cause: string): { status: string; message: string } | null {
+  const m = /provider status (\d+)\s*:\s*/.exec(cause)
+  if (!m) return null
+  let rest = cause.slice(m.index + m[0].length)
+  const cut = rest.search(/\s*\((?:served by|type:)/)
+  if (cut >= 0) rest = rest.slice(0, cut)
+  rest = rest.trim()
+  let message = ''
+  try {
+    const parsed = JSON.parse(rest) as Record<string, unknown>
+    const err = (parsed.error ?? parsed) as Record<string, unknown>
+    message = String(err.message ?? err.reason ?? '')
+  } catch {
+    message = rest
+  }
+  message = message.replace(/\s+/g, ' ').trim()
+  return { status: m[1], message: message || '—' }
+}
+
+/** Strip transport plumbing from a peeled cause: retry annotations,
+ *  «served by …» tails, wrapper echoes — what stays is what the operator
+ *  can act on. */
+export function friendlyCause(cause: string): string {
+  return cause
+    .replace(/\s*\((?:served by [^)]*|type: [A-Za-z0-9_.]+(?:, retryable: (?:true|false))?)\)/g, '')
+    .replace(/:\s*provider status\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** Localized wait duration for failure copy: «3 мин», «45 с», «2 мин 30 с». */

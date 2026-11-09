@@ -1763,16 +1763,26 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
   // «Продолжить» after a failed run: start a new attempt of the same task —
   // the kernel feeds it the previous attempt's journal tail (PriorTail), so
-  // the work resumes from where it stopped instead of starting blind.
-  const continueRun = async (conv: Conversation) => {
-    if (!conv.taskId || loading) return
+  // the work resumes from where it stopped instead of starting blind. The
+  // conversation may have lost its task id (older chats) — the run knows its
+  // own task, so the button never lies about being there.
+  const continueRun = async (conv: Conversation, runId?: string) => {
+    if (loading) return
     setLoading(true)
     try {
-      const result = await workspaceApi.startRun(conv.taskId, { agent_id: conv.agentId || undefined })
-      const runId = result.run_id
-      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [`${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}`] }
-      setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, messages: [...c.messages, assistantMsg] } : c))
-      streamRun(runId, conv.id)
+      let taskId = conv.taskId
+      if (!taskId && runId) {
+        taskId = (await workspaceApi.getRun(runId)).task_id ?? ''
+      }
+      if (!taskId) {
+        setError(t('chat.continue_no_task') ?? 'Cannot resume: this run has no task to continue.')
+        return
+      }
+      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined })
+      const runId2 = result.run_id
+      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId: runId2, streamLines: [`${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}`] }
+      setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, taskId, messages: [...c.messages, assistantMsg] } : c))
+      streamRun(runId2, conv.id)
     } catch (f) {
       setError(message(f))
     } finally {
@@ -2069,13 +2079,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         )}
                         {msg.status === 'failed' && msg.runId && activeConv && (
                           <>
-                            {activeConv.taskId && (
-                              <button
-                                onClick={() => void continueRun(activeConv)}
-                                style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem', marginLeft: 'auto' }}
-                                title={t('chat.continue_title') ?? 'Resume the task from where it stopped'}
-                              >{t('chat.continue') ?? 'Continue'}</button>
-                            )}
+                            <button
+                              onClick={() => void continueRun(activeConv, msg.runId)}
+                              style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem', marginLeft: 'auto' }}
+                              title={t('chat.continue_title') ?? 'Resume the task from where it stopped'}
+                            >{t('chat.continue') ?? 'Continue'}</button>
                             <CallReportButton runId={msg.runId} project={project} onOpen={(event) => setCallReport({ runId: msg.runId!, event })} />
                           </>
                         )}

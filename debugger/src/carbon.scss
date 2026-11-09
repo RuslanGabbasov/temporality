@@ -2268,6 +2268,13 @@ button.header-nav-link {
   color: var(--tm-text);
 }
 
+// Content keeps its natural height and the PANEL scrolls: without this the
+// flex column squeezes its children instead (the «сплющенные таблицы» in
+// the call-report dialog — grids collapsed to unreadable slivers).
+.modal-panel > * {
+  flex-shrink: 0;
+}
+
 .modal-panel h2,
 .modal-panel .cds--heading {
   color: var(--tm-text) !important;

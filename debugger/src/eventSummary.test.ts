@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { eventSummary, friendlyRunFailure, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
+import { eventSummary, friendlyRunFailure, providerRejection, friendlyCause, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
 import { foldDelegations } from './DelegationTree'
 import { foldPlans } from './PlanGraph'
 import { ru } from './locales/ru'
@@ -667,5 +667,32 @@ describe('friendlyRunFailure', () => {
     const text = friendlyRunFailure(tr, { error: 'activity error (type: kernel.run_tool, scheduledEventID: 1, startedEventID: 2, identity: x): boom', error_type: 'tool_failed' })
     expect(text).toContain('boom')
     expect(text).not.toContain('scheduledEventID')
+  })
+})
+
+describe('provider rejection shaping', () => {
+  const tr = (key: string, vars?: Record<string, string>) => {
+    let s = (ru as Record<string, string>)[key] ?? key
+    for (const [k, v] of Object.entries(vars ?? {})) s = s.replaceAll(`{{${k}}}`, v)
+    return s
+  }
+  const rejected = 'activity error (type: kernel.call_model, scheduledEventID: 23, startedEventID: 24, identity: 1@d25708beafcb@): provider status 400: {"error":{"code":"400","message":"Invalid request parameters","param":"","type":"BadRequestError"}} (served by provider Xiaomi) (type: wrapError, retryable: true): provider status'
+
+  it('renders a provider status rejection as a human sentence', () => {
+    const text = friendlyRunFailure(tr, { error: rejected, error_type: 'model_call_failed', provider: 'Xiaomi' })
+    expect(text).toContain('Провайдер Xiaomi отклонил запрос (400): Invalid request parameters')
+    expect(text).not.toContain('wrapError')
+    expect(text).not.toContain('scheduledEventID')
+    expect(text).not.toContain('{"error"')
+  })
+
+  it('providerRejection peels the status and the body message', () => {
+    expect(providerRejection(rejected)).toEqual({ status: '400', message: 'Invalid request parameters' })
+    expect(providerRejection('boom')).toBeNull()
+  })
+
+  it('friendlyCause strips the plumbing parentheticals', () => {
+    const cause = friendlyCause('boom (served by provider Xiaomi) (type: wrapError, retryable: true): provider status')
+    expect(cause).toBe('boom')
   })
 })
