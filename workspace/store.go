@@ -201,13 +201,13 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO workspace_agent
 		 (id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
-		  sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
+		  sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, vision_keep_images, approval_mode, labels,
 		  definition, definition_version, org_unit_id, egress_allowlist, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
 		a.ID, nullString(a.ProjectID), a.Name, a.Description, a.Model, a.Provider,
 		a.SystemPrompt, skills, mcp, tools, secrets, a.SandboxProfile,
 		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
-		a.MaxTurns, a.TurnLimitRestarts, a.ApprovalMode, labels, definition, a.DefinitionVersion, nullString(a.OrgUnitID), egress, a.CreatedAt, a.UpdatedAt)
+		a.MaxTurns, a.TurnLimitRestarts, a.VisionKeepImages, a.ApprovalMode, labels, definition, a.DefinitionVersion, nullString(a.OrgUnitID), egress, a.CreatedAt, a.UpdatedAt)
 	return err
 }
 
@@ -217,14 +217,14 @@ func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 	var projectID, orgUnitID *string
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
-		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, vision_keep_images, approval_mode, labels,
 		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
 		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent WHERE id = $1`, id).
 		Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
 			&a.SystemPrompt, &skills, &mcp, &tools, &secrets, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
-			&a.MaxTurns, &a.TurnLimitRestarts, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled,
+			&a.MaxTurns, &a.TurnLimitRestarts, &a.VisionKeepImages, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled,
 			&a.ObservationDays, &a.ObservationMinRuns, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrNotFound
@@ -246,7 +246,7 @@ func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
-		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, vision_keep_images, approval_mode, labels,
 		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
 		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent ORDER BY created_at`)
@@ -266,7 +266,7 @@ func (s *Store) ListAgentsVisible(ctx context.Context, units []string) ([]Agent,
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
-		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, vision_keep_images, approval_mode, labels,
 		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
 		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
@@ -282,7 +282,7 @@ func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Ag
 	// usable in every project, project-bound ones only in their project.
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
-		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, vision_keep_images, approval_mode, labels,
 		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
 		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent WHERE project_id = $1 OR project_id IS NULL ORDER BY created_at`, projectID)
@@ -301,7 +301,7 @@ func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Ag
 func (s *Store) FindAgentsByName(ctx context.Context, name, projectID string) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
-		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, approval_mode, labels,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, turn_limit_restarts, vision_keep_images, approval_mode, labels,
 		        definition, definition_version, org_unit_id, egress_allowlist, enabled,
 		        observation_days, observation_min_runs, created_at, updated_at
 		 FROM workspace_agent WHERE (project_id IS NULL OR project_id = $1) AND lower(name) = lower($2) ORDER BY id`,
@@ -326,7 +326,7 @@ func scanAgents(rows interface {
 		if err := rows.Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
 			&a.SystemPrompt, &skills, &mcp, &tools, &secrets, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
-			&a.MaxTurns, &a.TurnLimitRestarts, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled,
+			&a.MaxTurns, &a.TurnLimitRestarts, &a.VisionKeepImages, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &orgUnitID, &egress, &a.Enabled,
 			&a.ObservationDays, &a.ObservationMinRuns, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -384,13 +384,13 @@ func updateAgentRow(ctx context.Context, ex agentExecer, a Agent) error {
 		`UPDATE workspace_agent
 		 SET project_id=$2, name=$3, description=$4, model=$5, provider=$6, system_prompt=$7,
 		     skills=$8, mcp_servers=$9, tools=$10, secrets=$11, sandbox_profile=$12, temperature=$13, max_tokens=$14,
-		     network_access=$15, read_only=$16, max_turns=$17, turn_limit_restarts=$18, approval_mode=$19, labels=$20,
-		     definition=$21, definition_version=$22, org_unit_id=$23, egress_allowlist=$24, updated_at=$25
+		     network_access=$15, read_only=$16, max_turns=$17, turn_limit_restarts=$18, vision_keep_images=$19, approval_mode=$20, labels=$21,
+		     definition=$22, definition_version=$23, org_unit_id=$24, egress_allowlist=$25, updated_at=$26
 		 WHERE id=$1`,
 		a.ID, nullString(a.ProjectID), a.Name, a.Description, a.Model, a.Provider,
 		a.SystemPrompt, skills, mcp, tools, secrets, a.SandboxProfile,
 		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
-		a.MaxTurns, a.TurnLimitRestarts, a.ApprovalMode, labels, definition, a.DefinitionVersion, nullString(a.OrgUnitID), egress, a.UpdatedAt)
+		a.MaxTurns, a.TurnLimitRestarts, a.VisionKeepImages, a.ApprovalMode, labels, definition, a.DefinitionVersion, nullString(a.OrgUnitID), egress, a.UpdatedAt)
 	if err != nil {
 		return err
 	}

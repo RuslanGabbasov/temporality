@@ -191,6 +191,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // estimate coefficients (docs/supervisor-model.md).
   const [supervisor, setSupervisor] = useState<SupervisorSettings | null>(null)
   const [visionDraft, setVisionDraft] = useState('')
+  const [compactionDraft, setCompactionDraft] = useState('')
+  const [titleDraft, setTitleDraft] = useState('')
+  const [extractionDraft, setExtractionDraft] = useState('')
   const [habDraft, setHabDraft] = useState({ approval: 45, answerBase: 20, readingWpm: 180 })
   const [qualityBusy, setQualityBusy] = useState(false)
   const [qualityError, setQualityError] = useState('')
@@ -312,6 +315,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       if (sup) {
         setSupervisor(sup)
         setVisionDraft(sup.vision_model ?? '')
+        setCompactionDraft(sup.compaction_model ?? '')
+        setTitleDraft(sup.title_model ?? '')
+        setExtractionDraft(sup.extraction_model ?? '')
         setHabDraft({
           approval: sup.hab.approval_seconds,
           answerBase: sup.hab.answer_base_seconds,
@@ -330,6 +336,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       const sup = await workspaceApi.updateSupervisorSettings({
         judge_model: supervisor?.judge_model ?? '',
         vision_model: visionDraft.trim(),
+        compaction_model: compactionDraft.trim(),
+        title_model: titleDraft.trim(),
+        extraction_model: extractionDraft.trim(),
         hab: {
           approval_seconds: Number(habDraft.approval) || 45,
           answer_base_seconds: Number(habDraft.answerBase) || 20,
@@ -1935,6 +1944,18 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       style={paramInputStyle}
                     />
                   </label>
+                  <label style={{ display: 'block', minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }} title={t('agents.vision_keep_hint') ?? 'Сколько свежих сообщений со скриншотами держать в контексте агента; старые vision-блоки вытесняются по мере появления новых (экономит запросы, историю и prompt cache у дизайн-агентов). 0 = держать все.'}>{t('agents.vision_keep_short') ?? '🖼 скриншотов в контексте'}</span>
+                    <input
+                      type="number"
+                      value={form.vision_keep_images ?? 0}
+                      min={0}
+                      max={20}
+                      step={1}
+                      onChange={(e) => setForm({ ...form, vision_keep_images: Math.min(20, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
+                      style={paramInputStyle}
+                    />
+                  </label>
                 </div>
                 <Select id="agent-sandbox" labelText={t('agents.sandbox_profile') ?? 'Sandbox profile'} value={form.sandbox_profile ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_profile: e.target.value })}>
                   <SelectItem value="" text={t('agents.sandbox_default') ?? 'Default (installation image)'} />
@@ -2252,6 +2273,47 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             </Select>
             <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.vision_model_hint') ?? ''}</p>
           </div>
+          {/* Harness model roles (docs/harness-settings.md): the models that
+              serve the harness's own background work. Empty = the role's
+              cascade fallback (judge model, then the default model). */}
+          <div style={{ marginTop: '1.25rem' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.roles_title') ?? 'Harness models'}</div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.roles_hint') ?? ''}</p>
+            <Select id="harness-compaction-model" labelText={t('quality.compaction_model') ?? 'Compaction model (state card)'} value={compactionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCompactionDraft(e.target.value)}>
+              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
+              {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                <SelectItem key={`c/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+              )))}
+            </Select>
+            <Select id="harness-title-model" labelText={t('quality.title_model') ?? 'Run title model'} value={titleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTitleDraft(e.target.value)} style={{ marginTop: '0.6rem' }}>
+              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
+              {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                <SelectItem key={`t/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+              )))}
+            </Select>
+            <Select id="harness-extraction-model" labelText={t('quality.extraction_model') ?? 'Knowledge extraction model'} value={extractionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setExtractionDraft(e.target.value)} style={{ marginTop: '0.6rem' }}>
+              <SelectItem value="" text={t('quality.model_cascade') ?? '— cascade fallback —'} />
+              {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                <SelectItem key={`e/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+              )))}
+            </Select>
+          </div>
+          {/* Effective harness knobs (env-resolved, read-only): one place to
+              see what the kernel actually runs with. */}
+          {supervisor?.harness && (
+            <div style={{ marginTop: '1.25rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.harness_title') ?? 'Effective harness settings'}</div>
+              <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.harness_hint') ?? ''}</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.25rem 0.8rem', fontSize: '0.72rem', color: 'var(--tm-text-2)' }}>
+                {Object.entries(supervisor.harness.budgets ?? {}).map(([key, value]) => (
+                  <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <code style={{ fontFamily: 'var(--tm-font-mono)', fontSize: '0.68rem' }}>{key}</code>
+                    <span>{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div style={{ marginTop: '1.25rem' }}>
             <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.hab_title') ?? 'Human Attention Budget (estimates)'}</div>
             <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.hab_hint') ?? ''}</p>

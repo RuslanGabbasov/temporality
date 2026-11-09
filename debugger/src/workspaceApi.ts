@@ -169,6 +169,12 @@ export interface Agent {
    *  times a turn-limit-exhausted run restarts with a fresh turn budget.
    *  0/absent = off. */
   turn_limit_restarts?: number
+  /** Vision keep-window (docs/harness-settings.md): how many most-recent
+   *  screenshot messages stay in the conversation; older vision blocks are
+   *  evicted as new ones land (one-time mutation per message). 0/absent =
+   *  keep everything — for image-heavy agents (design reviews) a small window
+   *  keeps requests, history and the provider prompt cache small. */
+  vision_keep_images?: number
   approval_mode: string
   /** Egress allowlist (docs/agent-behavior-monitoring.md §7): destinations
    *  beyond the public internet, enforced by the egress proxy. */
@@ -253,11 +259,30 @@ export interface JudgeConfig {
 export interface SupervisorSettings {
   judge_model: string
   vision_model: string
+  /** Harness model roles (docs/harness-settings.md): the context-compaction
+   *  card, run titles and knowledge extraction. Empty = the role's cascade
+   *  fallback (judge model, then the default model). */
+  compaction_model: string
+  title_model: string
+  extraction_model: string
+  /** Effective harness knobs (env-resolved, read-only): one place to see
+   *  what the kernel actually runs with. */
+  harness?: HarnessSettings
   hab: {
     approval_seconds: number
     answer_base_seconds: number
     reading_wpm: number
   }
+}
+
+/** Effective kernel harness settings (kernel/harness, docs/harness-settings.md). */
+export interface HarnessSettings {
+  budgets: Record<string, number>
+  model_call_activity_timeout?: number
+  tool_activity_timeout?: number
+  image_max_side?: number
+  image_encoded_max_bytes?: number
+  image_source_max_bytes?: number
 }
 
 // Result of the judge-driven knowledge-area normalization sweep: how many

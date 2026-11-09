@@ -124,12 +124,19 @@ func harnessModelClient(ctx context.Context, ws *workspace.Store, masterKey []by
 		harness.RoleCompaction: workspace.SettingCompactionModel,
 		harness.RoleTitle:      workspace.SettingTitleModel,
 		harness.RoleExtraction: workspace.SettingExtractionModel,
+		harness.RoleVision:     workspace.SettingSupervisorVisionModel,
 	}[role]
 	if key == "" {
 		return nil, fmt.Errorf("unknown harness model role %q", role)
 	}
 	if model, err := ws.GetSetting(ctx, key); err == nil && strings.TrimSpace(model) != "" {
 		return providerModelClient(ctx, ws, masterKey, strings.TrimSpace(model), "")
+	}
+	// The vision role has NO judge fallback: a text-only judge would
+	// hallucinate about pixels it cannot see. Its callers fall back to the
+	// run's own model instead.
+	if role == harness.RoleVision {
+		return nil, fmt.Errorf("supervisor.vision.model is not configured")
 	}
 	return judgeModelClient(ctx, ws, masterKey)
 }

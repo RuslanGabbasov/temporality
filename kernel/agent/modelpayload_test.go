@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -132,5 +133,60 @@ func TestElideRequestImagesLeavesTextOnlyRequest(t *testing.T) {
 	result := elideRequestImages(request, 100<<10)
 	if result.Messages[0].Content != request.Messages[0].Content {
 		t.Fatal("a text-only request has nothing to elide")
+	}
+}
+
+// The vision keep-window (agent config): at most keep image-bearing messages
+// keep their vision blocks in the request; the stored conversation is never
+// touched and each message's state flips exactly once, so the provider prompt
+// cache is invalidated once per evicted screenshot.
+func TestEvictRequestImagesKeepsWindow(t *testing.T) {
+	shot := make([]byte, 1024)
+	mk := func(i int) llm.Message {
+		return llm.Message{Role: "user", Content: fmt.Sprintf("shot %d", i), Images: []llm.ImageBlock{{MIMEType: "image/png", Data: shot}}}
+	}
+	messages := []llm.Message{{Role: "system", Content: "SYS"}, mk(1), mk(2), mk(3), mk(4)}
+	request := ModelRequest{Model: "m", Messages: messages}
+
+	result := evictRequestImages(request, 2)
+	if len(result.Messages[1].Images) != 0 || len(result.Messages[2].Images) != 0 {
+		t.Fatal("the two oldest image messages must be evicted")
+	}
+	if len(result.Messages[3].Images) != 1 || len(result.Messages[4].Images) != 1 {
+		t.Fatal("the newest keep-window messages must keep their vision blocks")
+	}
+	if !strings.Contains(result.Messages[1].Content, "image keep-window") {
+		t.Fatal("evicted messages must carry an explicit notice")
+	}
+	// The stored conversation stays append-only.
+	if len(messages[1].Images) != 1 || len(messages[2].Images) != 1 {
+		t.Fatal("the window must not mutate the stored messages")
+	}
+	// Under the window nothing changes; keep=0 disables the policy.
+	if len(evictRequestImages(request, 4).Messages[1].Images) != 1 || len(evictRequestImages(request, 0).Messages[1].Images) != 1 {
+		t.Fatal("a fitting window must not evict anything")
+	}
+}
+
+func TestVisionWindowCostCountsFlipPoint(t *testing.T) {
+	shot := make([]byte, 1000)
+	mk := func(i int) llm.Message {
+		return llm.Message{Role: "user", Content: fmt.Sprintf("shot %d", i), Images: []llm.ImageBlock{{MIMEType: "image/png", Data: shot}}}
+	}
+	messages := []llm.Message{{Role: "system", Content: "SYS"}, mk(1), mk(2), mk(3)}
+	evicted, rewritten := visionWindowCost(messages, 1)
+	if evicted != 2 {
+		t.Fatalf("evicted = %d, want 2", evicted)
+	}
+	// The flip point is the message that just left the window (shot 2):
+	// everything from it to the end is re-written once.
+	if rewritten <= messageBytes(messages[2]) {
+		t.Fatalf("rewritten = %d, want the tail from the flip point", rewritten)
+	}
+	if total := messageBytes(messages[1]) + messageBytes(messages[2]) + messageBytes(messages[3]); rewritten >= total {
+		t.Fatalf("rewritten = %d, must not include the already-evicted head", rewritten)
+	}
+	if evicted, _ := visionWindowCost(messages, 3); evicted != 0 {
+		t.Fatalf("a fitting window must cost nothing, got %d evicted", evicted)
 	}
 }

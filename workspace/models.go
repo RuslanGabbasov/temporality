@@ -489,6 +489,12 @@ type Agent struct {
 	// of this agent auto-restarts with a fresh turn budget when it finishes by
 	// exhausting its turns (status turn_limit). nil/0 = off — the honest stop.
 	TurnLimitRestarts *int `json:"turn_limit_restarts,omitempty"`
+	// VisionKeepImages (docs/harness-settings.md): how many most-recent
+	// screenshot messages stay in the conversation; older vision blocks are
+	// evicted as new ones land (one-time mutation per message, an explicit
+	// notice stays). For image-heavy agents (design reviews) this keeps the
+	// request and the workflow history small. nil/0 = keep everything.
+	VisionKeepImages *int `json:"vision_keep_images,omitempty"`
 	// Egress allowlist (docs/agent-behavior-monitoring.md §7): network
 	// destinations (domains, globs, CIDRs, host:port) the agent may reach
 	// beyond the public internet. Private addresses are denied by default —
@@ -814,6 +820,7 @@ type CreateAgentRequest struct {
 	ReadOnly          *bool    `json:"read_only,omitempty"`
 	MaxTurns          *int     `json:"max_turns,omitempty"`
 	TurnLimitRestarts *int     `json:"turn_limit_restarts,omitempty"`
+	VisionKeepImages  *int     `json:"vision_keep_images,omitempty"`
 	ApprovalMode      *string  `json:"approval_mode,omitempty"`
 	// EgressAllowlist (docs/agent-behavior-monitoring.md §7): destinations the
 	// agent may reach beyond the public internet. Entries: domain, *.glob,

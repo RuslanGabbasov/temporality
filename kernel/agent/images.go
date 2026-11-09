@@ -71,6 +71,32 @@ var fetchImageTool = llm.ToolDef{
 	},
 }
 
+// inspectImageTool answers a question about an image WITHOUT attaching the
+// vision block to the conversation: the inspection runs on the installation's
+// vision model inside the activity and returns text. For image-heavy work
+// (design reviews) this keeps the request, the workflow history and the
+// provider prompt cache small (docs/harness-settings.md).
+var inspectImageTool = llm.ToolDef{
+	Name:        "inspect_image",
+	Description: "Inspect an image file (PNG, JPEG, WebP, GIF) with a vision model and get a TEXT answer about it — the image does NOT enter your context. Prefer this over view_image for design reviews and screenshot checks: you get facts (layout, elements, colors, text, visual issues) while the conversation stays small and cheap. Ask a concrete question and request a format when you need one; fall back to view_image only when pixels themselves are required (e.g. fine color work).",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":     map[string]any{"type": "string", "description": "Workspace-relative path (a leading /workspace/ is accepted)"},
+			"question": map[string]any{"type": "string", "description": "What to check or describe: layout, elements, consistency with a spec, visual issues — be specific"},
+		},
+		"required": []string{"path", "question"},
+	},
+}
+
+const inspectImageSystemPrompt = `You are a meticulous visual reviewer working for an agent that cannot see the image itself. Inspect the attached image and answer the question precisely, in the language of the question.
+
+Rules:
+- Facts over vibes: name elements, positions, sizes, colors and texts you can actually read.
+- When asked for issues, list concrete defects with locations; when the image is fine for the asked aspect, say so plainly.
+- Never invent details you cannot see. If the image is unreadable or the question cannot be answered from it, say exactly that.
+- Keep the answer dense: a short structured verdict, no preamble.`
+
 // imageMeta summarizes what actually reached the model context — the journal
 // event carries this, never the blob.
 type imageMeta struct {
@@ -221,6 +247,63 @@ func (a *Activities) handleViewImage(request ToolRequest) (ToolResult, error) {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q: %w", cleanPath(pathArg), err))
 	}
 	return ToolResult{Content: meta.summary(), Images: []llm.ImageBlock{block}}, nil
+}
+
+// handleInspectImage loads the image, runs the vision model on the question
+// and returns TEXT only — the block never enters the conversation.
+func (a *Activities) handleInspectImage(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	pathArg, _ := request.Arguments["path"].(string)
+	question, _ := request.Arguments["question"].(string)
+	if strings.TrimSpace(pathArg) == "" || strings.TrimSpace(question) == "" {
+		return ToolResult{}, invalidToolArguments(fmt.Errorf("inspect_image requires path and question"))
+	}
+	abs, err := a.resolveToolTarget(request, pathArg, fsOpRead)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return ToolResult{}, invalidToolArguments(fmt.Errorf("inspect %q: %w", cleanPath(pathArg), err))
+	}
+	if info.IsDir() {
+		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q is a directory", cleanPath(pathArg)))
+	}
+	if info.Size() > int64(imageSourceCap) {
+		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q is %d bytes; the cap is %d", cleanPath(pathArg), info.Size(), imageSourceCap))
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return ToolResult{}, fileToolFailure(fmt.Errorf("inspect %q: %w", cleanPath(pathArg), err))
+	}
+	block, meta, err := prepareImageBlock(data)
+	if err != nil {
+		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q: %w", cleanPath(pathArg), err))
+	}
+	// The installation's vision role (supervisor.vision.model) picks the
+	// multimodal model; an empty role falls back to the env default model.
+	// The judge model is deliberately NOT a fallback here — a text-only judge
+	// would hallucinate about pixels it cannot see.
+	model := a.Model
+	if a.HarnessModel != nil {
+		if client, mErr := a.HarnessModel(ctx, harness.RoleVision); mErr == nil && client != nil {
+			model = client
+		}
+	}
+	if model == nil {
+		return ToolResult{}, fmt.Errorf("inspect_image needs a vision model: set supervisor.vision.model in the supervisor settings (or configure the default model)")
+	}
+	completion, err := model.Complete(ctx, []llm.Message{
+		{Role: "system", Content: inspectImageSystemPrompt},
+		{Role: "user", Content: strings.TrimSpace(question), Images: []llm.ImageBlock{block}},
+	}, nil)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	answer := strings.TrimSpace(completion.Content)
+	if answer == "" {
+		return ToolResult{}, fmt.Errorf("the vision model returned an empty answer for %q", cleanPath(pathArg))
+	}
+	return ToolResult{Content: fmt.Sprintf("vision inspection of %s (%s %dx%d):\n\n%s", cleanPath(pathArg), meta.mime, meta.width, meta.height, answer)}, nil
 }
 
 func (a *Activities) handleFetchImage(ctx context.Context, request ToolRequest) (ToolResult, error) {

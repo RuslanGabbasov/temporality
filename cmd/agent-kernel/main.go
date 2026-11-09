@@ -2637,7 +2637,7 @@ func main() {
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 			Skills: req.Skills, MCPServers: req.MCPServers, Secrets: req.Secrets, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
-			MaxTurns: req.MaxTurns, TurnLimitRestarts: req.TurnLimitRestarts, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
+			MaxTurns: req.MaxTurns, TurnLimitRestarts: req.TurnLimitRestarts, VisionKeepImages: req.VisionKeepImages, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
 			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
 		}
 		if a.Definition != nil {
@@ -2691,7 +2691,7 @@ func main() {
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 			Skills: req.Skills, MCPServers: req.MCPServers, Secrets: req.Secrets, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
-			MaxTurns: req.MaxTurns, TurnLimitRestarts: req.TurnLimitRestarts, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
+			MaxTurns: req.MaxTurns, TurnLimitRestarts: req.TurnLimitRestarts, VisionKeepImages: req.VisionKeepImages, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
 			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
 		}
 		prev, prevErr := ws.GetAgent(r.Context(), a.ID)
@@ -9223,6 +9223,11 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	if a.TurnLimitRestarts != nil && *a.TurnLimitRestarts > 0 {
 		input.TurnLimitRestarts = *a.TurnLimitRestarts
 	}
+	// The vision keep-window is enforced config too: every run path inherits
+	// the agent's screenshot policy (docs/harness-settings.md).
+	if a.VisionKeepImages != nil && *a.VisionKeepImages > 0 {
+		input.VisionKeepImages = *a.VisionKeepImages
+	}
 	if a.SystemPrompt != "" {
 		input.SystemPrompt = a.SystemPrompt
 	}
@@ -9329,6 +9334,9 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 	}
 	if input.TurnLimitRestarts == 0 && a.TurnLimitRestarts != nil && *a.TurnLimitRestarts > 0 {
 		input.TurnLimitRestarts = *a.TurnLimitRestarts
+	}
+	if input.VisionKeepImages == 0 && a.VisionKeepImages != nil && *a.VisionKeepImages > 0 {
+		input.VisionKeepImages = *a.VisionKeepImages
 	}
 	// Card-granted network rides in as a default: the caller's bare false
 	// (zero value) means "unset", and — matching every other run path —

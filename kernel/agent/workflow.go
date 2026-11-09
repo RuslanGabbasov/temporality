@@ -231,6 +231,11 @@ type RunInput struct {
 	// as the prior-tail block) this many times before finishing honestly as
 	// turn_limit. 0 = off.
 	TurnLimitRestarts int `json:"turn_limit_restarts,omitempty"`
+	// VisionKeepImages (docs/harness-settings.md): how many most-recent
+	// screenshot messages stay in the conversation — older vision blocks are
+	// evicted as new ones land (one-time mutation per message). Pinned per
+	// run so replays derive identical evictions. 0 = keep everything.
+	VisionKeepImages int `json:"vision_keep_images,omitempty"`
 	// RestartAttempt counts the continuation chain: 0 = original run, 1..N =
 	// spawned continuations (the run id gains an -r2/-r3 suffix and the trace
 	// shows run.restarted between the attempts).
@@ -1737,7 +1742,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						turnMessages = append(slices.Clone(messages), finalTurnReminder)
 					}
 					modelReq.Messages = turnMessages
-					if err := emit(activityCtx, state, "context.compacted", map[string]any{"turn": turn, "bytes_before": size, "bytes_after": modelRequestBytes(modelReq), "card": card, "kept_messages": kept, "dropped_messages": dropped}); err != nil {
+					after := modelRequestBytes(modelReq)
+					if err := emit(activityCtx, state, "context.compacted", map[string]any{"turn": turn, "bytes_before": size, "bytes_after": after, "cache_rewritten_bytes": after, "card": card, "kept_messages": kept, "dropped_messages": dropped}); err != nil {
 						return result, err
 					}
 				} else {
@@ -3036,6 +3042,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				Content: "Image(s) produced by this turn's tool calls are attached below as vision blocks; their metadata is in the tool results above.",
 				Images:  turnImages,
 			})
+			// Vision keep-window accounting (docs/harness-settings.md): each
+			// evicted screenshot flips its message once and the provider
+			// re-writes the prompt cache from that point — journal the cost so
+			// image-heavy agents (design reviews) can size their window.
+			if evicted, cacheBytes := visionWindowCost(messages, input.VisionKeepImages); evicted > 0 {
+				if err := emit(activityCtx, state, "context.vision_evicted", map[string]any{"turn": turn, "evicted_images": evicted, "cache_rewritten_bytes": cacheBytes, "keep_images": input.VisionKeepImages}); err != nil {
+					return result, err
+				}
+			}
 		}
 		if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "tool_calls": len(completion.ToolCalls), "behavior_monitor": input.BehaviorMonitor}); err != nil {
 			return result, err
@@ -3650,6 +3665,73 @@ func elideRequestImages(request ModelRequest, budget int) ModelRequest {
 func withMessages(request ModelRequest, messages []llm.Message) ModelRequest {
 	request.Messages = messages
 	return request
+}
+
+// evictRequestImages enforces the agent's vision keep-window (RunInput.
+// VisionKeepImages, docs/harness-settings.md): at most keep image-bearing
+// messages keep their vision blocks in the REQUEST; older ones carry a fixed
+// notice instead. The stored conversation stays strictly append-only and each
+// message's state flips exactly once (more images only arrive), so the
+// provider's prefix cache is invalidated once per evicted screenshot and the
+// point of invalidation sits near the end of the prompt — the newest
+// screenshots are the working context, the model re-opens older ones by path
+// with view_image.
+func evictRequestImages(request ModelRequest, keep int) ModelRequest {
+	if keep <= 0 {
+		return request
+	}
+	messages := slices.Clone(request.Messages)
+	imageIdx := make([]int, 0, keep+1)
+	for i, m := range messages {
+		if len(m.Images) > 0 {
+			imageIdx = append(imageIdx, i)
+		}
+	}
+	if len(imageIdx) <= keep {
+		return request
+	}
+	changed := false
+	for _, i := range imageIdx[:len(imageIdx)-keep] {
+		count := len(messages[i].Images)
+		messages[i].Images = nil
+		messages[i].Content += fmt.Sprintf("\n\n[%d screenshot(s) from this message were evicted by the agent's image keep-window; re-open them by path with view_image if you need them]", count)
+		changed = true
+	}
+	if !changed {
+		return request
+	}
+	request.Messages = messages
+	return request
+}
+
+// visionWindowCost reports what the keep-window would evict from the stored
+// conversation and how much provider-side prompt cache THIS turn invalidates:
+// each message's eviction state flips exactly once, and the flip point is the
+// message that just fell out of the window — everything from it to the end of
+// the prompt is re-written once. Pure accounting for the context.vision_evicted
+// event — the enforcement itself happens on the request copy
+// (evictRequestImages).
+func visionWindowCost(messages []llm.Message, keep int) (evictedImages int, cacheRewrittenBytes int) {
+	if keep <= 0 {
+		return 0, 0
+	}
+	var imageIdx []int
+	for i, m := range messages {
+		if len(m.Images) > 0 {
+			imageIdx = append(imageIdx, i)
+		}
+	}
+	if len(imageIdx) <= keep {
+		return 0, 0
+	}
+	for _, i := range imageIdx[:len(imageIdx)-keep] {
+		evictedImages += len(messages[i].Images)
+	}
+	flip := imageIdx[len(imageIdx)-keep-1]
+	for _, m := range messages[flip:] {
+		cacheRewrittenBytes += messageBytes(m)
+	}
+	return evictedImages, cacheRewrittenBytes
 }
 
 // boundedFailureDetail reduces an activity error to a bounded, redacted
@@ -4623,9 +4705,11 @@ func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, s
 	// The request rides the workflow-task upload as one activity-input blob:
 	// over the scheduler's payload limit every attempt dies on upload
 	// (TMPRL1103) and the run wedges in a silent retry loop that never emits
-	// model.failed. Shed the oldest screenshot blocks first (they accumulate
-	// across turns and alone can cross the limit); only when the text itself
-	// is over budget stop honestly — the caller journals the failure.
+	// model.failed. The agent's vision keep-window comes first (the policy
+	// choice), then the oldest screenshot blocks are shed until the request
+	// fits the hard budget; only when the text itself is over budget stop
+	// honestly — the caller journals the failure.
+	request = evictRequestImages(request, state.run.VisionKeepImages)
 	request = elideRequestImages(request, state.budget().MaxModelRequestBytes)
 	if size := modelRequestBytes(request); size > state.budget().MaxModelRequestBytes {
 		return fmt.Errorf("model request payload is %d bytes (budget %d) — the conversation grew too large to schedule the call; reduce tool output volume or split the work into more runs", size, state.budget().MaxModelRequestBytes)

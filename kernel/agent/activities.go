@@ -1609,6 +1609,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleWebSearch(ctx, request)
 	case "view_image":
 		return a.handleViewImage(request)
+	case "inspect_image":
+		return a.handleInspectImage(ctx, request)
 	case "fetch_image":
 		return a.handleFetchImage(ctx, request)
 	case "browser":
