@@ -454,7 +454,7 @@ export const en: Record<string, string> = {
     'chat.stop': 'Stop',
     'chat.trace': 'Trace',
     'chat.trace_title': 'Open the run trace (new tab)',
-    'chat.branch': 'Branch',
+    'chat.branch': 'Create branch',
     'chat.streaming': 'streaming…',
     'chat.scroll_bottom': 'Scroll to bottom',
     'chat.totals.tokens': '{{count}} tok',

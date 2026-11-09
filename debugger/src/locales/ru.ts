@@ -453,7 +453,7 @@ export const ru: Record<string, string> = {
     'chat.stop': 'Стоп',
     'chat.trace': 'Трейс',
     'chat.trace_title': 'Открыть трейс рана (в новой вкладке)',
-    'chat.branch': 'Ветка',
+    'chat.branch': 'Создать ветку',
     'chat.streaming': 'загрузка…',
     'chat.scroll_bottom': 'Прокрутить вниз',
     'chat.totals.tokens': '{{count}} ток.',

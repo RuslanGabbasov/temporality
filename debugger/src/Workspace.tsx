@@ -2070,23 +2070,33 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         {msg.role === 'assistant' && msg.taskTotals && (
                           <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }} title={t('chat.task_totals.title') ?? 'Whole-task budget: every run of this task (follow-ups and delegated agents)'}>Σ {msg.taskTotals}</span>
                         )}
-                        {activeConv && (
-                          <button
-                            onClick={() => branchConversation(activeConv.id, i)}
-                            style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem', marginLeft: 'auto' }}
-                            title={t('chat.branch_title') ?? 'Branch conversation from this point'}
-                          >{t('chat.branch') ?? 'Branch'}</button>
-                        )}
+                        {/* Error details are the diagnosis of THIS message —
+                            they belong next to the failed badge, not among
+                            the conversational actions. */}
                         {msg.status === 'failed' && msg.runId && activeConv && (
-                          <>
+                          <CallReportButton runId={msg.runId} project={project} onOpen={(event) => setCallReport({ runId: msg.runId!, event })} />
+                        )}
+                        {/* Conversational actions cluster in the right
+                            corner. Branching the LAST message is pointless —
+                            the conversation is already at that point and can
+                            simply continue — so the branch button stops one
+                            message short of the end. */}
+                        <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                          {activeConv && i < activeConv.messages.length - 1 && (
+                            <button
+                              onClick={() => branchConversation(activeConv.id, i)}
+                              style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+                              title={t('chat.branch_title') ?? 'Branch conversation from this point'}
+                            >{t('chat.branch') ?? 'Create branch'}</button>
+                          )}
+                          {msg.status === 'failed' && msg.runId && activeConv && (
                             <button
                               onClick={() => void continueRun(activeConv, msg.runId)}
-                              style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem', marginLeft: 'auto' }}
+                              style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
                               title={t('chat.continue_title') ?? 'Resume the task from where it stopped'}
                             >{t('chat.continue') ?? 'Continue'}</button>
-                            <CallReportButton runId={msg.runId} project={project} onOpen={(event) => setCallReport({ runId: msg.runId!, event })} />
-                          </>
-                        )}
+                          )}
+                        </span>
                       </div>
                     )}
                   </div>
