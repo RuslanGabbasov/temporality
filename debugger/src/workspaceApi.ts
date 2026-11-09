@@ -134,6 +134,9 @@ export interface AgentCapabilities {
    *  (view_image / fetch_image / inspect_image) and keeps screenshot blocks
    *  out of the conversation. Unset = allowed. */
   vision?: boolean
+  /** Describe-only image mode: tools return text inspections of images and
+   *  base64 blocks never enter the conversation. Explicit opt-in. */
+  vision_describe?: boolean
 }
 
 /** Structured definition (docs/evaluable-agent.md): capabilities, hard

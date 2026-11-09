@@ -1414,7 +1414,15 @@ func sandboxLabels(request ToolRequest) map[string]string {
 	return labels
 }
 
-func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResult, error) {
+func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (result ToolResult, err error) {
+	// Describe-only image mode (docs/harness-settings.md): whatever the tool
+	// attached, the vision blocks are converted to text here — one choke point
+	// so no tool can smuggle base64 into the conversation.
+	defer func() {
+		if request.VisionDescribe && len(result.Images) > 0 {
+			result = a.describeToolImages(ctx, result)
+		}
+	}()
 	if len(request.AllowedTools) > 0 && !allowedForAgent(request.AllowedTools, request.Name) {
 		// Defense in depth: the workflow already filters the tools advertised to
 		// the model; this rejects calls to tools outside the agent's allowlist.

@@ -240,6 +240,10 @@ type RunInput struct {
 	// vision=false): the vision tools are denied and screenshot blocks never
 	// enter the conversation — tool results keep only their metadata.
 	VisionDisabled bool `json:"vision_disabled,omitempty"`
+	// VisionDescribe is the describe-only image mode (agent capability
+	// vision_describe=true): tools return text descriptions of images and
+	// base64 blocks never enter the conversation.
+	VisionDescribe bool `json:"vision_describe,omitempty"`
 	// RestartAttempt counts the continuation chain: 0 = original run, 1..N =
 	// spawned continuations (the run id gains an -r2/-r3 suffix and the trace
 	// shows run.restarted between the attempts).
@@ -399,6 +403,11 @@ type ToolRequest struct {
 	DeniedTools []string `json:"denied_tools,omitempty"`
 	// ReadOnly mounts the workspace read-only in the command sandbox.
 	ReadOnly bool `json:"read_only,omitempty"`
+	// VisionDescribe is the describe-only image mode (agent capability
+	// vision_describe, docs/harness-settings.md): tools that would attach
+	// vision blocks get them converted to text descriptions instead — pixels
+	// never reach the conversation.
+	VisionDescribe bool `json:"vision_describe,omitempty"`
 	// Sandbox carries the run's resolved sandbox profile into the execution
 	// boundary (docs/sandbox-profiles.md §3.3); nil keeps the runner defaults.
 	Sandbox *SandboxSpec `json:"sandbox,omitempty"`
@@ -2779,7 +2788,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 							// starts the process, later attempts attach to it.
 							RetryPolicy: backgroundActivityRetryPolicy(),
 						})
-						future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion})
+						future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion, VisionDescribe: input.VisionDescribe})
 						if err := startTool(); err != nil {
 							return result, err
 						}
@@ -2793,7 +2802,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						// Wall latency from the workflow clock covers scheduling, retries
 						// and execution — the honest end-to-end cost of the operation.
 						toolStarted := workflow.Now(ctx)
-						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &toolResult); err != nil {
+						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion, VisionDescribe: input.VisionDescribe}).Get(ctx, &toolResult); err != nil {
 							toolFailed = true
 							failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -2948,7 +2957,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						// command is never re-executed.
 						RetryPolicy: backgroundActivityRetryPolicy(),
 					})
-					future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion})
+					future := workflow.ExecuteActivity(bgCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion, VisionDescribe: input.VisionDescribe})
 					if err := startTool(); err != nil {
 						return result, err
 					}
@@ -2967,7 +2976,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					// Same wall-clock semantics as the approval path: scheduling,
 					// retries and execution in one number.
 					toolStarted := workflow.Now(ctx)
-					if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &toolResult); err != nil {
+					if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion, VisionDescribe: input.VisionDescribe}).Get(ctx, &toolResult); err != nil {
 						toolFailed = true
 						failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 						failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()

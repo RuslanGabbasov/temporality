@@ -121,7 +121,7 @@ function setCaps(caps?: AgentCapabilities): AgentCapabilities {
   const result: AgentCapabilities = {}
   // Delegation is serialized with the rest: the backend default is denied,
   // so dropping it here would silently revoke a granted toggle on save.
-  for (const key of [...CAP_KEYS, 'delegation', 'triggers', 'vision'] as const) {
+  for (const key of [...CAP_KEYS, 'delegation', 'triggers', 'vision', 'vision_describe'] as const) {
     const value = caps?.[key]
     if (typeof value === 'boolean') result[key] = value
   }
@@ -362,7 +362,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const setDef = (part: Partial<AgentDefinition>) =>
     setForm((prev) => ({ ...prev, definition: { ...prev.definition, ...part } }))
 
-  const setCap = (key: CapKey | 'delegation' | 'triggers' | 'vision', value: boolean | undefined) =>
+  const setCap = (key: CapKey | 'delegation' | 'triggers' | 'vision' | 'vision_describe', value: boolean | undefined) =>
     setForm((prev) => ({
       ...prev,
       definition: {
@@ -370,6 +370,16 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         capabilities: { ...prev.definition?.capabilities, [key]: value },
       },
     }))
+
+  // Vision mode (docs/harness-settings.md): the 3-way image-handling switch
+  // mapped onto the capability flags — off is vision=false, describe-only is
+  // vision_describe=true, full is the default.
+  const visionMode: 'full' | 'describe' = form.definition?.capabilities?.vision_describe === true ? 'describe' : 'full'
+  const setVisionMode = (mode: 'full' | 'describe') => {
+    touch('capabilities')
+    setCap('vision', undefined)
+    setCap('vision_describe', mode === 'describe' ? true : undefined)
+  }
 
   // ── Create / edit flows ────────────────────────────────────────────────
 
@@ -1857,22 +1867,37 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       onToggle={(checked: boolean) => { touch('capabilities'); setCap('vision', checked ? undefined : false) }}
                     />
                     {form.definition?.capabilities?.vision !== false && (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }} title={t('agents.vision_limit_hint') ?? 'Сколько свежих сообщений со скриншотами держать в контексте; старые vision-блоки вытесняются по мере появления новых (экономит запросы, историю и prompt cache). 0 = без лимита.'}>{t('agents.vision_limit_short') ?? '× лимит изображений в контексте'}</span>
-                        <input
-                          type="number"
-                          onFocus={selectOnFocus}
-                          value={form.vision_keep_images ?? 0}
-                          min={0}
-                          max={20}
-                          step={1}
-                          onChange={(e) => setForm({ ...form, vision_keep_images: Math.min(20, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
-                          style={{ ...paramInputStyle, width: '64px', textAlign: 'center' }}
-                        />
-                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', flexWrap: 'wrap' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>{t('agents.vision_mode_label') ?? 'Изображения:'}</span>
+                          <select
+                            value={visionMode}
+                            onChange={(e) => setVisionMode(e.target.value as 'full' | 'describe')}
+                            style={{ ...paramInputStyle, width: 'auto', padding: '0.3rem 0.5rem' }}
+                          >
+                            <option value="full">{t('agents.vision_mode_full') ?? 'Пиксели в контексте'}</option>
+                            <option value="describe">{t('agents.vision_mode_describe') ?? 'Только описания'}</option>
+                          </select>
+                        </label>
+                        {visionMode === 'full' && (
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', whiteSpace: 'nowrap' }}>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }} title={t('agents.vision_limit_hint') ?? 'Сколько свежих сообщений со скриншотами держать в контексте; старые vision-блоки вытесняются по мере появления новых (экономит запросы, историю и prompt cache). 0 = без лимита.'}>{t('agents.vision_limit_short') ?? '× лимит изображений в контексте'}</span>
+                            <input
+                              type="number"
+                              onFocus={selectOnFocus}
+                              value={form.vision_keep_images ?? 0}
+                              min={0}
+                              max={20}
+                              step={1}
+                              onChange={(e) => setForm({ ...form, vision_keep_images: Math.min(20, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
+                              style={{ ...paramInputStyle, width: '64px', textAlign: 'center' }}
+                            />
+                          </label>
+                        )}
+                      </div>
                     )}
                   </div>
-                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: '0.35rem 0 0' }}>{t('agents.cap.vision_hint') ?? 'Выключено — view_image / fetch_image / inspect_image недоступны, скриншоты не попадают в контекст (остаются только метаданные из тул-результатов).'}</p>
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: '0.35rem 0 0' }}>{t('agents.cap.vision_hint') ?? 'Выключено — view_image / fetch_image / inspect_image недоступны, скриншоты не попадают в контекст. «Только описания» — тулы вместо пикселей сразу возвращают текстовое описание (vision-модель), base64 в контекст не попадает никогда. «Пиксели в контексте» — vision-блоки живут в диалоге (с лимитом).'}</p>
                 </div>
               </Stack>
             )}

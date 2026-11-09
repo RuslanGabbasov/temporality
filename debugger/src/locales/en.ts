@@ -984,7 +984,10 @@ export const en: Record<string, string> = {
     'agents.turn_restarts_short': '× continuations',
 
     'agents.cap.vision': 'Image handling',
-    'agents.cap.vision_hint': 'Off — view_image / fetch_image / inspect_image are denied and screenshots never enter the context (tool results keep their metadata only).',
+    'agents.cap.vision_hint': 'Off — view_image / fetch_image / inspect_image are denied and screenshots never enter the context. "Descriptions only" — tools return text inspections (vision model) instead of pixels, base64 never enters the context. "Pixels in context" — vision blocks live in the conversation (with a limit).',
+    'agents.vision_mode_label': 'Images:',
+    'agents.vision_mode_full': 'Pixels in context',
+    'agents.vision_mode_describe': 'Descriptions only',
     'agents.vision_limit_short': '× image limit in context',
     'agents.vision_limit_hint': 'How many most-recent screenshot messages stay in context; older vision blocks are evicted as new ones land (keeps requests, history and the prompt cache small). 0 = no limit.',
 

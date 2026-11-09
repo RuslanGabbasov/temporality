@@ -984,7 +984,10 @@ export const ru: Record<string, string> = {
     'agents.turn_restarts_short': '× продолжений',
 
     'agents.cap.vision': 'Работа с изображениями',
-    'agents.cap.vision_hint': 'Выключено — view_image / fetch_image / inspect_image недоступны, скриншоты не попадают в контекст (остаются только метаданные из тул-результатов).',
+    'agents.cap.vision_hint': 'Выключено — view_image / fetch_image / inspect_image недоступны, скриншоты не попадают в контекст. «Только описания» — тулы вместо пикселей сразу возвращают текстовое описание (vision-модель), base64 в контекст не попадает никогда. «Пиксели в контексте» — vision-блоки живут в диалоге (с лимитом).',
+    'agents.vision_mode_label': 'Изображения:',
+    'agents.vision_mode_full': 'Пиксели в контексте',
+    'agents.vision_mode_describe': 'Только описания',
     'agents.vision_limit_short': '× лимит изображений в контексте',
     'agents.vision_limit_hint': 'Сколько свежих сообщений со скриншотами держать в контексте; старые vision-блоки вытесняются по мере появления новых (экономит запросы, историю и prompt cache). 0 = без лимита.',
 

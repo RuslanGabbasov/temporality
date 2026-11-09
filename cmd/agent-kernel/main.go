@@ -9265,6 +9265,10 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 		if !caps.Cap(caps.Vision) {
 			input.DenyTools = append(input.DenyTools, "view_image", "fetch_image", "inspect_image")
 			input.VisionDisabled = true
+		} else if caps.VisionDescribe != nil && *caps.VisionDescribe {
+			// Describe-only mode (docs/harness-settings.md): tools return text
+			// inspections, pixels never reach the conversation.
+			input.VisionDescribe = true
 		}
 	}
 	// Delegation is an explicitly granted capability (docs/agent-delegation.md):
@@ -9388,6 +9392,10 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 		if !caps.Cap(caps.Vision) {
 			input.DenyTools = append(input.DenyTools, "view_image", "fetch_image", "inspect_image")
 			input.VisionDisabled = true
+		} else if caps.VisionDescribe != nil && *caps.VisionDescribe {
+			// Describe-only mode (docs/harness-settings.md): tools return text
+			// inspections, pixels never reach the conversation.
+			input.VisionDescribe = true
 		}
 	} else if callerPrompt == "" && a.SystemPrompt != "" {
 		input.SystemPrompt = a.SystemPrompt

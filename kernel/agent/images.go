@@ -249,6 +249,63 @@ func (a *Activities) handleViewImage(request ToolRequest) (ToolResult, error) {
 	return ToolResult{Content: meta.summary(), Images: []llm.ImageBlock{block}}, nil
 }
 
+// describeImage runs the vision model over one block with a question and
+// returns the text answer. The shared tail of inspect_image and the
+// describe-only image mode.
+func (a *Activities) describeImage(ctx context.Context, block llm.ImageBlock, question string) (string, error) {
+	// The installation's vision role (supervisor.vision.model) picks the
+	// multimodal model; an empty role falls back to the env default model.
+	// The judge model is deliberately NOT a fallback here — a text-only judge
+	// would hallucinate about pixels it cannot see.
+	model := a.Model
+	if a.HarnessModel != nil {
+		if client, mErr := a.HarnessModel(ctx, harness.RoleVision); mErr == nil && client != nil {
+			model = client
+		}
+	}
+	if model == nil {
+		return "", fmt.Errorf("no vision model configured: set supervisor.vision.model in the supervisor settings (or configure the default model)")
+	}
+	completion, err := model.Complete(ctx, []llm.Message{
+		{Role: "system", Content: inspectImageSystemPrompt},
+		{Role: "user", Content: strings.TrimSpace(question), Images: []llm.ImageBlock{block}},
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	answer := strings.TrimSpace(completion.Content)
+	if answer == "" {
+		return "", fmt.Errorf("the vision model returned an empty answer")
+	}
+	return answer, nil
+}
+
+// describeOnlyQuestion is the generic prompt of the describe-only image
+// mode: the tool did not ask anything specific, so the inspection must cover
+// the whole picture.
+const describeOnlyQuestion = "Describe this image fully and factually for an agent that will never see it: what it shows, layout and key elements, readable text, and any visible issues."
+
+// describeToolImages converts a tool result's vision blocks into text
+// inspections — the describe-only image mode (RunInput.VisionDescribe,
+// docs/harness-settings.md). The pixels are dropped from the result (they
+// never reach the conversation) and each block is answered by the vision
+// model. Failures keep the mode's contract: the block is dropped with an
+// explicit note instead of being kept "just in case".
+func (a *Activities) describeToolImages(ctx context.Context, result ToolResult) ToolResult {
+	described := make([]string, 0, len(result.Images))
+	for _, block := range result.Images {
+		text, err := a.describeImage(ctx, block, describeOnlyQuestion)
+		if err != nil {
+			described = append(described, "[image dropped: describe-only mode and the inspection failed: "+err.Error()+"]")
+			continue
+		}
+		described = append(described, text)
+	}
+	result.Images = nil
+	result.Content += "\n\n[describe-only mode: the vision block(s) are not kept in context; inspections follow]\n\n" + strings.Join(described, "\n\n")
+	return result
+}
+
 // handleInspectImage loads the image, runs the vision model on the question
 // and returns TEXT only — the block never enters the conversation.
 func (a *Activities) handleInspectImage(ctx context.Context, request ToolRequest) (ToolResult, error) {
@@ -279,29 +336,9 @@ func (a *Activities) handleInspectImage(ctx context.Context, request ToolRequest
 	if err != nil {
 		return ToolResult{}, invalidToolArguments(fmt.Errorf("%q: %w", cleanPath(pathArg), err))
 	}
-	// The installation's vision role (supervisor.vision.model) picks the
-	// multimodal model; an empty role falls back to the env default model.
-	// The judge model is deliberately NOT a fallback here — a text-only judge
-	// would hallucinate about pixels it cannot see.
-	model := a.Model
-	if a.HarnessModel != nil {
-		if client, mErr := a.HarnessModel(ctx, harness.RoleVision); mErr == nil && client != nil {
-			model = client
-		}
-	}
-	if model == nil {
-		return ToolResult{}, fmt.Errorf("inspect_image needs a vision model: set supervisor.vision.model in the supervisor settings (or configure the default model)")
-	}
-	completion, err := model.Complete(ctx, []llm.Message{
-		{Role: "system", Content: inspectImageSystemPrompt},
-		{Role: "user", Content: strings.TrimSpace(question), Images: []llm.ImageBlock{block}},
-	}, nil)
+	answer, err := a.describeImage(ctx, block, question)
 	if err != nil {
 		return ToolResult{}, err
-	}
-	answer := strings.TrimSpace(completion.Content)
-	if answer == "" {
-		return ToolResult{}, fmt.Errorf("the vision model returned an empty answer for %q", cleanPath(pathArg))
 	}
 	return ToolResult{Content: fmt.Sprintf("vision inspection of %s (%s %dx%d):\n\n%s", cleanPath(pathArg), meta.mime, meta.width, meta.height, answer)}, nil
 }

@@ -293,6 +293,11 @@ type AgentCapabilities struct {
 	// enter the conversation — tool results keep only their metadata. nil =
 	// allowed (the pre-definition behavior).
 	Vision *bool `json:"vision,omitempty"`
+	// VisionDescribe is the describe-only image mode: tools return text
+	// descriptions of images (a vision-model inspection) and base64 blocks
+	// never enter the conversation. Meaningful only with Vision allowed;
+	// explicit opt-in like delegation (nil or false = pixels as usual).
+	VisionDescribe *bool `json:"vision_describe,omitempty"`
 }
 
 // Cap returns the effective value of a capability: nil (unset) means allowed,
