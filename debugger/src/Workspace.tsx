@@ -9,7 +9,7 @@ import {
   Tag,
   Heading,
 } from '@carbon/react'
-import { Add, ArrowDown, Attachment, Send, TrashCan } from '@carbon/icons-react'
+import { Add, ArrowDown, Attachment, Branch, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile, ApiError } from './workspaceApi'
 import { runCost, taskCost, KERNEL_API, whoami, interactWithPresentation, type Whoami } from './kernelApi'
 import { authHeaders } from './api'
@@ -2081,13 +2081,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                             the conversation is already at that point and can
                             simply continue — so the branch button stops one
                             message short of the end. */}
-                        <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                        <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', alignItems: 'center', flexShrink: 0 }}>
                           {activeConv && i < activeConv.messages.length - 1 && (
                             <button
                               onClick={() => branchConversation(activeConv.id, i)}
-                              style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+                              style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', padding: '0.25rem', lineHeight: 0, display: 'flex' }}
                               title={t('chat.branch_title') ?? 'Branch conversation from this point'}
-                            >{t('chat.branch') ?? 'Create branch'}</button>
+                              aria-label={t('chat.branch') ?? 'Create branch'}
+                            ><Branch size={16} /></button>
                           )}
                           {msg.status === 'failed' && msg.runId && activeConv && (
                             <button
