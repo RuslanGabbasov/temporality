@@ -66,8 +66,15 @@ services:
     depends_on:
       journal:
         condition: service_healthy
+      # The kernel boot can legitimately take minutes (its Temporal wait
+      # loop + migrations run before the full API mux; the liveness listener
+      # answers /livez from the first second). A hard service_healthy gate
+      # here re-created the flaky «dependency agent-kernel failed to start»:
+      # compose burned the healthcheck budget on a healthy-but-booting
+      # process. nginx serves fine while the kernel finishes booting — the UI
+      # retries kernel-api calls; service_started is the honest condition.
       agent-kernel:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     stop_grace_period: 40s
 
@@ -318,10 +325,16 @@ services:
       searxng:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8090/healthz || exit 1"]
+      # /livez — process liveness, answered from the FIRST second of boot by
+      # the early listener (see main.go): the container counts as healthy
+      # while the kernel is still migrating/waiting for Temporal. Readiness
+      # (/healthz) turns 200 only when the full API mux is up — humans and
+      # orchestrators that care use that.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8090/livez || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 30s
     restart: unless-stopped
 
   # Egress proxy (docs/agent-behavior-monitoring.md §7): the only container

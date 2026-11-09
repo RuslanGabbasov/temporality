@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -237,6 +238,40 @@ func main() {
 	log.Info("temporality-agent-kernel starting", "version", buildVersion)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Early liveness listener (the «dependency failed to start» fix): boot
+	// can legitimately take minutes — the Temporal wait-loop and workspace
+	// migrations run BEFORE the full API mux — and until now the port stayed
+	// closed the whole time, so compose's own healthcheck burned its whole
+	// retry budget on a healthy-but-still-booting process and the dependent
+	// services (debugger) gave up. The socket opens NOW: /livez answers 200
+	// from the first moment (the container healthcheck probes it — liveness,
+	// not readiness), /healthz answers 503 {"booting":true} until the real
+	// handler swap below. Readiness stays honest; liveness stops lying.
+	bootMux := http.NewServeMux()
+	var bootDone atomic.Bool
+	bootMux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true,"booting":` + map[bool]string{true: "true", false: "false"}[!bootDone.Load()] + `}`))
+	})
+	bootMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		if !bootDone.Load() {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "booting": true})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "version": buildVersion})
+	})
+	bootMux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "booting": true})
+	})
+	address := env("KERNEL_HTTP_ADDR", ":8090")
+	bootServer := newKernelHTTPServer(address, bootMux)
+	go func() {
+		if err := bootServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("boot listener", "error", err)
+		}
+	}()
+	defer func() { _ = bootServer.Close() }()
+	defer func() { bootDone.Store(true) }() // never reached on the success path; the swap below does it
 	if err := controlplane.LoadFileSecrets("DATABASE_URL", "TEMPORALITY_MODEL_API_KEY", "TEMPORALITY_API_TOKEN", "KERNEL_AUTH_TOKENS", "KERNEL_SECRET_MASTER_KEY"); err != nil {
 		log.Error("load file secrets", "error", err)
 		os.Exit(1)
@@ -712,7 +747,6 @@ func main() {
 	// own workspace API over loopback. A startup-random internal token lets the
 	// calls pass the gate once authentication is on (including after the first
 	// workspace user activates it) without exposing a reusable credential.
-	address := env("KERNEL_HTTP_ADDR", ":8090")
 	internalToken := generateToken()
 	gate.SetInternalToken(internalToken)
 	activities.WorkspaceToken = internalToken
@@ -8127,8 +8161,16 @@ func main() {
 		}
 		authed.ServeHTTP(w, r)
 	})
+	// Boot complete: hand the socket from the liveness bootstrap to the real
+	// API. Close first — the listener goroutine releases :8090, then the full
+	// server binds it; a brief connection-refused window between the two is
+	// fine (callers retry) and beats minutes of a closed port.
+	if err := bootServer.Close(); err != nil {
+		log.Warn("close the boot listener", "error", err)
+	}
 	server := newKernelHTTPServer(address, root)
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
+	bootDone.Store(true)
 	log.Info("agent kernel started", "address", address, "task_queue", taskQueue)
 	serveErr := server.ListenAndServe()
 	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
