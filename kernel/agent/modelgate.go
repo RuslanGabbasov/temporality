@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,12 +43,27 @@ type ModelGate struct {
 	entries  map[string]*budgetEntry
 	order    []string // FIFO of queued run ids, for the reported position
 	ttl      time.Duration
+	// Actual-usage reconciliation (the overcommit heuristic): every run's
+	// sandbox container is capped by its own cgroup at the DECLARED memory —
+	// the host only dies when everything peaks at once, which is rare. So the
+	// ledger re-charges each live run from the container's real usage:
+	// clamp(factor × actual, floor, declared). A quiet 6g sandbox stops
+	// hogging 6g of the budget within one reconcile pass; a run that really
+	// balloons grows its charge toward the declared cap as it grows. New
+	// entries keep their declared charge until the first stats sample lands
+	// (the container does not exist before the first run_command).
+	stats          func() map[string]int64 // sandbox scratch key → used MB; nil disables
+	reconcileEvery time.Duration           // 0 disables
+	chargeFactor   float64
+	chargeFloorMB  int
 }
 
 type budgetEntry struct {
-	memoryMB  int
-	quotaKey  string
-	lastRenew time.Time
+	memoryMB   int    // the EFFECTIVE charge (admission math); starts as declared
+	declaredMB int    // the sandbox profile's cgroup cap — the reconcile ceiling
+	scratchKey string // "project/run" — matches the container label for stats
+	quotaKey   string
+	lastRenew  time.Time
 }
 
 var (
@@ -63,8 +79,9 @@ var gateDefaultRunMemoryMB = 1024
 // ConfigureModelGate installs the budget: max concurrent runs (absolute
 // runaway guard), the host budget in MB, the memory floor percent, the
 // memory probe (nil = no floor check), and the per-run default requirement
-// for sandboxes that declare no explicit memory.
-func ConfigureModelGate(max int, budgetMB int, floorPct float64, memory func() (uint64, uint64, bool), defaultRunMB int) {
+// for sandboxes that declare no explicit memory. stats (sandbox scratch key
+// → used MB) enables the actual-usage reconciliation when non-nil.
+func ConfigureModelGate(max int, budgetMB int, floorPct float64, memory func() (uint64, uint64, bool), defaultRunMB int, stats func() map[string]int64) {
 	gateMu.Lock()
 	defer gateMu.Unlock()
 	if max <= 0 {
@@ -76,15 +93,101 @@ func ConfigureModelGate(max int, budgetMB int, floorPct float64, memory func() (
 	if defaultRunMB <= 0 {
 		defaultRunMB = 1024
 	}
+	factor := envFloat("KERNEL_GATE_CHARGE_FACTOR", 2.0)
+	if factor < 1 {
+		factor = 1
+	}
+	floor := int(envFloat("KERNEL_GATE_CHARGE_FLOOR_MB", 512))
+	if floor <= 0 {
+		floor = 512
+	}
+	every := gateDurationFromEnv("KERNEL_GATE_RECONCILE_INTERVAL", 45*time.Second)
 	modelGate = &ModelGate{
-		max:      max,
-		budgetMB: budgetMB,
-		floorPct: floorPct,
-		memory:   memory,
-		entries:  map[string]*budgetEntry{},
-		ttl:      30 * time.Minute,
+		max:            max,
+		budgetMB:       budgetMB,
+		floorPct:       floorPct,
+		memory:         memory,
+		entries:        map[string]*budgetEntry{},
+		ttl:            30 * time.Minute,
+		stats:          stats,
+		reconcileEvery: every,
+		chargeFactor:   factor,
+		chargeFloorMB:  floor,
 	}
 	gateDefaultRunMemoryMB = defaultRunMB
+	if stats != nil && every > 0 {
+		go func() {
+			ticker := time.NewTicker(every)
+			defer ticker.Stop()
+			for range ticker.C {
+				modelGate.Reconcile()
+			}
+		}()
+	}
+}
+
+// Reconcile re-charges every ledger entry from its sandbox container's real
+// memory usage: clamp(factor × actual, floor, declared). Entries without a
+// stats sample (no container yet — model-only turns; or the container is
+// between recreations) keep their current charge — absence of a sample is
+// not evidence of idleness.
+func (g *ModelGate) Reconcile() {
+	if g.stats == nil {
+		return
+	}
+	samples := g.stats()
+	if len(samples) == 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, entry := range g.entries {
+		if entry.scratchKey == "" {
+			continue
+		}
+		used, ok := samples[entry.scratchKey]
+		if !ok || used <= 0 {
+			continue
+		}
+		charge := int(float64(used) * g.chargeFactor)
+		if charge < g.chargeFloorMB {
+			charge = g.chargeFloorMB
+		}
+		if entry.declaredMB > 0 && charge > entry.declaredMB {
+			charge = entry.declaredMB
+		}
+		entry.memoryMB = charge
+	}
+}
+
+// envFloat reads a float env var with a fallback; malformed values keep the
+// default (a kernel that refuses to boot over a typo in an optional knob
+// would be worse).
+func envFloat(key string, fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+// durationFromEnv parses a Go duration, falling back to the default when
+// unset or malformed. 0/negative is a valid "disable" for callers that
+// support it (ReconcileEvery: 0 turns reconciliation off).
+func gateDurationFromEnv(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
 }
 
 // gate returns the configured gate, or a permissive default when the binary
@@ -106,6 +209,27 @@ func gate() *ModelGate {
 // ErrModelGateBusy is the typed "not yet" answer for the activity path: the
 // workflow polls again instead of failing.
 var ErrModelGateBusy = errors.New("model gate: at capacity")
+
+// sanitizeGateToken mirrors sandbox.SanitizeScratchToken (letters, digits,
+// '-', '_', '.') — duplicated verbatim because the workflow package keeps
+// its deterministic helpers dependency-free; the two MUST stay in sync or
+// the gate's scratch key stops matching run_command's container labels.
+func sanitizeGateToken(s string) string {
+	if s == "" {
+		return "_"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "_"
+	}
+	return b.String()
+}
 
 // ParseMemoryMB reads a docker-style size ("1g", "512m", "256k", plain
 // bytes) into whole megabytes. Zero on anything unparseable — the caller's
@@ -180,7 +304,8 @@ const (
 // Verdict answers "is it my turn": a zero WaitSeconds admits a run with the
 // given sandbox memory under the given unit quota; otherwise the verdict
 // carries the next poll delay, the queue position and the blocking reason.
-func (g *ModelGate) Verdict(runID string, memoryMB, quotaMB, quotaRuns int) GateVerdict {
+// scratchKey ties the ledger entry to its container's stats (reconcile).
+func (g *ModelGate) Verdict(runID string, memoryMB, quotaMB, quotaRuns int, scratchKey string) GateVerdict {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.expireLocked()
@@ -206,7 +331,7 @@ func (g *ModelGate) Verdict(runID string, memoryMB, quotaMB, quotaRuns int) Gate
 
 // Acquire claims the budget for a run. A lost race with another run comes
 // back as ModelGateBusy — the workflow polls again.
-func (g *ModelGate) Acquire(runID string, memoryMB, quotaMB, quotaRuns int) error {
+func (g *ModelGate) Acquire(runID string, memoryMB, quotaMB, quotaRuns int, scratchKey string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.expireLocked()
@@ -220,7 +345,7 @@ func (g *ModelGate) Acquire(runID string, memoryMB, quotaMB, quotaRuns int) erro
 	if _, exists := g.entries[runID]; !exists {
 		g.order = append(g.order, runID) // re-acquire must not ghost the queue order
 	}
-	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, quotaKey: key, lastRenew: time.Now()}
+	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, declaredMB: memoryMB, scratchKey: scratchKey, quotaKey: key, lastRenew: time.Now()}
 	return nil
 }
 
@@ -229,7 +354,7 @@ func (g *ModelGate) Acquire(runID string, memoryMB, quotaMB, quotaRuns int) erro
 // whose entry expired under a long model call — it is still the run's
 // budget to reclaim if the host can carry it; if not, the renew call fails
 // and the run keeps polling).
-func (g *ModelGate) Renew(runID string, memoryMB, quotaMB, quotaRuns int) (admitted bool) {
+func (g *ModelGate) Renew(runID string, memoryMB, quotaMB, quotaRuns int, scratchKey string) (admitted bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.expireLocked()
@@ -247,7 +372,7 @@ func (g *ModelGate) Renew(runID string, memoryMB, quotaMB, quotaRuns int) (admit
 	if _, exists := g.entries[runID]; !exists {
 		g.order = append(g.order, runID)
 	}
-	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, quotaKey: key, lastRenew: time.Now()}
+	g.entries[runID] = &budgetEntry{memoryMB: memoryMB, declaredMB: memoryMB, scratchKey: scratchKey, quotaKey: key, lastRenew: time.Now()}
 	return true
 }
 
@@ -339,16 +464,35 @@ func (g *ModelGate) Stats() (usedMB, budgetMB int, admitted int, maxRuns int, ho
 	g.expireLocked()
 	for id, entry := range g.entries {
 		usedMB += entry.memoryMB
-		holders = append(holders, fmt.Sprintf("%s:%dMB", id, entry.memoryMB))
+		if entry.memoryMB < entry.declaredMB {
+			// effective (reconciled from actual usage) vs the profile's cap —
+			// the two-number view is exactly the overcommit story.
+			holders = append(holders, fmt.Sprintf("%s:%dMB(declared %dMB)", id, entry.memoryMB, entry.declaredMB))
+		} else {
+			holders = append(holders, fmt.Sprintf("%s:%dMB", id, entry.memoryMB))
+		}
 	}
 	sort.Strings(holders)
 	return usedMB, g.budgetMB, len(g.entries), g.max, holders, append([]string(nil), g.order...)
+}
+
+// ReconcileStats reports the reconciliation parameters for the panel hint
+// (factor, floor, interval) so operators see HOW the effective number is
+// computed, not just that it differs from declared.
+func (g *ModelGate) ReconcileStats() (factor float64, floorMB int, every time.Duration) {
+	return g.chargeFactor, g.chargeFloorMB, g.reconcileEvery
 }
 
 // GateStats exposes the memory budget gate's live state to the kernel's
 // HTTP surface (GET /v1/agent/gate). See ModelGate.Stats.
 func GateStats() (usedMB, budgetMB int, admitted int, maxRuns int, holders []string, queued []string) {
 	return gate().Stats()
+}
+
+// GateReconcileStats exposes the reconciliation parameters (factor, floor,
+// interval) for the operator panel.
+func GateReconcileStats() (factor float64, floorMB int, every time.Duration) {
+	return gate().ReconcileStats()
 }
 
 // QueueNoticeMilestones: the queue positions a queued run announces to its

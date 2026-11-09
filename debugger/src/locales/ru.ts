@@ -1518,6 +1518,7 @@ export const ru: Record<string, string> = {
     'org.gate_host_title': 'Память песочниц сервера (все юниты)',
     'org.gate_runs': 'ранов: {{admitted}}',
     'org.gate_queued': ', в очереди: {{count}}',
+    'org.gate_charge_hint': 'Списывается {{factor}}× фактическое использование песочницы (минимум {{floor}} МБ, потолок — лимит профиля), перечитывается из docker stats.',
     'org.policy_max_runs_label': 'Макс. параллельных ранов (юнит)',
     'org.policy_mem_budget_label': 'Бюджет памяти, MB (юнит)',
     'org.policy_fs_tag': 'Файлы',

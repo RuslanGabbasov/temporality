@@ -1518,6 +1518,7 @@ export const en: Record<string, string> = {
     'org.gate_host_title': 'Server sandbox memory (all units)',
     'org.gate_runs': '{{admitted}} runs admitted',
     'org.gate_queued': ', {{count}} queued',
+    'org.gate_charge_hint': 'Charged = {{factor}}× actual usage (min {{floor}} MB, capped at the sandbox profile limit), re-read from docker stats.',
     'org.policy_max_runs_label': 'Max concurrent runs (unit)',
     'org.policy_mem_budget_label': 'Memory budget, MB (unit)',
     'org.policy_fs_tag': 'Files',

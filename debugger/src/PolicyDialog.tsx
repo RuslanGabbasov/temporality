@@ -161,7 +161,7 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
   // dimension): loaded when the Limits tab opens — a run queued on
   // memory_budget while the unit quota reads ∞MB otherwise reads as phantom
   // queueing. Best-effort: older kernels without the endpoint show nothing.
-  const [gateStats, setGateStats] = useState<{ used_mb: number; budget_mb: number; admitted: number; max_runs: number; holders: string[]; queued: string[] } | null>(null)
+  const [gateStats, setGateStats] = useState<{ used_mb: number; budget_mb: number; admitted: number; max_runs: number; holders: string[]; queued: string[]; charge_factor?: number; charge_floor_mb?: number; reconcile_seconds?: number } | null>(null)
   useEffect(() => {
     if (tab !== 'limits' || gateStats) return
     let alive = true
@@ -393,9 +393,14 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
                       const idx = h.lastIndexOf(':')
                       const id = idx > 0 ? h.slice(0, idx) : h
                       const mb = idx > 0 ? h.slice(idx + 1) : ''
-                      return <span key={h} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{mb ? `${(Number(mb.replace('MB', '')) / 1024).toFixed(1)} GB` : ''} — {id.length > 46 ? `…${id.slice(-46)}` : id}</span>
+                      return <span key={h} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{mb ? `${(Number(mb.replace('MB', '').replace('(declared', '')) / 1024).toFixed(1)}` : ''} {h.includes('declared') ? `GB (факт) из ${Number((h.match(/declared (\d+)MB/) ?? [])[1] ?? 0) / 1024}GB` : 'GB'} — {id.length > 46 ? `…${id.slice(-46)}` : id}</span>
                     })}
                   </div>
+                ) : null}
+                {gateStats.charge_factor ? (
+                  <span style={{ color: 'var(--tm-text-3)', fontSize: '0.66rem' }}>
+                    {t('org.gate_charge_hint', { factor: String(gateStats.charge_factor), floor: String(gateStats.charge_floor_mb ?? 0) }) ?? `Charged = ${gateStats.charge_factor}× actual usage (min ${gateStats.charge_floor_mb}MB, capped at the sandbox profile's limit); re-read every ${gateStats.reconcile_seconds ?? 45}s.`}
+                  </span>
                 ) : null}
               </div>
             )}

@@ -1569,18 +1569,23 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if gateMemoryMB <= 0 {
 		gateMemoryMB = gateDefaultRunMemoryMB
 	}
+	// The ledger entry's container identity: the same scratch key run_command
+	// derives, so the gate's reconcile loop can map docker stats back to this
+	// run (sandbox.SanitizeScratchToken — mirrored here to avoid the package
+	// dependency in deterministic code; the chars it keeps are exactly these).
+	gateScratchKey := sanitizeGateToken(input.Project) + "/" + sanitizeGateToken(input.RunID)
 	for modelGate == 1 && gateQueuedTotal < ModelGateQueueTimeout {
 		gateCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		noticeCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		budgetCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		var verdict ModelGateVerdictResult
-		if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict, ModelGateAdmission{RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, &verdict); err != nil || verdict.WaitSeconds == 0 {
+		if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict, ModelGateAdmission{RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, &verdict); err != nil || verdict.WaitSeconds == 0 {
 			// Admitted (or the gate itself failed — never wedge a run on a
 			// broken probe): claim the budget for the whole run lifetime and
 			// proceed; the ledger entry renews per turn and expires if the
 			// run dies.
 			var budget ModelGateBudgetResult
-			if err := workflow.ExecuteActivity(budgetCtx, ActivityModelGateBudget, ModelGateBudgetInput{Op: "acquire", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, &budget); err != nil || budget.Admitted {
+			if err := workflow.ExecuteActivity(budgetCtx, ActivityModelGateBudget, ModelGateBudgetInput{Op: "acquire", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, &budget); err != nil || budget.Admitted {
 				break
 			}
 			// Lost the race after the verdict — one poll cycle, then re-verdict.
@@ -1605,7 +1610,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		for verdict.WaitSeconds > 0 && workflow.Now(ctx).Sub(queuedAt) < ModelGateQueueTimeout {
 			workflow.Sleep(ctx, time.Duration(verdict.WaitSeconds)*time.Second)
 			gateQueuedTotal = workflow.Now(ctx).Sub(queuedAt)
-			if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict, ModelGateAdmission{RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, &verdict); err != nil {
+			if err := workflow.ExecuteActivity(gateCtx, ActivityModelGateVerdict, ModelGateAdmission{RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, &verdict); err != nil {
 				break
 			}
 			if verdict.WaitSeconds == 0 {
@@ -1695,7 +1700,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// TTL), so a crashed workflow cannot pin the host's capacity forever.
 		if modelGate == 1 && gateMemoryMB > 0 {
 			renewCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-			_ = workflow.ExecuteActivity(renewCtx, ActivityModelGateBudget, ModelGateBudgetInput{Op: "renew", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, nil)
+			_ = workflow.ExecuteActivity(renewCtx, ActivityModelGateBudget, ModelGateBudgetInput{Op: "renew", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, nil)
 		}
 		// User notes (chat messages sent mid-run) are drained at turn boundaries:
 		// the history stays append-only, so the prompt-cache prefix keeps its
@@ -1912,7 +1917,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// The run is done: its sandbox memory requirement leaves the host
 			// ledger (the TTL expiry is the safety net, not the primary path).
 			if modelGate == 1 && gateMemoryMB > 0 {
-				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, nil)
+				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, nil)
 			}
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
@@ -2649,7 +2654,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					}
 					if modelGate == 1 && gateMemoryMB > 0 {
-						_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, nil)
+						_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, nil)
 					}
 					startKnowledgeExtraction(ctx, activityCtx, state, input)
 					return result, nil
@@ -3106,7 +3111,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				return result, err
 			}
 			if modelGate == 1 && gateMemoryMB > 0 {
-				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, nil)
+				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, nil)
 			}
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
@@ -3157,7 +3162,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// gate ledger until the TTL expires it — a multi-GB ghost holding
 			// capacity for up to half an hour of every chain.
 			if modelGate == 1 && gateMemoryMB > 0 {
-				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, nil)
+				_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, nil)
 			}
 			return *child, nil
 		}
@@ -3285,7 +3290,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// The run is done: its sandbox memory requirement leaves the host ledger
 	// (the TTL expiry is the safety net, not the primary path).
 	if modelGate == 1 && gateMemoryMB > 0 {
-		_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns}).Get(ctx, nil)
+		_ = workflow.ExecuteActivity(renewCtx0(activityCtx), ActivityModelGateBudget, ModelGateBudgetInput{Op: "release", RunID: input.RunID, MemoryMB: gateMemoryMB, QuotaMB: input.MemoryBudgetMB, QuotaRuns: input.MaxConcurrentRuns, ScratchKey: gateScratchKey}).Get(ctx, nil)
 	}
 	if result.Answer != "" {
 		if err := emitAgentSummary(activityCtx, state, result.Answer, frames, finaleTurn); err != nil {

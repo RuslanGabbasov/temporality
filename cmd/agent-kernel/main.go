@@ -458,7 +458,26 @@ func main() {
 		health := storage.ReadHostHealth()
 		return health.Memory.TotalBytes, health.Memory.AvailableBytes, health.Memory.TotalBytes > 0
 	}
-	agent.ConfigureModelGate(gateMax, gateBudgetMB, gateFloor, gateMemory, gateDefaultRunMB)
+	// Actual-usage reconciliation source: one docker stats sweep maps every
+	// live sandbox container (by its scratch-key label) to its used MB. The
+	// gate then re-charges runs from real usage instead of the declared
+	// worst-case — the overcommit heuristic (see ModelGate.Reconcile). Best-
+	// effort by contract: a failed sweep just keeps the previous charges.
+	gateSandboxStats := func() map[string]int64 {
+		containers := storage.ReadSandboxContainers(context.Background(), "")
+		if len(containers) == 0 {
+			return nil
+		}
+		out := make(map[string]int64, len(containers))
+		for _, c := range containers {
+			key := c.Labels["temporality.scratch_key"]
+			if key != "" {
+				out[key] = c.MemUsedBytes / (1 << 20)
+			}
+		}
+		return out
+	}
+	agent.ConfigureModelGate(gateMax, gateBudgetMB, gateFloor, gateMemory, gateDefaultRunMB, gateSandboxStats)
 	log.Info("memory budget gate configured", "budget_mb", gateBudgetMB, "max_concurrent", gateMax, "default_run_mb", gateDefaultRunMB, "memory_floor_percent", gateFloor)
 	// A missing default model is legal on a clean install (providers get
 	// configured through onboarding); say so loudly instead of failing later
@@ -1636,10 +1655,12 @@ func main() {
 			return
 		}
 		usedMB, budgetMB, admitted, maxRuns, holders, queued := agent.GateStats()
+		factor, floorMB, every := agent.GateReconcileStats()
 		writeJSON(w, 200, map[string]any{
 			"used_mb": usedMB, "budget_mb": budgetMB,
 			"admitted": admitted, "max_runs": maxRuns,
 			"holders": holders, "queued": queued,
+			"charge_factor": factor, "charge_floor_mb": floorMB, "reconcile_seconds": int64(every.Seconds()),
 		})
 	})
 	mux.HandleFunc("GET /v1/agent/quotas", func(w http.ResponseWriter, r *http.Request) {
