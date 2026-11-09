@@ -1740,3 +1740,10 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 		key, value)
 	return err
 }
+
+// DeleteSetting removes a workspace_setting row; a missing row is not an
+// error — "reset to default" flows are idempotent.
+func (s *Store) DeleteSetting(ctx context.Context, key string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM workspace_setting WHERE key = $1`, key)
+	return err
+}

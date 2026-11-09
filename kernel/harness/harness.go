@@ -149,6 +149,60 @@ func FromEnv() Settings {
 	return s
 }
 
+// BudgetKeys returns the budget knobs in their documented order. The keys
+// are the Budgets json tags and double as the wire names for UI overrides
+// (docs/harness-settings.md §6).
+func BudgetKeys() []string {
+	return []string{
+		"max_model_request_bytes",
+		"compaction_trigger_bytes",
+		"compaction_card_max_bytes",
+		"compaction_tail_bytes",
+		"compaction_keep_groups_min",
+		"compaction_keep_groups_max",
+		"compaction_digest_head_bytes",
+		"compaction_digest_tail_bytes",
+		"tool_output_max_bytes",
+		"tool_output_tail_bytes",
+		"continue_as_new_bytes",
+	}
+}
+
+// ApplyBudgetOverrides layers per-knob UI overrides (keyed by the Budgets
+// json tag, e.g. "compaction_tail_bytes") over a settings snapshot — the
+// composition is env first, saved overrides second. Unknown keys are
+// ignored: a stale row must never break the boot.
+func ApplyBudgetOverrides(s Settings, overrides map[string]int) Settings {
+	b := &s.Budgets
+	for key, value := range overrides {
+		switch key {
+		case "max_model_request_bytes":
+			b.MaxModelRequestBytes = value
+		case "compaction_trigger_bytes":
+			b.CompactionTriggerBytes = value
+		case "compaction_card_max_bytes":
+			b.CompactionCardMaxBytes = value
+		case "compaction_tail_bytes":
+			b.CompactionTailBytes = value
+		case "compaction_keep_groups_min":
+			b.CompactionKeepGroupsMin = value
+		case "compaction_keep_groups_max":
+			b.CompactionKeepGroupsMax = value
+		case "compaction_digest_head_bytes":
+			b.CompactionDigestHeadBytes = value
+		case "compaction_digest_tail_bytes":
+			b.CompactionDigestTailBytes = value
+		case "tool_output_max_bytes":
+			b.ToolOutputMaxBytes = value
+		case "tool_output_tail_bytes":
+			b.ToolOutputTailBytes = value
+		case "continue_as_new_bytes":
+			b.ContinueAsNewBytes = value
+		}
+	}
+	return s
+}
+
 func intEnv(name string, target *int) {
 	raw := os.Getenv(name)
 	if raw == "" {

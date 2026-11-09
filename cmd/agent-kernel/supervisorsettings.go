@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,25 +29,7 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		settings, err := ws.SupervisorSettings(r.Context())
-		if err != nil {
-			writeError(w, 500, err)
-			return
-		}
-		// Semantic-layer health rides along (docs/supervisor-model.md §6.5):
-		// the operator sees degradation without digging kernel logs.
-		writeJSON(w, 200, map[string]any{
-			"judge_model":      settings.JudgeModel,
-			"vision_model":     settings.VisionModel,
-			"compaction_model": settings.CompactionModel,
-			"title_model":      settings.TitleModel,
-			"extraction_model": settings.ExtractionModel,
-			"hab":              settings.HAB,
-			"embeddings":       activities.EmbeddingsStatus(),
-			// Effective harness knobs (env-resolved, read-only): one look shows
-			// what the kernel actually runs with (docs/harness-settings.md).
-			"harness": harness.Current(),
-		})
+		writeSupervisorPayload(r.Context(), w, ws, activities)
 	})
 
 	mux.HandleFunc("PUT /v1/workspace/supervisor", func(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +50,10 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 				AnswerBaseSeconds *int `json:"answer_base_seconds,omitempty"`
 				ReadingWPM        *int `json:"reading_wpm,omitempty"`
 			} `json:"hab"`
+			// Harness budget overrides (docs/harness-settings.md §6): a number
+			// saves an override, null resets the knob to env/default, an omitted
+			// key is untouched.
+			Harness map[string]*int `json:"harness"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
 			writeError(w, 400, err)
@@ -120,6 +108,33 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 		if req.HAB.ReadingWPM != nil {
 			next.HAB.ReadingWPM = *req.HAB.ReadingWPM
 		}
+		// Harness budget edits validate BEFORE anything is written: a bad
+		// payload must change nothing.
+		sets, resets, err := harnessBudgetEdits(req.Harness)
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		merged := map[string]int{}
+		storedOverrides, err := ws.HarnessBudgetOverrides(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		for key, value := range storedOverrides {
+			merged[key] = value
+		}
+		for key, value := range sets {
+			merged[key] = value
+		}
+		for _, key := range resets {
+			delete(merged, key)
+		}
+		effective := harness.ApplyBudgetOverrides(harness.FromEnv(), merged)
+		if err := checkBudgetConsistency(effective.Budgets); err != nil {
+			writeError(w, 422, err)
+			return
+		}
 		if err := ws.SaveSupervisorSettings(r.Context(), next); err != nil {
 			writeError(w, 500, err)
 			return
@@ -129,11 +144,28 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 			writeError(w, 500, err)
 			return
 		}
+		if len(sets) > 0 || len(resets) > 0 {
+			if err := ws.SetHarnessBudgetOverrides(r.Context(), sets, resets); err != nil {
+				writeError(w, 500, err)
+				return
+			}
+		}
+		// New runs pin the composed snapshot at start (docs/harness-settings.md
+		// §3): in-flight runs keep theirs, saved overrides reach the next run.
+		harness.SetCurrent(effective)
+		resetKeys := append([]string(nil), resets...)
+		sort.Strings(resetKeys)
+		savedKeys := make([]string, 0, len(sets))
+		for key := range sets {
+			savedKeys = append(savedKeys, key)
+		}
+		sort.Strings(savedKeys)
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSettingChanged, "supervisor_settings", "installation", map[string]any{
 			"judge_model": saved.JudgeModel, "vision_model": saved.VisionModel,
 			"compaction_model": saved.CompactionModel, "title_model": saved.TitleModel, "extraction_model": saved.ExtractionModel,
+			"harness_saved": savedKeys, "harness_reset": resetKeys,
 		})
-		writeJSON(w, 200, saved)
+		writeSupervisorPayload(r.Context(), w, ws, activities)
 	})
 
 	// Acknowledging a verdict closes it in the problem queue without touching
@@ -235,4 +267,109 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSettingChanged, "supervisor_verdicts", fmt.Sprintf("%d", len(ids)), map[string]any{"acknowledged": true})
 		writeJSON(w, 200, map[string]any{"acknowledged": ids})
 	})
+}
+
+// writeSupervisorPayload answers both GET and PUT with the same shape: the
+// settings themselves, semantic-layer health, the effective harness snapshot
+// (what new runs pin), the compile-time defaults and the knobs with saved
+// overrides — enough for the UI to render origin chips and reset targets
+// (docs/harness-settings.md §6).
+func writeSupervisorPayload(ctx context.Context, w http.ResponseWriter, ws *workspace.Store, activities *agent.Activities) {
+	settings, err := ws.SupervisorSettings(ctx)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	overrides, err := ws.HarnessBudgetOverrides(ctx)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	saved := make([]string, 0, len(overrides))
+	for key := range overrides {
+		saved = append(saved, key)
+	}
+	sort.Strings(saved)
+	writeJSON(w, 200, map[string]any{
+		"judge_model":      settings.JudgeModel,
+		"vision_model":     settings.VisionModel,
+		"compaction_model": settings.CompactionModel,
+		"title_model":      settings.TitleModel,
+		"extraction_model": settings.ExtractionModel,
+		"hab":              settings.HAB,
+		// Semantic-layer health rides along (docs/supervisor-model.md §6.5):
+		// the operator sees degradation without digging kernel logs.
+		"embeddings": activities.EmbeddingsStatus(),
+		// Effective harness knobs (docs/harness-settings.md): one look shows
+		// what the kernel actually runs with.
+		"harness":          harness.Current(),
+		"harness_defaults": harness.Defaults().Budgets,
+		"harness_saved":    saved,
+	})
+}
+
+// budgetCeilings bounds the editable knobs. max_model_request_bytes is
+// capped at the Temporal payload error limit (2 MiB): anything bigger would
+// wedge the run in TMPRL1103 retries. continue_as_new_bytes is capped at the
+// history error limit (512 MiB) — the hand-off must fire before the history
+// service terminates the execution. The keep-groups knobs are turn counts,
+// not bytes.
+var budgetCeilings = map[string]int{
+	"max_model_request_bytes":    2 << 20,
+	"continue_as_new_bytes":      512 << 20,
+	"compaction_keep_groups_min": 64,
+	"compaction_keep_groups_max": 64,
+}
+
+const budgetCeilingDefault = 64 << 20
+
+// harnessBudgetEdits splits the PUT "harness" map into per-knob overrides to
+// save and keys to reset (null = back to env/default). Unknown keys and
+// out-of-range values reject the whole payload: a partial write would leave
+// the budgets in a state nobody chose.
+func harnessBudgetEdits(raw map[string]*int) (sets map[string]int, resets []string, err error) {
+	known := make(map[string]bool, len(budgetCeilings))
+	for _, key := range harness.BudgetKeys() {
+		known[key] = true
+	}
+	for key := range raw {
+		if !known[key] {
+			return nil, nil, fmt.Errorf("harness.%s: unknown budget knob", key)
+		}
+	}
+	sets = map[string]int{}
+	for _, key := range harness.BudgetKeys() {
+		value, ok := raw[key]
+		if !ok {
+			continue
+		}
+		if value == nil {
+			resets = append(resets, key)
+			continue
+		}
+		ceiling := budgetCeilings[key]
+		if ceiling == 0 {
+			ceiling = budgetCeilingDefault
+		}
+		if *value < 1 || *value > ceiling {
+			return nil, nil, fmt.Errorf("harness.%s: value %d out of range 1..%d", key, *value, ceiling)
+		}
+		sets[key] = *value
+	}
+	return sets, resets, nil
+}
+
+// checkBudgetConsistency rejects combinations no operator wants: an inverted
+// keep-groups range, and a compaction trigger above the request ceiling —
+// requests between the two would fail to schedule before compaction fires.
+func checkBudgetConsistency(b harness.Budgets) error {
+	if b.CompactionKeepGroupsMin > b.CompactionKeepGroupsMax {
+		return fmt.Errorf("harness.compaction_keep_groups_min (%d) must not exceed compaction_keep_groups_max (%d)",
+			b.CompactionKeepGroupsMin, b.CompactionKeepGroupsMax)
+	}
+	if b.CompactionTriggerBytes > b.MaxModelRequestBytes {
+		return fmt.Errorf("harness.compaction_trigger_bytes (%d) must not exceed max_model_request_bytes (%d): oversized requests would fail before compaction fires",
+			b.CompactionTriggerBytes, b.MaxModelRequestBytes)
+	}
+	return nil
 }

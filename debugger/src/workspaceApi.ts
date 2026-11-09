@@ -272,14 +272,26 @@ export interface SupervisorSettings {
   compaction_model: string
   title_model: string
   extraction_model: string
-  /** Effective harness knobs (env-resolved, read-only): one place to see
-   *  what the kernel actually runs with. */
+  /** Effective harness knobs (env-resolved snapshot — what new runs pin):
+   *  one place to see what the kernel actually runs with. */
   harness?: HarnessSettings
+  /** Compile-time harness budget defaults (the layer under env), same keys
+   *  as harness.budgets. */
+  harness_defaults?: Record<string, number>
+  /** Budget keys with a saved UI override — the reset targets. */
+  harness_saved?: string[]
   hab: {
     approval_seconds: number
     answer_base_seconds: number
     reading_wpm: number
   }
+}
+
+/** PUT payload for the supervisor panel: the harness budget map uses
+ *  override semantics — a number saves an override, null resets the knob to
+ *  env/default, an omitted key is untouched. */
+export type SupervisorSettingsUpdate = Omit<Partial<SupervisorSettings>, 'harness'> & {
+  harness?: Record<string, number | null>
 }
 
 /** Effective kernel harness settings (kernel/harness, docs/harness-settings.md). */
@@ -1280,7 +1292,7 @@ export const workspaceApi = {
   // administrator plus the human-attention estimate coefficients.
   getSupervisorSettings: () =>
     request<SupervisorSettings>('/v1/workspace/supervisor'),
-  updateSupervisorSettings: (settings: Partial<SupervisorSettings>) =>
+  updateSupervisorSettings: (settings: SupervisorSettingsUpdate) =>
     request<SupervisorSettings>('/v1/workspace/supervisor', { method: 'PUT', body: JSON.stringify(settings) }),
   // Close a verdict in the problem queue (journaled, audited; nothing the
   // verdict proposes is applied or reverted).

@@ -280,6 +280,17 @@ func main() {
 		log.Error("migrate workspace", "error", err)
 		os.Exit(1)
 	}
+	// UI-saved harness budget overrides (docs/harness-settings.md §6) layer
+	// over the env-resolved budgets. Runs pin the composed snapshot at start,
+	// so in-flight runs are untouched and new runs pick the saved values up.
+	if overrides, oErr := ws.HarnessBudgetOverrides(ctx); oErr != nil {
+		log.Error("load harness budget overrides", "error", oErr)
+	} else {
+		harness.SetCurrent(harness.ApplyBudgetOverrides(harness.FromEnv(), overrides))
+		if len(overrides) > 0 {
+			log.Info("harness budget overrides applied", "count", len(overrides))
+		}
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
