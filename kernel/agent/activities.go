@@ -2061,9 +2061,18 @@ func applyModelOutputCap(config *llm.Config, answer modelConfigAnswer) {
 // these are definitive answers, not transport noise).
 func (a *Activities) pinnedConfigFrom(body string, status int, providerID, model string) (llm.Config, string, error) {
 	if status == http.StatusNotFound {
+		// The workspace answer names the provider (display name + id); its
+		// message is the one the chat should show — a raw provider id means
+		// nothing to a human.
+		if detail := workspaceErrorDetail(body); detail != "" {
+			return llm.Config{}, "", errors.New(detail)
+		}
 		return llm.Config{}, "", fmt.Errorf("the agent's provider %q does not serve model %q (or is not visible to this project) — fix the provider's model list or pick another model", providerID, model)
 	}
 	if status == http.StatusConflict {
+		if detail := workspaceErrorDetail(body); detail != "" {
+			return llm.Config{}, "", errors.New(detail)
+		}
 		return llm.Config{}, "", fmt.Errorf("the agent's provider %q is disabled — enable it in Providers", providerID)
 	}
 	if status >= 400 {

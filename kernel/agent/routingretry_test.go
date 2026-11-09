@@ -51,9 +51,12 @@ func TestPinnedRoutingRetriesTransportErrorsSilently(t *testing.T) {
 
 func TestPinnedRoutingDefinitiveAnswersDoNotRetry(t *testing.T) {
 	var lookups atomic.Int32
+	// The workspace answer is the actionable message: it names the provider
+	// (display name + id) and must surface in the chat verbatim — a raw
+	// provider id means nothing to a human.
 	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lookups.Add(1)
-		http.Error(w, "disabled", http.StatusConflict)
+		http.Error(w, `the agent's provider "Mimo" (prov-1) is disabled — enable it in Providers`, http.StatusConflict)
 	}))
 	defer workspace.Close()
 
@@ -62,11 +65,29 @@ func TestPinnedRoutingDefinitiveAnswersDoNotRetry(t *testing.T) {
 	if err == nil {
 		t.Fatal("a disabled provider must fail loudly")
 	}
-	if !strings.Contains(err.Error(), "disabled — enable it in Providers") {
-		t.Fatalf("the actionable answer must surface verbatim, got %v", err)
+	if !strings.Contains(err.Error(), `provider "Mimo" (prov-1) is disabled — enable it in Providers`) {
+		t.Fatalf("the workspace answer must surface verbatim (with the provider name), got %v", err)
 	}
 	if lookups.Load() != 1 {
 		t.Fatalf("a definitive HTTP answer must not be retried, got %d lookups", lookups.Load())
+	}
+}
+
+// An empty error body keeps the kernel-side fallback message — the
+// actionable wording must survive even when the workspace says nothing.
+func TestPinnedRoutingFallbackMessageWithoutBody(t *testing.T) {
+	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "", http.StatusNotFound)
+	}))
+	defer workspace.Close()
+
+	activities := &Activities{HTTP: &http.Client{}, WorkspaceURL: workspace.URL}
+	_, _, err := activities.modelConfigForPinned(context.Background(), "proj-1", "prov-1", "mimo-v2.6-flash")
+	if err == nil {
+		t.Fatal("an unknown model must fail loudly")
+	}
+	if !strings.Contains(err.Error(), "does not serve model") || !strings.Contains(err.Error(), "fix the provider's model list") {
+		t.Fatalf("the fallback must stay actionable, got %v", err)
 	}
 }
 

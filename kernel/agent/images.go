@@ -292,6 +292,9 @@ const describeOnlyQuestion = "Describe this image fully and factually for an age
 // model. Failures keep the mode's contract: the block is dropped with an
 // explicit note instead of being kept "just in case".
 func (a *Activities) describeToolImages(ctx context.Context, result ToolResult) ToolResult {
+	if len(result.Images) == 0 {
+		return result
+	}
 	described := make([]string, 0, len(result.Images))
 	for _, block := range result.Images {
 		text, err := a.describeImage(ctx, block, describeOnlyQuestion)

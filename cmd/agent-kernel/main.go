@@ -4332,6 +4332,15 @@ func main() {
 	// call_model activity hits this on the hot path (60s TTL cache on the
 	// caller side) to route non-default models to the right provider instead
 	// of falling back to the env provider with a swapped model name.
+	// providerLabel renders a provider for human-facing errors: the display
+	// name with the id in parentheses — a raw provider id means nothing in the
+	// chat (the 2026-11-09 report).
+	providerLabel := func(name, id string) string {
+		if strings.TrimSpace(name) == "" {
+			return id
+		}
+		return fmt.Sprintf("%s (%s)", name, id)
+	}
 	mux.HandleFunc("GET /v1/workspace/model-config", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -4365,7 +4374,13 @@ func main() {
 			return
 		}
 		disabledHit := false
+		pinnedSeen := false
+		pinnedName := ""
+		pinnedDisabled := false
 		for _, p := range providers {
+			if pinnedProvider != "" && p.ID == pinnedProvider {
+				pinnedSeen, pinnedName, pinnedDisabled = true, p.Name, !p.Enabled
+			}
 			// The uniform switch (the trigger/MCP pattern): a disabled provider
 			// does not serve calls — and if it was the only one serving this
 			// model, the caller gets a loud 409 instead of a silent fallback.
@@ -4390,7 +4405,7 @@ func main() {
 						// Routing found a provider but its credential did not resolve —
 						// a misconfigured secret must surface as an error, not as a
 						// silent fallback to the env provider.
-						writeError(w, 502, fmt.Errorf("provider %q credential: %w", p.ID, kErr))
+						writeError(w, 502, fmt.Errorf("provider %s credential: %w", providerLabel(p.Name, p.ID), kErr))
 						return
 					}
 					payload := map[string]any{"provider_id": p.ID, "provider_name": p.Name, "base_url": p.BaseURL, "model": m}
@@ -4414,11 +4429,31 @@ func main() {
 				}
 			}
 		}
+		if pinnedProvider != "" {
+			// Human-readable provider identity in every routing refusal: a raw
+			// provider id means nothing in the chat (the 2026-11-09 report). When
+			// the pinned row is outside the project's visible set its name is
+			// resolved by id anyway — the operator owns the pin, the message
+			// just has to be readable.
+			if pinnedDisabled {
+				writeError(w, 409, fmt.Errorf("the agent's provider %s is disabled — enable it in Providers", providerLabel(pinnedName, pinnedProvider)))
+				return
+			}
+			if !pinnedSeen {
+				if p, pErr := ws.GetProvider(r.Context(), pinnedProvider); pErr == nil {
+					pinnedName = p.Name
+				}
+				writeError(w, 404, fmt.Errorf("the agent's provider %s does not serve model %q (or is not visible to this project) — fix the provider's model list or pick another model", providerLabel(pinnedName, pinnedProvider), model))
+				return
+			}
+			writeError(w, 404, fmt.Errorf("the agent's provider %s does not serve model %q — fix the provider's model list or pick another model", providerLabel(pinnedName, pinnedProvider), model))
+			return
+		}
 		if disabledHit {
 			writeError(w, 409, fmt.Errorf("the provider serving model %q is disabled; enable it in Providers", model))
 			return
 		}
-		writeError(w, 404, fmt.Errorf("no provider serves model %q", model))
+		writeError(w, 404, fmt.Errorf("no visible provider serves model %q", model))
 	})
 
 	// Triggers (docs/org-structure.md §18, §21): org-scoped, optionally bound
