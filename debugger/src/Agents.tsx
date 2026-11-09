@@ -80,6 +80,11 @@ import { formatDuration } from './eventSummary'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
+// Numeric count fields default to 0: clicking must SELECT the value, or
+// typing "4" appends and shows "04". One handler for every number input.
+const selectOnFocus = (e: React.FocusEvent<HTMLInputElement>) => e.target.select()
+
+
 const CAP_KEYS = ['read_files', 'modify_files', 'run_commands', 'network', 'skills', 'knowledge'] as const
 type CapKey = (typeof CAP_KEYS)[number]
 
@@ -1471,6 +1476,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                         <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.obs_days') ?? 'Days'}</span>
                         <input
                           type="number"
+                          onFocus={selectOnFocus}
                           min={1}
                           max={90}
                           value={obsDraft.days}
@@ -1482,6 +1488,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                         <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.obs_min_runs') ?? 'Min runs'}</span>
                         <input
                           type="number"
+                          onFocus={selectOnFocus}
                           min={1}
                           max={100}
                           value={obsDraft.minRuns}
@@ -1838,30 +1845,34 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   />
                 </div>
                 {/* Image handling (docs/harness-settings.md): the master
-                    switch plus the screenshot context window. Off denies the
-                    vision tools and keeps pixels out of the conversation. */}
+                    switch and the screenshot context window in one row —
+                    toggle left, limit right. Off denies the vision tools and
+                    keeps pixels out of the conversation. */}
                 <div style={{ borderTop: '1px solid var(--tm-border)', paddingTop: '0.8rem', marginTop: '0.5rem' }}>
-                  <Toggle
-                    id="agent-cap-vision"
-                    labelText={t('agents.cap.vision') ?? 'Работа с изображениями'}
-                    toggled={form.definition?.capabilities?.vision !== false}
-                    onToggle={(checked: boolean) => { touch('capabilities'); setCap('vision', checked ? undefined : false) }}
-                  />
-                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: '0.25rem 0 0.5rem' }}>{t('agents.cap.vision_hint') ?? 'Выключено — view_image / fetch_image / inspect_image недоступны, скриншоты не попадают в контекст (остаются только метаданные из тул-результатов).'}</p>
-                  {form.definition?.capabilities?.vision !== false && (
-                    <label style={{ display: 'block', maxWidth: '240px' }}>
-                      <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }} title={t('agents.vision_limit_hint') ?? 'Сколько свежих сообщений со скриншотами держать в контексте; старые vision-блоки вытесняются по мере появления новых (экономит запросы, историю и prompt cache). 0 = без лимита.'}>{t('agents.vision_limit_short') ?? '× лимит изображений в контексте'}</span>
-                      <input
-                        type="number"
-                        value={form.vision_keep_images ?? 0}
-                        min={0}
-                        max={20}
-                        step={1}
-                        onChange={(e) => setForm({ ...form, vision_keep_images: Math.min(20, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
-                        style={paramInputStyle}
-                      />
-                    </label>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                    <Toggle
+                      id="agent-cap-vision"
+                      labelText={t('agents.cap.vision') ?? 'Работа с изображениями'}
+                      toggled={form.definition?.capabilities?.vision !== false}
+                      onToggle={(checked: boolean) => { touch('capabilities'); setCap('vision', checked ? undefined : false) }}
+                    />
+                    {form.definition?.capabilities?.vision !== false && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }} title={t('agents.vision_limit_hint') ?? 'Сколько свежих сообщений со скриншотами держать в контексте; старые vision-блоки вытесняются по мере появления новых (экономит запросы, историю и prompt cache). 0 = без лимита.'}>{t('agents.vision_limit_short') ?? '× лимит изображений в контексте'}</span>
+                        <input
+                          type="number"
+                          onFocus={selectOnFocus}
+                          value={form.vision_keep_images ?? 0}
+                          min={0}
+                          max={20}
+                          step={1}
+                          onChange={(e) => setForm({ ...form, vision_keep_images: Math.min(20, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
+                          style={{ ...paramInputStyle, width: '64px', textAlign: 'center' }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: '0.35rem 0 0' }}>{t('agents.cap.vision_hint') ?? 'Выключено — view_image / fetch_image / inspect_image недоступны, скриншоты не попадают в контекст (остаются только метаданные из тул-результатов).'}</p>
                 </div>
               </Stack>
             )}
@@ -1923,6 +1934,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.temperature') ?? 'Temperature'}</span>
                     <input
                       type="number"
+                      onFocus={selectOnFocus}
                       value={form.temperature ?? 0}
                       min={0}
                       max={1}
@@ -1938,6 +1950,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_tokens') ?? 'Max tokens'}</span>
                     <input
                       type="number"
+                      onFocus={selectOnFocus}
                       value={form.max_tokens ?? 16384}
                       min={64}
                       max={1000000}
@@ -1950,6 +1963,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_turns') ?? 'Max turns'}</span>
                     <input
                       type="number"
+                      onFocus={selectOnFocus}
                       value={form.max_turns ?? 20}
                       min={1}
                       max={100}
@@ -1962,6 +1976,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }} title={t('agents.turn_restarts_hint') ?? 'Если ран завершился только из-за лимита ходов, он автоматически продолжится новым раном с полным бюджетом ходов (в трейсе — run.restarted). 0 = выключено.'}>{t('agents.turn_restarts_short') ?? '× продолжений'}</span>
                     <input
                       type="number"
+                      onFocus={selectOnFocus}
                       value={form.turn_limit_restarts ?? 0}
                       min={0}
                       max={5}
@@ -2644,6 +2659,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
             <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.temperature') ?? 'Temperature'}</span>
             <input
               type="number"
+              onFocus={selectOnFocus}
               value={bulkTemp}
               min={0}
               max={1}
@@ -2659,6 +2675,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
             <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_tokens') ?? 'Max tokens'}</label>
             <input
               type="number"
+              onFocus={selectOnFocus}
               value={bulkMaxTokens}
               min={64}
               max={1000000}
@@ -2671,6 +2688,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
             <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>{t('agents.max_turns') ?? 'Max turns'}</label>
             <input
               type="number"
+              onFocus={selectOnFocus}
               value={bulkMaxTurns}
               min={1}
               max={100}
@@ -2683,6 +2701,7 @@ function BulkAgentDialog({ agentIds, providers, sandboxProfiles, secrets, mcpSer
             <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }} title={t('agents.turn_restarts_hint') ?? 'Если ран завершился только из-за лимита ходов, он автоматически продолжится новым раном с полным бюджетом ходов (в трейсе — run.restarted). 0 = выключено.'}>{t('agents.turn_restarts_short') ?? '× продолжений'}</label>
             <input
               type="number"
+              onFocus={selectOnFocus}
               value={bulkTurnRestarts}
               min={0}
               max={5}
