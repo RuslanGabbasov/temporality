@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useT } from './i18n'
 import { storageFileContent } from './kernelApi'
+import { highlightCode, languageForFile } from './syntax'
 import MediaViewer, { type MediaViewerPayload } from './MediaViewer'
 
 /** Inline trace previews (the «what did the agent actually see» layer):
@@ -61,15 +62,20 @@ function TracePreviewInner({ project, kind, path, content }: {
 
   // File fragment: a bounded monospace block; the click opens the full text.
   const preview = content ?? ''
+  const shown = preview.length > 600 ? preview.slice(0, 600) : preview
+  const html = useMemo(
+    () => (preview.trim() ? highlightCode(shown, languageForFile(path)) : ''),
+    [shown, path, preview],
+  )
   if (!preview.trim()) return null
   return (
     <div style={{ marginTop: '0.35rem' }}>
       <pre
+        className="code-preview hljs"
         onClick={() => setViewer({ kind: 'text', src: preview, title: path })}
         style={{ margin: 0, padding: '0.45rem 0.55rem', background: 'var(--tm-raised)', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text)', fontSize: '0.68rem', lineHeight: 1.45, fontFamily: '"SFMono-Regular", Consolas, monospace', maxHeight: '140px', overflow: 'hidden', cursor: 'zoom-in', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', position: 'relative' }}
-      >
-        {preview.length > 600 ? `${preview.slice(0, 600)}\n…` : preview}
-      </pre>
+        dangerouslySetInnerHTML={{ __html: preview.length > 600 ? `${html}\n…` : html }}
+      />
       {preview.length > 600 && (
         <button onClick={() => setViewer({ kind: 'text', src: preview, title: path })} style={{ background: 'none', border: 'none', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.68rem', padding: '0.15rem 0' }}>
           {t('trace.preview_open_full') ?? 'open fully…'}

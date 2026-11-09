@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from './i18n'
+import { highlightCode, languageForFile } from './syntax'
 
 /** Fullscreen media viewer for trace previews: an image with wheel-zoom and
  *  drag-pan, or a text blob in a scrollable monospace pane. Esc/click-out
@@ -19,6 +20,10 @@ export default function MediaViewer({ payload, onClose }: { payload: MediaViewer
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
 
   const close = useCallback(() => onClose(), [onClose])
+  // Same deterministic highlighting as the storage preview: language by file
+  // extension, no auto-detection; unknown extensions stay plain text.
+  const textLanguage = payload.kind === 'text' ? languageForFile(payload.title) : ''
+  const html = useMemo(() => (payload.kind === 'text' ? highlightCode(payload.src, textLanguage) : ''), [payload, textLanguage])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     window.addEventListener('keydown', onKey)
@@ -30,10 +35,10 @@ export default function MediaViewer({ payload, onClose }: { payload: MediaViewer
       <div role="dialog" aria-modal onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 10001, background: 'rgba(0,0,0,0.75)', display: 'flex', flexDirection: 'column' }}>
         <div onClick={(e) => e.stopPropagation()} style={{ flex: 1, display: 'flex', flexDirection: 'column', margin: '2rem', background: 'var(--tm-surface, #142522)', border: '1px solid var(--tm-border)', borderRadius: '10px', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.9rem', borderBottom: '1px solid var(--tm-border)', fontSize: '0.78rem', color: 'var(--tm-text-2)' }}>
-            <span style={{ fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{payload.title}</span>
+            <span style={{ fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{payload.title}{textLanguage ? ` · ${textLanguage}` : ''}</span>
             <button onClick={close} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}>✕</button>
           </div>
-          <pre style={{ flex: 1, margin: 0, padding: '0.9rem', overflow: 'auto', color: 'var(--tm-text)', fontSize: '0.75rem', lineHeight: 1.5, fontFamily: '"SFMono-Regular", Consolas, monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{payload.src}</pre>
+          <pre className="code-preview hljs" style={{ flex: 1, margin: 0, padding: '0.9rem', overflow: 'auto', color: 'var(--tm-text)', fontSize: '0.75rem', lineHeight: 1.5, fontFamily: '"SFMono-Regular", Consolas, monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }} dangerouslySetInnerHTML={{ __html: html }} />
         </div>
       </div>
     )
