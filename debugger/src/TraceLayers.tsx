@@ -10,6 +10,7 @@ import type { ConsoleState } from './consoleStream'
 import type { Locale } from './locales'
 import Markdown from './Markdown'
 import ConsoleOutput from './ConsoleOutput'
+import TracePreview, { tracePreviewOf } from './TracePreview'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
 
 /**
@@ -110,6 +111,12 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
           live={Boolean(live)}
           onStateLoaded={onConsoleState}
         />          )}
+      {/* The «what did the agent actually see» layer: image tool thumbnails
+          (click → the zoom/pan viewer) and file-tool content fragments. */}
+      {(() => {
+        const previewRequest = tracePreviewOf(event)
+        return previewRequest ? <TracePreview project={project} request={previewRequest} /> : null
+      })()}
       {response && (
         <div className="run-model-response">
           <Markdown content={response} />

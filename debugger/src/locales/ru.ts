@@ -2882,6 +2882,11 @@ export const ru: Record<string, string> = {
     'runs.chip.tools': 'Только инструменты',
     'runs.chip.human': 'Только решения человека',
     'runs.layers.raw_empty': 'У события нет данных для отображения.',
+    // ── Превью в трейсе: миниатюры изображений и фрагменты файлов (view_image, write_file…) ──
+    'trace.preview_image_failed': 'изображение недоступно ({{error}})',
+    'trace.preview_loading': 'загрузка…',
+    'trace.preview_open_full': 'открыть полностью…',
+    'media.hint': 'колесо — масштаб · перетаскивание — панорама · двойной клик — сброс · Esc — закрыть',
     'runs.layers.group.turns': 'Ходы агента',
     'runs.layers.group.turns_hint': 'Служебные границы ходов свернуты',
     'runs.layers.turn_n': 'Ход {{n}}',

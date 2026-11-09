@@ -2882,6 +2882,11 @@ export const en: Record<string, string> = {
     'runs.chip.tools': 'Only tools',
     'runs.chip.human': 'Only human decisions',
     'runs.layers.raw_empty': 'The event carries no displayable data.',
+    // ── Trace previews: image thumbnails & file fragments (view_image, write_file…) ──
+    'trace.preview_image_failed': 'image unavailable ({{error}})',
+    'trace.preview_loading': 'loading…',
+    'trace.preview_open_full': 'open fully…',
+    'media.hint': 'wheel — zoom · drag — pan · double click — reset · Esc — close',
     'runs.layers.group.turns': 'Agent turns',
     'runs.layers.group.turns_hint': 'Service turn boundaries are folded',
     'runs.layers.turn_n': 'Turn {{n}}',
