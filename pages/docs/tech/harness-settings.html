@@ -135,16 +135,16 @@
 </tr>
 </thead>
 <tbody><tr>
-<td><strong>Работа с изображениями</strong> (тумблер, capability <code>vision</code>)</td>
-<td><strong>Выключено</strong> — тулы <code>view_image</code> / <code>fetch_image</code> / <code>inspect_image</code> запрещены (DenyTools + фильтр AllowedTools), vision-блоки от любых тулов (например, скриншот браузера) не входят в контекст — остаются только метаданные с пометкой. Включено (по умолчанию) — всё доступно в обычном режиме</td>
+<td><strong>Работа с изображениями</strong> (capability <code>vision</code> + режим <code>vision_describe</code>)</td>
+<td>Три режима: <strong>Пиксели в контексте</strong> (по умолчанию) — vision-блоки живут в диалоге, с лимитом ниже; <strong>Только описания</strong> (<code>vision_describe=true</code>) — любые тулы, возвращающие картинки (view_image, fetch_image, browser), автоматически заменяются текстовым описанием от vision-модели — base64 <strong>никогда</strong> не попадает в контекст (главный режим для агентов, которым пофиг на пиксели); <strong>Выключено</strong> (<code>vision=false</code>) — тулы <code>view_image</code> / <code>fetch_image</code> / <code>inspect_image</code> запрещены (DenyTools + фильтр AllowedTools), скриншоты не входят в контекст — только метаданные с пометкой</td>
 </tr>
 <tr>
-<td><strong>× лимит изображений в контексте</strong> (<code>vision_keep_images</code>, виден при включённом тумблере)</td>
+<td><strong>× лимит изображений в контексте</strong> (<code>vision_keep_images</code>, виден в режиме «Пиксели»)</td>
 <td>сколько свежих сообщений со скриншотами держать в контексте; старые vision-блоки вытесняются по мере появления новых (однократная мутация на сообщение, явная пометка, можно вернуть через <code>view_image</code> по пути). 0 = без лимита. Для дизайн-агентов — 2–4</td>
 </tr>
 <tr>
 <td>тула <code>inspect_image</code></td>
-<td>осмотр картинки vision-моделью (роль <code>vision</code>) с возвратом <strong>текста</strong>: изображение не входит в контекст — главный инструмент дизайн-ревью</td>
+<td>точечный осмотр картинки vision-моделью (роль <code>vision</code>) с возвратом <strong>текста</strong> — доступен во всех режимах кроме «Выключено» и остаётся escape-hatch для «Только описания»: нужен конкретный ответ по пикселям — задай вопрос</td>
 </tr>
 </tbody></table>
 <p>Лимит имеет смысл только при включённом тумблере; выключенный тумблер —
