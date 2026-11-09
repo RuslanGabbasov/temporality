@@ -149,8 +149,11 @@
 </tbody></table>
 <p>Лимит имеет смысл только при включённом тумблере; выключенный тумблер —
 жёсткий запрет уровня рантайма, а не рекомендация в промпте.</p>
-<h2 id="2-бюджеты-таймауты-капы-env-единая-таблица"><a class="anchor" href="#2-бюджеты-таймауты-капы-env-единая-таблица" aria-label="Section link">#</a>2. Бюджеты, таймауты, капы (env, единая таблица)</h2><p>Дом — пакет <code>kernel/harness</code> (<code>Settings</code>, <code>FromEnv</code>, <code>Current</code>); дефолты =
+<h2 id="2-бюджеты-таймауты-капы-env-ui-переопределения-единая-таблица"><a class="anchor" href="#2-бюджеты-таймауты-капы-env-ui-переопределения-единая-таблица" aria-label="Section link">#</a>2. Бюджеты, таймауты, капы (env + UI-переопределения, единая таблица)</h2><p>Дом — пакет <code>kernel/harness</code> (<code>Settings</code>, <code>FromEnv</code>, <code>Current</code>); дефолты =
 сегодняшние значения. Невалидное значение деградирует до дефолта.</p>
+<p>Порядок резолва бюджетных ручек: дефолт → env → <strong>сохранённое переопределение</strong>
+из UI (ключи <code>harness.budgets.&lt;knob&gt;</code> в <code>workspace_setting</code>). Таймауты и
+капы картинок — по-прежнему только env.</p>
 <table>
 <thead>
 <tr>
@@ -237,11 +240,21 @@
 результат активити лежит в истории и replay не зависит от окружения.</p>
 <h2 id="4-api"><a class="anchor" href="#4-api" aria-label="Section link">#</a>4. API</h2><p><code>GET /v1/workspace/supervisor</code> отдаёт роли (<code>judge_model</code>, <code>vision_model</code>,
 <code>compaction_model</code>, <code>title_model</code>, <code>extraction_model</code>), HAB-коэффициенты,
-статус эмбеддингов и <strong>эффективный</strong> <code>harness</code>-снапшот (read-only) — одно
-место, чтобы видеть, чем харнес реально работает. <code>PUT</code> принимает роли
-(<code>compaction_model</code>/<code>title_model</code>/<code>extraction_model</code> — pointer-семантика:
-пропущенное поле хранится как есть, пустая строка сбрасывает роль);
-валидация имён — по реестру провайдеров.</p>
+статус эмбеддингов и <strong>эффективный</strong> <code>harness</code>-снапшот — одно место, чтобы
+видеть, чем харнес реально работает. Для бюджетов ответ дополнительно несёт
+<code>harness_defaults</code> (компиляционные дефолты) и <code>harness_saved</code> (ключи с
+сохранёнными переопределениями) — UI рисует происхождение значения и кнопку
+сброса. <code>PUT</code> принимает роли (<code>compaction_model</code>/<code>title_model</code>/
+<code>extraction_model</code> — pointer-семантика: пропущенное поле хранится как есть,
+пустая строка сбрасывает роль); валидация имён — по реестру провайдеров.</p>
+<p><code>PUT</code> дополнительно принимает <code>harness</code> — карту бюджетных ручек
+(<code>map[string]*int</code> по json-тегам из §2): <strong>число</strong> сохраняет переопределение,
+<strong>null</strong> сбрасывает ручку обратно на env/дефолт, <strong>пропущенный ключ</strong> не
+трогается. Валидация: известный ключ, значение в пределах потолка ручки
+(<code>max_model_request_bytes</code> ≤ 2 МиБ — лимит Temporal, <code>continue_as_new_bytes</code>
+≤ 512 МиБ, остальные ≤ 64 МиБ; keep-groups — счётчики ≤ 64), сквозные
+проверки <code>keep_groups_min ≤ max</code> и <code>compaction_trigger_bytes ≤ max_model_request_bytes</code>. Ответ — тот же payload, что и <code>GET</code>. Сброс/сохранение
+пишется в access audit.</p>
 <h2 id="5-prompt-cache-и-его-инвалидация"><a class="anchor" href="#5-prompt-cache-и-его-инвалидация" aria-label="Section link">#</a>5. Prompt cache и его инвалидация</h2><p>Кэш — провайдерский префиксный (KV): <code>prompt_cache_key</code> = TaskID, живёт на
 байт-стабильном префиксе сообщений. Мутация старого сообщения инвалидирует
 кэш от её позиции до конца; цена пересчёта видна в событиях
@@ -281,9 +294,11 @@
 <p>Правило проектирования мутаций: каждое сообщение меняется <strong>один раз</strong>
 (детерминированная пометка), и точка мутации — ближе к концу.</p>
 <h2 id="6-ограничения"><a class="anchor" href="#6-ограничения" aria-label="Section link">#</a>6. Ограничения</h2><ul>
-<li>Бюджеты редактируются через env и применяются к <strong>новым</strong> ранам
-(пин на старте); UI-редактирование бюджетов — следующий шаг, место уже
-есть (<code>harness</code>-секция ответа).</li>
+<li>Бюджеты применяются к <strong>новым</strong> ранам (пин на старте): сохранение
+переопределения не трогает раны в полёте — это свойство replay-безопасности
+(§3), а не недостаток. UI-редактирование бюджетов реализовано (§4).</li>
+<li>Таймауты активити и капы картинок — только env (читаются при старте
+процесса); из интерфейса не редактируются.</li>
 <li>Модельные роли — глобальные на инсталляцию; per-project роли не нужны,
 пока у проектов есть свои дефолтные модели ранов.</li>
 </ul>
