@@ -394,33 +394,33 @@ export default function Dashboard({ project, setProject }: Props) {
                   value={health?.runs.running_now ?? 0}
                   label={pluralT(t, locale, 'dashboard.running_n', health?.runs.running_now ?? 0)}
                   title={t('dashboard.running_hint') ?? undefined}
-                  onClick={() => navigate('/agents')}
+                  onClick={() => navigate('/agents?status=running')}
                 />
                 <HealthChip
                   value={health?.totals.in_flight ?? 0}
                   label={pluralT(t, locale, 'dashboard.inflight_n', health?.totals.in_flight ?? 0)}
                   title={t('dashboard.inflight_hint') ?? undefined}
-                  onClick={() => navigate('/agents')}
+                  onClick={() => navigate('/agents?status=running')}
                 />
                 <HealthChip
                   value={health?.totals.model_failures ?? 0}
                   label={pluralT(t, locale, 'dashboard.failures_n', health?.totals.model_failures ?? 0)}
                   danger
                   title={t('dashboard.failures_hint') ?? undefined}
-                  onClick={() => navigate('/agents')}
+                  onClick={() => navigate('/agents?status=failed')}
                 />
                 <HealthChip
                   value={health?.approvals.pending ?? 0}
                   label={pluralT(t, locale, 'dashboard.approvals_n', health?.approvals.pending ?? 0)}
                   title={health?.approvals.wait_ms_avg ? `${t('dashboard.wait_avg') ?? 'avg wait'}: ${formatDuration(health.approvals.wait_ms_avg, t)}` : undefined}
-                  onClick={() => navigate('/agents')}
+                  onClick={() => navigate('/agents?status=waiting')}
                 />
                 {opsCount !== null && (
                   <HealthChip
                     value={opsCount}
                     label={pluralT(t, locale, 'dashboard.ops_n', opsCount)}
                     title={t('dashboard.ops_hint') ?? undefined}
-                    onClick={() => navigate('/agents')}
+                    onClick={() => navigate('/agents?ops=1')}
                   />
                 )}
               </>

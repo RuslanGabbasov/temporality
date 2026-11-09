@@ -343,7 +343,13 @@ export default function AgentRuns({ project }: { project: string }) {
   const [initiatorPick, setInitiatorPick] = useState<{ kind: 'user' | 'unit'; id: string; name: string } | null>(null)
   // 'waiting' is a virtual status: a live run paused on a human answer
   // (questionRuns) — not a journal status.
-  const [statusFilter, setStatusFilter] = useState<RunStatus | 'waiting' | ''>('')
+  // Dashboard health chips deep-link into the list (?status=running / waiting
+  // / failed, ?ops=1): a click must land on the clicked subset, not the full
+  // run list. Unknown values degrade to «no filter» (the stale-link rule).
+  const [statusFilter, setStatusFilter] = useState<RunStatus | 'waiting' | ''>(() => {
+    const raw = new URLSearchParams(window.location.search).get('status') ?? ''
+    return ['completed', 'failed', 'running', 'cancelled', 'waiting'].includes(raw) ? (raw as RunStatus | 'waiting') : ''
+  })
   // Age preset: '' (all) | 'today' | '3d' | 'week' — matches the run's own
   // start time (RunRow.at), client-side over the loaded window.
   const [ageFilter, setAgeFilter] = useState<'' | 'today' | '3d' | 'week'>('')
@@ -355,7 +361,7 @@ export default function AgentRuns({ project }: { project: string }) {
   // reconciliation.md). The verdict UI lives next to the trace that produced
   // the uncertainty instead of a standalone page.
   const [opsByRun, setOpsByRun] = useState<Map<string, UncertainOperation[]>>(new Map())
-  const [opsOnly, setOpsOnly] = useState(false)
+  const [opsOnly, setOpsOnly] = useState(() => new URLSearchParams(window.location.search).get('ops') === '1')
   const [identity, setIdentity] = useState<Whoami | null>(null)
   const [reconcileNote, setReconcileNote] = useState('')
   // Reconcile wall (docs/failure-reconciliation.md): long runs pile up dozens
