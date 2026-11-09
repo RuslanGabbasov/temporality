@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Heading, InlineNotification, Select, SelectItem, TextArea, TextInput, Toggle } from '@carbon/react'
 import { workspaceApi, type FilesystemRules, type OrgUnit, type Policy } from './workspaceApi'
+import { authHeaders } from './api'
 import { flattenUnits } from './orgUnits'
 import { useT } from './i18n'
 import SuggestChips from './SuggestChips'
@@ -156,6 +157,20 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
   const [testerPath, setTesterPath] = useState('')
   const [testerProject, setTesterProject] = useState('')
+  // Host memory-budget gate state (the third, unit-independent quota
+  // dimension): loaded when the Limits tab opens — a run queued on
+  // memory_budget while the unit quota reads ∞MB otherwise reads as phantom
+  // queueing. Best-effort: older kernels without the endpoint show nothing.
+  const [gateStats, setGateStats] = useState<{ used_mb: number; budget_mb: number; admitted: number; max_runs: number; holders: string[]; queued: string[] } | null>(null)
+  useEffect(() => {
+    if (tab !== 'limits' || gateStats) return
+    let alive = true
+    fetch('/kernel-api/v1/agent/gate', { headers: { Accept: 'application/json', ...authHeaders() } })
+      .then((resp) => (resp.ok ? resp.json() : Promise.reject(new Error(String(resp.status)))))
+      .then((data) => { if (alive) setGateStats(data) })
+      .catch(() => { /* older kernel — the panel just omits the line */ })
+    return () => { alive = false }
+  }, [tab, gateStats])
 
   useEffect(() => {
     let alive = true
@@ -356,6 +371,34 @@ export default function PolicyDialog({ editing, initialUnitId, units, onClose, o
             <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: 0 }}>
               {t('org.policy_quota_hint') ?? 'Memory quota for this unit: when the running requests sum up to the memory budget, new ones wait in a queue and start automatically as slots free up. 0 or empty = no restriction.'}
             </p>
+            {/* The HOST budget — a third dimension beside the unit quotas: the
+                whole-server sandbox memory ledger. When it is full, runs queue
+                with reason memory_budget EVEN IF every unit quota is ∞ — the
+                line makes that visible right where the quotas are edited. */}
+            {gateStats && (
+              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem', fontSize: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <strong style={{ color: 'var(--tm-text)' }}>{t('org.gate_host_title') ?? 'Server sandbox memory'}</strong>
+                  <span style={{ color: gateStats.used_mb >= gateStats.budget_mb ? 'var(--tm-danger)' : 'var(--tm-text-2)' }}>
+                    {(gateStats.used_mb / 1024).toFixed(1)} / {(gateStats.budget_mb / 1024).toFixed(1)} GB
+                  </span>
+                  <span style={{ color: 'var(--tm-text-3)' }}>
+                    · {t('org.gate_runs', { admitted: String(gateStats.admitted) }) ?? `${gateStats.admitted} runs`}
+                    {gateStats.queued?.length ? t('org.gate_queued', { count: String(gateStats.queued.length) }) ?? `, ${gateStats.queued.length} queued` : ''}
+                  </span>
+                </div>
+                {gateStats.holders?.length ? (
+                  <div style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', display: 'flex', flexDirection: 'column', gap: '0.1rem', maxHeight: '7rem', overflowY: 'auto' }}>
+                    {gateStats.holders.slice(0, 12).map((h) => {
+                      const idx = h.lastIndexOf(':')
+                      const id = idx > 0 ? h.slice(0, idx) : h
+                      const mb = idx > 0 ? h.slice(idx + 1) : ''
+                      return <span key={h} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{mb ? `${(Number(mb.replace('MB', '')) / 1024).toFixed(1)} GB` : ''} — {id.length > 46 ? `…${id.slice(-46)}` : id}</span>
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
               <Select id="policy-sandbox" labelText={t('org.policy_sandbox_label') ?? 'Sandbox'} value={form.sandbox_mode} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_mode: e.target.value })}>
                 <SelectItem value="" text={t('org.policy_sandbox.default') ?? 'standard'} />

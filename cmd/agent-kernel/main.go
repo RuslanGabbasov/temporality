@@ -1627,6 +1627,21 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"pending": stats.Pending, "oldest_pending_age_seconds": int64(stats.OldestPendingAge.Seconds()), "delivered": stats.Delivered, "last_error": stats.FailedAttemptsLast})
 	})
+	// Memory budget gate state (docs/org-structure.md §24): the HOST-wide
+	// ledger behind the memory_budget queue reason. The quota panel shows it
+	// next to the unit quotas — a run queued on the host budget while the unit
+	// quota reads ∞MB otherwise looks like phantom queueing.
+	mux.HandleFunc("GET /v1/agent/gate", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		usedMB, budgetMB, admitted, maxRuns, holders, queued := agent.GateStats()
+		writeJSON(w, 200, map[string]any{
+			"used_mb": usedMB, "budget_mb": budgetMB,
+			"admitted": admitted, "max_runs": maxRuns,
+			"holders": holders, "queued": queued,
+		})
+	})
 	mux.HandleFunc("GET /v1/agent/quotas", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		if project == "" {

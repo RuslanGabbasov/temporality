@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -324,6 +325,30 @@ func (g *ModelGate) expireLocked() {
 			}
 		}
 	}
+}
+
+// Stats reports the gate's live state for operators: the host budget, how
+// much of it the admitted runs declare, who holds it (the run ids and their
+// declared sandbox memory) and the FIFO queue waiting for a slot. The
+// quota panel shows it next to the unit quotas — a run queued on the HOST
+// budget while the unit quota reads ∞MB otherwise looks like phantom
+// queueing.
+func (g *ModelGate) Stats() (usedMB, budgetMB int, admitted int, maxRuns int, holders []string, queued []string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.expireLocked()
+	for id, entry := range g.entries {
+		usedMB += entry.memoryMB
+		holders = append(holders, fmt.Sprintf("%s:%dMB", id, entry.memoryMB))
+	}
+	sort.Strings(holders)
+	return usedMB, g.budgetMB, len(g.entries), g.max, holders, append([]string(nil), g.order...)
+}
+
+// GateStats exposes the memory budget gate's live state to the kernel's
+// HTTP surface (GET /v1/agent/gate). See ModelGate.Stats.
+func GateStats() (usedMB, budgetMB int, admitted int, maxRuns int, holders []string, queued []string) {
+	return gate().Stats()
 }
 
 // QueueNoticeMilestones: the queue positions a queued run announces to its
