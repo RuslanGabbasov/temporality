@@ -152,7 +152,9 @@ inheritance and the run&#39;s effective policy, execution identities for
 automated runs.</p>
 <h2 id="providers-and-models"><a class="anchor" href="#providers-and-models" aria-label="Section link">#</a>Providers and models</h2><p>The <strong>Providers</strong> page (<code>/providers</code>): OpenAI-compatible endpoints (base URL,
 key, model catalog — fetched automatically on the <code>KERNEL_PROVIDER_MODELS_REFRESH</code>
-schedule plus a manual refresh and a probe check). A run&#39;s model is routed to
+schedule plus a manual refresh and a probe check). The <code>Concurrent requests</code>
+setting bounds in-flight model calls (default 4), preventing strict upstreams
+from being flooded by parallel runs. A run&#39;s model is routed to
 the provider that declares it; catalog models carry roles (chat / embedding /
 asr) — draft wizards (agent, skill, team) pick a model through the chain
 &quot;env model → judge model → first chat candidate in the catalog&quot;, and non-chat

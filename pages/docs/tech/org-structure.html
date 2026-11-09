@@ -875,7 +875,7 @@ GET /v1/workspace/triggers
 <code>provider={id}</code> (pinned-вызов) — только этот провайдер: явная привязка
 агента к провайдеру — контракт маршрутизации, дублирование модели у другого
 провайдера не перехватывает вызов. Ответ:</p>
-<pre><code class="language-json">{&quot;provider_id&quot;:&quot;prov-...&quot;,&quot;provider_name&quot;:&quot;...&quot;,&quot;base_url&quot;:&quot;https://...&quot;,&quot;api_key&quot;:&quot;...&quot;,&quot;model&quot;:&quot;...&quot;}
+<pre><code class="language-json">{&quot;provider_id&quot;:&quot;prov-...&quot;,&quot;provider_name&quot;:&quot;...&quot;,&quot;base_url&quot;:&quot;https://...&quot;,&quot;api_key&quot;:&quot;...&quot;,&quot;model&quot;:&quot;...&quot;,&quot;max_concurrent_requests&quot;:4}
 </code></pre>
 <p>404 — модель не обслуживается ни одним видимым провайдером (или пиновый
 провайдер её не декларирует). 409 — обслуживающий провайдер выключен.
