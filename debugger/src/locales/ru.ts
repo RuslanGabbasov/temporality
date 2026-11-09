@@ -1960,6 +1960,8 @@ export const ru: Record<string, string> = {
     'providers.url_label': 'Базовый URL',
     'providers.key_label': 'API-ключ',
     'providers.key_helper': 'secret://имя (рекомендуется), имя переменной окружения или сам ключ',
+    'providers.concurrency_label': 'Параллельные запросы',
+    'providers.concurrency_helper': 'Максимум одновременно выполняющихся запросов к провайдеру; безопасное значение по умолчанию — 4.',
     'providers.models_label': 'Модели (через запятую)',
     'providers.models_helper': 'Оставьте пустым — список загрузится с провайдера автоматически; ручной список приостанавливает автосинхронизацию, пока его не очистить.',
     'providers.model_limits_label': 'Лимиты вывода (модель=токены, через запятую)',

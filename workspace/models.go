@@ -638,6 +638,9 @@ type Provider struct {
 	// ({"mimo-v2.6-pro": {"max_output_tokens": 32768}}); absent = the kernel
 	// default (docs/agents.md §routing).
 	ModelLimits map[string]ModelLimit `json:"model_limits,omitempty"`
+	// MaxConcurrentRequests bounds in-flight model requests for this provider.
+	// Zero is normalized to the conservative default for older callers.
+	MaxConcurrentRequests int `json:"max_concurrent_requests"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -866,14 +869,24 @@ type StartRunRequest struct {
 
 // CreateProviderRequest is the payload for creating a model provider.
 type CreateProviderRequest struct {
-	ID          string                `json:"id"`
-	Name        string                `json:"name"`
-	BaseURL     string                `json:"base_url"`
-	APIKeyRef   string                `json:"api_key_ref,omitempty"`
-	Models      []string              `json:"models,omitempty"`
-	Labels      map[string]string     `json:"labels,omitempty"`
-	ModelLimits map[string]ModelLimit `json:"model_limits,omitempty"`
-	OrgUnitID   string                `json:"org_unit_id,omitempty"`
+	ID                    string                `json:"id"`
+	Name                  string                `json:"name"`
+	BaseURL               string                `json:"base_url"`
+	APIKeyRef             string                `json:"api_key_ref,omitempty"`
+	Models                []string              `json:"models,omitempty"`
+	Labels                map[string]string     `json:"labels,omitempty"`
+	ModelLimits           map[string]ModelLimit `json:"model_limits,omitempty"`
+	MaxConcurrentRequests int                   `json:"max_concurrent_requests,omitempty"`
+	OrgUnitID             string                `json:"org_unit_id,omitempty"`
+}
+
+const DefaultProviderMaxConcurrentRequests = 4
+
+func (p Provider) EffectiveMaxConcurrentRequests() int {
+	if p.MaxConcurrentRequests <= 0 {
+		return DefaultProviderMaxConcurrentRequests
+	}
+	return p.MaxConcurrentRequests
 }
 
 // CreateUserRequest is the payload for creating a user.

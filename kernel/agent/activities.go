@@ -2051,7 +2051,8 @@ type modelConfigAnswer struct {
 	Model        string  `json:"model"`
 	// MaxOutputTokens is the provider's per-model cap (docs/agents.md
 	// §routing); 0 = the env/hard default applies.
-	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
+	MaxOutputTokens       int `json:"max_output_tokens,omitempty"`
+	MaxConcurrentRequests int `json:"max_concurrent_requests,omitempty"`
 }
 
 // applyModelOutputCap lets the per-model cap override the shared default:
@@ -2092,7 +2093,7 @@ func (a *Activities) pinnedConfigFrom(body string, status int, providerID, model
 	if answer.APIKey == nil {
 		return llm.Config{}, "", fmt.Errorf("the workspace handed no credential for model %q: the kernel's loopback identity was not recognized as the service principal — an empty bearer would only earn a bare 401 from the provider", model)
 	}
-	config := llm.Config{BaseURL: answer.BaseURL, APIKey: *answer.APIKey, Model: answer.Model}
+	config := llm.Config{BaseURL: answer.BaseURL, APIKey: *answer.APIKey, Model: answer.Model, ProviderID: answer.ProviderID, MaxConcurrentRequests: answer.MaxConcurrentRequests}
 	if envConfig, err := llm.ConfigFromEnv(); err == nil {
 		config.Temperature = envConfig.Temperature
 		config.Timeout = envConfig.Timeout
@@ -2157,7 +2158,7 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 	// The endpoint carries routing only (base URL, key, model); timeouts and
 	// caps come from the env config when it parses, else the same hard defaults
 	// ConfigFromEnv would apply.
-	config = llm.Config{BaseURL: answer.BaseURL, APIKey: *answer.APIKey, Model: answer.Model}
+	config = llm.Config{BaseURL: answer.BaseURL, APIKey: *answer.APIKey, Model: answer.Model, ProviderID: answer.ProviderID, MaxConcurrentRequests: answer.MaxConcurrentRequests}
 	if envConfig, err := llm.ConfigFromEnv(); err == nil {
 		config.Temperature = envConfig.Temperature
 		config.Timeout = envConfig.Timeout

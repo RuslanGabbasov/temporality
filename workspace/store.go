@@ -1317,9 +1317,9 @@ func (s *Store) CreateProvider(ctx context.Context, p *Provider) error {
 	labels, _ := json.Marshal(p.Labels)
 	modelLimits, _ := json.Marshal(p.ModelLimits)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_provider (id, name, base_url, api_key_ref, models, labels, model_limits, org_unit_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		p.ID, p.Name, p.BaseURL, p.APIKeyRef, p.Models, labels, modelLimits, nullString(p.OrgUnitID), p.CreatedAt, p.UpdatedAt)
+		`INSERT INTO workspace_provider (id, name, base_url, api_key_ref, models, labels, model_limits, max_concurrent_requests, org_unit_id, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		p.ID, p.Name, p.BaseURL, p.APIKeyRef, p.Models, labels, modelLimits, p.EffectiveMaxConcurrentRequests(), nullString(p.OrgUnitID), p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
@@ -1328,9 +1328,9 @@ func (s *Store) GetProvider(ctx context.Context, id string) (Provider, error) {
 	var labels, modelLimits []byte
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, base_url, api_key_ref, models, labels, model_limits, enabled, org_unit_id, created_at, updated_at
+		`SELECT id, name, base_url, api_key_ref, models, labels, model_limits, max_concurrent_requests, enabled, org_unit_id, created_at, updated_at
 		 FROM workspace_provider WHERE id = $1`, id).
-		Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &modelLimits, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt)
+		Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &modelLimits, &p.MaxConcurrentRequests, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -1344,7 +1344,7 @@ func (s *Store) GetProvider(ctx context.Context, id string) (Provider, error) {
 }
 
 func (s *Store) ListProviders(ctx context.Context) ([]Provider, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, model_limits, enabled, org_unit_id, created_at, updated_at FROM workspace_provider ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, model_limits, max_concurrent_requests, enabled, org_unit_id, created_at, updated_at FROM workspace_provider ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -1354,7 +1354,7 @@ func (s *Store) ListProviders(ctx context.Context) ([]Provider, error) {
 		var p Provider
 		var labels, modelLimits []byte
 		var orgUnitID *string
-		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &modelLimits, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &modelLimits, &p.MaxConcurrentRequests, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.OrgUnitID = derefPtr(orgUnitID)
@@ -1371,7 +1371,7 @@ func (s *Store) ListProvidersVisible(ctx context.Context, units []string) ([]Pro
 	if units == nil {
 		return s.ListProviders(ctx)
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, model_limits, enabled, org_unit_id, created_at, updated_at FROM workspace_provider WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, model_limits, max_concurrent_requests, enabled, org_unit_id, created_at, updated_at FROM workspace_provider WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
 	if err != nil {
 		return nil, err
 	}
@@ -1381,7 +1381,7 @@ func (s *Store) ListProvidersVisible(ctx context.Context, units []string) ([]Pro
 		var p Provider
 		var labels, modelLimits []byte
 		var orgUnitID *string
-		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &modelLimits, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &modelLimits, &p.MaxConcurrentRequests, &p.Enabled, &orgUnitID, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.OrgUnitID = derefPtr(orgUnitID)
@@ -1397,8 +1397,8 @@ func (s *Store) UpdateProvider(ctx context.Context, p Provider) error {
 	labels, _ := json.Marshal(p.Labels)
 	modelLimits, _ := json.Marshal(p.ModelLimits)
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_provider SET name=$2, base_url=$3, api_key_ref=$4, models=$5, labels=$6, model_limits=$7, org_unit_id=$8, updated_at=$9 WHERE id=$1`,
-		p.ID, p.Name, p.BaseURL, p.APIKeyRef, p.Models, labels, modelLimits, nullString(p.OrgUnitID), p.UpdatedAt)
+		`UPDATE workspace_provider SET name=$2, base_url=$3, api_key_ref=$4, models=$5, labels=$6, model_limits=$7, max_concurrent_requests=$8, org_unit_id=$9, updated_at=$10 WHERE id=$1`,
+		p.ID, p.Name, p.BaseURL, p.APIKeyRef, p.Models, labels, modelLimits, p.EffectiveMaxConcurrentRequests(), nullString(p.OrgUnitID), p.UpdatedAt)
 	if err != nil {
 		return err
 	}

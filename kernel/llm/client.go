@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -132,10 +133,15 @@ type Usage struct {
 
 // Config is resolved from the environment.
 type Config struct {
-	BaseURL     string
-	Model       string
-	APIKey      string
-	Temperature float64
+	// ProviderID and MaxConcurrentRequests are supplied by workspace routing.
+	// The limiter is shared by every client for the same provider, since clients
+	// are intentionally short-lived on the activity hot path.
+	ProviderID            string
+	MaxConcurrentRequests int
+	BaseURL               string
+	Model                 string
+	APIKey                string
+	Temperature           float64
 	// Timeout is the total per-attempt budget for blocking requests. Streaming
 	// requests ignore it: long generations are legal as long as chunks keep
 	// arriving, so streams are bounded by StreamIdleTimeout instead plus the
@@ -263,6 +269,46 @@ type Client struct {
 	http         *http.Client
 	streamHTTP   *http.Client
 	providerHost string
+	limiter      *providerLimiter
+}
+
+type providerLimiter struct{ slots chan struct{} }
+
+var providerLimiters = struct {
+	sync.Mutex
+	items map[string]*providerLimiter
+}{items: make(map[string]*providerLimiter)}
+
+func limiterFor(providerID string, limit int) *providerLimiter {
+	if providerID == "" || limit <= 0 {
+		return nil
+	}
+	providerLimiters.Lock()
+	defer providerLimiters.Unlock()
+	if current := providerLimiters.items[providerID]; current != nil && cap(current.slots) == limit {
+		return current
+	}
+	current := &providerLimiter{slots: make(chan struct{}, limit)}
+	providerLimiters.items[providerID] = current
+	return current
+}
+
+func (l *providerLimiter) acquire(ctx context.Context) error {
+	if l == nil {
+		return nil
+	}
+	select {
+	case l.slots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (l *providerLimiter) release() {
+	if l != nil {
+		<-l.slots
+	}
 }
 
 // New builds a client.
@@ -286,6 +332,7 @@ func New(cfg Config) *Client {
 		http:         &http.Client{Timeout: cfg.Timeout},
 		streamHTTP:   &http.Client{},
 		providerHost: host,
+		limiter:      limiterFor(cfg.ProviderID, cfg.MaxConcurrentRequests),
 	}
 }
 
@@ -636,7 +683,11 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 			}
 		}
 		degraded = false
+		if err := c.limiter.acquire(ctx); err != nil {
+			return Completion{}, err
+		}
 		completion, err := c.once(ctx, payload)
+		c.limiter.release()
 		if err == nil {
 			completion.LatencyMs = time.Since(started).Milliseconds()
 			completion.Attempts = attempt
@@ -742,6 +793,10 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	if err != nil {
 		return Completion{}, err
 	}
+	if err := c.limiter.acquire(ctx); err != nil {
+		return Completion{}, err
+	}
+	defer c.limiter.release()
 
 	started := time.Now()
 	// A blanket http.Client.Timeout would cut a long generation mid-flight —

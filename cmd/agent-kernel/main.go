@@ -4320,10 +4320,14 @@ func main() {
 			writeError(w, 422, errors.New("name and base_url are required"))
 			return
 		}
+		if req.MaxConcurrentRequests < 0 || req.MaxConcurrentRequests > 128 {
+			writeError(w, 422, errors.New("max_concurrent_requests must be between 1 and 128"))
+			return
+		}
 		if req.ID == "" {
 			req.ID = "prov-" + shortID()
 		}
-		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits, OrgUnitID: req.OrgUnitID}
+		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits, MaxConcurrentRequests: req.MaxConcurrentRequests, OrgUnitID: req.OrgUnitID}
 		// An operator who typed a model list curated it: tag the row so the
 		// background loop never overwrites it. An empty list means "discover
 		// from the provider" — sync starts right after the row lands.
@@ -4367,7 +4371,11 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits}
+		if req.MaxConcurrentRequests < 0 || req.MaxConcurrentRequests > 128 {
+			writeError(w, 422, errors.New("max_concurrent_requests must be between 1 and 128"))
+			return
+		}
+		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits, MaxConcurrentRequests: req.MaxConcurrentRequests}
 		// Editing config must not silently re-scope a provider: bindings change
 		// only through the admin binding endpoint.
 		if prev, err := ws.GetProvider(r.Context(), provider.ID); err == nil {
@@ -4488,7 +4496,7 @@ func main() {
 						writeError(w, 502, fmt.Errorf("provider %s credential: %w", providerLabel(p.Name, p.ID), kErr))
 						return
 					}
-					payload := map[string]any{"provider_id": p.ID, "provider_name": p.Name, "base_url": p.BaseURL, "model": m}
+					payload := map[string]any{"provider_id": p.ID, "provider_name": p.Name, "base_url": p.BaseURL, "model": m, "max_concurrent_requests": p.EffectiveMaxConcurrentRequests()}
 					// Per-model caps ride the routing answer (docs/agents.md §routing):
 					// the kernel default output ceiling is a conservative floor, a
 					// capable model carries its own.
@@ -10168,6 +10176,8 @@ func workspaceDraftModel(ctx context.Context, lister providerLister, resolveKey 
 		config.BaseURL = p.BaseURL
 		config.Model = model
 		config.APIKey = apiKey
+		config.ProviderID = p.ID
+		config.MaxConcurrentRequests = p.EffectiveMaxConcurrentRequests()
 		return llm.New(config), nil
 	}
 	for _, p := range providers {

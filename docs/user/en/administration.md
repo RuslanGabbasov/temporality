@@ -112,7 +112,9 @@ automated runs.
 
 The **Providers** page (`/providers`): OpenAI-compatible endpoints (base URL,
 key, model catalog — fetched automatically on the `KERNEL_PROVIDER_MODELS_REFRESH`
-schedule plus a manual refresh and a probe check). A run's model is routed to
+schedule plus a manual refresh and a probe check). The `Concurrent requests`
+setting bounds in-flight model calls (default 4), preventing strict upstreams
+from being flooded by parallel runs. A run's model is routed to
 the provider that declares it; catalog models carry roles (chat / embedding /
 asr) — draft wizards (agent, skill, team) pick a model through the chain
 "env model → judge model → first chat candidate in the catalog", and non-chat

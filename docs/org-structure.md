@@ -1236,7 +1236,7 @@ GET /v1/workspace/model-config?model={model}&project={project}[&provider={provid
 провайдера не перехватывает вызов. Ответ:
 
 ```json
-{"provider_id":"prov-...","provider_name":"...","base_url":"https://...","api_key":"...","model":"..."}
+{"provider_id":"prov-...","provider_name":"...","base_url":"https://...","api_key":"...","model":"...","max_concurrent_requests":4}
 ```
 
 404 — модель не обслуживается ни одним видимым провайдером (или пиновый

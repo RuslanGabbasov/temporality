@@ -88,7 +88,7 @@ export default function Providers() {
 
   const startCreate = () => {
     setEditing(null)
-    setForm({ name: '', base_url: '', api_key_ref: '', models: [] })
+    setForm({ name: '', base_url: '', api_key_ref: '', models: [], max_concurrent_requests: 4 })
     setLimitsText('')
     setFetchNote('')
     loadSecretOptions()
@@ -360,6 +360,7 @@ export default function Providers() {
                   ))}
                 </div>
               )}
+              <TextInput id="prov-concurrency" type="number" min={1} max={128} labelText={t('providers.concurrency_label') ?? 'Concurrent requests'} value={String(form.max_concurrent_requests ?? 4)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, max_concurrent_requests: Number(e.target.value) })} helperText={t('providers.concurrency_helper') ?? 'Maximum in-flight model requests; 4 is a safe default for providers with strict rate limits.'} />
               <div>
                 <TextInput id="prov-models" labelText={t('providers.models_label') ?? 'Models (comma-separated)'} value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro"
                   helperText={t('providers.models_helper') ?? 'Leave empty to auto-discover from the provider'} />
