@@ -2107,6 +2107,9 @@ export const en: Record<string, string> = {
     'channels.error_address': 'Every channel needs an address.',
     'channels.error_preferred': 'The preferred channel must be the in-app inbox or an enabled channel with an address.',
     'common.loading': 'Loading…',
+    'kernel_down.title': 'The agent kernel is restarting',
+    'kernel_down.body': 'This is routine — a deploy or restart is in progress. Your data is safe; running agents continue in the background. The page will come back by itself.',
+    'kernel_down.waiting': 'waiting for the kernel… {{seconds}}s',
     'common.error': 'Error',
     'common.saving': 'Saving…',
 

@@ -1,4 +1,5 @@
 import { authHeaders } from './api'
+import { reportKernelReachable, reportKernelTransportFailure } from './kernelAvailability'
 import type { Agent, AgentDefinition, AgentProposal, AgentVersion } from './workspaceApi'
 
 export const KERNEL_API = '/kernel-api'
@@ -89,11 +90,25 @@ export function reasonText(reason: string): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${KERNEL_API}${path}`, {
-    ...init,
-    headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders() },
-  })
-  if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+  let response: Response
+  try {
+    response = await fetch(`${KERNEL_API}${path}`, {
+      ...init,
+      headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders() },
+    })
+  } catch {
+    // Network refusal — the kernel container is restarting: the calm
+    // overlay owns this story, the raw TypeError helps nobody.
+    reportKernelTransportFailure()
+    throw new Error('kernel unreachable — it is probably restarting')
+  }
+  if (!response.ok) {
+    if (response.status === 502 || response.status === 503 || response.status === 504) {
+      reportKernelTransportFailure()
+    }
+    throw new Error(`${response.status} ${await response.text()}`)
+  }
+  reportKernelReachable()
   return response.json() as Promise<T>
 }
 

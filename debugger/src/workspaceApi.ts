@@ -1,4 +1,5 @@
 import { authHeaders } from './api'
+import { reportKernelReachable, reportKernelTransportFailure } from './kernelAvailability'
 import type { ResearchSessionPayload } from './explorer/sessions'
 
 const KERNEL_API = '/kernel-api'
@@ -1125,13 +1126,26 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
   try {
     const response = await fetch(`${KERNEL_API}${path}`, { ...init, headers: headers(), signal: deadline.signal })
     if (!response.ok) {
+      // A proxy-level failure (kernel container restarting) is not this
+      // call's error — report it to the availability tracker (the calm
+      // «kernel is restarting» overlay) and keep the per-call error honest.
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        reportKernelTransportFailure()
+      }
       const body = await response.json().catch(() => ({}))
       throw new ApiError(response.status, body)
     }
+    reportKernelReachable()
     return await response.json()
   } catch (e) {
     if (timedOut && !(e instanceof ApiError)) {
       throw new ApiError(408, { error: `request timed out after ${Math.round(timeoutMs / 1000)}s` })
+    }
+    // Network-level refusal (fetch TypeError): during a kernel restart
+    // every call lands here — surface it to the availability tracker so the
+    // overlay explains itself instead of N raw «Failed to fetch» banners.
+    if (!(e instanceof ApiError)) {
+      reportKernelTransportFailure()
     }
     throw e
   } finally {

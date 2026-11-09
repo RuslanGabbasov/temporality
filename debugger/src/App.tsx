@@ -7,6 +7,7 @@ import Supervisor from './Supervisor'
 import KnowledgeExplorer from './KnowledgeExplorer'
 import AgentRuns from './AgentRuns'
 import ExperienceTimeline from './ExperienceTimeline'
+import KernelDownOverlay from './KernelDownOverlay'
 import Workspace from './Workspace'
 import Agents from './Agents'
 import Teams from './Teams'
@@ -100,6 +101,7 @@ export default function App() {
   return (
     <ThemePrefProvider>
     <I18nProvider>
+    <KernelDownOverlay />
     <Layout activePage={page}>
       {({ project, setProject, projectDefaultAgent, projectDefaultModel, refreshProjects }: AppState) => {
         switch (page) {
