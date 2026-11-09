@@ -4333,13 +4333,12 @@ func main() {
 	// caller side) to route non-default models to the right provider instead
 	// of falling back to the env provider with a swapped model name.
 	// providerLabel renders a provider for human-facing errors: the display
-	// name with the id in parentheses — a raw provider id means nothing in the
-	// chat (the 2026-11-09 report).
+	// name as it appears in the UI — the raw id is meaningless in the chat.
 	providerLabel := func(name, id string) string {
 		if strings.TrimSpace(name) == "" {
-			return id
+			return id // an unnamed provider is misconfigured; the id is the only handle left
 		}
-		return fmt.Sprintf("%s (%s)", name, id)
+		return name
 	}
 	mux.HandleFunc("GET /v1/workspace/model-config", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {

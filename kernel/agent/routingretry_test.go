@@ -56,7 +56,7 @@ func TestPinnedRoutingDefinitiveAnswersDoNotRetry(t *testing.T) {
 	// provider id means nothing to a human.
 	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lookups.Add(1)
-		http.Error(w, `the agent's provider "Mimo" (prov-1) is disabled — enable it in Providers`, http.StatusConflict)
+		http.Error(w, `the agent's provider "Mimo" is disabled — enable it in Providers`, http.StatusConflict)
 	}))
 	defer workspace.Close()
 
@@ -65,7 +65,7 @@ func TestPinnedRoutingDefinitiveAnswersDoNotRetry(t *testing.T) {
 	if err == nil {
 		t.Fatal("a disabled provider must fail loudly")
 	}
-	if !strings.Contains(err.Error(), `provider "Mimo" (prov-1) is disabled — enable it in Providers`) {
+	if !strings.Contains(err.Error(), `provider "Mimo" is disabled — enable it in Providers`) {
 		t.Fatalf("the workspace answer must surface verbatim (with the provider name), got %v", err)
 	}
 	if lookups.Load() != 1 {

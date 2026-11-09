@@ -1995,11 +1995,11 @@ func (a *Activities) modelConfigForPinned(ctx context.Context, project, provider
 		// Non-transport answers (4xx/5xx bodies) are definitive — retrying a
 		// 409 "provider disabled" would only add latency to an actionable error.
 		if !isTransportError(err) || ctx.Err() != nil || time.Now().Add(routingRetryBackoff).After(deadline) {
-			return llm.Config{}, "", fmt.Errorf("provider %q routing failed: %w", providerID, err)
+			return llm.Config{}, "", fmt.Errorf("provider routing failed for model %q: %w", model, err)
 		}
 		select {
 		case <-ctx.Done():
-			return llm.Config{}, "", fmt.Errorf("provider %q routing failed: %w", providerID, ctx.Err())
+			return llm.Config{}, "", fmt.Errorf("provider routing failed for model %q: %w", model, ctx.Err())
 		case <-time.After(routingRetryBackoff):
 		}
 	}
@@ -2060,33 +2060,30 @@ func applyModelOutputCap(config *llm.Config, answer modelConfigAnswer) {
 // mapping HTTP answers to the loud, actionable routing errors (no retries —
 // these are definitive answers, not transport noise).
 func (a *Activities) pinnedConfigFrom(body string, status int, providerID, model string) (llm.Config, string, error) {
+	// The workspace answer names the provider (display name, as in the UI);
+	// its message is the one the chat should show — provider ids are invisible
+	// in the interface and meaningless to a human.
+	if detail := workspaceErrorDetail(body); status >= 400 && status < 500 && detail != "" {
+		return llm.Config{}, "", errors.New(detail)
+	}
 	if status == http.StatusNotFound {
-		// The workspace answer names the provider (display name + id); its
-		// message is the one the chat should show — a raw provider id means
-		// nothing to a human.
-		if detail := workspaceErrorDetail(body); detail != "" {
-			return llm.Config{}, "", errors.New(detail)
-		}
-		return llm.Config{}, "", fmt.Errorf("the agent's provider %q does not serve model %q (or is not visible to this project) — fix the provider's model list or pick another model", providerID, model)
+		return llm.Config{}, "", fmt.Errorf("the agent's provider does not serve model %q (or is not visible to this project) — fix the provider's model list or pick another model", model)
 	}
 	if status == http.StatusConflict {
-		if detail := workspaceErrorDetail(body); detail != "" {
-			return llm.Config{}, "", errors.New(detail)
-		}
-		return llm.Config{}, "", fmt.Errorf("the agent's provider %q is disabled — enable it in Providers", providerID)
+		return llm.Config{}, "", fmt.Errorf("the agent's provider is disabled — enable it in Providers")
 	}
 	if status >= 400 {
-		return llm.Config{}, "", fmt.Errorf("provider %q routing failed (HTTP %d): %s", providerID, status, truncate(body, 300))
+		return llm.Config{}, "", fmt.Errorf("provider routing failed (HTTP %d): %s", status, truncate(body, 300))
 	}
 	var answer modelConfigAnswer
 	if err := json.Unmarshal([]byte(body), &answer); err != nil {
-		return llm.Config{}, "", fmt.Errorf("provider %q routing decode: %w", providerID, err)
+		return llm.Config{}, "", fmt.Errorf("routing answer decode for model %q: %w", model, err)
 	}
 	if answer.BaseURL == "" || answer.Model == "" {
-		return llm.Config{}, "", fmt.Errorf("provider %q routing response incomplete for model %q", providerID, model)
+		return llm.Config{}, "", fmt.Errorf("routing response incomplete for model %q", model)
 	}
 	if answer.APIKey == nil {
-		return llm.Config{}, "", fmt.Errorf("the workspace handed no credential for provider %q: the kernel's loopback identity was not recognized as the service principal — an empty bearer would only earn a bare 401 from the provider", providerID)
+		return llm.Config{}, "", fmt.Errorf("the workspace handed no credential for model %q: the kernel's loopback identity was not recognized as the service principal — an empty bearer would only earn a bare 401 from the provider", model)
 	}
 	config := llm.Config{BaseURL: answer.BaseURL, APIKey: *answer.APIKey, Model: answer.Model}
 	if envConfig, err := llm.ConfigFromEnv(); err == nil {
