@@ -982,8 +982,12 @@ export const en: Record<string, string> = {
     'agents.max_turns': 'Max turns',
     'agents.turn_restarts': 'Continue past the turn limit',
     'agents.turn_restarts_short': '× continuations',
-    'agents.vision_keep_short': '🖼 screenshots in context',
-    'agents.vision_keep_hint': 'How many most-recent screenshot messages stay in the agent context; older vision blocks are evicted as new ones land (keeps requests, history and the prompt cache small for design-heavy agents). 0 = keep all.',
+
+    'agents.cap.vision': 'Image handling',
+    'agents.cap.vision_hint': 'Off — view_image / fetch_image / inspect_image are denied and screenshots never enter the context (tool results keep their metadata only).',
+    'agents.vision_limit_short': '× image limit in context',
+    'agents.vision_limit_hint': 'How many most-recent screenshot messages stay in context; older vision blocks are evicted as new ones land (keeps requests, history and the prompt cache small). 0 = no limit.',
+
     'agents.turn_restarts_hint': 'When a run finishes only because it hit the turn limit, it automatically continues as a new run with a fresh full budget (run.restarted in the trace). 0 = off.',
     'agents.sandbox_profile': 'Sandbox profile',
     'agents.sandbox_default': 'Default (installation image)',

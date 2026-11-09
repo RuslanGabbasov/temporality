@@ -236,6 +236,10 @@ type RunInput struct {
 	// evicted as new ones land (one-time mutation per message). Pinned per
 	// run so replays derive identical evictions. 0 = keep everything.
 	VisionKeepImages int `json:"vision_keep_images,omitempty"`
+	// VisionDisabled is the hard image-handling switch (agent capability
+	// vision=false): the vision tools are denied and screenshot blocks never
+	// enter the conversation — tool results keep only their metadata.
+	VisionDisabled bool `json:"vision_disabled,omitempty"`
 	// RestartAttempt counts the continuation chain: 0 = original run, 1..N =
 	// spawned continuations (the run id gains an -r2/-r3 suffix and the trace
 	// shows run.restarted between the attempts).
@@ -3036,7 +3040,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// included) have landed, so the image blocks ride one trailing user
 		// message — inserting them between tool messages would break the
 		// tool-replies-must-stay-contiguous contract of the API.
-		if len(turnImages) > 0 {
+		if len(turnImages) > 0 && input.VisionDisabled {
+			// Image handling is switched off for this agent (capability vision=false,
+			// docs/harness-settings.md): pixels never enter the conversation — the
+			// tool results above keep their metadata.
+			messages = append(messages, llm.Message{
+				Role:    "user",
+				Content: fmt.Sprintf("[%d image block(s) produced by this turn's tool calls were dropped: image handling is disabled for this agent; the tool results above carry their metadata]", len(turnImages)),
+			})
+		} else if len(turnImages) > 0 {
 			messages = append(messages, llm.Message{
 				Role:    "user",
 				Content: "Image(s) produced by this turn's tool calls are attached below as vision blocks; their metadata is in the tool results above.",

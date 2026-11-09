@@ -287,6 +287,12 @@ type AgentCapabilities struct {
 	// nil or false ⇒ denied — a runaway trigger burns the token budget on
 	// every fire.
 	Triggers *bool `json:"triggers,omitempty"`
+	// Vision is the image-handling switch (docs/harness-settings.md): when an
+	// agent is explicitly switched off, the vision tools (view_image,
+	// fetch_image, inspect_image) are denied and screenshot blocks never
+	// enter the conversation — tool results keep only their metadata. nil =
+	// allowed (the pre-definition behavior).
+	Vision *bool `json:"vision,omitempty"`
 }
 
 // Cap returns the effective value of a capability: nil (unset) means allowed,
@@ -298,7 +304,7 @@ func (c AgentCapabilities) Cap(enabled *bool) bool { return enabled == nil || *e
 // historical alias of modify_files (the spec example used it) and normalizes
 // to the same flag.
 var AgentCapabilityNames = []string{
-	"read_files", "modify_files", "run_commands", "network", "skills", "knowledge", "delegation",
+	"read_files", "modify_files", "run_commands", "network", "skills", "knowledge", "delegation", "vision",
 }
 
 // NormalizeAgentCapability maps a requirement name onto the canonical name;
@@ -343,6 +349,8 @@ func (a Agent) SatisfiesCapability(name string) bool {
 		return caps.Cap(caps.Skills)
 	case "knowledge":
 		return caps.Cap(caps.Knowledge)
+	case "vision":
+		return caps.Cap(caps.Vision)
 	}
 	return false
 }

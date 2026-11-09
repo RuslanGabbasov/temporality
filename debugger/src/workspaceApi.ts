@@ -130,6 +130,10 @@ export interface AgentCapabilities {
   /** Create/update/delete launch triggers — denied by default (a runaway
    *  trigger burns the token budget on every fire). */
   triggers?: boolean
+  /** Image handling (docs/harness-settings.md): off denies the vision tools
+   *  (view_image / fetch_image / inspect_image) and keeps screenshot blocks
+   *  out of the conversation. Unset = allowed. */
+  vision?: boolean
 }
 
 /** Structured definition (docs/evaluable-agent.md): capabilities, hard

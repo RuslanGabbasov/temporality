@@ -116,7 +116,7 @@ function setCaps(caps?: AgentCapabilities): AgentCapabilities {
   const result: AgentCapabilities = {}
   // Delegation is serialized with the rest: the backend default is denied,
   // so dropping it here would silently revoke a granted toggle on save.
-  for (const key of [...CAP_KEYS, 'delegation', 'triggers'] as const) {
+  for (const key of [...CAP_KEYS, 'delegation', 'triggers', 'vision'] as const) {
     const value = caps?.[key]
     if (typeof value === 'boolean') result[key] = value
   }
@@ -357,7 +357,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const setDef = (part: Partial<AgentDefinition>) =>
     setForm((prev) => ({ ...prev, definition: { ...prev.definition, ...part } }))
 
-  const setCap = (key: CapKey | 'delegation' | 'triggers', value: boolean | undefined) =>
+  const setCap = (key: CapKey | 'delegation' | 'triggers' | 'vision', value: boolean | undefined) =>
     setForm((prev) => ({
       ...prev,
       definition: {
@@ -1837,6 +1837,32 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     onToggle={(checked: boolean) => { touch('capabilities'); setCap('triggers', checked ? true : undefined) }}
                   />
                 </div>
+                {/* Image handling (docs/harness-settings.md): the master
+                    switch plus the screenshot context window. Off denies the
+                    vision tools and keeps pixels out of the conversation. */}
+                <div style={{ borderTop: '1px solid var(--tm-border)', paddingTop: '0.8rem', marginTop: '0.5rem' }}>
+                  <Toggle
+                    id="agent-cap-vision"
+                    labelText={t('agents.cap.vision') ?? 'Работа с изображениями'}
+                    toggled={form.definition?.capabilities?.vision !== false}
+                    onToggle={(checked: boolean) => { touch('capabilities'); setCap('vision', checked ? undefined : false) }}
+                  />
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: '0.25rem 0 0.5rem' }}>{t('agents.cap.vision_hint') ?? 'Выключено — view_image / fetch_image / inspect_image недоступны, скриншоты не попадают в контекст (остаются только метаданные из тул-результатов).'}</p>
+                  {form.definition?.capabilities?.vision !== false && (
+                    <label style={{ display: 'block', maxWidth: '240px' }}>
+                      <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }} title={t('agents.vision_limit_hint') ?? 'Сколько свежих сообщений со скриншотами держать в контексте; старые vision-блоки вытесняются по мере появления новых (экономит запросы, историю и prompt cache). 0 = без лимита.'}>{t('agents.vision_limit_short') ?? '× лимит изображений в контексте'}</span>
+                      <input
+                        type="number"
+                        value={form.vision_keep_images ?? 0}
+                        min={0}
+                        max={20}
+                        step={1}
+                        onChange={(e) => setForm({ ...form, vision_keep_images: Math.min(20, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
+                        style={paramInputStyle}
+                      />
+                    </label>
+                  )}
+                </div>
               </Stack>
             )}
             {formTab === 'rules' && (
@@ -1941,18 +1967,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       max={5}
                       step={1}
                       onChange={(e) => setForm({ ...form, turn_limit_restarts: Math.min(5, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
-                      style={paramInputStyle}
-                    />
-                  </label>
-                  <label style={{ display: 'block', minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }} title={t('agents.vision_keep_hint') ?? 'Сколько свежих сообщений со скриншотами держать в контексте агента; старые vision-блоки вытесняются по мере появления новых (экономит запросы, историю и prompt cache у дизайн-агентов). 0 = держать все.'}>{t('agents.vision_keep_short') ?? '🖼 скриншотов в контексте'}</span>
-                    <input
-                      type="number"
-                      value={form.vision_keep_images ?? 0}
-                      min={0}
-                      max={20}
-                      step={1}
-                      onChange={(e) => setForm({ ...form, vision_keep_images: Math.min(20, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
                       style={paramInputStyle}
                     />
                   </label>

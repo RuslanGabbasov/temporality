@@ -9259,6 +9259,13 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 		if !caps.Cap(caps.Knowledge) {
 			input.SkipKnowledge = true
 		}
+		// Image handling (docs/harness-settings.md): switched off, the vision
+		// tools are denied and screenshot blocks stay out of the conversation
+		// (the workflow keeps only their metadata).
+		if !caps.Cap(caps.Vision) {
+			input.DenyTools = append(input.DenyTools, "view_image", "fetch_image", "inspect_image")
+			input.VisionDisabled = true
+		}
 	}
 	// Delegation is an explicitly granted capability (docs/agent-delegation.md):
 	// nil or false denies the delegate tool, and agents without a structured
@@ -9374,6 +9381,13 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 		useSkills = caps.Cap(caps.Skills)
 		if !caps.Cap(caps.Knowledge) {
 			input.SkipKnowledge = true
+		}
+		// Image handling (docs/harness-settings.md): switched off, the vision
+		// tools are denied and screenshot blocks stay out of the conversation
+		// (the workflow keeps only their metadata).
+		if !caps.Cap(caps.Vision) {
+			input.DenyTools = append(input.DenyTools, "view_image", "fetch_image", "inspect_image")
+			input.VisionDisabled = true
 		}
 	} else if callerPrompt == "" && a.SystemPrompt != "" {
 		input.SystemPrompt = a.SystemPrompt
