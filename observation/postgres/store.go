@@ -145,8 +145,11 @@ const appendObservationSQL = `INSERT INTO observation_events
 	ON CONFLICT (source_id,event_id) DO NOTHING`
 
 // encodeObservationEvent marshals the JSONB columns and normalizes the
-// received_at bind (NULL = let the database clock stamp it).
+// received_at bind (NULL = let the database clock stamp it). Data and evidence
+// are scrubbed of NUL bytes first: PostgreSQL rejects \u0000 escapes on JSONB
+// input (SQLSTATE 22P05), and one poisoned event must never wedge the ingest.
 func encodeObservationEvent(event observation.Event) (data, evidence []byte, receivedAt any, err error) {
+	event = observation.ScrubNULEvent(event)
 	data, err = json.Marshal(event.Data)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("encode event data: %w", err)

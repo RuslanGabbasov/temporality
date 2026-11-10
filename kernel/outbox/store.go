@@ -52,6 +52,11 @@ func (s *Store) Migrate(ctx context.Context, path string) error {
 }
 
 func (s *Store) Enqueue(ctx context.Context, event observation.Event) error {
+	// Tool outputs can carry NUL bytes, which json.Marshal turns into \u0000
+	// escapes that PostgreSQL rejects on JSONB insert (SQLSTATE 22P05) — the
+	// emit then fails and kills the run that produced the event. The event is
+	// observability: scrub before it ever reaches a JSONB column.
+	event = observation.ScrubNULEvent(event)
 	payload, err := json.Marshal(event)
 	if err != nil {
 		return err

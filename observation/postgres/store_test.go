@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/temporality-project/temporality/observation"
 )
 
 // One malformed row (jsonb allows scalars/arrays where the write path only
@@ -70,5 +73,38 @@ func TestDecodeEvidence(t *testing.T) {
 	}
 	if got := decodeEvidence("src", "evt", []byte(`{"not":"an array"}`)); got != nil {
 		t.Fatalf("malformed evidence must drop to nil, got %v", got)
+	}
+}
+
+// A tool output carrying NUL bytes must not poison the JSONB insert: the
+// encode path scrubs \u0000 escapes before the bind, so one binary-laden
+// tool.completed event can neither fail the append nor wedge the ingest batch
+// (SQLSTATE 22P05 — PostgreSQL cannot represent \u0000 in jsonb).
+func TestEncodeObservationEventScrubsNUL(t *testing.T) {
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    "run/event/000001",
+		OccurredAt: time.Date(2026, 11, 10, 7, 11, 51, 0, time.UTC),
+		Source:     observation.Source{ID: "kernel-test", Integration: "temporality-agent-kernel"},
+		Context:    observation.Context{Project: "p", Run: "r"},
+		Type:       "tool.completed",
+		Data: map[string]any{
+			"tool":   "run_command",
+			"output": "git\x00-z listing\x00",
+		},
+		Evidence: []observation.Evidence{{Ref: "ref\x00"}},
+	}
+	data, evidence, _, err := encodeObservationEvent(event)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	for name, encoded := range map[string][]byte{"data": data, "evidence": evidence} {
+		if strings.Contains(string(encoded), `\u0000`) {
+			t.Fatalf("%s: \\u0000 survived the scrub: %s", name, encoded)
+		}
+		var decoded any
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatalf("%s: scrubbed payload must stay valid JSON: %v\n%s", name, err, encoded)
+		}
 	}
 }
