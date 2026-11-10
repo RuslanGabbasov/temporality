@@ -296,8 +296,71 @@ func TestExtractFirstJSONObject(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"a": {"b": "c}"}, "d": 1}`, payload)
 
+	// Escaped quotes and backslashes inside strings must not break balance.
+	payload, err = extractFirstJSONObject(`prefix {"change": "never say \"hi\" to users", "path": "C:\\tmp"} suffix`)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"change": "never say \"hi\" to users", "path": "C:\\tmp"}`, payload)
+
+	// ```json fences are tolerated (the object inside is found).
+	payload, err = extractFirstJSONObject("```json\n{\"change\": \"x\"}\n```")
+	require.NoError(t, err)
+	require.JSONEq(t, `{"change": "x"}`, payload)
+
 	_, err = extractFirstJSONObject("no json here")
 	require.Error(t, err)
 	_, err = extractFirstJSONObject(`{"unbalanced": {`)
 	require.Error(t, err)
+	require.Contains(t, err.Error(), "truncated", "the unbalanced error must hint at truncation")
+}
+
+// A broken first answer (the routine failure: truncation, unescaped quotes)
+// is recovered by one corrective retry — the route never surfaces a raw
+// "unbalanced JSON" 502 to the user while one retry can still save it.
+func TestDraftAgentProposalRetriesBrokenJSON(t *testing.T) {
+	calls := 0
+	var sawMaxTokens float64
+	var repairPrompt string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if mt, ok := body["max_tokens"].(float64); ok {
+			sawMaxTokens = mt
+		}
+		content := `Here is my take: {"problem": "agent x", "change": "never say "hi""` // broken on purpose
+		if calls >= 2 {
+			if msgs, ok := body["messages"].([]any); ok && len(msgs) >= 2 {
+				last := msgs[len(msgs)-1].(map[string]any)
+				repairPrompt, _ = last["content"].(string)
+			}
+			content = `{"problem":"p","change":"c","effect":"e","change_summary":"s","constraints":[],"completion":[]}`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}, "finish_reason": "stop"}}})
+	}))
+	defer server.Close()
+
+	model := llm.New(llm.Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	agent := workspace.Agent{ID: "agent-a", Name: "Agent A", Description: "d"}
+	draft, err := draftAgentProposal(context.Background(), model, agent, "the problem")
+	require.NoError(t, err, "one broken first answer must be recovered by the retry")
+	require.Equal(t, 2, calls, "exactly one corrective round")
+	require.Equal(t, "c", draft.Change)
+	require.Equal(t, float64(4096), sawMaxTokens, "the headroom must cover a verbose answer")
+	require.Contains(t, repairPrompt, "not one complete JSON object", "the corrective round must tell the model what was wrong")
+}
+
+// Both attempts broken → the 502 text says a corrective retry happened.
+func TestDraftAgentProposalRetryExhaustedIsReported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"no json at all"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	model := llm.New(llm.Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	agent := workspace.Agent{ID: "agent-a", Name: "Agent A", Description: "d"}
+	_, err := draftAgentProposal(context.Background(), model, agent, "the problem")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "corrective retry")
 }

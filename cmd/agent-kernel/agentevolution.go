@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -753,7 +754,7 @@ User's problem report:
 Respond with one JSON object:
 {"problem": "<the observed problem, restated in one or two sentences>", "change": "<the definition change you propose>", "effect": "<the expected effect once applied>", "change_summary": "<3-5 short lines describing what will change in the agent's BEHAVIOR — this is what the user reads before applying>", "constraints": %s, "completion": %s}
 
-Rules: constraints and completion are FULL REPLACEMENT lists — copy the current items, add, reword or drop items as the problem requires; leave an array empty ([] or omitted) to keep the current list unchanged. Never invent capabilities. Ground every change in the reported problem; no generic advice.`,
+Rules: constraints and completion are FULL REPLACEMENT lists — copy the current items, add, reword or drop items as the problem requires; leave an array empty ([] or omitted) to keep the current list unchanged. Never invent capabilities. Ground every change in the reported problem; no generic advice. Keep "problem", "change" and "effect" to at most three sentences each — a truncated answer is a failed proposal.`,
 		a.Name, a.Description, encode(constraints), encode(completion), strings.TrimSpace(problem),
 		`["..."]`, `["..."]`)
 	messages := []llm.Message{
@@ -762,7 +763,26 @@ Rules: constraints and completion are FULL REPLACEMENT lists — copy the curren
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	completionResp, err := model.Complete(callCtx, messages, nil, llm.WithMaxTokens(2048))
+	// A one-shot JSON answer routinely comes back broken the first time —
+	// truncated by the output cap, or with an unescaped quote that breaks
+	// brace balance. One corrective round recovers it without the user
+	// seeing a raw 502; the headroom above the usual ~1-2k of output keeps
+	// the first attempt from truncating at all.
+	draft, perr := parseAgentProposalDraft(callCtx, model, messages)
+	if perr != nil {
+		repair := append(slices.Clone(messages), llm.Message{Role: "user", Content: fmt.Sprintf("Your previous reply was not one complete JSON object (%s). Answer again with ONLY the JSON object — no prose, no code fences, close every bracket and quote, keep each text field to at most three sentences.", perr)})
+		draft, perr = parseAgentProposalDraft(callCtx, model, repair)
+		if perr != nil {
+			return agentProposalDraft{}, fmt.Errorf("model answer was not one complete JSON object even after a corrective retry: %w", perr)
+		}
+	}
+	return draft, nil
+}
+
+// parseAgentProposalDraft performs one model call over the given messages and
+// parses the answer into a draft.
+func parseAgentProposalDraft(ctx context.Context, model *llm.Client, messages []llm.Message) (agentProposalDraft, error) {
+	completionResp, err := model.Complete(ctx, messages, nil, llm.WithMaxTokens(4096))
 	if err != nil {
 		return agentProposalDraft{}, err
 	}
@@ -820,7 +840,7 @@ func extractFirstJSONObject(content string) (string, error) {
 		}
 		escaped = false
 	}
-	return "", errors.New("unbalanced JSON object in model answer")
+	return "", errors.New("unbalanced JSON object in model answer (the output was likely truncated — the closing brace never came)")
 }
 
 // summarizeChange is the change-summary fallback when the model omitted one:
