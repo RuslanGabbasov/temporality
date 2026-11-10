@@ -1425,11 +1425,14 @@ export default function AgentRuns({ project }: { project: string }) {
                             </div>
                           )}
 									{options.length > 0 && !schema && (
-										<Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem', flexWrap: 'wrap', maxWidth: '100%' }}>
+										// flex-wrap over the container width; a single option longer
+										// than the row compresses to an ellipsis (full text on hover)
+										// instead of stretching the screen.
+										<div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.5rem', maxWidth: '100%' }}>
 											{options.map((option) => (
-												<Button key={option} size="sm" style={{ flex: '0 0 auto', whiteSpace: 'nowrap', maxWidth: '100%' }} title={option} onClick={() => void decide(event, true, option)} disabled={busy}>{option}</Button>
+												<Button key={option} size="sm" className="runs-option-btn" style={{ flex: '0 1 auto', minWidth: 0, maxWidth: '100%' }} title={option} onClick={() => void decide(event, true, option)} disabled={busy}>{option}</Button>
 											))}
-										</Stack>
+										</div>
 									)}
                           {schema && (
                             <HumanForm

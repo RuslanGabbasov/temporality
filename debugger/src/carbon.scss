@@ -2333,6 +2333,21 @@ button.header-nav-link {
   margin-top: 0.5rem;
 }
 
+// Ask-form option buttons (AgentRuns): an option longer than the row
+// compresses to an ellipsis instead of stretching the screen — the full text
+// stays on the button's title hint. The ellipsis must live on Carbon's
+// inner label span (the button itself is inline-flex and never clips).
+.runs-option-btn {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.runs-option-btn .cds--btn__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Tabbed modal: tab bar and footer stay visible, only the body scrolls. */
 .modal-panel.tabbed { overflow: hidden; }
 
