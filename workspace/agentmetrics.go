@@ -94,6 +94,17 @@ func (s *Store) ListAgentVersionMetrics(ctx context.Context, agentID string, ver
 	return result, rows.Err()
 }
 
+// DeleteEmptyAgentMetrics drops the day's rollup rows written without agent
+// attribution (agent_id = '') — the bug the day-facts pass had before it
+// selected workspace_run.agent_id: every run of every agent merged into one
+// anonymous row, which no observation window could ever read. Rows are
+// deleted after the day's correct upserts, so the pass is idempotent.
+func (s *Store) DeleteEmptyAgentMetrics(ctx context.Context, day time.Time) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM workspace_agent_version_metrics WHERE agent_id = '' AND day = $1`, dayStart(day))
+	return err
+}
+
 // AgentVersionKey identifies one definition version of one agent in the
 // day-facts map.
 type AgentVersionKey struct {
@@ -130,7 +141,7 @@ type AgentDayFacts struct {
 func (s *Store) AgentVersionDayFacts(ctx context.Context, day time.Time) (map[AgentVersionKey]AgentDayFacts, error) {
 	start, end := dayStart(day), dayStart(day).AddDate(0, 0, 1)
 	rows, err := s.pool.Query(ctx,
-		`SELECT r.id, COALESCE(r.agent_version, 0), r.status, COALESCE(r.task_id, ''),
+		`SELECT r.id, COALESCE(r.agent_id, ''), COALESCE(r.agent_version, 0), r.status, COALESCE(r.task_id, ''),
 		        EXISTS (SELECT 1 FROM workspace_run r0
 		                WHERE r0.task_id = r.task_id AND r0.task_id <> ''
 		                  AND (r0.created_at < r.created_at OR (r0.created_at = r.created_at AND r0.id < r.id))),
@@ -159,17 +170,17 @@ func (s *Store) AgentVersionDayFacts(ctx context.Context, day time.Time) (map[Ag
 		return f
 	}
 	for rows.Next() {
-		var runID, runStatus, taskID string
+		var runID, agentID, runStatus, taskID string
 		var version int
 		var rework bool
 		var reqStatus, reqResponse *string
 		var reqOptions []byte
 		var reqCreatedAt *time.Time
-		if err := rows.Scan(&runID, &version, &runStatus, &taskID, &rework,
+		if err := rows.Scan(&runID, &agentID, &version, &runStatus, &taskID, &rework,
 			&reqStatus, &reqOptions, &reqResponse, &reqCreatedAt); err != nil {
 			return nil, err
 		}
-		key := AgentVersionKey{Version: version}
+		key := AgentVersionKey{AgentID: agentID, Version: version}
 		run, seen := byRun[runID]
 		if !seen {
 			run = &runFacts{key: key, rework: rework}

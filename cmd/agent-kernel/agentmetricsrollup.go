@@ -37,25 +37,38 @@ type rollupEvent struct {
 }
 
 // startAgentMetricsRollup runs the rollup loop until the context is cancelled:
-// one pass at startup, then hourly. Failures are logged and retried next
-// tick — metrics are derived data, a bad hour costs a stale card, never data.
+// a wide backfill pass at startup (the default observation window — heals
+// history written by an older kernel), then an hourly tick over yesterday and
+// today. Failures are logged and retried next tick — metrics are derived
+// data, a bad hour costs a stale card, never data.
 func startAgentMetricsRollup(ctx context.Context, log *slog.Logger, ws *workspace.Store, observationURL string) {
-	runAgentMetricsRollup(ctx, log, ws, observationURL)
+	runAgentMetricsRollup(ctx, log, ws, observationURL, true)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Hour):
 		}
-		runAgentMetricsRollup(ctx, log, ws, observationURL)
+		runAgentMetricsRollup(ctx, log, ws, observationURL, false)
 	}
 }
 
-// runAgentMetricsRollup re-rolls yesterday and today, then re-evaluates the
-// observation verdicts of every agent with data.
-func runAgentMetricsRollup(ctx context.Context, log *slog.Logger, ws *workspace.Store, observationURL string) {
+// runAgentMetricsRollup re-rolls the recent days and re-evaluates the
+// observation verdicts of every agent with data. The startup pass (backfill)
+// covers the whole default observation window (7 days), not just
+// yesterday+today: it heals history written by an older kernel — e.g. the
+// anonymous-attribution bug that merged every agent's runs into agent_id=''
+// rows. The hourly tick keeps re-rolling only yesterday and today (cheap,
+// stays live).
+func runAgentMetricsRollup(ctx context.Context, log *slog.Logger, ws *workspace.Store, observationURL string, backfill bool) {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	for _, day := range []time.Time{today.Add(-24 * time.Hour), today} {
+	days := []time.Time{today.Add(-24 * time.Hour), today}
+	if backfill {
+		for i := 2; i < 7; i++ {
+			days = append(days, today.Add(-time.Duration(i)*24*time.Hour))
+		}
+	}
+	for _, day := range days {
 		if err := rollupDay(ctx, log, ws, observationURL, day); err != nil {
 			log.Warn("agent metrics rollup", "day", day.Format("2006-01-02"), "error", err)
 		}
@@ -156,6 +169,12 @@ func rollupDay(ctx context.Context, log *slog.Logger, ws *workspace.Store, obser
 		if err := ws.UpsertAgentVersionMetrics(ctx, metrics); err != nil {
 			return fmt.Errorf("upsert metrics %s v%d: %w", key.AgentID, key.Version, err)
 		}
+	}
+	// The day was just re-rolled with correct attribution: drop the anonymous
+	// rows the pre-fix pass wrote, so the table stops carrying junk no window
+	// can read.
+	if err := ws.DeleteEmptyAgentMetrics(ctx, day); err != nil {
+		return fmt.Errorf("delete unattributed metrics: %w", err)
 	}
 	log.Info("agent metrics rolled up", "day", day.Format("2006-01-02"), "versions", len(facts))
 	return nil
