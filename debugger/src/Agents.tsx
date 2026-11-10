@@ -1017,17 +1017,23 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     {!!a.definition_version && <span>· v{a.definition_version}</span>}
                   </div>
                   {/* The uniform switch, bottom-right of the mini-card (the
-                      trigger pattern): a disabled agent starts no new runs. */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.3rem' }} title={t('agents.enabled_hint') ?? 'Disabled agents cannot start new runs'} onClick={(e) => e.stopPropagation()}>
-                    <Toggle
-                      id={`agent-enabled-${a.id}`}
-                      labelText=""
-                      hideLabel
-                      aria-label={t('agents.enabled_hint') ?? 'Toggle agent'}
-                      toggled={a.enabled !== false}
-                      onToggle={() => void toggleAgentEnabled(a)}
-                      size="sm"
-                    />
+                      trigger pattern): a disabled agent starts no new runs.
+                      stopPropagation sits on a fit-content wrapper hugging the
+                      switch — the rest of the row stays a click-through to
+                      select the card (a full-width guard swallowed clicks
+                      left of the toggle). */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.3rem' }} title={t('agents.enabled_hint') ?? 'Disabled agents cannot start new runs'}>
+                    <span style={{ display: 'inline-flex' }} onClick={(e) => e.stopPropagation()}>
+                      <Toggle
+                        id={`agent-enabled-${a.id}`}
+                        labelText=""
+                        hideLabel
+                        aria-label={t('agents.enabled_hint') ?? 'Toggle agent'}
+                        toggled={a.enabled !== false}
+                        onToggle={() => void toggleAgentEnabled(a)}
+                        size="sm"
+                      />
+                    </span>
                   </div>
                 </Tile>
               ))}
