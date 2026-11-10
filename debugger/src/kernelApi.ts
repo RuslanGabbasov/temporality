@@ -97,14 +97,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders() },
     })
   } catch {
-    // Network refusal — the kernel container is restarting: the calm
-    // overlay owns this story, the raw TypeError helps nobody.
-    reportKernelTransportFailure()
-    throw new Error('kernel unreachable — it is probably restarting')
+    // Network refusal — no HTTP answer at all: the server is unreachable
+    // (down network/VPN), which is a different story from a kernel restart.
+    // The calm overlay owns this, the raw TypeError helps nobody.
+    reportKernelTransportFailure('unreachable')
+    throw new Error('server unreachable — no connection')
   }
   if (!response.ok) {
     if (response.status === 502 || response.status === 503 || response.status === 504) {
-      reportKernelTransportFailure()
+      reportKernelTransportFailure('gateway')
     }
     throw new Error(`${response.status} ${await response.text()}`)
   }

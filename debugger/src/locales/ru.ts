@@ -2109,7 +2109,9 @@ export const ru: Record<string, string> = {
     'common.loading': 'Загрузка…',
     'kernel_down.title': 'Ядро агентов перезапускается',
     'kernel_down.body': 'Это штатная ситуация — идёт деплой или рестарт. Ваши данные в порядке, запущенные агенты продолжают работать в фоне. Страница вернётся сама.',
-    'kernel_down.waiting': 'ждём ядро… {{seconds}} с',
+    'kernel_down.unreachable_title': 'Нет связи с сервером',
+    'kernel_down.unreachable_body': 'Страница не может достучаться до сервера — проверьте интернет или VPN. Ничего не потеряно: всё продолжится само, когда связь вернётся.',
+    'kernel_down.waiting': 'ждём… {{seconds}} с',
     'common.error': 'Ошибка',
     'common.saving': 'Сохранение…',
 

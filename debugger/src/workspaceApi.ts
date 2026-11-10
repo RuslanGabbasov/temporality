@@ -1130,7 +1130,7 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
       // call's error — report it to the availability tracker (the calm
       // «kernel is restarting» overlay) and keep the per-call error honest.
       if (response.status === 502 || response.status === 503 || response.status === 504) {
-        reportKernelTransportFailure()
+        reportKernelTransportFailure('gateway')
       }
       const body = await response.json().catch(() => ({}))
       throw new ApiError(response.status, body)
@@ -1141,11 +1141,12 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
     if (timedOut && !(e instanceof ApiError)) {
       throw new ApiError(408, { error: `request timed out after ${Math.round(timeoutMs / 1000)}s` })
     }
-    // Network-level refusal (fetch TypeError): during a kernel restart
-    // every call lands here — surface it to the availability tracker so the
-    // overlay explains itself instead of N raw «Failed to fetch» banners.
+    // Network-level refusal (fetch TypeError): no HTTP answer at all — the
+    // server is unreachable (down network/VPN), a different story from a
+    // kernel restart. Surface it to the availability tracker so the overlay
+    // explains itself instead of N raw «Failed to fetch» banners.
     if (!(e instanceof ApiError)) {
-      reportKernelTransportFailure()
+      reportKernelTransportFailure('unreachable')
     }
     throw e
   } finally {

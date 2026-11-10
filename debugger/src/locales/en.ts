@@ -2109,7 +2109,9 @@ export const en: Record<string, string> = {
     'common.loading': 'Loading…',
     'kernel_down.title': 'The agent kernel is restarting',
     'kernel_down.body': 'This is routine — a deploy or restart is in progress. Your data is safe; running agents continue in the background. The page will come back by itself.',
-    'kernel_down.waiting': 'waiting for the kernel… {{seconds}}s',
+    'kernel_down.unreachable_title': 'No connection to the server',
+    'kernel_down.unreachable_body': 'The page cannot reach the server — check your network or VPN. Nothing is lost; everything continues by itself once the connection is back.',
+    'kernel_down.waiting': 'waiting… {{seconds}}s',
     'common.error': 'Error',
     'common.saving': 'Saving…',
 
