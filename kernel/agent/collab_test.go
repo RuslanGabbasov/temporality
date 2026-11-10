@@ -240,6 +240,48 @@ func TestAgentContinuePrompt(t *testing.T) {
 	}
 }
 
+// The late-answer follow-up is woken purely by its prompt: it must say WHY
+// it runs (the predecessor died waiting), carry the answer itself, and
+// forbid re-asking the resolved question — otherwise the successor restarts
+// the very conversation that orphaned this answer.
+func TestAgentLateReplyPrompt(t *testing.T) {
+	msg := AgentMessage{RequestID: "req-8f993c", FromRunID: "run-lead/plan/01-fix", FromAgentID: "lead-agent", FromTaskID: "task-42", Payload: `{"q":1}`}
+	prompt := agentLateReplyPrompt(msg, `{"diagnosis":"flapping","action":"fix"}`)
+	for _, want := range []string{"run-lead/plan/01-fix", "task-42", "lead-agent", "req-8f993c", `{"diagnosis":"flapping","action":"fix"}`, "finished before the answer arrived", "Do not re-ask"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("late-reply prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+// The channel notice is for the HUMAN who started the chain: it must say why
+// an agent-to-agent answer is in their channels, what happens next, and mark
+// the payload as agent-addressed so its instructions do not read as orders.
+func TestLateReplyNoticeText(t *testing.T) {
+	msg := AgentMessage{RequestID: "req-8f993c", FromRunID: "run-lead/plan/01-fix", FromAgentID: "lead-agent", Payload: `{"attempts":[]}`}
+	notice := lateReplyNoticeText(msg, "req-8f993c", `{"attempts":[]}`, "run-lead/plan/01-fix/late/01")
+	for _, want := range []string{"req-8f993c", "run-lead/plan/01-fix", "run-lead/plan/01-fix/late/01", "Запущен наследник", "адресованы агентам", `{"attempts":[]}`} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("notice missing %q:\n%s", want, notice)
+		}
+	}
+	// Without a spawned follow-up the notice must say the answer is FYI only.
+	quiet := lateReplyNoticeText(msg, "req-8f993c", `{"attempts":[]}`, "")
+	if !strings.Contains(quiet, "Наследник не запускался") || strings.Contains(quiet, "/late/01") {
+		t.Fatalf("no-followup notice must not mention a follow-up:\n%s", quiet)
+	}
+}
+
+func TestCapLabel(t *testing.T) {
+	if got := capLabel("short", 40); got != "short" {
+		t.Fatalf("short label untouched: %q", got)
+	}
+	long := strings.Repeat("x", 60)
+	if got := capLabel(long, 40); len([]rune(got)) != 40 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("long label capped with ellipsis: %q", got)
+	}
+}
+
 func TestCollabToolsVersionFiltered(t *testing.T) {
 	tools := KernelTools()
 	all := withoutCollabTools(tools)

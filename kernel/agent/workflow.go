@@ -192,6 +192,14 @@ type RunInput struct {
 	// that earlier run's id. The child's final completion message IS the
 	// reply — delivered to the requester and to the starter's channels.
 	ContinueOf string `json:"continue_of,omitempty"`
+	// LateReplyDepth counts how many late-answer follow-up generations this
+	// run is away from its original ancestor. Original runs carry 0; a
+	// follow-up spawned because a late ask_agent answer outlived its asker
+	// carries parent+1. The ask_agent tool stamps this depth into every ask
+	// it sends, and the late-answer branch on the answering side refuses to
+	// spawn past the kernel-wide cap — the single structural guarantee that
+	// orphaned answers cannot recurse forever.
+	LateReplyDepth int `json:"late_reply_depth,omitempty"`
 	// Policy-derived constraints (docs/org-structure.md §24): resolved from the
 	// org position at run start and enforced here, in the execution model.
 	RequireToolApproval bool `json:"require_tool_approval,omitempty"` // consequential tools need approval
@@ -508,6 +516,15 @@ type AgentMessage struct {
 	// recipient answers the same way either way.
 	Mode   string `json:"mode"`
 	SentAt string `json:"sent_at"`
+	// LateReplyDepth is the asker's own late-reply generation at ask time
+	// (RunInput.LateReplyDepth, stamped by the ask_agent tool). The answering
+	// side reads it when the reply outlives the asker: a follow-up may spawn
+	// only while the asker's generation stays under the kernel-wide cap.
+	LateReplyDepth int `json:"late_reply_depth,omitempty"`
+	// FromTaskID is the asker's task — the late-answer follow-up attaches to
+	// it (not to the replier's task), so the successor lands in the same
+	// task/conversation context as the run it succeeds.
+	FromTaskID string `json:"from_task_id,omitempty"`
 }
 
 type AgentReply struct {
@@ -550,6 +567,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// admission verdict before their first model call and queue (deterministic
 	// sleeps, outside any activity timeout) while the host is at capacity.
 	modelGate := workflow.GetVersion(ctx, "model-gate", workflow.DefaultVersion, 1)
+	// Late-answer follow-ups (agent collaboration §4, orphaned replies):
+	// version 1 lets the answer_agent branch coalesce onto or spawn a bounded
+	// follow-up run of the asker's agent when the asker finished before the
+	// answer arrived. Old histories replay the version-0 path (notify only).
+	lateFollowups := workflow.GetVersion(ctx, "late-reply-followups", workflow.DefaultVersion, 1)
 	// Context compaction (docs/context-compaction.md): version 1 turns on the
 	// state-card rebuild of the conversation when the request outgrows the
 	// compaction budget. A pre-gate history must replay without the extra
@@ -2442,7 +2464,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						toolResult.Content = "The ask was not delivered: " + detail + ". Check get_collaborators for currently available collaborators."
 						toolBlocked = true
 					} else {
-						message := AgentMessage{RequestID: requestID, FromRunID: input.RunID, FromAgentID: input.AgentID, FromRole: input.Role, Type: askType, Payload: payload, Mode: mode, SentAt: workflow.Now(ctx).UTC().Format(time.RFC3339)}
+						message := AgentMessage{RequestID: requestID, FromRunID: input.RunID, FromAgentID: input.AgentID, FromRole: input.Role, Type: askType, Payload: payload, Mode: mode, SentAt: workflow.Now(ctx).UTC().Format(time.RFC3339), LateReplyDepth: input.LateReplyDepth, FromTaskID: input.TaskID}
 						// A completed delegation is not automatically addressable, but the
 						// model DOES support resuming it: a finished collaborator gets a
 						// short follow-up run that answers and finishes, instead of a refusal.
@@ -2630,12 +2652,62 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					// continuations that re-answer the same ask for days.
 					if signalErr != nil {
 						// The asker finished before the answer: the reply is already
-						// journaled (agent.replied), and the HUMAN still gets it — the
-						// answer rides their channels (this is the case the user hit:
-						// the chain finished the work a day later, the asker was long
-						// gone, and nobody ever learned the outcome).
-						_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: fmt.Sprintf("The answer to agent request %s (from %s):\n%s", requestID, original.FromRunID, replyPayload)}).Get(ctx, nil)
-						toolResult.Content = fmt.Sprintf("The answer to %s was recorded and sent to the requester's channels, but the asking run %s already finished — it could not receive the signal.", requestID, original.FromRunID)
+						// journaled (agent.replied). The answer must never vanish with
+						// the chain that asked for it, so — in order: journal the
+						// orphaning, coalesce onto a running late-answer follow-up of
+						// the asker, spawn one if the generation cap allows, and
+						// always notify the human starter.
+						if err := emit(activityCtx, state, "agent.reply_orphaned", map[string]any{"request_id": requestID, "to_run": original.FromRunID, "depth": original.LateReplyDepth}); err != nil {
+							return result, err
+						}
+						followupID := original.FromRunID + "/late/01"
+						followupAlive := workflow.SignalExternalWorkflow(ctx, WorkflowID(input.SourceID, input.Project, followupID), "", AgentReplySignal, reply).Get(ctx, nil) == nil
+						spawned := ""
+						var maxDepth int
+						_ = workflow.ExecuteActivity(noticeCtx, ActivityLateReplyMaxDepth).Get(ctx, &maxDepth)
+						// Depth guard: the asker's generation must stay under the
+						// kernel cap, and a follow-up never resurrects itself. Within
+						// the cap the follow-up is a full run — normal turns,
+						// delegations, asks to live agents; the generation counter is
+						// the one structural guarantee against endless loops.
+						if lateFollowups == 1 && !followupAlive && original.LateReplyDepth < maxDepth && original.FromRunID != input.RunID {
+							newDepth := original.LateReplyDepth + 1
+							askerAgent := original.FromAgentID
+							if askerAgent == "" {
+								askerAgent = original.FromRunID
+							}
+							taskID := original.FromTaskID
+							if taskID == "" {
+								taskID = input.TaskID
+							}
+							resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+							var followInput RunInput
+							resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: askerAgent, RunID: followupID, TaskID: taskID, Prompt: agentLateReplyPrompt(original, replyPayload), ActorID: input.ActorID, DelegationDepth: MaxDelegationDepth, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion}).Get(ctx, &followInput)
+							if resolveErr == nil {
+								followInput.ParentRunID = original.FromRunID
+								followInput.TeamRootRunID = input.TeamRootRunID
+								followInput.SourceID = input.SourceID
+								followInput.ContinueOf = original.FromRunID
+								followInput.LateReplyDepth = newDepth
+								followInput.Title = fmt.Sprintf("Наследник %s: поздний ответ %s", capLabel(original.FromRunID, 40), requestID)
+								childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, followupID), ParentClosePolicy: enums.PARENT_CLOSE_POLICY_ABANDON})
+								childFuture := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", followInput)
+								if startErr := childFuture.GetChildWorkflowExecution().Get(ctx, nil); startErr == nil {
+									spawned = followupID
+									if err := emit(activityCtx, state, "agent.followup_started", map[string]any{"request_id": requestID, "source_run": original.FromRunID, "followup_run": followupID, "depth": newDepth, "agent": askerAgent}); err != nil {
+										return result, err
+									}
+								}
+							}
+						}
+						_ = workflow.ExecuteActivity(noticeCtx, ActivityNotifyActorText, NotifyActorTextInput{ActorID: input.ActorID, Text: lateReplyNoticeText(original, requestID, replyPayload, spawned)}).Get(ctx, nil)
+						if spawned != "" {
+							toolResult.Content = fmt.Sprintf("The asking run %s had already finished, so the answer could not be signaled to it. A follow-up run %s of the same agent now carries the answer (late-reply generation %d of %d; it finishes with its own completion message, which reaches the starter's channels). The starter was notified.", original.FromRunID, spawned, original.LateReplyDepth+1, maxDepth)
+						} else if followupAlive {
+							toolResult.Content = fmt.Sprintf("The asking run %s had already finished; the answer was delivered to its running follow-up %s instead. The starter was notified.", original.FromRunID, followupID)
+						} else {
+							toolResult.Content = fmt.Sprintf("The answer to %s was recorded and sent to the requester's channels, but the asking run %s already finished — it could not receive the signal.", requestID, original.FromRunID)
+						}
 					} else {
 						toolResult.Content = fmt.Sprintf("Answer delivered to %s for request %s.", original.FromRunID, requestID)
 					}
@@ -4391,6 +4463,56 @@ func agentContinuePrompt(msg AgentMessage, targetRunID, taskID string) string {
 	}
 	b.WriteString("\n\nRequest:\n" + msg.Payload)
 	b.WriteString(fmt.Sprintf("\n\nIf the request needs facts from your earlier work, inspect the workspace or your own trace (trace_read run_id=%s) instead of guessing. If it is out of scope for you, finish with a clear refusal as your answer.", targetRunID))
+	return b.String()
+}
+
+// capLabel truncates a run id for a human-facing title.
+func capLabel(s string, n int) string {
+	if len(s) > n {
+		return s[:n-1] + "…"
+	}
+	return s
+}
+
+// agentLateReplyPrompt is the successor prompt for a late-answer follow-up:
+// the run it succeeds asked a collaborator and died before the answer came;
+// the follow-up inherits the outcome. Full-budget run — the only thing it
+// must not do is lose the answer or re-ask the same question forever.
+func agentLateReplyPrompt(msg AgentMessage, replyPayload string) string {
+	from := msg.FromAgentID
+	if from == "" {
+		from = msg.FromRunID
+	}
+	task := msg.FromTaskID
+	if task == "" {
+		task = "(unknown)"
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("You are the successor of your own earlier run %s (task %s). That run asked a collaborating agent (%s) a question (request %s) and finished before the answer arrived — you are started now to receive it.", msg.FromRunID, task, from, msg.RequestID))
+	b.WriteString("\n\nDo what the successor should: take the answer into account, finish or consolidate the work it enables (record agreements in files/artifacts where they persist), notify the human if the outcome needs their attention, and FINISH with a completion message — it is delivered to the human who started the chain automatically.")
+	b.WriteString("\nDo not re-ask the same question the answer already resolves. If the answer makes the remaining work unnecessary, say exactly that and finish.")
+	b.WriteString("\n\nThe answer:\n" + replyPayload)
+	return b.String()
+}
+
+// lateReplyNoticeText is the human-facing channel notice for an orphaned
+// ask_agent answer. The payload is agent-to-agent work product (its
+// instructions address agents, not the human) — the notice says why it is
+// in the human's channels and what was done with it.
+func lateReplyNoticeText(msg AgentMessage, requestID, replyPayload, followupRunID string) string {
+	from := msg.FromAgentID
+	if from == "" {
+		from = msg.FromRunID
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Поздний ответ на межагентный запрос %s: запрашивающий ран %s уже завершился, доставить ответ ему некому — вы запускали эту цепочку, поэтому получаете результат.", requestID, capLabel(msg.FromRunID, 60)))
+	if followupRunID != "" {
+		b.WriteString(fmt.Sprintf("\nЗапущен наследник %s (агент %s): он примет ответ и продолжит работу; финальное сообщение придёт вам сюда.", capLabel(followupRunID, 60), from))
+	} else {
+		b.WriteString("\nНаследник не запускался — ответ ниже только для вашей информации.")
+	}
+	b.WriteString("\nНиже — рабочий payload агента; инструкции в нём адресованы агентам, не вам.")
+	b.WriteString("\n\n" + replyPayload)
 	return b.String()
 }
 

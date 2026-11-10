@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 )
 
@@ -21,6 +23,11 @@ const (
 	// ActivityNotifyActorText delivers one plain text to the actor's enabled
 	// channels (no inbox row, no answer round-trip).
 	ActivityNotifyActorText = "kernel.notify_actor_text"
+	// ActivityLateReplyMaxDepth reads KERNEL_LATE_REPLY_MAX_DEPTH — the cap on
+	// late-answer follow-up generations (see RunInput.LateReplyDepth). An
+	// activity, not workflow env access: the value lands in the run history
+	// once, keeping replay deterministic.
+	ActivityLateReplyMaxDepth = "kernel.late_reply_max_depth"
 )
 
 // ModelGateVerdictResult: WaitSeconds == 0 admits the run; otherwise it is
@@ -122,6 +129,26 @@ func (a *Activities) NotifyActorText(ctx context.Context, input NotifyActorTextI
 		_ = driver.SendText(ctx, a.HTTP, settings.Channels[channel.Type], channel.Address, OutboundText{Body: text})
 	}
 	return nil
+}
+
+// LateReplyMaxDepth resolves the cap on late-answer follow-up generations
+// (RunInput.LateReplyDepth): how many times a chain may spawn a successor for
+// an ask_agent answer that outlived its asker. KERNEL_LATE_REPLY_MAX_DEPTH,
+// default 3; 0 disables follow-ups (late answers only ride the starter's
+// channels). Resolved through an activity, never in workflow code: the value
+// is recorded once in history, so replays stay deterministic even if the env
+// changes between runs.
+func (a *Activities) LateReplyMaxDepth(ctx context.Context) (int, error) {
+	const fallback = 3
+	raw := strings.TrimSpace(os.Getenv("KERNEL_LATE_REPLY_MAX_DEPTH"))
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		return fallback, nil
+	}
+	return v, nil
 }
 
 // queueNoticeText renders the human-facing queue line. Position 1 reads as

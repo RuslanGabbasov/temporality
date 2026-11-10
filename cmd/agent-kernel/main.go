@@ -686,6 +686,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.ModelGateVerdict, activity.RegisterOptions{Name: agent.ActivityModelGateVerdict})
 	temporalWorker.RegisterActivityWithOptions(activities.ModelGateBudget, activity.RegisterOptions{Name: agent.ActivityModelGateBudget})
 	temporalWorker.RegisterActivityWithOptions(activities.NotifyActorText, activity.RegisterOptions{Name: agent.ActivityNotifyActorText})
+	temporalWorker.RegisterActivityWithOptions(activities.LateReplyMaxDepth, activity.RegisterOptions{Name: agent.ActivityLateReplyMaxDepth})
 	temporalWorker.RegisterActivityWithOptions(activities.GenerateTitle, activity.RegisterOptions{Name: agent.ActivityGenerateTitle})
 	temporalWorker.RegisterActivityWithOptions(activities.CompactContext, activity.RegisterOptions{Name: agent.ActivityCompactContext})
 	temporalWorker.RegisterActivityWithOptions(activities.ExtractKnowledge, activity.RegisterOptions{Name: agent.ActivityExtractKnowledge})
