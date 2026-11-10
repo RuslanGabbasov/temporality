@@ -12,6 +12,7 @@ import {
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, ChevronRight, ChevronDown, Building, Enterprise } from '@carbon/icons-react'
 import { workspaceApi, type OrgUnit, type UnitResources, type OrgUnitKind, type Policy, type OrgUnitRoleGrant, type ExecutionIdentity, type User } from './workspaceApi'
+import { ListSuggestInput, type SuggestOption } from './ListSuggestInput'
 import { useT } from './i18n'
 import { whoami } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -32,9 +33,6 @@ function kindLabel(t: (k: string, v?: Record<string, string>) => string, kind: s
 }
 
 type Node = { unit: OrgUnit; children: Node[] }
-
-const splitList = (raw: string): string[] =>
-  raw.split(',').map((x) => x.trim()).filter(Boolean)
 
 const optionalNumber = (raw: string): number | undefined => {
   const n = Number(raw.trim())
@@ -98,39 +96,40 @@ export function identitySummaryTags(i: ExecutionIdentity, t: (k: string, v?: Rec
   ]
 }
 
-// Identity dialog form: allowed-lists are edited as comma-separated strings;
-// the store turns empty lists back into "*" ("any") on save.
+// Identity dialog form: the allowed-lists are chip inputs backed by live
+// option lists (agents, MCP servers, providers, projects, users) loaded when
+// the dialog opens; the store turns empty lists back into "*" ("any") on save.
 type IdentityForm = {
   name: string
   description: string
   org_unit_id: string
-  allowed_agents: string
-  allowed_mcp: string
-  allowed_providers: string
-  allowed_projects: string
-  human_targets: string
+  allowed_agents: string[]
+  allowed_mcp: string[]
+  allowed_providers: string[]
+  allowed_projects: string[]
+  human_targets: string[]
 }
 
 const emptyIdentityForm = (): IdentityForm => ({
   name: '', description: '', org_unit_id: '',
-  allowed_agents: '', allowed_mcp: '', allowed_providers: '',
-  allowed_projects: '', human_targets: '',
+  allowed_agents: [], allowed_mcp: [], allowed_providers: [],
+  allowed_projects: [], human_targets: [],
 })
 
 // "*" is hidden from the form: an empty field means the same thing and
 // round-trips back to ["*"] server-side. Mixing "*" with concrete entries is
 // redundant (allowsAny treats "*" as allow-all), so dropping it is neutral.
-const joinList = (list?: string[] | null) => (list ?? []).filter((x) => x !== '*').join(', ')
+const concreteList = (list?: string[] | null) => (list ?? []).filter((x) => x !== '*')
 
 const identityFormOf = (i: ExecutionIdentity): IdentityForm => ({
   name: i.name,
   description: i.description ?? '',
   org_unit_id: i.org_unit_id ?? '',
-  allowed_agents: joinList(i.allowed_agents),
-  allowed_mcp: joinList(i.allowed_mcp),
-  allowed_providers: joinList(i.allowed_providers),
-  allowed_projects: joinList(i.allowed_projects),
-  human_targets: joinList(i.human_targets),
+  allowed_agents: concreteList(i.allowed_agents),
+  allowed_mcp: concreteList(i.allowed_mcp),
+  allowed_providers: concreteList(i.allowed_providers),
+  allowed_projects: concreteList(i.allowed_projects),
+  human_targets: concreteList(i.human_targets),
 })
 
 function buildTree(units: OrgUnit[]): Node[] {
@@ -144,6 +143,18 @@ function buildTree(units: OrgUnit[]): Node[] {
   }
   return roots
 }
+
+// Live option lists for the identity dialog's autocomplete: agents, MCP
+// servers, providers and projects, fetched once per dialog open (cached in
+// state). Users are already in page state. Every source degrades to empty —
+// the input stays usable as free text even when a list fetch fails.
+interface IdentityOptions {
+  agents: SuggestOption[]
+  mcp: SuggestOption[]
+  providers: SuggestOption[]
+  projects: SuggestOption[]
+}
+const EMPTY_IDENTITY_OPTIONS: IdentityOptions = { agents: [], mcp: [], providers: [], projects: [] }
 
 export default function Org() {
   const t = useT()
@@ -192,6 +203,7 @@ export default function Org() {
   const [identityDialogOpen, setIdentityDialogOpen] = useState(false)
   const [identityForm, setIdentityForm] = useState<IdentityForm>(emptyIdentityForm())
   const [deletingIdentity, setDeletingIdentity] = useState<ExecutionIdentity | null>(null)
+  const [identityOptions, setIdentityOptions] = useState<IdentityOptions>(EMPTY_IDENTITY_OPTIONS)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -352,16 +364,41 @@ export default function Org() {
     finally { setLoading(false) }
   }
 
+  // The kernel checks identity allow-lists against exact ids, so the
+  // suggestions offer ids (value) labeled by human names. The raw id rides
+  // along as the secondary line — that is the actual stored value.
+  const loadIdentityOptions = () => {
+    void Promise.all([
+      workspaceApi.listAllAgents().catch(() => ({ agents: [] })) as Promise<{ agents: { id: string; name: string }[] }>,
+      workspaceApi.listMCPServers().catch(() => ({ servers: [] })) as Promise<{ servers: { id: string; name: string; type: string }[] }>,
+      workspaceApi.listProviders().catch(() => ({ providers: [] })) as Promise<{ providers: { id: string; name: string }[] }>,
+      workspaceApi.listProjects().catch(() => ({ projects: [] })) as Promise<{ projects: { id: string; name: string; archived?: boolean }[] }>,
+    ]).then(([ag, mcp, prov, proj]) => {
+      setIdentityOptions({
+        agents: ag.agents.map((a) => ({ value: a.id, label: a.name || a.id, sub: a.name && a.name !== a.id ? a.id : undefined })),
+        mcp: (mcp.servers ?? []).map((s) => ({ value: s.id, label: s.name || s.id, sub: s.type || undefined })),
+        providers: prov.providers.map((p) => ({ value: p.id, label: p.name || p.id })),
+        projects: proj.projects.filter((p) => !p.archived).map((p) => ({ value: p.id, label: p.name || p.id })),
+      })
+    }).catch(() => { /* options stay; free text still works */ })
+  }
+
+  // Human question recipients: users are already in page state — the ids are
+  // exactly what identityAllowsHuman checks against.
+  const humanOptions: SuggestOption[] = users.map((u) => ({ value: u.id, label: u.name || u.id, sub: u.email || undefined }))
+
   const openIdentityCreate = () => {
     setEditingIdentity(null)
     setIdentityForm({ ...emptyIdentityForm(), org_unit_id: selected ?? '' })
     setIdentityDialogOpen(true)
+    loadIdentityOptions()
   }
 
   const openIdentityEdit = (i: ExecutionIdentity) => {
     setEditingIdentity(i)
     setIdentityForm(identityFormOf(i))
     setIdentityDialogOpen(true)
+    loadIdentityOptions()
   }
 
   const saveIdentity = async () => {
@@ -373,11 +410,11 @@ export default function Org() {
       name,
       description: identityForm.description.trim(),
       org_unit_id: identityForm.org_unit_id,
-      allowed_agents: splitList(identityForm.allowed_agents),
-      allowed_mcp: splitList(identityForm.allowed_mcp),
-      allowed_providers: splitList(identityForm.allowed_providers),
-      allowed_projects: splitList(identityForm.allowed_projects),
-      human_targets: splitList(identityForm.human_targets),
+      allowed_agents: identityForm.allowed_agents,
+      allowed_mcp: identityForm.allowed_mcp,
+      allowed_providers: identityForm.allowed_providers,
+      allowed_projects: identityForm.allowed_projects,
+      human_targets: identityForm.human_targets,
     }
     setLoading(true); setError('')
     try {
@@ -957,41 +994,51 @@ export default function Org() {
                   <SelectItem key={unit.id} value={unit.id} text={`${'　'.repeat(depth)}${unit.name}`} />
                 ))}
               </Select>
-              <TextInput
-                id="identity-agents"
-                labelText={t('org.identity_agents_label') ?? 'Allowed agents'}
-                value={identityForm.allowed_agents}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, allowed_agents: e.target.value })}
-                placeholder={t('org.identity_agents_placeholder') ?? 'agent-a, agent-b — empty = any'}
-              />
-              <TextInput
-                id="identity-mcp"
-                labelText={t('org.identity_mcp_label') ?? 'Allowed MCP servers'}
-                value={identityForm.allowed_mcp}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, allowed_mcp: e.target.value })}
-                placeholder={t('org.identity_mcp_placeholder') ?? 'server-a, server-b — empty = any'}
-              />
-              <TextInput
-                id="identity-providers"
-                labelText={t('org.identity_providers_label') ?? 'Allowed providers'}
-                value={identityForm.allowed_providers}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, allowed_providers: e.target.value })}
-                placeholder={t('org.identity_providers_placeholder') ?? 'provider-a, provider-b — empty = any'}
-              />
-              <TextInput
-                id="identity-projects"
-                labelText={t('org.identity_projects_label') ?? 'Allowed projects'}
-                value={identityForm.allowed_projects}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, allowed_projects: e.target.value })}
-                placeholder={t('org.identity_projects_placeholder') ?? 'project-a, project-b — empty = any'}
-              />
-              <TextInput
-                id="identity-targets"
-                labelText={t('org.identity_targets_label') ?? 'Human question recipients'}
-                value={identityForm.human_targets}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, human_targets: e.target.value })}
-                placeholder={t('org.identity_targets_placeholder') ?? 'user-a, user-b — empty = anyone'}
-              />
+              <div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('org.identity_agents_label') ?? 'Allowed agents'}</div>
+                <ListSuggestInput
+                  value={identityForm.allowed_agents}
+                  onChange={(next) => setIdentityForm({ ...identityForm, allowed_agents: next })}
+                  options={identityOptions.agents}
+                  placeholder={t('org.identity_agents_placeholder') ?? 'pick from the list or type an id — empty = any'}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('org.identity_mcp_label') ?? 'Allowed MCP servers'}</div>
+                <ListSuggestInput
+                  value={identityForm.allowed_mcp}
+                  onChange={(next) => setIdentityForm({ ...identityForm, allowed_mcp: next })}
+                  options={identityOptions.mcp}
+                  placeholder={t('org.identity_mcp_placeholder') ?? 'pick from the list or type an id — empty = any'}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('org.identity_providers_label') ?? 'Allowed providers'}</div>
+                <ListSuggestInput
+                  value={identityForm.allowed_providers}
+                  onChange={(next) => setIdentityForm({ ...identityForm, allowed_providers: next })}
+                  options={identityOptions.providers}
+                  placeholder={t('org.identity_providers_placeholder') ?? 'pick from the list or type an id — empty = any'}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('org.identity_projects_label') ?? 'Allowed projects'}</div>
+                <ListSuggestInput
+                  value={identityForm.allowed_projects}
+                  onChange={(next) => setIdentityForm({ ...identityForm, allowed_projects: next })}
+                  options={identityOptions.projects}
+                  placeholder={t('org.identity_projects_placeholder') ?? 'pick from the list or type an id — empty = any'}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('org.identity_targets_label') ?? 'Human question recipients'}</div>
+                <ListSuggestInput
+                  value={identityForm.human_targets}
+                  onChange={(next) => setIdentityForm({ ...identityForm, human_targets: next })}
+                  options={humanOptions}
+                  placeholder={t('org.identity_targets_placeholder') ?? 'pick people — empty = anyone'}
+                />
+              </div>
               <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setEditingIdentity(null); setIdentityDialogOpen(false); setIdentityForm(emptyIdentityForm()) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void saveIdentity()} disabled={!identityForm.name.trim()}>{editingIdentity ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
