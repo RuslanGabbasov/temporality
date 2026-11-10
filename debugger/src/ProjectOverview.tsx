@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Heading, InlineNotification, Tag, Tile, Button, Stack, TextInput, TextArea, ComboBox } from '@carbon/react'
+import { Heading, InlineNotification, Tag, Tile, Button, Stack, TextInput, TextArea } from '@carbon/react'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
 import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, type ProjectBudget, type SagaRollup, type TaskRollup } from './kernelApi'
+import { FloatingComboBox } from './FloatingComboBox'
 import ProjectRequired from './ProjectRequired'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -28,7 +29,9 @@ function SagaComboBox({ id, labelText, sagas, exclude, value, onChange }: {
     .filter((s) => !exclude?.includes(s.saga_id))
     .map((s) => ({ id: s.saga_id, text: `${s.title || s.saga_id} (${s.task_ids.length})` }))
   return (
-    <ComboBox
+    // FloatingComboBox: the open menu escapes the modal's clipping context
+    // (see the component doc) instead of spilling past the dialog border.
+    <FloatingComboBox
       id={id}
       size="sm"
       items={items}
