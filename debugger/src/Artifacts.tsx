@@ -18,7 +18,7 @@ import { MarkdownWithPresentations } from './PresentationView'
 import { whoami, canReconcile } from './kernelApi'
 import { useT } from './i18n'
 import { shortTime } from './eventSummary'
-import { TimeHint } from './timeHint'
+import { TimeHint, fullDateTime, briefDateTime } from './timeHint'
 import ListFilter from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -695,13 +695,19 @@ export default function Artifacts({ project }: { project?: string }) {
                       <span>{a.id}{a.version && a.version > 1 ? ` · v${a.version}` : ''}</span>
                       <span>{humanArtifactSize(a.size_bytes)}</span>
                       {(references[a.id] ?? []).length > 0 && <span title={(references[a.id] ?? []).join(', ')}>🔗 {(references[a.id] ?? []).length}</span>}
+                      {(a.tags ?? []).length === 0 && (
+                        // No tag row below → the modification time rides at the
+                        // right end of this line, still the row's bottom corner.
+                        <TimeHint value={a.updated_at} style={{ marginLeft: 'auto', flexShrink: 0 }}>{briefDateTime(a.updated_at)}</TimeHint>
+                      )}
                     </div>
                     {(a.tags ?? []).length > 0 && (
-                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem', alignItems: 'center' }}>
                         {(a.tags ?? []).slice(0, 4).map((tag) => (
                           <span key={tag} style={{ fontSize: '0.66rem', padding: '0.05rem 0.35rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.14))', color: 'var(--tm-text-3)' }}>#{tag}</span>
                         ))}
                         {(a.tags ?? []).length > 4 && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>+{(a.tags ?? []).length - 4}</span>}
+                        <TimeHint value={a.updated_at} style={{ marginLeft: 'auto', flexShrink: 0 }}>{briefDateTime(a.updated_at)}</TimeHint>
                       </div>
                     )}
                   </div>
@@ -784,6 +790,7 @@ export default function Artifacts({ project }: { project?: string }) {
                     </div>
                     <p style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
                       {selected.id}{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
+                      {' · '}{t('artifacts.updated_prefix') ?? 'Изменён'}: {fullDateTime(selected.updated_at)}
                     </p>
                   </div>
 				<Stack orientation="horizontal" gap={2}>

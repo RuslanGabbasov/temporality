@@ -1821,6 +1821,7 @@ export const en: Record<string, string> = {
     'artifacts.kind_reference': 'reference — regulation, instruction, checklist',
     'artifacts.kind_work_option': 'work — saga work product (requirement, spec, report)',
     'artifacts.origin_prefix': 'Created by',
+    'artifacts.updated_prefix': 'Modified',
     'artifacts.origin_agent': 'agent{{run}}',
     'artifacts.origin_human': 'human{{user}}',
     'artifacts.saga_prefix': 'saga',

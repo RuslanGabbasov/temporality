@@ -1821,6 +1821,7 @@ export const ru: Record<string, string> = {
     'artifacts.kind_reference': 'reference — регламент, инструкция, чек-лист',
     'artifacts.kind_work_option': 'work — рабочий продукт саги (требование, спецификация, отчёт)',
     'artifacts.origin_prefix': 'Создатель',
+    'artifacts.updated_prefix': 'Изменён',
     'artifacts.origin_agent': 'агент{{run}}',
     'artifacts.origin_human': 'человек{{user}}',
     'artifacts.saga_prefix': 'сага',
