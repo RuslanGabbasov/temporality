@@ -713,6 +713,13 @@ func versionMetricsPayload(ctx context.Context, ws evolutionStore, a workspace.A
 	}, nil
 }
 
+// checkCaseMaxTokens caps one control-example generation. Patterns only
+// inspect the answer head, and long generations on slow models turn into
+// timeout tails — but a cap too low turns a legitimately verbose answer
+// into a truncated one and the case fails on the missing tail. 8k is the
+// compromise (the WithMaxTokens contract: checked-in-head answers).
+const checkCaseMaxTokens = 8192
+
 // agentProposalDraft is the model's answer to a free-text problem report.
 type agentProposalDraft struct {
 	Problem       string   `json:"problem"`
@@ -873,7 +880,7 @@ func runCheckCases(ctx context.Context, model *llm.Client, system string, cases 
 		answer, err := model.Complete(callCtx, []llm.Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: c.Input},
-		}, nil, llm.WithMaxTokens(4096))
+		}, nil, llm.WithMaxTokens(checkCaseMaxTokens))
 		cancel()
 		if err != nil {
 			failed++

@@ -59,8 +59,10 @@ type evaluationCaseResult struct {
 }
 
 // evalCaseMaxTokens caps one case's generation. Patterns only inspect the
-// answer head, and long generations on slow models turn into timeout tails.
-const evalCaseMaxTokens = 4096
+// answer head, and long generations on slow models turn into timeout tails —
+// but too low a cap truncates a legitimately verbose answer and the case
+// fails on the missing tail. 8k is the compromise.
+const evalCaseMaxTokens = 8192
 
 // classifyModelError maps a case-model failure to its machine cause:
 // deadlines (case context, client timeout) are model_timeout, everything
