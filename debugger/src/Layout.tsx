@@ -342,7 +342,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
     return () => window.clearInterval(timer)
   }, [project])
 
-  const loadProjects = useCallback(async (): Promise<Project[]> => {
+  const loadProjects = useCallback(async (): Promise<Project[] | null> => {
     try {
       const resp = await fetch('/kernel-api/v1/workspace/projects', { headers: { ...authHeaders() } })
       if (resp.ok) {
@@ -381,10 +381,26 @@ export default function Layout({ children, activePage }: LayoutProps) {
     } catch (e) {
       setProjectsError(e instanceof Error && e.message ? e.message : 'network error')
     }
-    return []
+    // null marks a FAILED load — distinct from a legitimately empty list, so
+    // the caller never mistakes «could not ask» for «there are none».
+    return null
   }, [])
 
-  useEffect(() => { void loadProjects().then(() => setProjectsLoaded(true)) }, [loadProjects])
+  // A failed load must NOT count as loaded: projectsLoaded gates the
+  // onboarding wizard, and flipping it on an error showed the first-run
+  // wizard to an existing install whose page happened to open mid-deploy.
+  useEffect(() => { void loadProjects().then((list) => { if (list) setProjectsLoaded(true) }) }, [loadProjects])
+
+  // Self-healing: while the project list stands in its error state, retry on
+  // a slow poll; the first success clears the banner and refills the
+  // selector. A tab opened mid-deploy (or left open through one) heals by
+  // itself — it never had to know the difference between «no projects» and
+  // «could not ask».
+  useEffect(() => {
+    if (!projectsError) return
+    const timer = window.setInterval(() => { void loadProjects() }, 5000)
+    return () => window.clearInterval(timer)
+  }, [projectsError, loadProjects])
   // Client-side navigation (pushState + popstate, e.g. the Inbox opening an
   // intake run) must update the project too: Layout's initializer runs once,
   // so without this sync the deep-linked page would query the wrong project.
@@ -1133,7 +1149,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
             // the global filter — the workspace/chat pages it opens next need
             // a concrete project (docs/activity-scoping.md §7).
             void loadProjects().then((list) => {
-              const real = list.find((p) => p.id !== INTAKE_PROJECT_ID)
+              const real = list?.find((p) => p.id !== INTAKE_PROJECT_ID)
               if (real) selectProject(real.id)
             })
           }} />}

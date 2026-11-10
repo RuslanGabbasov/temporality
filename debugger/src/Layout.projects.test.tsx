@@ -4,10 +4,16 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Layout from './Layout'
 import { I18nProvider } from './i18n'
+import { TOKEN_STORAGE_KEY } from './api'
+import { INTAKE_PROJECT_ID } from './kernelApi'
 
 // Incident 2026-10-21 (spec R3/F5): while the kernel API is unreachable, the
 // project selector must show a visible error with a Retry — not silently go
 // empty — and a successful retry must bring the list back.
+//
+// The onboarding guard (2026-11): a FAILED load must also not flip the
+// onboarding gate — a page opened mid-deploy saw the first-run wizard
+// instead of its workspace.
 
 const PROJECTS_URL = '/kernel-api/v1/workspace/projects'
 const PROJECTS = [{ id: 'alpha', name: 'Alpha', description: '' }]
@@ -57,7 +63,12 @@ beforeEach(() => {
         ? Promise.reject(new TypeError('NetworkError: failed to fetch'))
         : Promise.resolve(okJson({ projects: PROJECTS }))
     }
-    // Everything else Layout pokes at (whoami, agents, users, org units) is
+    if (url.endsWith('/v1/agent/whoami')) {
+      return kernelDown
+        ? Promise.reject(new TypeError('NetworkError: failed to fetch'))
+        : Promise.resolve(okJson({ subject: 'tester', role: 'admin', projects: ['alpha'] }))
+    }
+    // Everything else Layout pokes at (agents, users, org units) is
     // down in this scenario; those failures stay swallowed as before.
     return Promise.reject(new TypeError('kernel unreachable'))
   }))
@@ -95,5 +106,59 @@ describe('Layout project loading (incident 2026-10-21, spec R3)', () => {
     await act(async () => { selector!.click() })
     expect(document.body.textContent).toContain('Alpha')
     expect(document.body.textContent).toContain('All projects')
+  })
+})
+
+describe('Layout projects during a deploy (onboarding must not hijack a broken load)', () => {
+  beforeEach(() => {
+    // A logged-in user: without a token the boot splash hides the onboarding
+    // branch entirely and the test cannot see the bug it guards against.
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'test-token')
+  })
+
+  it('a failed initial load shows the error banner, not the first-run wizard', async () => {
+    await renderLayout()
+    // whoami raced through, projects hit the 502: an existing install must
+    // see the incident-R3 banner — never the welcome wizard.
+    expect(document.querySelector('.onboarding-overlay')).toBeNull()
+    expect(document.body.textContent).toContain('Failed to load projects')
+    expect(buttonWithText('Retry')).toBeTruthy()
+  })
+
+  it('while the error stands, projects reload on a slow poll and heal', async () => {
+    vi.useFakeTimers()
+    try {
+      await renderLayout()
+      expect(document.body.textContent).toContain('Failed to load projects')
+      const before = projectFetches
+
+      kernelDown = false
+      await act(async () => { await vi.advanceTimersByTimeAsync(5100) })
+
+      expect(projectFetches).toBeGreaterThan(before)
+      expect(document.body.textContent).not.toContain('Failed to load projects')
+      // The selector is back — open it to see the healed list.
+      const selector = buttons().find((b) => b.textContent?.includes('All projects'))
+      expect(selector).toBeTruthy()
+      await act(async () => { selector!.click() })
+      expect(document.body.textContent).toContain('Alpha')
+      expect(document.querySelector('.onboarding-overlay')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a genuinely fresh install (successful load, only intake) still gets the wizard', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: unknown) => {
+      const url = String(input)
+      if (url === PROJECTS_URL) return Promise.resolve(okJson({ projects: [{ id: INTAKE_PROJECT_ID, name: 'Intake', description: '' }] }))
+      if (url.endsWith('/v1/agent/whoami')) return Promise.resolve(okJson({ subject: 'tester', role: 'admin', projects: [] }))
+      return Promise.reject(new TypeError('kernel unreachable'))
+    }))
+
+    await renderLayout()
+    // The load SUCCEEDED with no real projects — this is a fresh install and
+    // the wizard legitimately owns the screen.
+    expect(document.querySelector('.onboarding-overlay')).toBeTruthy()
   })
 })
