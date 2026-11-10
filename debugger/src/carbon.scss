@@ -419,6 +419,10 @@ $css--font-face: false;
   color: var(--tm-text-3);
 }
 
+:root[data-theme="light"] .chat-stream-fragment {
+  color: var(--tm-text);
+}
+
 :root[data-theme="light"] .chat-stream-prefix {
   color: var(--tm-teal);
 }
@@ -1555,8 +1559,12 @@ button.header-nav-link {
 /* Intermediate model answers in the feed: same small mono font, softer than
  * tool lines, clamped to two lines with an ellipsis — readable breadcrumbs
  * of the run's progress, not a wall of text. */
+/* Intermediate model answers in the feed: these are the model's actual
+ * words — they read one step brighter than the tool-call noise around them
+ * (same small mono size, two-line clamp keeps the bubble compact). */
 .chat-stream-fragment {
-  font-weight: 200;
+  color: var(--tm-text);
+  font-weight: 500;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
