@@ -956,8 +956,8 @@ export const ru: Record<string, string> = {
     'runs.live.alive': 'стрим идёт',
     'runs.live.stalled': 'нет данных {{seconds}} с',
     'runs.live.waiting_first_token': 'ждём первый токен',
-    'runs.live.sse_down': 'канал токенов не подключился (транспорт, не модель)',
-    'runs.live.sse_reconnecting': 'канал токенов переподключается (попытка {{count}})',
+    'runs.live.sse_down': 'Ожидание подключения',
+    'runs.live.sse_reconnecting': 'Переподключение (попытка {{count}})',
 
     // Console output of run_command (v2-consolidated.md §6, DoD-5)
     'runs.console.tabs': 'Потоки вывода команды',

@@ -956,8 +956,8 @@ export const en: Record<string, string> = {
     'runs.live.alive': 'streaming',
     'runs.live.stalled': 'no data for {{seconds}}s',
     'runs.live.waiting_first_token': 'waiting for first token',
-    'runs.live.sse_down': 'token stream not connected (transport, not the model)',
-    'runs.live.sse_reconnecting': 'token stream reconnecting (attempt {{count}})',
+    'runs.live.sse_down': 'Waiting for connection',
+    'runs.live.sse_reconnecting': 'Reconnecting (attempt {{count}})',
 
     // Console output of run_command (v2-consolidated.md §6, DoD-5)
     'runs.console.tabs': 'Command output streams',
