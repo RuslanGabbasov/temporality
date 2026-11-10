@@ -181,8 +181,8 @@ v2.0 привязывает его к яру human_request / ask_human, факт
 <td>pull <code>getUpdates</code>, chat id</td>
 <td>да (личка)</td>
 <td>—</td>
-<td>текст</td>
-<td>inline keyboard (<code>Capabilities.Interactive</code>)</td>
+<td>inline keyboard (<code>Capabilities.Interactive</code>, callback <code>a:&lt;id&gt;:&lt;idx&gt;</code> + cancel; answerCallbackQuery; editMessageText «решён») + schema-формы HTML-виджетом (Bot API 10.4, §7.1) + rich-ответы + черновики</td>
+<td>TON-типы виджет-запросов (sign_data/sent_transaction) — логируются</td>
 </tr>
 <tr>
 <td>Slack (webhook)</td>
@@ -454,13 +454,46 @@ endpoint + политики таймаутов) — работает во все
 <li><strong>Этап C (готово):</strong> формы — <code>schema</code> в <code>ask_human</code>, хранение в
 <code>human_request</code>, серверная валидация значений, общий рендерер <code>HumanForm</code>
 в чате и на Runs, текстовая заглушка для каналов (§7).</li>
-<li><strong>Этап D:</strong> нативные кнопки там, где канал умеет: <code>Capabilities.Interactive</code>,
-telegram inline keyboard, slack Block Kit; текстовый фолбэк обязателен
-(docs/channels.md, фаза 3).</li>
-<li><strong>Этап E:</strong> расширения форм из v1.0 §3.2–3.4 по мере надобности: условные
-поля, многошаговость, динамические справочники, карточки сущностей.</li>
+<li><strong>Этап D (готово):</strong> нативные кнопки там, где канал умеет:
+<code>Capabilities.Interactive</code>; telegram inline keyboard — Options кнопками
+(токены <code>a:&lt;requestID&gt;:&lt;idx&gt;</code>, cancel <code>a:&lt;requestID&gt;:x</code> ≤64Б, иначе деградация
+в текст), press → тот же approval-путь, что текстовый ответ
+(kernel/agent/notify.go askButtons, cmd/agent-kernel handleCallback);
+answerCallbackQuery подтверждает нажатие, editMessageText гасит кнопки.</li>
+<li><strong>Этап E (готово, частично):</strong> schema-формы как HTML-виджеты в Telegram
+(§7.1 ниже) — расширение подмножества §3.2–3.4 по мере надобности.</li>
 <li><strong>Этап F:</strong> бэклог §9 по мере появления каналов и требований.</li>
 </ul>
+<h2 id="71-schema-формы-как-html-виджеты-telegram-bot-api-104"><a class="anchor" href="#71-schema-формы-как-html-виджеты-telegram-bot-api-104" aria-label="Section link">#</a>7.1. Schema-формы как HTML-виджеты (Telegram, Bot API 10.4)</h2><p>Schema-вопрос при доставке в telegram с <code>Capabilities.Widgets</code> рендерится
+<strong>HTML-виджетом прямо в чате</strong> (sendWidget): селекты/чекбоксы/числа вместо
+«текст + ссылка». Агенты не меняются: виджет — чистая функция над <code>schema</code> из
+<code>ask_human</code>, всё канало-специфичное живёт под контрактом.</p>
+<p>Слои («ядро не знает каналов, драйверы не знают продукта»):</p>
+<ul>
+<li><strong>ядро</strong> (<code>kernel/agent/widgetform.go</code>) — нейтральная <code>WidgetModel</code>
+(поля из подмножества §7, состояние, ошибки) и op-протокол: <code>set</code>/<code>submit</code>/
+<code>reset</code>, значения по индексу поля (ops ≤64Б), валидация — зеркало
+<code>workspace.ValidateFormValues</code>; ответ резолва — канонический JSON значений,
+тот же tool result, что у веб-формы;</li>
+<li><strong>драйвер</strong> (<code>kernel/agent/widgetrender.go</code>) — модель → HTML-виджет
+(≤32КБ raw / ≤4096Б zlib), кнопка хостед-формы рядом;</li>
+<li><strong>конвейер</strong>: доставка пинит сессию в <code>workspace_channel_widget</code>
+(миграция 0029, внутренний роут <code>POST /v1/workspace/channel-widgets</code>);
+входной луп обрабатывает <code>widget_query</code>: throttle 5/5с на отправителя →
+применить op к авторитетному состоянию → <code>answerWidgetQuery</code> (ack ≤15с) →
+<code>editMessageWidgetData</code> (перерисовка) → на submit — signal+закрытие+аудит
+через общий <code>resolveAsk</code> (cmd/agent-kernel/channelinbound.go).</li>
+</ul>
+<p>Деградации (решает ядро, агент не узнаёт): группа/старый сервер/модель &gt;1КБ →
+текст + хостед-форма; сессия истекла → «форм уже закрыт»; невалидный submit →
+ошибки полей уезжают в виджет, строка остаётся открытой. Ограничения prod:
+виджеты только в личных чатах, protect_content неизбежен, TON-типы запросов
+(sign_data/sent_transaction) логируются и ack-аются без кошельковой логики.</p>
+<p>Черновики генерации (<code>sendMessageDraft</code>): answer-watcher стримит накопленный
+<code>model.text_delta</code> как ephemeral-превью ответа (tail ≤1200 символов, стабильный
+draft_id на (чат, ран)); превью живёт ~30с и заменяется финальным
+<code>sendRichMessage</code>/<code>sendMessage</code>. can_stop выключен — остановка рана остаётся
+явным продуктовым действием.</p>
 <h2 id="11-критерии-приёмки"><a class="anchor" href="#11-критерии-приёмки" aria-label="Section link">#</a>11. Критерии приёмки</h2><ol>
 <li>Агент создаёт вопрос одним контрактом (<code>ask_human</code>), не зная канала.</li>
 <li>Вопрос, доставленный в любой канал, отвечает в любом другом (матчинг по

@@ -231,7 +231,7 @@ VerifyRequest (для push), курсор (для pull).</p>
 <td>telegram</td>
 <td>pull <code>getUpdates</code></td>
 <td>chat id (личка) = адрес</td>
-<td>offset-курсор персистить; лимит 4096; getFile</td>
+<td>offset-курсор персистить; лимит 4096 → tgformat рендерит и режет по частям; parse_mode=HTML с фолбэком на plain; Options → inline keyboard (callback <code>a:&lt;id&gt;:&lt;idx&gt;</code>, cancel <code>a:&lt;id&gt;:x</code>), answerCallbackQuery + editMessageText «решён»; schema-ask → HTML-виджет (Bot API 10.4 sendWidget, состояние в workspace_channel_widget, ops ≤64Б, ack ≤15с, throttle 5/5с); rich-ответы через sendRichMessage с фолбэком; черновики генерации sendMessageDraft в личке</td>
 </tr>
 <tr>
 <td>slack (webhook)</td>
@@ -318,11 +318,22 @@ web — без единой правки вне файла драйвера.</li
 <li>Рестарт кернела не теряет курсоры и не порождает дублей сообщений.</li>
 </ol>
 <h2 id="13-открытые-вопросы"><a class="anchor" href="#13-открытые-вопросы" aria-label="Section link">#</a>13. Открытые вопросы</h2><ul>
-<li>Разметка исходящих: markdown у нас, у каналов HTML (matrix custom
-org.matrix.custom.html, telegram HTML/MarkdownV2) — нужен renderer per
-driver; MVP остаётся plain text.</li>
+<li><del>Разметка исходящих: markdown у нас, у каналов HTML — нужен renderer per
+driver</del> <strong>решено</strong> (tgformat.go): общий goldmark-конвейер с матрицей,
+маппинг на подмножество Telegram-HTML (b/i/s/code/pre/a/blockquote),
+таблицы схлопываются в текст, длинные тела режутся по абзацам (лимит 4096);
+parse_mode=HTML с автоматическим фолбэком на plain при «can&#39;t parse
+entities». Матрица продолжает org.matrix.custom.html.</li>
 <li>Несколько ботов одного типа (два матрикс-аккаунта для разных юнитов) —
 настройки станут списком инстансов драйвера; пока один на тип.</li>
+<li>Клиентский мост HTML-виджетов (Bot API 10.4): серверная часть задокументирована
+в Bot API, клиентская поверхность виджета (как JS внутри виджета постит
+widget_query) — одна точка интеграции в widgetrender.go (<code>TelegramWidget.send</code>);
+уточнить по официальной документации виджетов при появлении.</li>
+<li>Черновики (sendMessageDraft) стримят накопленный текст из журнала рана
+(model.text_delta через answer-watcher); потоковый канал токенов
+реального времени (SSE-эндпоинт рана) — следующее уточнение, когда
+понадобится посимвольный стриминг.</li>
 <li>Rate limits и retry-политики отправки по каналам (у телеграма жёсткие) —
 общий бюджет попыток в ядре, паузы в драйвере.</li>
 <li>Voice/stickers: игнорируем или транскрибируем — вне скоупа, фиксируем в
