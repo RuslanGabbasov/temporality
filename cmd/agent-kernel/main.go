@@ -3794,6 +3794,13 @@ func main() {
 						done = true
 					}
 				}
+				// Boundary between the replayed recent past and live events: the
+				// chat freezes the answer block during catch-up and applies the
+				// settled text once this frame lands. Named SSE events unknown to
+				// a listener are ignored by EventSource — older clients keep the
+				// pre-marker behavior.
+				fmt.Fprintf(w, "event: stream.replayed\ndata: {\"count\":%d}\n\n", len(events))
+				flusher.Flush()
 				cursor = next
 			} else {
 				slog.Warn("stream tail fallback to full replay", "error", tErr.Error())

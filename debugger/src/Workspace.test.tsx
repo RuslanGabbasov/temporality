@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sendFileChip, formatStreamEvent, normalizeRunStatus, runTraceUrl, sortConversationsByActivity } from './Workspace'
+import { sendFileChip, formatStreamEvent, chatFragmentLine, normalizeRunStatus, runTraceUrl, sortConversationsByActivity } from './Workspace'
 import { pluralT } from './i18n'
 import { en } from './locales/en'
 import { ru } from './locales/ru'
@@ -129,6 +129,24 @@ describe('normalizeRunStatus', () => {
     expect(normalizeRunStatus('cancelled')).toBe('cancelled')
     expect(normalizeRunStatus('completed')).toBe('completed')
     expect(normalizeRunStatus(undefined)).toBe('')
+  })
+})
+
+describe('chatFragmentLine', () => {
+  it('marks intermediate answers as fragment lines; short elapsed gets no prefix', () => {
+    const line = chatFragmentLine(3, 'Checking the build status', ruT, 'ru')
+    expect(line.fragment).toBe(true)
+    expect(line.text).toBe('✎ Checking the build status')
+  })
+
+  it('prefixes long elapsed like the trace lines do', () => {
+    expect(chatFragmentLine(61, 'Промежуточный вывод', ruT, 'ru').text).toBe('+1м 1с ✎ Промежуточный вывод')
+  })
+
+  it('caps the text beyond what the two-line CSS clamp will ever show', () => {
+    const line = chatFragmentLine(undefined, 'x'.repeat(500), enT, 'en')
+    expect(line.text).toBe(`✎ ${'x'.repeat(237)}…`)
+    expect(line.fragment).toBe(true)
   })
 })
 

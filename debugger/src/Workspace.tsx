@@ -124,6 +124,14 @@ export interface ChatQuestion {
   error?: string
 }
 
+/** One line of the bubble's activity feed. Fragment lines carry an
+ * intermediate model answer — rendered softer than tool lines and clamped
+ * to two lines: the trace-style breadcrumbs of a multi-turn run. */
+interface ChatStreamLine {
+  text: string
+  fragment?: boolean
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -131,7 +139,7 @@ interface ChatMessage {
   timestamp: Date
   runId?: string
   status?: string
-  streamLines?: string[]
+  streamLines?: ChatStreamLine[]
   /** The run waits for a server slot (memory quota): it starts by itself, and
    *  the chat says so instead of spinning channel noise at the user. */
   queued?: boolean
@@ -191,6 +199,11 @@ function loadConversations(): Conversation[] {
         // Mid-run addenda ride the same JSON round-trip: their Date comes
         // back as an ISO string and must be revived before rendering.
         addenda: (m.addenda ?? []).map((a: any) => ({ ...a, at: new Date(a.at) })),
+        // streamLines gained the {text, fragment} shape mid-project; older
+        // localStorage copies store plain strings — revive both.
+        streamLines: Array.isArray(m.streamLines)
+          ? m.streamLines.map((l: any) => (typeof l === 'string' ? { text: l } : l))
+          : undefined,
       })),
     }))
   } catch { return [] }
@@ -338,14 +351,23 @@ export function sendFileChip(d: { tool?: unknown; arguments?: unknown }): { path
 
 /** One-line question preview for the activity feed — newlines squashed, so a
  * long ask stays a single status line like the other stream events. */
-function squashQuestion(text: string): string {
+function squashQuestion(text: string, cap = 100): string {
   const squashed = text.replace(/\s+/g, ' ').trim()
-  return squashed.length > 100 ? squashed.slice(0, 97) + '…' : squashed
+  return squashed.length > cap ? squashed.slice(0, cap - 3) + '…' : squashed
+}
+
+/** The activity-feed line for an intermediate model answer: elapsed prefix
+ * plus the turn's text, clamped to two lines in CSS with an ellipsis — the
+ * JS cap only bounds pathological cases before the string enters state. */
+export function chatFragmentLine(elapsedS: number | undefined, text: string, t: Translate, locale: string): ChatStreamLine {
+  void locale
+  const prefix = elapsedS !== undefined && elapsedS >= 5 ? `+${formatDuration(elapsedS * 1000, t)} ` : ''
+  return { text: prefix + t('chat.stream.fragment', { text: squashQuestion(text, 240) }), fragment: true }
 }
 
 /** Live-activity feed with capped height. Auto-scrolls to the newest line
  * unless the user has scrolled up to read earlier activity. */
-function ChatStreamLines({ lines }: { lines: string[] }) {
+function ChatStreamLines({ lines }: { lines: ChatStreamLine[] }) {
   const ref = useRef<HTMLDivElement>(null)
   const mounted = useRef(false)
   useEffect(() => {
@@ -359,8 +381,8 @@ function ChatStreamLines({ lines }: { lines: string[] }) {
   return (
     <div ref={ref} className="chat-activity-scroll">
       {lines.map((line, li) => (
-        <div key={li} className="chat-stream-line">
-          <span className="chat-stream-prefix">›</span>{line}
+        <div key={li} className={line.fragment ? 'chat-stream-line chat-stream-fragment' : 'chat-stream-line'}>
+          <span className="chat-stream-prefix">›</span>{line.text}
         </div>
       ))}
     </div>
@@ -937,7 +959,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const appendStreamLine = (convId: string, runId: string, line: string) => {
     setConversations((prev) => prev.map((c) => {
       if (c.id !== convId) return c
-      return { ...c, messages: c.messages.map((m) => m.runId === runId ? { ...m, streamLines: [...(m.streamLines ?? []), line] } : m) }
+      return { ...c, messages: c.messages.map((m) => m.runId === runId ? { ...m, streamLines: [...(m.streamLines ?? []), { text: line }] } : m) }
     }))
   }
 
@@ -952,7 +974,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     const streamQS = streamParams.toString()
     const es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/stream${streamQS ? `?${streamQS}` : ''}`)
     streamRef.current.set(convId, es)
-    const lines: string[] = []
+    const lines: ChatStreamLine[] = []
 
     // Coalesce stream-line updates: a reconnect burst (or a busy delegation)
     // lands dozens of events at once, and one setState per event turns the
@@ -965,8 +987,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       linesTimer = undefined
       updateMsg(convId, runId, { streamLines: [...lines] })
     }
-    const pushLine = (line: string) => {
-      lines.push(line)
+    const pushLine = (line: string | ChatStreamLine) => {
+      lines.push(typeof line === 'string' ? { text: line } : line)
       if (linesTimer === undefined) linesTimer = window.setTimeout(flushLines, 120)
     }
 
@@ -1008,6 +1030,43 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     let settledTurn = -1
     let settledText = ''
     let settledReasoning = ''
+
+    // Tail-reconnect catch-up (?tail=1): while the server replays the recent
+    // past, replayed turns must not strobe the answer block — the activity
+    // feed filling up IS the progress. The settled answer applies atomically
+    // once the replay boundary lands (stream.replayed marker, or done/close
+    // when the run finished while the client was away).
+    let catchingUp = opts?.tail === true
+    let finalAnswerLanded = false
+    let catchUpTimer: number | undefined
+    const stopCatchUp = () => {
+      if (catchUpTimer !== undefined) { window.clearTimeout(catchUpTimer); catchUpTimer = undefined }
+      catchingUp = false
+    }
+    const finishCatchUp = () => {
+      if (!catchingUp) return
+      stopCatchUp()
+      // Never touch an already-terminal message: fetchFinalAnswer (the
+      // heal path or the flag below) may have landed the answer + status
+      // while the replay was still draining — a turn fragment must not
+      // overwrite it.
+      setConversations((prev) => prev.map((c) => {
+        if (c.id !== convId) return c
+        return { ...c, messages: c.messages.map((m) => {
+          if (m.runId !== runId) return m
+          if ((m.status && m.status !== 'running') || finalAnswerLanded) return m
+          return { ...m, content: liveText || settledText, reasoning: liveReasoning || settledReasoning, liveTool: liveTool || undefined }
+        }) }
+      }))
+    }
+    const fetchFinal = () => {
+      void fetchFinalAnswer(runId, convId).then(() => { finalAnswerLanded = true })
+    }
+    if (catchingUp) {
+      // Old-kernel safety net: without the stream.replayed marker the
+      // catch-up resolves on a generous timer, not forever-suppressed.
+      catchUpTimer = window.setTimeout(finishCatchUp, 5000)
+    }
     const applyLive = (data: { type?: string; turn?: number; text?: string; reasoning?: string; tool?: string; args?: string }) => {
       if (data.type === 'done') { closeTokenStream(); return }
       const turn = Number(data.turn ?? 0)
@@ -1039,7 +1098,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       // (the same source the runs-page trace uses).
       if (data.tool) liveTool = data.tool
       else if (data.text) liveTool = ''
-      updateMsg(convId, runId, { content: liveText || settledText, reasoning: liveReasoning || settledReasoning, liveTool: liveTool || undefined })
+      // During catch-up the token preview only accumulates: the answer block
+      // stays frozen until finishCatchUp applies it in one step.
+      if (!catchingUp) updateMsg(convId, runId, { content: liveText || settledText, reasoning: liveReasoning || settledReasoning, liveTool: liveTool || undefined })
     }
     tes.addEventListener('snapshot', (e) => {
       try { applyLive(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
@@ -1080,7 +1141,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     // does not exist yet).
     es.addEventListener('run.queued', () => {
       const line = t('chat.stream.queued')
-      if (!lines.includes(line)) lines.push(line)
+      if (!lines.some((l) => l.text === line)) lines.push({ text: line })
       // The «Run started · streaming…» placeholder is not true yet — the
       // message adopts the queue line while the run waits for its slot.
       updateMsg(convId, runId, { queued: true, streamLines: [...lines] })
@@ -1141,9 +1202,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         // worth keeping; a turn with no tools was the final answer, which the
         // bubble already shows.
         if (fragment && Number(d.tool_calls ?? 0) > 0) {
-          const elapsed = elapsedFor(outer)
-          const prefix = elapsed !== undefined && elapsed >= 5 ? `+${formatDuration(elapsed * 1000, t)} ` : ''
-          pushLine(prefix + t('chat.stream.fragment', { text: squashQuestion(fragment) }))
+          pushLine(chatFragmentLine(elapsedFor(outer), fragment, t, locale))
         }
         delete fragments[turn]
       } catch { /* ignore */ }
@@ -1179,7 +1238,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         fragments[turn] = text
         settledText = text
         settledTurn = turn
-        setConversations((prev) => prev.map((c) => {
+        // During catch-up the authoritative text only settles into the buffer;
+        // the bubble gets it in one step from finishCatchUp.
+        if (!catchingUp) setConversations((prev) => prev.map((c) => {
           if (c.id !== convId) return c
           return { ...c, messages: c.messages.map((m) => {
             if (m.runId !== runId) return m
@@ -1201,7 +1262,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const turn = Number(d.turn ?? 0)
         if (!text || turn < liveTurn) return
         settledReasoning = text
-        setConversations((prev) => prev.map((c) => {
+        if (!catchingUp) setConversations((prev) => prev.map((c) => {
           if (c.id !== convId) return c
           return { ...c, messages: c.messages.map((m) => {
             if (m.runId !== runId) return m
@@ -1220,7 +1281,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const d = outer.data ?? outer
         if (d.answer) {
           pushLine(t('chat.answer_received') ?? 'Answer received')
-          void fetchFinalAnswer(runId, convId)
+          fetchFinal()
         }
       } catch { /* ignore */ }
     })
@@ -1376,7 +1437,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       es.close(); streamRef.current.delete(convId)
       closeTokenStream()
       stopLinesTimer()
-      void fetchFinalAnswer(runId, convId)
+      stopCatchUp()
+      fetchFinal()
     })
 
     // Delegation events — surface child agent activity in the stream
@@ -1506,8 +1568,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const line = formatStreamEvent('run.failed', outer, t, locale)
-        if (line) lines.push(line)
+        if (line) lines.push({ text: line })
         stopLinesTimer()
+        stopCatchUp()
         // Human copy first: a model call that timed out reads as «провайдер
         // не отвечал N мин», not as an activity-error wall — the raw chain is
         // details-layer material (the trace and the call report keep it).
@@ -1524,17 +1587,28 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       es.close(); streamRef.current.delete(convId)
       closeTokenStream()
       stopLinesTimer()
+      // The catch-up applies the settled fragment before the REST fetch: a
+      // finished run shows its answer immediately, totals follow.
+      finishCatchUp()
       // The final answer replaces the kept fragment — the REST copy also
       // fills the terminal status and totals. Skipping the fetch when a
       // fragment was on screen left policy-limited runs spinning forever.
-      void fetchFinalAnswer(runId, convId)
+      fetchFinal()
+    })
+
+    // Tail-replay boundary (kernel main.go writes it right after the recent
+    // past): everything before this frame is backlog — the answer block
+    // applies once, here; everything after is live.
+    es.addEventListener('stream.replayed', () => {
+      finishCatchUp()
     })
 
     es.onerror = () => {
       es.close(); streamRef.current.delete(convId)
       closeTokenStream()
       stopLinesTimer()
-      void fetchFinalAnswer(runId, convId)
+      finishCatchUp()
+      fetchFinal()
     }
   }
 
@@ -1748,7 +1822,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined })
       const runId = result.run_id
 
-      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [`${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}`] }
+      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
       const withAssistant = { ...updatedConv, messages: [...updatedConv.messages, assistantMsg] }
       setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
 
@@ -1780,7 +1854,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       }
       const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined })
       const runId2 = result.run_id
-      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId: runId2, streamLines: [`${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}`] }
+      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId: runId2, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
       setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, taskId, messages: [...c.messages, assistantMsg] } : c))
       streamRun(runId2, conv.id)
     } catch (f) {

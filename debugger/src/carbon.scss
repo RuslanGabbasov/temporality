@@ -1552,6 +1552,18 @@ button.header-nav-link {
   margin-right: 0.4rem;
 }
 
+/* Intermediate model answers in the feed: same small mono font, softer than
+ * tool lines, clamped to two lines with an ellipsis — readable breadcrumbs
+ * of the run's progress, not a wall of text. */
+.chat-stream-fragment {
+  opacity: 0.72;
+  font-weight: 300;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* Live-activity feed inside an assistant bubble: capped height, scrolls internally */
 .chat-activity-scroll {
   max-height: 260px;
