@@ -154,6 +154,14 @@ function shortRun(id: string) {
   const root = parts[0].replace(/^([a-z][a-z0-9]*)-\d{8}-/i, '$1 ')
   return parts.length > 1 ? `${root}/${parts[parts.length - 1]}` : root
 }
+/** Cap a lane label so it never overflows the gutter over the ↗ button:
+ *  SVG text neither wraps nor clips, and a long run title used to push the
+ *  trace-jump button out of reach. The full title stays in the lane's
+ *  <title> tooltip. Newlines collapse — task-derived titles carry them. */
+export function capTail(text: string, max = 24): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
+}
 function clock(iso: string) {
   const date = new Date(iso)
   return Number.isNaN(date.getTime()) ? '' : date.toTimeString().slice(0, 8)
@@ -1023,12 +1031,17 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                   const openInRuns = (click: React.MouseEvent) => { click.stopPropagation(); window.location.assign(`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(chain.root.id)}`) }
                   const roles = [...new Set(chain.runs.map((run) => run.role).filter(Boolean))] as string[]
                   const chainMisleads = chain.runs.flatMap((run) => view.misleadsByRun.get(run.id) ?? [])
-                  const ticks: number[] = []
-                  const dots: number[] = []
-                  for (const run of chain.runs) { const acts = activity.get(run.id); if (acts) { ticks.push(...acts.tools); dots.push(...acts.models) } }
-                  return <g key={chain.root.id} className={`chain-lane ${selected === chain.root.id ? 'selected' : ''}`} onClick={expandChain} style={{ cursor: 'pointer' }}>
-                    <title>{`${chain.root.title ?? chain.root.id}\n${roles.join(' → ')} · ${chain.runs.length} ${t('timeline.runs_abbr')}${chain.failed ? ` · ${t('timeline.chain_failed')}` : ''}${chainMisleads.length ? ` · ${chainMisleads.length} ${t('timeline.misleads_abbr')}` : ''}\n${clock(chain.root.startedAt)} → ${clock(chain.endedAt ?? chain.root.startedAt)}`}</title>
-                    <text x={20} y={yLane + 3} className="lane-label run-label">{chain.root.title ?? shortRun(chain.root.id)}{chain.runs.length > 1 ? ` +${chain.runs.length - 1}` : ''}{chain.failed ? ' ✕' : ''}</text>
+                  					const ticks: number[] = []
+                  					const dots: number[] = []
+                  					for (const run of chain.runs) { const acts = activity.get(run.id); if (acts) { ticks.push(...acts.tools); dots.push(...acts.models) } }
+                  					// The title is capped so the label stays inside the gutter and the
+                  					// ↗ jump button keeps its place; the suffixes (+N runs, failed ✕)
+                  					// are outside the cap — they survive any title length.
+                  					const suffix = `${chain.runs.length > 1 ? ` +${chain.runs.length - 1}` : ''}${chain.failed ? ' ✕' : ''}`
+                  					const chainLabel = capTail(chain.root.title ?? shortRun(chain.root.id), 24 - suffix.length) + suffix
+                  					return <g key={chain.root.id} className={`chain-lane ${selected === chain.root.id ? 'selected' : ''}`} onClick={expandChain} style={{ cursor: 'pointer' }}>
+                  						<title>{`${chain.root.title ?? chain.root.id}\n${roles.join(' → ')} · ${chain.runs.length} ${t('timeline.runs_abbr')}${chain.failed ? ` · ${t('timeline.chain_failed')}` : ''}${chainMisleads.length ? ` · ${chainMisleads.length} ${t('timeline.misleads_abbr')}` : ''}\n${clock(chain.root.startedAt)} → ${clock(chain.endedAt ?? chain.root.startedAt)}`}</title>
+                  						<text x={20} y={yLane + 3} className="lane-label run-label">{chainLabel}</text>
                     <text x={GUTTER - 8} y={yLane + 3} textAnchor="end" className="lane-sublabel" onClick={openInRuns} style={{ cursor: 'pointer' }}>
                       <title>{t('timeline.open_in_runs')}</title>↗
                     </text>
