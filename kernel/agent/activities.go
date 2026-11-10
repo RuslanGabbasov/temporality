@@ -1987,22 +1987,37 @@ func (a *Activities) handleDeleteTrigger(ctx context.Context, request ToolReques
 //
 // Transport-level failures (connection refused, timeouts — the kernel's own
 // HTTP listener down during a stack restart while the Temporal worker already
-// polls) retry here SILENTLY: no journal markers, no chat noise — the retry
-// window just bridges the restart gap. Only a failure of every attempt
-// surfaces, with the plain routing error (the Temporal retry ladder on top
-// stays as is).
+// polls) AND gateway-style 502–504 answers (the workspace's {"booting":true}
+// 503 while migrations still run, a proxy hiccup) retry here SILENTLY: no
+// journal markers, no chat noise — the retry window just bridges the restart
+// gap, and the Temporal retry ladder on top of the activity stretches it
+// further. Both classes are infrastructure availability, not an answer about
+// this model. A 4xx (404 model not served, 409 provider disabled) stays
+// definitive: it retries nowhere and surfaces as the actionable routing
+// error. Only a failure of every attempt surfaces, with the plain routing
+// error.
 func (a *Activities) modelConfigForPinned(ctx context.Context, project, providerID, model string) (llm.Config, string, error) {
 	endpoint := fmt.Sprintf("%s/v1/workspace/model-config?model=%s&project=%s&provider=%s", a.WorkspaceURL, url.QueryEscape(model), url.QueryEscape(project), url.QueryEscape(providerID))
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
-		if err == nil {
+		if err == nil && (status < 500 || status > 504) {
 			return a.pinnedConfigFrom(body, status, providerID, model)
 		}
-		// Non-transport answers (4xx/5xx bodies) are definitive — retrying a
-		// 409 "provider disabled" would only add latency to an actionable error.
-		if !isTransportError(err) || ctx.Err() != nil || time.Now().Add(routingRetryBackoff).After(deadline) {
-			return llm.Config{}, "", fmt.Errorf("provider routing failed for model %q: %w", model, err)
+		// Two flavors of the same story — the routing source is briefly gone:
+		// (a) transport failures (connection refused — the listener is down),
+		// (b) 502–504 answers from the server that IS up but not ready (the
+		// workspace's {"booting":true} 503 while migrations run, a gateway
+		// hiccup). Both are infrastructure, not an answer about THIS model:
+		// retrying them silently bridges a stack restart, while a 4xx (404
+		// model not served, 409 provider disabled) stays definitive —
+		// retrying it would only add latency to an actionable error.
+		transient := err != nil && isTransportError(err) || err == nil && status >= 502 && status <= 504
+		if !transient || ctx.Err() != nil || time.Now().Add(routingRetryBackoff).After(deadline) {
+			if err != nil {
+				return llm.Config{}, "", fmt.Errorf("provider routing failed for model %q: %w", model, err)
+			}
+			return a.pinnedConfigFrom(body, status, providerID, model)
 		}
 		select {
 		case <-ctx.Done():
