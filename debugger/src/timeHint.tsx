@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { uiLocale } from './i18n'
 
 /** Full date-time for hover hints: everywhere the UI shows a bare clock time
  * («14:03:11»), the hover must answer «today or yesterday?» — the same instant
@@ -6,7 +7,7 @@ import type { ReactNode } from 'react'
 export function fullDateTime(iso: string | Date): string {
   const d = typeof iso === 'string' ? new Date(iso) : iso
   if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString([], {
+  return d.toLocaleString([uiLocale()], {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -24,11 +25,12 @@ export function fullDateTime(iso: string | Date): string {
 export function briefDateTime(iso: string | Date): string {
   const d = typeof iso === 'string' ? new Date(iso) : iso
   if (Number.isNaN(d.getTime())) return ''
+  const culture = [uiLocale()]
   if (d.toDateString() === new Date().toDateString()) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleTimeString(culture, { hour: '2-digit', minute: '2-digit' })
   }
   const sameYear = d.getFullYear() === new Date().getFullYear()
-  return d.toLocaleString([], {
+  return d.toLocaleString(culture, {
     day: 'numeric',
     month: 'short',
     ...(sameYear ? {} : { year: 'numeric' }),

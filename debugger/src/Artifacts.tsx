@@ -16,7 +16,7 @@ import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download } 
 import { workspaceApi, exportArtifactMarkdown, type Artifact, type ArtifactInboxEntry, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
 import { MarkdownWithPresentations } from './PresentationView'
 import { whoami, canReconcile } from './kernelApi'
-import { useT } from './i18n'
+import { useT, uiLocale } from './i18n'
 import { shortTime } from './eventSummary'
 import { TimeHint, fullDateTime, briefDateTime } from './timeHint'
 import ListFilter from './ListFilter'
@@ -535,7 +535,7 @@ export default function Artifacts({ project }: { project?: string }) {
     finally { setBusy(false) }
   }
 
-  const fmtTime = (v?: string) => (v ? new Date(v).toLocaleString() : '')
+  const fmtTime = (v?: string) => (v ? new Date(v).toLocaleString([uiLocale()]) : '')
 
   return (
     <div style={{ padding: '1rem' }}>
@@ -1284,7 +1284,7 @@ function VersionHistory({ artifactID, project }: { artifactID: string; project?:
                 <Tag type="green" size="sm">{v.status}</Tag>
                 <span style={{ color: 'var(--tm-text-2)' }}>{v.title}</span>
                 <span style={{ color: 'var(--tm-muted)', marginLeft: 'auto', fontSize: '0.7rem' }}>
-                  {t('artifacts.versions_superseded') ?? 'superseded'} {v.superseded_at ? new Date(v.superseded_at).toLocaleString() : ''}
+                  {t('artifacts.versions_superseded') ?? 'superseded'} {v.superseded_at ? new Date(v.superseded_at).toLocaleString([uiLocale()]) : ''}
                 </span>
               </div>
               {expanded === v.version && (

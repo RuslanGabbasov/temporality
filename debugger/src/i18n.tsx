@@ -65,5 +65,18 @@ export function pluralT(t: (key: string, vars?: Record<string, string>) => strin
   return t(`${key}_${suffix}`, { ...vars, count: String(count) })
 }
 
+/** The UI culture for Intl formatting (dates, numbers): the stored locale
+ *  (temporality_locale), falling back to the browser tag — the same
+ *  resolution getInitialLocale uses. Pure formatters (timeHint and friends)
+ *  call this instead of relying on the browser default, so a Russian UI
+ *  never renders «Fri, Nov 6» in a Russian browser. */
+export function uiLocale(): string {
+  try {
+    const stored = localStorage.getItem(LOCALE_STORAGE_KEY)
+    if (isLocale(stored)) return stored
+  } catch { /* private mode */ }
+  return typeof navigator !== 'undefined' && navigator.language ? navigator.language : DEFAULT_LOCALE
+}
+
 export { LOCALES } from './locales'
 export type { Locale }
