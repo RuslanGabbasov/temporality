@@ -1556,8 +1556,7 @@ button.header-nav-link {
  * tool lines, clamped to two lines with an ellipsis — readable breadcrumbs
  * of the run's progress, not a wall of text. */
 .chat-stream-fragment {
-  opacity: 0.72;
-  font-weight: 300;
+  font-weight: 200;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
