@@ -253,7 +253,9 @@ func telegramCredentials(settings map[string]string) (base, token string, err er
 	return base, token, nil
 }
 
-// TelegramUpdate is one message-bearing update in normalized form.
+// TelegramUpdate is one interaction-bearing update in normalized form: a
+// regular message, a keyboard button press (callback_query) or a widget op
+// (widget_query, Bot API 10.4).
 type TelegramUpdate struct {
 	UpdateID     int64
 	ChatID       int64
@@ -262,6 +264,14 @@ type TelegramUpdate struct {
 	Files        []InboundFile
 	Timestamp    time.Time
 	MediaGroupID string // albums: parts share one media_group_id
+	// Interaction surface (Kind != "message"): Kind is "callback" or
+	// "widget_query"; QueryID is the transport receipt to acknowledge;
+	// CallbackData is the kernel-opaque token/op; SourceMessageID is the
+	// channel message the interaction landed on.
+	Kind            string
+	QueryID         string
+	CallbackData    string
+	SourceMessageID int64
 }
 
 // ParseTelegramUpdates extracts message updates from a getUpdates body and
@@ -294,6 +304,31 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 					FileSize int64  `json:"file_size"`
 				} `json:"photo"`
 			} `json:"message"`
+			CallbackQuery *struct {
+				ID   string `json:"id"`
+				From struct {
+					ID int64 `json:"id"`
+				} `json:"from"`
+				Data string `json:"data"`
+				Message *struct {
+					MessageID int64 `json:"message_id"`
+					Chat struct {
+						ID int64 `json:"id"`
+					} `json:"chat"`
+				} `json:"message"`
+			} `json:"callback_query"`
+			WidgetQuery *struct {
+				ID   string `json:"id"`
+				From struct {
+					ID int64 `json:"id"`
+				} `json:"from"`
+				Data string `json:"data"`
+				Type string `json:"type"`
+				Chat *struct {
+					ID int64 `json:"id"`
+				} `json:"chat"`
+				MessageID int64 `json:"message_id"`
+			} `json:"widget_query"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(body, &decoded); err != nil {
@@ -304,9 +339,53 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 	}
 	updates := []TelegramUpdate{}
 	next := previousCursor
+	advance := func(updateID int64) {
+		if updateID+1 > parseTelegramOffset(next) {
+			next = strconv.FormatInt(updateID+1, 10)
+		}
+	}
 	for _, result := range decoded.Result {
-		if result.UpdateID+1 > parseTelegramOffset(next) {
-			next = strconv.FormatInt(result.UpdateID+1, 10)
+		advance(result.UpdateID)
+		// Interactive updates first: a callback in a group chat must never
+		// degrade into an intake run — the cursor moves past them here, the
+		// interactive routing answers them.
+		if cb := result.CallbackQuery; cb != nil {
+			entry := TelegramUpdate{
+				UpdateID:     result.UpdateID,
+				Kind:         "callback",
+				QueryID:      cb.ID,
+				CallbackData: strings.TrimSpace(cb.Data),
+				SenderID:     cb.From.ID,
+				Timestamp:    time.Now().UTC(),
+			}
+			if cb.Message != nil {
+				entry.ChatID = cb.Message.Chat.ID
+				entry.SourceMessageID = cb.Message.MessageID
+			}
+			if entry.QueryID == "" || entry.CallbackData == "" || entry.SenderID == 0 {
+				continue // malformed interaction: the cursor already advanced
+			}
+			updates = append(updates, entry)
+			continue
+		}
+		if wq := result.WidgetQuery; wq != nil {
+			entry := TelegramUpdate{
+				UpdateID:     result.UpdateID,
+				Kind:         "widget_query",
+				QueryID:      wq.ID,
+				CallbackData: strings.TrimSpace(wq.Data),
+				SenderID:     wq.From.ID,
+				Timestamp:    time.Now().UTC(),
+			}
+			if wq.Chat != nil {
+				entry.ChatID = wq.Chat.ID
+				entry.SourceMessageID = wq.MessageID
+			}
+			if entry.QueryID == "" || entry.SenderID == 0 {
+				continue
+			}
+			updates = append(updates, entry)
+			continue
 		}
 		message := result.Message
 		if message == nil || message.From == nil || message.Chat.ID == 0 {
@@ -314,6 +393,7 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 		}
 		entry := TelegramUpdate{
 			UpdateID:     result.UpdateID,
+			Kind:         "message",
 			ChatID:       message.Chat.ID,
 			SenderID:     message.From.ID,
 			Text:         strings.TrimSpace(message.Text),
@@ -374,6 +454,10 @@ func telegramNormalizedOne(update TelegramUpdate) InboundMessage {
 		Text:      update.Text,
 		Files:     update.Files,
 		Timestamp: update.Timestamp,
+		Kind:            update.Kind,
+		CallbackData:    update.CallbackData,
+		QueryID:         update.QueryID,
+		SourceMessageID: strconv.FormatInt(update.SourceMessageID, 10),
 	}
 }
 

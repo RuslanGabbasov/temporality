@@ -90,6 +90,19 @@ type ChannelCapabilities struct {
 	// FilesIn: inbound delivery accepts user attachments (FilesIn channels
 	// implement a poller with file fetch).
 	FilesIn bool
+	// Interactive: the channel renders Options as tappable buttons and
+	// routes the presses back (telegram inline keyboard, docs/interactive-
+	// HITL.md Этап D). Text remains the universal fallback.
+	Interactive bool
+	// Rich: the channel renders structured markdown (headings, tables,
+	// details) beyond the plain-text baseline (telegram sendRichMessage).
+	Rich bool
+	// Widgets: the channel carries interactive HTML widgets derived from a
+	// form schema (Bot API 10.4 sendWidget, docs/interactive-HITL.md).
+	Widgets bool
+	// Drafts: the channel streams ephemeral previews of content being
+	// generated (telegram sendMessageDraft).
+	Drafts bool
 }
 
 // SettingField is one admin-editable channel setting.
@@ -130,14 +143,86 @@ type OutboundText struct {
 	Lang string
 	// Schema is the optional form (docs/interactive-HITL.md §7) attached to
 	// the ask: channels that can render structured questions (matrix HTML
-	// cards) build a field table from it; text-only transports get the field
-	// list in the plain body. nil = plain question.
+	// cards, telegram widgets) build a field table from it; text-only
+	// transports get the field list in the plain body. nil = plain question.
 	Schema json.RawMessage
 	// FormURL is the hosted one-click form for this ask (docs/interactive-
 	// HITL.md §6.2): a scoped-secret page answerable from any browser, no
 	// harness account. Empty when the kernel has no public URL — channels fall
 	// back to the in-harness answer link.
 	FormURL string
+	// Buttons are the interactive answer shortcuts (Capabilities.Interactive):
+	// each Token is the kernel's opaque routing key the channel delivers back
+	// verbatim on a press (telegram callback_data, 1-64 bytes). The kernel
+	// keeps tokens short and degrades to the plain body when a channel cannot
+	// carry them. nil = text-only question.
+	Buttons [][]OutboundButton
+}
+
+// OutboundButton is one interactive keyboard button: Text is the label,
+// Token the routing key returned by the channel when the user taps it.
+type OutboundButton struct {
+	Text  string
+	Token string
+}
+
+// Optional driver extensions. Each is resolved by the kernel through a type
+// assertion, never by a channel-type branch: a driver implements what its
+// transport can carry, and every interactive surface keeps the text
+// baseline as the fallback (docs/channels.md §3).
+
+// RichTextPoster is the structured-markdown extension: headings, tables and
+// details render natively instead of flat text. Returns the posted message's
+// channel id when the transport reports one (best-effort, "" otherwise).
+type RichTextPoster interface {
+	SendTextRich(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) (postedID string, err error)
+}
+
+// CallbackResponder acknowledges a button press (telegram
+// answerCallbackQuery): the tap receipt the user sees until the real answer
+// lands. text renders as a toast; empty text just clears the spinner.
+type CallbackResponder interface {
+	AnswerCallback(ctx context.Context, client *http.Client, settings map[string]string, queryID, text string) error
+}
+
+// MessageEditor rewrites a previously posted message — resolving an ask in
+// place (buttons out, verdict line in) instead of posting a follow-up.
+type MessageEditor interface {
+	EditMessage(ctx context.Context, client *http.Client, settings map[string]string, address, messageID, text string, buttons [][]OutboundButton) error
+}
+
+// OutboundWidget carries the channel-neutral widget model (widgetform.go):
+// the kernel builds semantics from the ask's schema, the driver renders it
+// into the channel's widget protocol and carries the interaction back.
+type OutboundWidget struct {
+	// Model is the WidgetModel JSON: question, fields, current state.
+	Model json.RawMessage
+	// FormURL attaches the hosted-form fallback button to the widget
+	// message (long values and restricted chats degrade to it).
+	FormURL string
+	// Lang for driver-appended canned labels.
+	Lang string
+}
+
+// WidgetPoster is the interactive HTML-widget extension (Bot API 10.4
+// sendWidget): a schema ask renders as a form the user fills inside the
+// chat. SendWidget returns the posted message's channel id — the kernel
+// pins it so widget queries resolve back to the ask.
+type WidgetPoster interface {
+	SendWidget(ctx context.Context, client *http.Client, settings map[string]string, address string, w OutboundWidget) (messageID string, err error)
+	// EditWidgetData pushes a new widget model (state update) into the
+	// message's widget.
+	EditWidgetData(ctx context.Context, client *http.Client, settings map[string]string, address, messageID, model string) error
+	// AnswerWidget acknowledges one widget query within the transport's
+	// answer window; data rides to that widget instance only.
+	AnswerWidget(ctx context.Context, client *http.Client, settings map[string]string, queryID, data string) error
+}
+
+// DraftStreamer streams an ephemeral preview of a message being generated
+// (telegram sendMessageDraft): the preview lives ~30 seconds and is replaced
+// by the real message, never persisted by the transport.
+type DraftStreamer interface {
+	SendDraft(ctx context.Context, client *http.Client, settings map[string]string, address string, draftID int64, text string) error
 }
 
 // OutboundFile is one attachment pushed through a FilesOut channel.

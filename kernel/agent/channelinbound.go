@@ -42,6 +42,24 @@ type InboundMessage struct {
 	// pipeline records and refuses it loudly so an encrypted room cannot
 	// make the bot silently dead for one user while others get answers.
 	Encrypted bool
+	// Kind separates plain dialog messages from interaction events: "" or
+	// "message" is a regular message; "callback" is a button press
+	// (CallbackData carries the kernel's opaque token, SourceMessageID the
+	// message the button sits on); "widget_query" is one widget op
+	// (CallbackData carries the raw op, QueryID the transport's answer
+	// window). Interactive events never enter the intake pipeline — they
+	// resolve existing surfaces or are acknowledged and dropped.
+	Kind string
+	// CallbackData is the channel-opaque interaction payload (callback_data
+	// token, widget op) — the kernel decodes it by its own tables, never by
+	// protocol parsing.
+	CallbackData string
+	// QueryID is the transport's interaction receipt (callback_query id,
+	// widget_query id) the driver must acknowledge within its window.
+	QueryID string
+	// SourceMessageID is the channel id of the message the interaction
+	// happened on (the button's message, the widget's message).
+	SourceMessageID string
 }
 
 // InboundFile is one attachment of an inbound message.

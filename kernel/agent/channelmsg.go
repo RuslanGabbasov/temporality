@@ -65,6 +65,21 @@ var channelMessages = map[string][2]string{
 	"ask_project_run": {"Project %s · run %s", "Проект %s · ран %s"},
 	"ask_waiting":     {"waiting %ds", "ждёт %dс"},
 	"ask_answer_here": {"Answer here:", "Ответьте здесь:"},
+	"ask_cancel":      {"Cancel", "Отмена"},
+	"ask_resolved":    {"✅ Answered — the run continues.", "✅ Ответ принят — ран продолжается."},
+	"ask_cancelled":   {"✖ Question cancelled.", "✖ Вопрос отменён."},
+
+	// Interactive surfaces (docs/interactive-HITL.md Этап D + widgets): the
+	// tap receipts and the widget session lifecycle.
+	"callback_ok":     {"Answer accepted — the agent is continuing.", "Ответ принят — агент продолжает работу."},
+	"callback_cancel": {"Question cancelled — the run continues without it.", "Вопрос отменён — ран продолжается без него."},
+	"callback_closed": {"This question is already closed — answer the active one or send a new message.", "Этот вопрос уже закрыт — ответьте на активный или пришлите новое сообщение."},
+	"callback_bad":    {"Could not route this button press — reply with text instead.", "Не удалось разобрать нажатие — ответьте текстом."},
+	"widget_expired":  {"The form session has expired — the question was answered or closed.", "Сессия формы истекла — вопрос уже закрыт или отвечен."},
+	"widget_invalid":  {"Check the highlighted fields and resubmit.", "Исправьте подсвеченные поля и отправьте снова."},
+	"widget_accepted": {"Form accepted — the agent is continuing.", "Форма принята — агент продолжает работу."},
+	"widget_rate":     {"Too many updates — wait a couple of seconds.", "Слишком часто — подождите пару секунд."},
+	"widget_bad_op":   {"Could not apply this action — reopen the form.", "Не удалось применить действие — переоткройте форму."},
 
 	// Artifact review decisions from the channel (docs/artifact-lifecycle.md
 	// §6 Phase 2): the reply router confirms or refuses in the dialog language.

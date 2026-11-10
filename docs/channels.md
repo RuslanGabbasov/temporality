@@ -175,7 +175,7 @@ VerifyRequest (для push), курсор (для pull).
 | Канал | Модель | Identity | Специфика |
 |---|---|---|---|
 | matrix | pull `/sync` | mxid | whoami для пропуска себя; mxc:// download; txn idempotency; E2EE (`m.room.encrypted`) не поддерживается — такие события фиксируются и отклоняются с уведомлением (`intake.rejected`, reason: `encrypted_unsupported`), а не теряются молча |
-| telegram | pull `getUpdates` | chat id (личка) = адрес | offset-курсор персистить; лимит 4096; getFile |
+| telegram | pull `getUpdates` | chat id (личка) = адрес | offset-курсор персистить; лимит 4096 → tgformat рендерит и режет по частям; parse_mode=HTML с фолбэком на plain; Options → inline keyboard (callback `a:<id>:<idx>`, cancel `a:<id>:x`), answerCallbackQuery + editMessageText «решён»; schema-ask → HTML-виджет (Bot API 10.4 sendWidget, состояние в workspace_channel_widget, ops ≤64Б, ack ≤15с, throttle 5/5с); rich-ответы через sendRichMessage с фолбэком; черновики генерации sendMessageDraft в личке |
 | slack (webhook) | только outbound | — | текущее поведение, остаётся отдельным типом |
 | slack (bot) | push Events API | member id | треды (ReplyTo=ts), подпись запроса, blocks (future) |
 | mattermost | pull WebSocket (`posted`) | user id | self-hosted: URL сервера в настройках; тот же base_url+token стримит входящие через WS, включая DM, куда outgoing webhooks не достают; REST v4 для отправки. Ранее — outgoing webhooks: их стоит удалить из сервера, роут `/v1/channels/mattermost/hooks` больше не регистрируется |
@@ -253,11 +253,22 @@ keyboard, slack blocks); везде остаётся текстовый фолб
 
 ## 13. Открытые вопросы
 
-* Разметка исходящих: markdown у нас, у каналов HTML (matrix custom
-  org.matrix.custom.html, telegram HTML/MarkdownV2) — нужен renderer per
-  driver; MVP остаётся plain text.
+* ~~Разметка исходящих: markdown у нас, у каналов HTML — нужен renderer per
+  driver~~ **решено** (tgformat.go): общий goldmark-конвейер с матрицей,
+  маппинг на подмножество Telegram-HTML (b/i/s/code/pre/a/blockquote),
+  таблицы схлопываются в текст, длинные тела режутся по абзацам (лимит 4096);
+  parse_mode=HTML с автоматическим фолбэком на plain при «can't parse
+  entities». Матрица продолжает org.matrix.custom.html.
 * Несколько ботов одного типа (два матрикс-аккаунта для разных юнитов) —
   настройки станут списком инстансов драйвера; пока один на тип.
+* Клиентский мост HTML-виджетов (Bot API 10.4): серверная часть задокументирована
+  в Bot API, клиентская поверхность виджета (как JS внутри виджета постит
+  widget_query) — одна точка интеграции в widgetrender.go (`TelegramWidget.send`);
+  уточнить по официальной документации виджетов при появлении.
+* Черновики (sendMessageDraft) стримят накопленный текст из журнала рана
+  (model.text_delta через answer-watcher); потоковый канал токенов
+  реального времени (SSE-эндпоинт рана) — следующее уточнение, когда
+  понадобится посимвольный стриминг.
 * Rate limits и retry-политики отправки по каналам (у телеграма жёсткие) —
   общий бюджет попыток в ядре, паузы в драйвере.
 * Voice/stickers: игнорируем или транскрибируем — вне скоупа, фиксируем в

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/temporality-project/temporality/kernel/agent"
@@ -74,10 +77,22 @@ type channelInboundLoop struct {
 	// ratePerHour caps how many initiative messages one sender may push per
 	// hour (docs/inbound-messages.md §12 phase 4); 0 disables the check.
 	ratePerHour int
+	// widgetThrottle state: interaction budget per sender (5 per window),
+	// mirroring the transport's own widget query cap (Bot API 10.4). A pointer
+	// because the loop struct is value-copied per webhook routing pass — the
+	// budget must not copy a lock (telegram is a poller, so copies never
+	// contend; the pointer only keeps vet honest).
+	widgetThrottleState *interactionBudget
 
 	cursor      string // opaque driver cursor; "" → fresh start (bounded history)
 	identityKey string // settings fingerprint the cursor and selfID belong to
 	selfID      string // the channel account's own identity; never matched
+}
+
+// interactionBudget is the per-sender sliding-window counter.
+type interactionBudget struct {
+	mu   sync.Mutex
+	hits map[string][]time.Time
 }
 
 // channelInboundStore is the workspace surface the loop needs; *workspace.Store
@@ -106,6 +121,12 @@ type channelInboundStore interface {
 	// watcher delivers the run's published visuals as channel-appropriate
 	// static renders.
 	ListPresentationsByRun(ctx context.Context, runID string, limit int) ([]workspace.Presentation, error)
+	// Interactive surfaces (docs/interactive-HITL.md Этап D + widgets): the
+	// callback router needs the ask row itself (option labels, schema), the
+	// widget router advances the authoritative widget state.
+	GetHumanRequest(ctx context.Context, id string) (workspace.HumanRequest, error)
+	GetChannelWidget(ctx context.Context, channel, chatID, messageID string) (workspace.ChannelWidget, error)
+	SaveChannelWidgetState(ctx context.Context, channel, chatID, messageID string, state json.RawMessage) error
 }
 
 // run cycles until the context is cancelled. A cycle error is logged and the
@@ -190,10 +211,27 @@ func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent
 		l.log.Warn("load open asks", "channel", l.driver.Type(), "error", err)
 		return
 	}
+	// Interactive events route first and never touch the reply matching or
+	// the intake pipeline: a button press is not a dialog message (a group
+	// callback must not start a run).
+	plain := make([]agent.InboundMessage, 0, len(messages))
+	for _, message := range messages {
+		switch message.Kind {
+		case "", "message":
+			plain = append(plain, message)
+		case "callback":
+			l.handleCallback(ctx, channelSettings, message)
+		case "widget_query":
+			l.handleWidgetQuery(ctx, channelSettings, message)
+		default:
+			l.log.Warn("unknown inbound kind", "channel", l.driver.Type(), "kind", message.Kind)
+			plain = append(plain, message)
+		}
+	}
 	// Route first, persist after: a crash between the two re-delivers the
 	// batch (at-least-once) — the workflow side already tolerates duplicate
 	// answers.
-	replies := agent.MatchChannelReplies(messages, asks, users, l.selfID)
+	replies := agent.MatchChannelReplies(plain, asks, users, l.selfID)
 	answered := make(map[string]bool, len(replies))
 	for _, reply := range replies {
 		// A zombie ask (its workflow is already gone) must not consume the
@@ -207,12 +245,253 @@ func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent
 	// Everything else is an initiative message: the intake pipeline records
 	// it durably, identifies the sender (closed world) and either starts the
 	// intake run or rejects politely (docs/inbound-messages.md §4–5).
-	for _, message := range messages {
+	for _, message := range plain {
 		if answered[message.ID] || message.Sender == "" || message.Sender == l.selfID {
 			continue
 		}
 		l.handleIntake(ctx, message, channelSettings, senders)
 	}
+}
+
+// widgetRateWindow is the interaction throttle: the transport already caps
+// widget queries at 5 per 5 seconds per user; the kernel mirrors it so a
+// scripted client cannot squeeze state transitions between the checks.
+const widgetRateWindow = 5 * time.Second
+
+// handleCallback routes one keyboard button press: the token carries the ask
+// id and the action (`a:<id>:<idx>` option select / `a:<id>:x` cancel), the
+// option label comes from the ask row — the channel never sees request data.
+func (l *channelInboundLoop) handleCallback(ctx context.Context, channelSettings map[string]string, message agent.InboundMessage) {
+	lang := "" // refined from the ask row below (the token itself is opaque)
+	ack := func(text string) {
+		responder, ok := l.driver.(agent.CallbackResponder)
+		if !ok || message.QueryID == "" {
+			return
+		}
+		ackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := responder.AnswerCallback(ackCtx, l.httpClient, channelSettings, message.QueryID, text); err != nil {
+			l.log.Warn("callback ack", "channel", l.driver.Type(), "error", err)
+		}
+	}
+	requestID, action, ok := parseAskToken(message.CallbackData)
+	if !ok {
+		ack(agent.ChannelText(lang, "callback_bad"))
+		return
+	}
+	row, err := l.store.GetHumanRequest(ctx, requestID)
+	if err != nil || row.Status != workspace.HumanStatusPending {
+		// Closed (answered elsewhere, expired, zombie) — the tap must not
+		// resurrect it; the user hears that immediately.
+		ack(agent.ChannelText(lang, "callback_closed"))
+		return
+	}
+	// The dialog language follows the question (the ask's language), matching
+	// every other channel surface.
+	lang = agent.DetectLang(row.Question)
+	// The chat must be a registered address of the resolved user (closed
+	// world): a button press from a foreign chat is refused, not routed.
+	address := message.ChatID
+	if row.ResolvedUser != "" && !l.userOwnsChat(ctx, row.ResolvedUser, address) {
+		ack(agent.ChannelText(lang, "callback_bad"))
+		return
+	}
+	cancelled := action == "x"
+	response := ""
+	if !cancelled {
+		idx, parseErr := strconv.Atoi(action)
+		if parseErr != nil || idx < 0 || idx >= len(row.Options) {
+			ack(agent.ChannelText(lang, "callback_bad"))
+			return
+		}
+		response = row.Options[idx]
+	}
+	ask := agent.PendingAsk{
+		RequestID: row.ID,
+		RunID:     row.RunID,
+		ProjectID: row.ProjectID,
+		UserID:    row.ResolvedUser,
+		ThreadRef: row.ThreadRef,
+		CreatedAt: row.CreatedAt,
+	}
+	if l.resolveAsk(ctx, ask, response, cancelled, message.Sender, address) {
+		if cancelled {
+			ack(agent.ChannelText(lang, "callback_cancel"))
+		} else {
+			ack(agent.ChannelText(lang, "callback_ok"))
+		}
+		l.resolveAskMessage(ctx, channelSettings, address, message.SourceMessageID, cancelled, lang)
+	} else {
+		ack(agent.ChannelText(lang, "callback_closed"))
+	}
+}
+
+// parseAskToken splits the kernel's button token: a:<requestID>:<action>
+// where action is an option index or "x" (cancel).
+func parseAskToken(token string) (requestID, action string, ok bool) {
+	parts := strings.SplitN(strings.TrimSpace(token), ":", 3)
+	if len(parts) != 3 || parts[0] != "a" || parts[1] == "" || parts[2] == "" {
+		return "", "", false
+	}
+	return parts[1], parts[2], true
+}
+
+// userOwnsChat checks the closed world for interactive events: the chat must
+// be one of the user's enabled addresses on this channel. Best-effort: a
+// lookup failure keeps the conservative answer (no ownership).
+func (l *channelInboundLoop) userOwnsChat(ctx context.Context, userID, chat string) bool {
+	users, err := l.store.ListUsers(ctx)
+	if err != nil {
+		return false
+	}
+	for _, user := range users {
+		if user.ID != userID {
+			continue
+		}
+		for _, channel := range user.Channels {
+			if channel.Type == l.driver.Type() && channel.Enabled && channel.Address == chat {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resolveAskMessage edits the ask's message in place when the driver can:
+// buttons out, verdict line in — the dialog keeps one readable story.
+// Best-effort: an edit failure costs a log line, never the answer.
+func (l *channelInboundLoop) resolveAskMessage(ctx context.Context, channelSettings map[string]string, address, messageID string, cancelled bool, lang string) {
+	editor, ok := l.driver.(agent.MessageEditor)
+	if !ok || address == "" || messageID == "" {
+		return
+	}
+	text := agent.ChannelText(lang, "ask_resolved")
+	if cancelled {
+		text = agent.ChannelText(lang, "ask_cancelled")
+	}
+	editCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := editor.EditMessage(editCtx, l.httpClient, channelSettings, address, messageID, text, nil); err != nil {
+		l.log.Warn("ask resolve edit", "channel", l.driver.Type(), "message", messageID, "error", err)
+	}
+}
+
+// handleWidgetQuery advances one widget form interaction: the authoritative
+// state lives in workspace_channel_widget, the widget is a dumb renderer.
+// The ack answers within the transport's window; the state push re-renders
+// the widget; a resolved submit enters the same approval path as a text
+// reply — the workflow cannot tell the surfaces apart.
+func (l *channelInboundLoop) handleWidgetQuery(ctx context.Context, channelSettings map[string]string, message agent.InboundMessage) {
+	lang := ""
+	ack := func(text string) {
+		poster, ok := l.driver.(agent.WidgetPoster)
+		if !ok || message.QueryID == "" {
+			return
+		}
+		ackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := poster.AnswerWidget(ackCtx, l.httpClient, channelSettings, message.QueryID, text); err != nil {
+			l.log.Warn("widget ack", "channel", l.driver.Type(), "error", err)
+		}
+	}
+	if !l.widgetThrottle(message.Sender) {
+		ack(agent.ChannelText(lang, "widget_rate"))
+		return
+	}
+	if message.CallbackData == "" || message.SourceMessageID == "" {
+		ack(agent.ChannelText(lang, "widget_bad_op"))
+		return
+	}
+	row, err := l.store.GetChannelWidget(ctx, l.driver.Type(), message.ChatID, message.SourceMessageID)
+	if err != nil {
+		ack(agent.ChannelText(lang, "widget_expired"))
+		return
+	}
+	model, err := agent.ParseWidgetModel(string(row.State))
+	if err != nil {
+		l.log.Warn("widget state decode", "channel", l.driver.Type(), "error", err)
+		ack(agent.ChannelText(lang, "widget_bad_op"))
+		return
+	}
+	if model.State.Done {
+		ack(agent.ChannelText(lang, "widget_expired"))
+		return
+	}
+	op, err := agent.DecodeWidgetOp(message.CallbackData)
+	if err != nil {
+		ack(agent.ChannelText(lang, "widget_bad_op"))
+		return
+	}
+	newModel, ackText, resolved, response, err := agent.ApplyWidgetOp(model, op)
+	if err != nil {
+		l.log.Warn("widget op apply", "channel", l.driver.Type(), "error", err)
+		ack(agent.ChannelText(lang, "widget_bad_op"))
+		return
+	}
+	encoded, err := newModel.Encode()
+	if err != nil {
+		// The user's values outgrew the widget data channel: surface the
+		// hosted form (the widget message carries its button).
+		l.log.Warn("widget state encode", "channel", l.driver.Type(), "error", err)
+		ack("form too large — use the web form")
+		return
+	}
+	if err := l.store.SaveChannelWidgetState(ctx, l.driver.Type(), message.ChatID, message.SourceMessageID, json.RawMessage(encoded)); err != nil {
+		l.log.Warn("widget state save", "channel", l.driver.Type(), "error", err)
+		ack(agent.ChannelText(lang, "widget_bad_op"))
+		return
+	}
+	ack(ackText)
+	// Push the new model: the widget re-renders values and field errors.
+	if poster, ok := l.driver.(agent.WidgetPoster); ok {
+		pushCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		pushErr := poster.EditWidgetData(pushCtx, l.httpClient, channelSettings, message.ChatID, message.SourceMessageID, encoded)
+		cancel()
+		if pushErr != nil {
+			l.log.Warn("widget push", "channel", l.driver.Type(), "error", pushErr)
+		}
+	}
+	if !resolved {
+		return
+	}
+	// The form came through: resolve the ask exactly like a channel reply.
+	askRow, err := l.store.GetHumanRequest(ctx, row.RequestID)
+	if err != nil || askRow.Status != workspace.HumanStatusPending {
+		return // the ask closed meanwhile; the widget already shows done
+	}
+	ask := agent.PendingAsk{
+		RequestID: askRow.ID,
+		RunID:     askRow.RunID,
+		ProjectID: askRow.ProjectID,
+		UserID:    askRow.ResolvedUser,
+		ThreadRef: askRow.ThreadRef,
+		CreatedAt: askRow.CreatedAt,
+	}
+	l.resolveAsk(ctx, ask, string(response), false, message.Sender, message.ChatID)
+}
+
+// widgetThrottle enforces the interaction budget (5 per window per sender).
+// In-memory: the transport's own cap carries the enforcement; this is the
+// politeness layer that keeps bursts from queuing state transitions.
+func (l *channelInboundLoop) widgetThrottle(sender string) bool {
+	if l.widgetThrottleState == nil {
+		l.widgetThrottleState = &interactionBudget{hits: map[string][]time.Time{}}
+	}
+	l.widgetThrottleState.mu.Lock()
+	defer l.widgetThrottleState.mu.Unlock()
+	now := time.Now()
+	fresh := l.widgetThrottleState.hits[sender][:0]
+	for _, at := range l.widgetThrottleState.hits[sender] {
+		if now.Sub(at) < widgetRateWindow {
+			fresh = append(fresh, at)
+		}
+	}
+	if len(fresh) >= 5 {
+		l.widgetThrottleState.hits[sender] = fresh
+		return false
+	}
+	l.widgetThrottleState.hits[sender] = append(fresh, now)
+	return true
 }
 
 // saveCursor persists the loop state best-effort: a failed save costs a
@@ -319,14 +598,12 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 }
 
 // routeReply signals the waiting workflow and closes the human request row.
-// The signal goes first: resuming the run is the point. When it fails
-// transiently the row stays open — the workflow is still waiting and a later
-// retry (e.g. after a restart's history replay) may yet deliver the answer.
-// When the workflow is GONE (not found / already completed) the row is a
-// zombie: nothing can ever answer it, and left open it swallows every later
-// message of the chat as a phantom reply — the sender hears nothing, ever.
-// The row is closed like the terminal-run hygiene sweep would, and the
-// message returns unconsumed so it re-enters intake as a fresh one.
+// The signal goes first: resuming the run is the point. A transient signal
+// failure keeps the row open — the workflow is still waiting and a later
+// retry may yet deliver the answer. When the workflow is GONE (not found /
+// already completed) resolveAsk closes the zombie row and returns false: the
+// message re-enters intake as a fresh one instead of dying silently in a
+// dead dialog, and the dialog hears the question is dead.
 // File replies are downloaded into the project workspace first, so the
 // resumed run — and every agent in the project — can read the attachment by
 // path.
@@ -359,40 +636,53 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 			response = strings.TrimSpace("[Attached file: " + saved + "] " + response)
 		}
 	}
-	actor := reply.Ask.UserID // anyone in the chat answers as the chat owner (MVP)
+	consumed := l.resolveAsk(ctx, reply.Ask, response, reply.Cancelled, reply.Message.Sender, reply.Message.ChatID)
+	if !consumed {
+		// Zombie ask: the workflow is gone, the row was closed, and the
+		// message re-enters intake as a fresh one — tell the dialog why.
+		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID,
+			agent.ChannelText(agent.DetectLang(response), "notice_ask_dead"))
+	}
+	return consumed
+}
+
+// resolveAsk is the shared answer core for every interactive surface (text
+// reply, keyboard button, widget submit): one approval signal into the
+// waiting workflow, one row closure, one audit record — the surface never
+// leaks into the workflow's view. Returns whether the answer was consumed
+// (a signal failure keeps the ask open for retry, a zombie closes it).
+func (l *channelInboundLoop) resolveAsk(ctx context.Context, ask agent.PendingAsk, response string, cancelled bool, sender, chat string) bool {
+	actor := ask.UserID // anyone in the chat answers as the chat owner (MVP)
 	approval := agent.Approval{
-		OperationID: reply.Ask.RequestID,
-		Approved:    !reply.Cancelled,
+		OperationID: ask.RequestID,
+		Approved:    !cancelled,
 		ActorID:     actor,
 		Response:    response,
 	}
-	workflowID := agent.WorkflowID(l.sourceID, reply.Ask.ProjectID, reply.Ask.RunID)
+	workflowID := agent.WorkflowID(l.sourceID, ask.ProjectID, ask.RunID)
 	if err := l.signal(ctx, workflowID, approval); err != nil {
 		// A finished workflow (timeout race) is expected: the row is already
 		// expired and the run moved on — nothing to route.
 		detail := strings.ToLower(err.Error())
 		if strings.Contains(detail, "not found") || strings.Contains(detail, "already completed") {
-			l.log.Info("channel reply arrived after run ended", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "run", reply.Ask.RunID)
+			l.log.Info("channel reply arrived after run ended", "channel", l.driver.Type(), "operation", ask.RequestID, "run", ask.RunID)
 			// The run is gone but the ask row survived it (a crash, a rebuild,
 			// a close activity that never ran). Close the zombie durably —
 			// otherwise every later message of this chat matches it, dies here
-			// and the sender hears nothing — and let the message re-enter
-			// intake as a fresh one.
-			if cErr := l.store.CancelHumanRequest(ctx, reply.Ask.RequestID, "system-sweep"); cErr != nil && !errors.Is(cErr, workspace.ErrNotFound) {
-				l.log.Warn("channel reply close zombie ask", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "error", cErr)
+			// and the sender hears nothing.
+			if cErr := l.store.CancelHumanRequest(ctx, ask.RequestID, "system-sweep"); cErr != nil && !errors.Is(cErr, workspace.ErrNotFound) {
+				l.log.Warn("channel reply close zombie ask", "channel", l.driver.Type(), "operation", ask.RequestID, "error", cErr)
 			}
-			l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID,
-				agent.ChannelText(agent.DetectLang(reply.Message.Text), "notice_ask_dead"))
 			return false
 		}
-		l.log.Warn("channel reply signal", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "run", reply.Ask.RunID, "error", err)
+		l.log.Warn("channel reply signal", "channel", l.driver.Type(), "operation", ask.RequestID, "run", ask.RunID, "error", err)
 		return true // consumed: the ask is still live, the row keeps waiting
 	}
-	if reply.Cancelled {
-		if err := l.store.CancelHumanRequest(ctx, reply.Ask.RequestID, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
-			l.log.Warn("channel reply cancel request", "operation", reply.Ask.RequestID, "error", err)
+	if cancelled {
+		if err := l.store.CancelHumanRequest(ctx, ask.RequestID, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+			l.log.Warn("channel reply cancel request", "operation", ask.RequestID, "error", err)
 		}
-	} else if row, transitioned, err := l.store.AnswerHumanRequest(ctx, reply.Ask.RequestID, response, actor); err == nil {
+	} else if row, transitioned, err := l.store.AnswerHumanRequest(ctx, ask.RequestID, response, actor); err == nil {
 		// Terminal transition with a verdict → hitl.verdict.recorded
 		// (specs/quality-loop.md §9) through the durable outbox. A reply that
 		// lost the race (the web answer already closed the row) stays silent.
@@ -400,22 +690,22 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 			emitHitlVerdict(ctx, l.events, row)
 		}
 	} else if !errors.Is(err, workspace.ErrNotFound) {
-		l.log.Warn("channel reply answer request", "operation", reply.Ask.RequestID, "error", err)
+		l.log.Warn("channel reply answer request", "operation", ask.RequestID, "error", err)
 	}
 	action := workspace.AuditHumanAnswered
-	if reply.Cancelled {
+	if cancelled {
 		action = workspace.AuditHumanCancelled
 	}
-	if err := l.store.RecordAccessAudit(ctx, actor, action, "human_request", reply.Ask.RequestID, map[string]any{
-		"run_id":  reply.Ask.RunID,
-		"project": reply.Ask.ProjectID,
+	if err := l.store.RecordAccessAudit(ctx, actor, action, "human_request", ask.RequestID, map[string]any{
+		"run_id":  ask.RunID,
+		"project": ask.ProjectID,
 		"channel": l.driver.Type(),
-		"sender":  reply.Message.Sender,
-		"chat":    reply.Message.ChatID,
+		"sender":  sender,
+		"chat":    chat,
 	}); err != nil {
-		l.log.Warn("channel reply audit", "operation", reply.Ask.RequestID, "error", err)
+		l.log.Warn("channel reply audit", "operation", ask.RequestID, "error", err)
 	}
-	l.log.Info("channel reply routed", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "run", reply.Ask.RunID, "sender", reply.Message.Sender, "cancelled", reply.Cancelled)
+	l.log.Info("channel reply routed", "channel", l.driver.Type(), "operation", ask.RequestID, "run", ask.RunID, "sender", sender, "cancelled", cancelled)
 	return true
 }
 
@@ -665,7 +955,20 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 			// file-capable transports, PNG photos for image ones (§9.4).
 			answerBody := presentation.StripFences(run.Answer)
 			deliverCtx, cancel := context.WithTimeout(watchCtx, 20*time.Second)
-			dErr := l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: answerBody})
+			var dErr error
+			// Rich transport (docs/channels.md §13): structured answers render
+			// their markdown natively; the plain-text path stays the fallback —
+			// a failed rich send never loses the answer.
+			rich, canRich := l.driver.(agent.RichTextPoster)
+			if canRich {
+				_, dErr = rich.SendTextRich(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: answerBody})
+				if dErr != nil {
+					l.log.Warn("rich answer delivery, falling back to text", "channel", l.driver.Type(), "error", dErr)
+				}
+			}
+			if !canRich || dErr != nil {
+				dErr = l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: answerBody})
+			}
 			cancel()
 			// Clear the marker before or together with the answer landing: the
 			// server expires it only after the full 30s timeout.
@@ -755,6 +1058,7 @@ type runProgress struct {
 	lang         string    // dialog language for every canned line
 	startedAt    time.Time // run start, for the elapsed marker
 	lastSent     time.Time // last progress delivery, for the pacing window
+	lastDraftLen int       // length already streamed as the ephemeral draft
 }
 
 // announceProgress tails the run's journal events once per poll: the latest
@@ -774,6 +1078,7 @@ func (l *channelInboundLoop) announceProgress(ctx context.Context, settings agen
 		l.foldProgressEvent(event, p)
 	}
 	if time.Since(p.lastSent) < progressEvery {
+		l.streamDraft(ctx, settings, address, runID, p)
 		return // the pacing window: everything pending survives to the next poll
 	}
 	// Phases first (they happen earlier in the run), interim model lines
@@ -786,9 +1091,51 @@ func (l *channelInboundLoop) announceProgress(ctx context.Context, settings agen
 		line, p.pendingQuote = p.pendingQuote, ""
 	}
 	if line == "" {
+		l.streamDraft(ctx, settings, address, runID, p)
 		return
 	}
 	l.sendProgress(ctx, settings, address, line, p)
+}
+
+// draftTailLen caps the ephemeral preview: the draft shows the freshest part
+// of the growing answer, not the whole buffer.
+const draftTailLen = 1200
+
+// streamDraft pushes the growing model text as an ephemeral draft preview
+// (telegram sendMessageDraft, docs/channels.md): the user watches the answer
+// being written instead of staring at a typing marker. The draft lives ~30
+// seconds and is replaced by the real delivery; failures are silent — the
+// draft is a bonus surface, never a dependency.
+func (l *channelInboundLoop) streamDraft(ctx context.Context, settings agent.ChannelSettings, address, runID string, p *runProgress) {
+	draft, ok := l.driver.(agent.DraftStreamer)
+	if !ok {
+		return
+	}
+	text := strings.TrimSpace(p.textBuf)
+	if text == "" || len(text) <= p.lastDraftLen {
+		return // nothing new since the last push
+	}
+	preview := text
+	if len(preview) > draftTailLen {
+		preview = "…" + preview[len(preview)-draftTailLen:]
+	}
+	draftCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := draft.SendDraft(draftCtx, l.httpClient, settings.Channels[l.driver.Type()], address, telegramDraftID(address, runID), preview); err != nil {
+		return // transport rejected the draft (unsupported chat, old server) — stay quiet
+	}
+	p.lastDraftLen = len(text)
+}
+
+// telegramDraftID derives a stable non-zero draft id for one (chat, run):
+// successive previews of the same run animate as one draft.
+func telegramDraftID(address, runID string) int64 {
+	h := sha256.Sum256([]byte(address + "\x00" + runID))
+	id := int64(binary.BigEndian.Uint64(h[:8]) & 0x3fffffffffffffff)
+	if id == 0 {
+		id = 1
+	}
+	return id
 }
 
 // interimTextLimit caps what qualifies as an "interim one-liner": longer

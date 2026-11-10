@@ -646,10 +646,104 @@ func (a *Activities) sendToChannel(ctx context.Context, channelType, address str
 	if driver.Spec().Capabilities.Threads {
 		msg.Thread = thread
 	}
+	// Interactive asks (docs/interactive-HITL.md Этап D): options become
+	// tappable buttons, the kernel keeps the routing tokens opaque and short.
+	// The cancel button joins the row; overlong tokens degrade to the text
+	// baseline (telegram callback_data carries 1-64 bytes).
+	if driver.Spec().Capabilities.Interactive {
+		msg.Buttons = askButtons(request.OperationID, request.Options, DetectLang(request.Question))
+	}
+	// Schema asks on widget-capable channels (Bot API 10.4): the form renders
+	// inside the chat and the interaction routes back through the widget
+	// pipeline. Best-effort with full degradation: any failure (old server,
+	// group chat, oversized model) falls through to the text+hosted-form
+	// delivery below — the agent never learns the difference.
+	if len(msg.Schema) > 0 && driver.Spec().Capabilities.Widgets {
+		if id, wErr := a.deliverSchemaWidget(ctx, driver, channelType, address, request, settings, msg); wErr == nil {
+			return id, nil
+		}
+	}
 	if poster, ok := driver.(ThreadedTextPoster); ok {
 		return poster.SendTextThreaded(ctx, a.HTTP, settings.Channels[channelType], address, msg)
 	}
 	return "", driver.SendText(ctx, a.HTTP, settings.Channels[channelType], address, msg)
+}
+
+// askButtons builds the interactive row set for one ask: one button per
+// option plus the cancel shortcut. Tokens carry the request id and the
+// action (`a:<id>:<idx>` / `a:<id>:x`) — under the 64-byte callback_data cap
+// or the whole surface drops (the plain body still lists the options).
+func askButtons(operationID string, options []string, lang string) [][]OutboundButton {
+	op := strings.TrimSpace(operationID)
+	if op == "" || len(options) == 0 {
+		return nil
+	}
+	rows := make([][]OutboundButton, 0, 2)
+	row := make([]OutboundButton, 0, len(options))
+	for i, option := range options {
+		token := fmt.Sprintf("a:%s:%d", op, i)
+		if len(token) > WidgetOpLimit {
+			return nil // this ask answers by text; buttons would lie silently
+		}
+		label := strings.TrimSpace(option)
+		if label == "" {
+			label = option
+		}
+		row = append(row, OutboundButton{Text: truncate(label, 64), Token: token})
+	}
+	rows = append(rows, row)
+	cancelToken := "a:" + op + ":x"
+	if len(cancelToken) <= WidgetOpLimit {
+		rows = append(rows, []OutboundButton{{Text: ChannelText(lang, "ask_cancel"), Token: cancelToken}})
+	}
+	return rows
+}
+
+// deliverSchemaWidget posts one schema ask as an interactive HTML widget and
+// pins the (channel, chat, message) → request mapping in the workspace store
+// so the widget's queries resolve back to the ask. Returns the posted message
+// id; an error degrades the caller to the text path.
+func (a *Activities) deliverSchemaWidget(ctx context.Context, driver ChannelDriver, channelType, address string, request NotifyChannelRequest, settings ChannelSettings, msg OutboundText) (string, error) {
+	poster, ok := driver.(WidgetPoster)
+	if !ok {
+		return "", fmt.Errorf("channel %q has no widget poster", channelType)
+	}
+	lang := DetectLang(request.Question)
+	model, err := BuildWidgetModel(request.Question, msg.Schema, WidgetState{Values: map[string]any{}})
+	if err != nil {
+		return "", err // unsupported schema subset: text + hosted form is the answer
+	}
+	encoded, err := model.Encode()
+	if err != nil {
+		return "", err // over the data cap: the widget cannot carry this form
+	}
+	messageID, err := poster.SendWidget(ctx, a.HTTP, settings.Channels[channelType], address, OutboundWidget{
+		Model:   json.RawMessage(encoded),
+		FormURL: msg.FormURL,
+		Lang:    lang,
+	})
+	if err != nil {
+		return "", err
+	}
+	// Pin the widget session: the inbound loop resolves widget queries
+	// through this row. A failed pin makes the widget dead glass — degrade
+	// honestly by returning the error so the ask still lands as text.
+	pin := map[string]any{
+		"channel":    channelType,
+		"chat_id":    address,
+		"message_id": messageID,
+		"request_id": request.OperationID,
+		"state":      encoded,
+	}
+	_, status, err := a.workspaceDo(ctx, http.MethodPost,
+		strings.TrimRight(a.WorkspaceURL, "/")+"/v1/workspace/channel-widgets", pin)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status > 299 {
+		return "", fmt.Errorf("widget pin returned %d", status)
+	}
+	return messageID, nil
 }
 
 // conversationThreadRef picks the conversation anchor for thread_ref: a

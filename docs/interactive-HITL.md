@@ -49,7 +49,7 @@ v2.0 привязывает его к яру human_request / ask_human, факт
 | Канал | Модель inbound | TwoWay | Threads | Интерактивность сейчас | План |
 |---|---|---|---|---|---|
 | Matrix | pull `/sync`, mxid | да | — | текст + ссылка «ответить здесь» | кнопки через клиент-агностику не обещаем |
-| Telegram | pull `getUpdates`, chat id | да (личка) | — | текст | inline keyboard (`Capabilities.Interactive`) |
+| Telegram | pull `getUpdates`, chat id | да (личка) | — | inline keyboard (`Capabilities.Interactive`, callback `a:<id>:<idx>` + cancel; answerCallbackQuery; editMessageText «решён») + schema-формы HTML-виджетом (Bot API 10.4, §7.1) + rich-ответы + черновики | TON-типы виджет-запросов (sign_data/sent_transaction) — логируются |
 | Slack (webhook) | только outbound | — | — | текст + `answer_url` | остаётся outbound-каналом |
 | Slack (bot) | push Events API, member id | да | да (ts) | текст в треде вопроса | Block Kit buttons |
 | Mattermost | pull WebSocket, user id | да | да (root post) | текст в треде вопроса | interactive dialogs |
@@ -242,12 +242,50 @@ Telegram Mini Apps, Matrix-кнопки, A2UI/MCP Apps как транспорт
 - **Этап C (готово):** формы — `schema` в `ask_human`, хранение в
   `human_request`, серверная валидация значений, общий рендерер `HumanForm`
   в чате и на Runs, текстовая заглушка для каналов (§7).
-- **Этап D:** нативные кнопки там, где канал умеет: `Capabilities.Interactive`,
-  telegram inline keyboard, slack Block Kit; текстовый фолбэк обязателен
-  (docs/channels.md, фаза 3).
-- **Этап E:** расширения форм из v1.0 §3.2–3.4 по мере надобности: условные
-  поля, многошаговость, динамические справочники, карточки сущностей.
+- **Этап D (готово):** нативные кнопки там, где канал умеет:
+  `Capabilities.Interactive`; telegram inline keyboard — Options кнопками
+  (токены `a:<requestID>:<idx>`, cancel `a:<requestID>:x` ≤64Б, иначе деградация
+  в текст), press → тот же approval-путь, что текстовый ответ
+  (kernel/agent/notify.go askButtons, cmd/agent-kernel handleCallback);
+  answerCallbackQuery подтверждает нажатие, editMessageText гасит кнопки.
+- **Этап E (готово, частично):** schema-формы как HTML-виджеты в Telegram
+  (§7.1 ниже) — расширение подмножества §3.2–3.4 по мере надобности.
 - **Этап F:** бэклог §9 по мере появления каналов и требований.
+
+## 7.1. Schema-формы как HTML-виджеты (Telegram, Bot API 10.4)
+
+Schema-вопрос при доставке в telegram с `Capabilities.Widgets` рендерится
+**HTML-виджетом прямо в чате** (sendWidget): селекты/чекбоксы/числа вместо
+«текст + ссылка». Агенты не меняются: виджет — чистая функция над `schema` из
+`ask_human`, всё канало-специфичное живёт под контрактом.
+
+Слои («ядро не знает каналов, драйверы не знают продукта»):
+
+* **ядро** (`kernel/agent/widgetform.go`) — нейтральная `WidgetModel`
+  (поля из подмножества §7, состояние, ошибки) и op-протокол: `set`/`submit`/
+  `reset`, значения по индексу поля (ops ≤64Б), валидация — зеркало
+  `workspace.ValidateFormValues`; ответ резолва — канонический JSON значений,
+  тот же tool result, что у веб-формы;
+* **драйвер** (`kernel/agent/widgetrender.go`) — модель → HTML-виджет
+  (≤32КБ raw / ≤4096Б zlib), кнопка хостед-формы рядом;
+* **конвейер**: доставка пинит сессию в `workspace_channel_widget`
+  (миграция 0029, внутренний роут `POST /v1/workspace/channel-widgets`);
+  входной луп обрабатывает `widget_query`: throttle 5/5с на отправителя →
+  применить op к авторитетному состоянию → `answerWidgetQuery` (ack ≤15с) →
+  `editMessageWidgetData` (перерисовка) → на submit — signal+закрытие+аудит
+  через общий `resolveAsk` (cmd/agent-kernel/channelinbound.go).
+
+Деградации (решает ядро, агент не узнаёт): группа/старый сервер/модель >1КБ →
+текст + хостед-форма; сессия истекла → «форм уже закрыт»; невалидный submit →
+ошибки полей уезжают в виджет, строка остаётся открытой. Ограничения prod:
+виджеты только в личных чатах, protect_content неизбежен, TON-типы запросов
+(sign_data/sent_transaction) логируются и ack-аются без кошельковой логики.
+
+Черновики генерации (`sendMessageDraft`): answer-watcher стримит накопленный
+`model.text_delta` как ephemeral-превью ответа (tail ≤1200 символов, стабильный
+draft_id на (чат, ран)); превью живёт ~30с и заменяется финальным
+`sendRichMessage`/`sendMessage`. can_stop выключен — остановка рана остаётся
+явным продуктовым действием.
 
 ## 11. Критерии приёмки
 

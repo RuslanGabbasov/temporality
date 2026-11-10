@@ -41,6 +41,9 @@ type fakeInboundStore struct {
 	presentations []workspace.Presentation
 	resolvedIDs   []string
 	resolveErr    error
+
+	// interactive widget sessions (Bot API 10.4)
+	widgets []workspace.ChannelWidget
 }
 
 // inboundUpdateRecord is one observed UpdateInboundMessage call.
@@ -233,6 +236,44 @@ func (s *fakeInboundStore) GetRun(_ context.Context, id string) (workspace.Run, 
 		return run, nil
 	}
 	return workspace.Run{}, workspace.ErrNotFound
+}
+
+// Interactive surfaces (Этап D + widgets): the fake mirrors the store
+// contract — GetHumanRequest reads by id, the widget map holds sessions.
+func (s *fakeInboundStore) GetHumanRequest(_ context.Context, id string) (workspace.HumanRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, row := range s.requests {
+		if row.ID == id {
+			return row, nil
+		}
+	}
+	return workspace.HumanRequest{}, workspace.ErrNotFound
+}
+
+func (s *fakeInboundStore) GetChannelWidget(_ context.Context, channel, chatID, messageID string) (workspace.ChannelWidget, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.widgets {
+		w := &s.widgets[i]
+		if w.Channel == channel && w.ChatID == chatID && w.MessageID == messageID {
+			return *w, nil
+		}
+	}
+	return workspace.ChannelWidget{}, workspace.ErrNotFound
+}
+
+func (s *fakeInboundStore) SaveChannelWidgetState(_ context.Context, channel, chatID, messageID string, state json.RawMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.widgets {
+		w := &s.widgets[i]
+		if w.Channel == channel && w.ChatID == chatID && w.MessageID == messageID {
+			w.State = state
+			return nil
+		}
+	}
+	return workspace.ErrNotFound
 }
 
 // ListRoutedInboundMessages backs the follow-up-as-note lookup: newest first

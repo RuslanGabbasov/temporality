@@ -7388,6 +7388,33 @@ func main() {
 		}
 		writeJSON(w, 201, &req)
 	})
+	mux.HandleFunc("POST /v1/workspace/channel-widgets", func(w http.ResponseWriter, r *http.Request) {
+		// Widget session pin (Bot API 10.4, docs/interactive-HITL.md): the
+		// notification activity registers the posted widget's channel
+		// placement so the inbound loop can resolve its queries to the ask.
+		// Internal-token caller only (RoleOperator covers the loopback gate).
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var req workspace.ChannelWidget
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<15)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if req.Channel == "" || req.ChatID == "" || req.MessageID == "" || req.RequestID == "" {
+			writeError(w, 400, errors.New("channel, chat_id, message_id and request_id are required"))
+			return
+		}
+		if len(req.State) > 4096 {
+			writeError(w, 400, errors.New("widget state exceeds 4096 bytes"))
+			return
+		}
+		if err := ws.UpsertChannelWidget(r.Context(), req); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /v1/workspace/human-requests/{requestID}/close", func(w http.ResponseWriter, r *http.Request) {
 		// Close from the workflow activity after the wait resolved. The HTTP
 		// approval path (below) closes answered/cancelled rows directly.
