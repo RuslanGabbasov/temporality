@@ -27,6 +27,7 @@ import {
   codeMirrorPlugin,
 } from '@mdxeditor/editor'
 import '@mdxeditor/editor/style.css'
+import { useTheme } from './theme'
 
 // The plugin set is shared with the fidelity test: the stored markdown must
 // survive the exact round-trip the UI performs (presentations fences,
@@ -90,6 +91,11 @@ export function ArtifactEditor({ markdown, onChange, onReady, readOnly }: {
   readOnly?: boolean
 }) {
   const ref = useRef<MDXEditorMethods | null>(null)
+  // MDXEditor's palette is driven by its theme class: the scales (slate/blue/
+  // amber/…) flip between the light :root values and the .dark-theme values.
+  // It must follow the APP theme, not a hardcoded dark — a hardcoded dark
+ //  left half the control invisible on the light theme.
+  const { resolved } = useTheme()
   // The editor is uncontrolled: markdown flows in once per mount (a key on
   // the parent side remounts it per version switch), edits flow out.
   useEffect(() => { if (onReady && ref.current) onReady({ getMarkdown: () => ref.current!.getMarkdown() }) }, [onReady])
@@ -97,7 +103,7 @@ export function ArtifactEditor({ markdown, onChange, onReady, readOnly }: {
     <div className="artifact-editor">
       <MDXEditor
         ref={ref}
-        className="dark-theme"
+        className={resolved === 'light' ? 'light-theme' : 'dark-theme'}
         markdown={markdown}
         onChange={onChange}
         readOnly={readOnly}
