@@ -196,6 +196,25 @@ func (a *Activities) handleArtifactRead(ctx context.Context, request ToolRequest
 	return ToolResult{Content: string(encoded)}, nil
 }
 
+// handleArtifactFeedback fetches the reviewer notes through the workspace
+// API so revision tasks have the same source of truth as the review UI.
+func (a *Activities) handleArtifactFeedback(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	artifactID := artifactStringArg(request, "artifact_id")
+	version, ok := request.Arguments["version"].(float64)
+	if artifactID == "" || !ok || version < 1 {
+		return ToolResult{Content: "error: artifact_id and positive version are required"}, nil
+	}
+	endpoint := fmt.Sprintf("%s/v1/workspace/artifacts/%s/annotations?version=%d", a.WorkspaceURL, url.PathEscape(artifactID), int(version))
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: artifact feedback failed (HTTP %d): %s", status, truncate(body, 500))}, nil
+	}
+	return ToolResult{Content: compactJSON(body, 12000)}, nil
+}
+
 // cachedExternalArtifact returns the url-provider body from cache when fresh,
 // or fetches it (reporting fetchedNow). The fetch honors the tool context and
 // the builtin 2 MiB cap: an oversized external document is an error, not a

@@ -39,7 +39,7 @@ type artifactLifecycleStore interface {
 	GetArtifactReview(ctx context.Context, reviewID string) (workspace.ArtifactReview, error)
 	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
 	ListArtifactReviews(ctx context.Context, artifactID string) ([]workspace.ArtifactReview, error)
-	AddArtifactAnnotation(ctx context.Context, artifactID string, version int, kind, quote, replacement, comment, createdBy string) (workspace.ArtifactAnnotation, error)
+	AddArtifactAnnotation(ctx context.Context, artifactID string, version, startOffset, endOffset int, kind, quote, replacement, comment, createdBy string) (workspace.ArtifactAnnotation, error)
 	ListArtifactAnnotations(ctx context.Context, artifactID string, version int) ([]workspace.ArtifactAnnotation, error)
 	ListArtifactVersions(ctx context.Context, artifactID string) ([]workspace.ArtifactVersion, error)
 	PendingArtifactRevision(ctx context.Context, artifactID string) (*workspace.ArtifactVersion, error)
@@ -95,6 +95,8 @@ type artifactReviewDecisionRequest struct {
 
 type artifactAnnotationRequest struct {
 	Version     int    `json:"version"`
+	StartOffset int    `json:"start_offset"`
+	EndOffset   int    `json:"end_offset"`
 	Kind        string `json:"kind"`
 	Quote       string `json:"quote"`
 	Replacement string `json:"replacement"`
@@ -161,6 +163,31 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 		}
 		writeJSON(w, 200, map[string]any{"annotations": items})
 	})
+	mux.HandleFunc("GET /v1/internal/artifacts/{artifactID}/annotations", func(w http.ResponseWriter, r *http.Request) {
+		if !isKernelInternal(r) {
+			writeError(w, http.StatusForbidden, errors.New("kernel service identity required"))
+			return
+		}
+		version, err := strconv.Atoi(r.URL.Query().Get("version"))
+		if err != nil || version < 1 {
+			writeError(w, http.StatusUnprocessableEntity, errors.New("version must be a positive integer"))
+			return
+		}
+		if _, err := ws.GetArtifactRange(r.Context(), r.PathValue("artifactID"), 0, 0); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, http.StatusNotFound, err)
+			} else {
+				writeError(w, http.StatusInternalServerError, err)
+			}
+			return
+		}
+		items, err := ws.ListArtifactAnnotations(r.Context(), r.PathValue("artifactID"), version)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"annotations": items})
+	})
 	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/annotations", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {
 			return
@@ -170,7 +197,7 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			writeError(w, 400, err)
 			return
 		}
-		a, err := ws.AddArtifactAnnotation(r.Context(), r.PathValue("artifactID"), req.Version, req.Kind, req.Quote, req.Replacement, req.Comment, requestUserID(r))
+		a, err := ws.AddArtifactAnnotation(r.Context(), r.PathValue("artifactID"), req.Version, req.StartOffset, req.EndOffset, req.Kind, req.Quote, req.Replacement, req.Comment, requestUserID(r))
 		if err != nil {
 			writeError(w, 422, err)
 			return

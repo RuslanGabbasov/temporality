@@ -60,6 +60,8 @@ type ArtifactAnnotation struct {
 	Version     int       `json:"version"`
 	Kind        string    `json:"kind"` // comment | change | approve | reject
 	Quote       string    `json:"quote"`
+	StartOffset int       `json:"start_offset"`
+	EndOffset   int       `json:"end_offset"`
 	Replacement string    `json:"replacement,omitempty"`
 	Comment     string    `json:"comment,omitempty"`
 	CreatedBy   string    `json:"created_by"`
@@ -86,9 +88,12 @@ const ArtifactRequestedByKey = "requested_by"
 
 const artifactReviewColumns = `id, artifact_id, artifact_version, reviewers, mode, status, note, requested_by, requested_at, decisions, resolved_by, resolved_at, reminded_at, escalated_at`
 
-func (s *Store) AddArtifactAnnotation(ctx context.Context, artifactID string, version int, kind, quote, replacement, comment, createdBy string) (ArtifactAnnotation, error) {
+func (s *Store) AddArtifactAnnotation(ctx context.Context, artifactID string, version, startOffset, endOffset int, kind, quote, replacement, comment, createdBy string) (ArtifactAnnotation, error) {
 	if version < 1 || len(quote) == 0 || len(quote) > 8192 {
 		return ArtifactAnnotation{}, errors.New("annotation requires a quoted fragment of at most 8192 bytes")
+	}
+	if startOffset < -1 || endOffset < -1 || (startOffset >= 0 && endOffset <= startOffset) || ((startOffset < 0) != (endOffset < 0)) {
+		return ArtifactAnnotation{}, errors.New("annotation offsets must identify a non-empty range")
 	}
 	switch kind {
 	case "comment", "change", "approve", "reject":
@@ -117,28 +122,14 @@ func (s *Store) AddArtifactAnnotation(ctx context.Context, artifactID string, ve
 		if !exists {
 			return ArtifactAnnotation{}, ErrNotFound
 		}
-	} else {
-		var status string
-		if err := s.pool.QueryRow(ctx, `SELECT status FROM workspace_artifact WHERE id=$1`, artifactID).Scan(&status); err != nil {
-			return ArtifactAnnotation{}, err
-		}
-		if status == ArtifactApproved {
-			var exists bool
-			if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_artifact_version WHERE artifact_id=$1 AND version=$2)`, artifactID, version).Scan(&exists); err != nil {
-				return ArtifactAnnotation{}, err
-			}
-			if exists {
-				return ArtifactAnnotation{}, errors.New("approved artifact annotations must target an archived version or a pending revision")
-			}
-		}
 	}
-	a := ArtifactAnnotation{ID: fmt.Sprintf("ann-%d", time.Now().UTC().UnixNano()), Version: version, Kind: kind, Quote: quote, Replacement: replacement, Comment: comment, CreatedBy: createdBy, CreatedAt: time.Now().UTC()}
-	_, err = s.pool.Exec(ctx, `INSERT INTO workspace_artifact_annotation (id, artifact_id, artifact_version, kind, quote, replacement, comment, created_by, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, a.ID, artifactID, a.Version, a.Kind, a.Quote, a.Replacement, a.Comment, a.CreatedBy, a.CreatedAt)
+	a := ArtifactAnnotation{ID: fmt.Sprintf("ann-%d", time.Now().UTC().UnixNano()), Version: version, Kind: kind, Quote: quote, StartOffset: startOffset, EndOffset: endOffset, Replacement: replacement, Comment: comment, CreatedBy: createdBy, CreatedAt: time.Now().UTC()}
+	_, err = s.pool.Exec(ctx, `INSERT INTO workspace_artifact_annotation (id, artifact_id, artifact_version, kind, quote, start_offset, end_offset, replacement, comment, created_by, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, a.ID, artifactID, a.Version, a.Kind, a.Quote, a.StartOffset, a.EndOffset, a.Replacement, a.Comment, a.CreatedBy, a.CreatedAt)
 	return a, err
 }
 
 func (s *Store) ListArtifactAnnotations(ctx context.Context, artifactID string, version int) ([]ArtifactAnnotation, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, artifact_version, kind, quote, replacement, comment, created_by, created_at FROM workspace_artifact_annotation WHERE artifact_id=$1 AND artifact_version=$2 ORDER BY created_at`, artifactID, version)
+	rows, err := s.pool.Query(ctx, `SELECT id, artifact_version, kind, quote, start_offset, end_offset, replacement, comment, created_by, created_at FROM workspace_artifact_annotation WHERE artifact_id=$1 AND artifact_version=$2 ORDER BY created_at`, artifactID, version)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +137,7 @@ func (s *Store) ListArtifactAnnotations(ctx context.Context, artifactID string, 
 	items := []ArtifactAnnotation{}
 	for rows.Next() {
 		var a ArtifactAnnotation
-		if err := rows.Scan(&a.ID, &a.Version, &a.Kind, &a.Quote, &a.Replacement, &a.Comment, &a.CreatedBy, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Version, &a.Kind, &a.Quote, &a.StartOffset, &a.EndOffset, &a.Replacement, &a.Comment, &a.CreatedBy, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, a)

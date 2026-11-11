@@ -1664,6 +1664,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (result T
 		return a.handleArtifactSearch(ctx, request)
 	case "artifact_read":
 		return a.handleArtifactRead(ctx, request)
+	case "artifact_feedback":
+		return a.handleArtifactFeedback(ctx, request)
 	case "artifact_create":
 		return a.handleArtifactCreate(ctx, request)
 	case "artifact_update":

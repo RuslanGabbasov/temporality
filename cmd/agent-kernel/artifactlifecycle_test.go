@@ -43,8 +43,8 @@ type fakeArtifactLifecycleStore struct {
 	cancelledRows []string
 }
 
-func (f *fakeArtifactLifecycleStore) AddArtifactAnnotation(_ context.Context, artifactID string, version int, kind, quote, replacement, comment, createdBy string) (workspace.ArtifactAnnotation, error) {
-	a := workspace.ArtifactAnnotation{ID: "ann-1", Version: version, Kind: kind, Quote: quote, Replacement: replacement, Comment: comment, CreatedBy: createdBy, CreatedAt: time.Now().UTC()}
+func (f *fakeArtifactLifecycleStore) AddArtifactAnnotation(_ context.Context, artifactID string, version, startOffset, endOffset int, kind, quote, replacement, comment, createdBy string) (workspace.ArtifactAnnotation, error) {
+	a := workspace.ArtifactAnnotation{ID: "ann-1", Version: version, StartOffset: startOffset, EndOffset: endOffset, Kind: kind, Quote: quote, Replacement: replacement, Comment: comment, CreatedBy: createdBy, CreatedAt: time.Now().UTC()}
 	f.mu.Lock()
 	f.annotations = append(f.annotations, a)
 	f.mu.Unlock()
@@ -310,7 +310,7 @@ func TestArtifactAnnotationsAreVersionScopedAndWriterOnly(t *testing.T) {
 
 	status, body := artifactPost(t, server, "readertoken", "/v1/workspace/artifacts/req-spec/annotations", `{"version":2,"kind":"comment","quote":"Clause 4","comment":"Please clarify"}`)
 	require.Equal(t, http.StatusForbidden, status, body)
-	status, body = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/annotations", `{"version":2,"kind":"change","quote":"Clause 4","replacement":"New clause","comment":"More precise"}`)
+	status, body = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/annotations", `{"version":2,"kind":"change","quote":"Clause 4","replacement":"New clause","comment":"More precise","start_offset":12,"end_offset":20}`)
 	require.Equal(t, http.StatusCreated, status, body)
 	status, body = artifactGet(t, server, "readertoken", "/v1/workspace/artifacts/req-spec/annotations?version=2")
 	require.Equal(t, http.StatusOK, status, body)

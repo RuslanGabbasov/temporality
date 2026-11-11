@@ -114,6 +114,8 @@ export default function Artifacts({ project }: { project?: string }) {
   const [reviews, setReviews] = useState<ArtifactReview[]>([])
   const [annotations, setAnnotations] = useState<ArtifactAnnotation[]>([])
   const [annotationDraft, setAnnotationDraft] = useState<{ quote: string; kind: ArtifactAnnotation['kind']; comment: string; replacement: string } | null>(null)
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; quote: string; start: number; end: number } | null>(null)
+  const artifactBodyRef = useRef<HTMLDivElement>(null)
   const [reviewsOpen, setReviewsOpen] = useState(false)
   const [submitOpen, setSubmitOpen] = useState(false)
   // Reviewers as tokens (the exact ask_human syntax underneath); the picker
@@ -302,6 +304,8 @@ export default function Artifacts({ project }: { project?: string }) {
     setBodyTruncated(false)
     setReviews([])
     setAnnotations([])
+    setSelectionMenu(null)
+    setAnnotationDraft(null)
     setReviewsOpen(false)
     setDecisionComment('')
     setRevision(null)
@@ -805,13 +809,74 @@ export default function Artifacts({ project }: { project?: string }) {
             const annotationsForVersion = annotations.filter((item) => item.version === displayedVersion)
             const saveAnnotation = async () => {
               if (!annotationDraft) return
+              const anchor = selectionMenu
+              if (!anchor) return
               setBusy(true)
               try {
-                const created = await workspaceApi.addArtifactAnnotation(selected.id, { version: displayedVersion, ...annotationDraft })
+                const created = await workspaceApi.addArtifactAnnotation(selected.id, { version: displayedVersion, ...annotationDraft, start_offset: anchor.start, end_offset: anchor.end })
                 setAnnotations((items) => [...items, created])
                 setAnnotationDraft(null)
+                setSelectionMenu(null)
               } catch (f) { setError(message(f)) }
               finally { setBusy(false) }
+            }
+            const captureSelection = () => {
+              if (selected.provider === 'url' || !artifactBodyRef.current) return
+              const selection = window.getSelection()
+              if (!selection || selection.isCollapsed || !selection.toString().trim()) return
+              const range = selection.getRangeAt(0)
+              if (!artifactBodyRef.current.contains(range.commonAncestorContainer)) return
+              const prefix = document.createRange()
+              prefix.selectNodeContents(artifactBodyRef.current)
+              prefix.setEnd(range.startContainer, range.startOffset)
+              const selectedQuote = range.toString().trim()
+              const renderedText = artifactBodyRef.current.textContent ?? ''
+              const start = renderedText.indexOf(selectedQuote, prefix.toString().length)
+              if (start < 0) return
+              const end = start + selectedQuote.length
+              const rect = range.getBoundingClientRect()
+              setSelectionMenu({ x: Math.min(Math.max(12, rect.left + rect.width / 2), window.innerWidth - 12), y: Math.max(12, rect.top - 8), quote: selectedQuote, start, end })
+              setAnnotationDraft(null)
+            }
+            const focusAnnotation = (item: ArtifactAnnotation) => {
+              const root = artifactBodyRef.current
+              if (!root) return
+              const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+              let node: Node | null
+              let cursor = 0
+              let startNode: Node | null = null, endNode: Node | null = null, startLocal = 0, endLocal = 0
+              while ((node = walker.nextNode())) {
+                const text = node.textContent ?? ''
+                const length = text.length
+                if (item.start_offset >= 0 && !startNode && item.start_offset >= cursor && item.start_offset <= cursor + length) { startNode = node; startLocal = item.start_offset - cursor }
+                if (item.end_offset >= 0 && item.end_offset <= cursor + length && item.end_offset >= cursor) { endNode = node; endLocal = item.end_offset - cursor; break }
+                cursor += length
+              }
+              if (!startNode || !endNode) {
+                const exactQuote = item.quote
+                const allText = root.textContent ?? ''
+                let occurrence = item.start_offset >= 0 && allText.slice(item.start_offset, item.start_offset + exactQuote.length) === exactQuote ? item.start_offset : -1
+                if (occurrence < 0) occurrence = allText.indexOf(exactQuote)
+                if (occurrence < 0 || (occurrence !== item.start_offset && allText.indexOf(exactQuote, occurrence + 1) >= 0)) return
+                item = { ...item, start_offset: occurrence, end_offset: occurrence + exactQuote.length }
+                cursor = 0
+                const fallbackWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+                while ((node = fallbackWalker.nextNode())) {
+                  const length = node.textContent?.length ?? 0
+                  if (!startNode && item.start_offset >= cursor && item.start_offset <= cursor + length) { startNode = node; startLocal = item.start_offset - cursor }
+                  if (item.end_offset >= cursor && item.end_offset <= cursor + length) { endNode = node; endLocal = item.end_offset - cursor; break }
+                  cursor += length
+                }
+              }
+              if (!startNode || !endNode) return
+              const range = document.createRange()
+              range.setStart(startNode, startLocal)
+              range.setEnd(endNode, endLocal)
+              const rect = range.getBoundingClientRect()
+              window.scrollTo({ top: window.scrollY + rect.top - 120, behavior: 'smooth' })
+              const selection = window.getSelection()
+              selection?.removeAllRanges()
+              selection?.addRange(range)
             }
             const defaultBase = compareOptions.filter((o) => o.version < displayedVersion)[0] ?? compareOptions.find((o) => o.version !== displayedVersion)
             const baseOption = compareOptions.find((o) => o.version === (diffBase ?? defaultBase?.version))
@@ -1056,59 +1121,46 @@ export default function Artifacts({ project }: { project?: string }) {
                       : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.external_body_missing') ?? 'No external reference set.'}</p>
                   ) : bodyText ? (
                     <>
-                      <div className="artifact-body">
+                      <div className="artifact-body artifact-review-body" ref={artifactBodyRef} onMouseUp={() => window.setTimeout(captureSelection, 0)} onKeyUp={() => window.setTimeout(captureSelection, 0)}>
                         <MarkdownWithPresentations content={bodyText} project={project} />
                       </div>
-                      <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.65rem' }}>
-                        <Heading style={{ fontSize: '0.9rem' }}>{t('artifacts.annotations_title') ?? 'Fragment review'}</Heading>
-                        <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>{t('artifacts.annotations_hint') ?? 'Select text in the document, then add a comment, suggested change, approval or rejection.'}</p>
-                        <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', margin: '0.4rem 0' }}>
+                      {selectionMenu && !annotationDraft && (
+                        <div className="artifact-selection-menu" style={{ left: selectionMenu.x, top: selectionMenu.y }} onMouseDown={(event) => event.preventDefault()}>
                           {(['comment', 'change', 'approve', 'reject'] as const).map((kind) => (
-                            <Button key={kind} size="sm" kind="tertiary" disabled={selected.provider === 'url'} onClick={() => {
-                              const quote = window.getSelection()?.toString().trim() ?? ''
-                              if (!quote) { setError(t('artifacts.annotation_select_first') ?? 'Select a text fragment first.'); return }
-                              setAnnotationDraft({ quote, kind, comment: '', replacement: '' })
-                            }}>{t(`artifacts.annotation_${kind}`) ?? kind}</Button>
+                            <button key={kind} type="button" onClick={() => setAnnotationDraft({ quote: selectionMenu.quote, kind, comment: '', replacement: '' })}>{t(`artifacts.annotation_${kind}`) ?? kind}</button>
                           ))}
+                          <button type="button" aria-label="Close" onClick={() => setSelectionMenu(null)}>×</button>
                         </div>
-                        {annotationDraft && (
-                          <Stack gap={2}>
-                            <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)' }}>{annotationDraft.quote}</p>
-                            {annotationDraft.kind === 'change' && <TextArea id="artifact-annotation-replacement" labelText={t('artifacts.annotation_replacement') ?? 'Suggested replacement'} value={annotationDraft.replacement} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnotationDraft({ ...annotationDraft, replacement: e.target.value })} rows={3} />}
-                            <TextArea id="artifact-annotation-comment" labelText={t('artifacts.annotation_comment') ?? 'Comment or rationale'} value={annotationDraft.comment} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnotationDraft({ ...annotationDraft, comment: e.target.value })} rows={2} />
-                            <Stack orientation="horizontal" gap={2}>
-                              <Button size="sm" disabled={busy || (annotationDraft.kind === 'change' && !annotationDraft.replacement.trim())} onClick={() => void saveAnnotation()}>{t('action.save') ?? 'Save'}</Button>
-                              <Button size="sm" kind="ghost" onClick={() => setAnnotationDraft(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
-                            </Stack>
+                      )}
+                      {selectionMenu && annotationDraft && (
+                        <div className="artifact-annotation-editor" style={{ left: selectionMenu.x, top: selectionMenu.y }}>
+                          <div className="artifact-annotation-editor-title">{t(`artifacts.annotation_${annotationDraft.kind}`) ?? annotationDraft.kind}</div>
+                          <blockquote>{annotationDraft.quote}</blockquote>
+                          {annotationDraft.kind === 'change' && <TextArea id="artifact-annotation-replacement" labelText={t('artifacts.annotation_replacement') ?? 'Suggested replacement'} value={annotationDraft.replacement} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnotationDraft({ ...annotationDraft, replacement: e.target.value })} rows={3} />}
+                          {annotationDraft.kind !== 'approve' && annotationDraft.kind !== 'reject' && <TextArea id="artifact-annotation-comment" labelText={t('artifacts.annotation_comment') ?? 'Comment'} value={annotationDraft.comment} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnotationDraft({ ...annotationDraft, comment: e.target.value })} rows={2} />}
+                          <Stack orientation="horizontal" gap={2}>
+                            <Button size="sm" disabled={busy || (annotationDraft.kind === 'change' && !annotationDraft.replacement.trim())} onClick={() => void saveAnnotation()}>{t('action.save') ?? 'Save'}</Button>
+                            <Button size="sm" kind="ghost" onClick={() => { setAnnotationDraft(null); setSelectionMenu(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                           </Stack>
-                        )}
+                        </div>
+                      )}
+                      {annotationsForVersion.length > 0 && (
+                        <div className="artifact-review-rail">
+                          <div className="artifact-review-rail-header">
+                            <strong>{t('artifacts.annotations_title') ?? 'Review notes'} · {annotationsForVersion.length}</strong>
+                            {selected.status !== 'in_review' && <Button size="sm" kind="secondary" disabled={busy} onClick={() => setRevisionAgentOpen(true)}>{selected.status === 'approved' ? (t('artifacts.annotation_ai_revision') ?? 'Apply with AI and submit for approval') : (t('artifacts.annotation_ai_revision') ?? 'Send for rework')}</Button>}
+                          </div>
                         {annotationsForVersion.map((item) => (
-                          <div key={item.id} style={{ borderLeft: `3px solid ${item.kind === 'reject' ? 'var(--tm-danger)' : item.kind === 'approve' ? 'var(--tm-success)' : 'var(--tm-amber)'}`, padding: '0.4rem 0.6rem', margin: '0.45rem 0', background: 'var(--tm-surface-2)' }}>
+                          <button className="artifact-review-note" key={item.id} type="button" onClick={() => focusAnnotation(item)} style={{ borderLeftColor: item.kind === 'reject' ? 'var(--tm-danger)' : item.kind === 'approve' ? 'var(--tm-success)' : 'var(--tm-amber)' }}>
                             <strong style={{ fontSize: '0.75rem' }}>{t(`artifacts.annotation_${item.kind}`) ?? item.kind}</strong>
                             <blockquote style={{ margin: '0.25rem 0', fontSize: '0.78rem' }}>{item.quote}</blockquote>
                             {item.replacement && <p style={{ fontSize: '0.78rem' }}>→ {item.replacement}</p>}
                             {item.comment && <p style={{ fontSize: '0.78rem' }}>{item.comment}</p>}
                             <span style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>{userNameOf(item.created_by)} · {fmtTime(item.created_at)}</span>
-                          </div>
+                          </button>
                         ))}
-                        {annotationsForVersion.length > 0 && selected.status !== 'in_review' && (
-                          <Button size="sm" kind="secondary" disabled={busy} onClick={async () => {
-                            setBusy(true)
-                            try {
-                              const brief = annotationsForVersion.map((item) => `- [${item.kind}] ${item.quote}${item.replacement ? ` → ${item.replacement}` : ''}${item.comment ? ` — ${item.comment}` : ''}`).join('\n')
-                              const prompt = `Revise artifact ${selected.id} (${selected.title}) using the attached human review annotations. Read the artifact first with artifact_read, then call artifact_update with new_version=true and a patch or complete content. Apply suggested replacements, preserve fragments marked approve, address rejected fragments, and resolve comments/questions where possible. If a point is uncertain, leave a clear note in the revised artifact and report it. After updating, summarize what changed.\n\nReview annotations:\n${brief}`
-                              if (!project) throw new Error(t('artifacts.annotation_project_required') ?? 'Open this artifact from a project to start an AI revision.')
-                              const page = await workspaceApi.listAgentsByProject(project)
-                              const agents = page.agents ?? []
-                              setRevisionAgents(agents.map((agent) => ({ id: agent.id, name: agent.name })))
-                              setRevisionAgentID(agents.find((agent) => agent.id === selected.origin_run)?.id ?? agents[0]?.id ?? '')
-                              setRevisionAgentOpen(true)
-                              setAnnotationDraft(null)
-                            } catch (f) { setError(message(f)) }
-                            finally { setBusy(false) }
-                          }}>{t('artifacts.annotation_ai_revision') ?? 'Prepare revision with AI'}</Button>
-                        )}
                       </div>
+                      )}
                       {bodyTruncated && !showRevisionBody && (
                         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', marginTop: '0.5rem' }}>
                           {t('artifacts.body_truncated') ?? 'The body is shown partially; agents read it in 32 KiB chunks.'}
@@ -1275,7 +1327,7 @@ export default function Artifacts({ project }: { project?: string }) {
 
       {revisionAgentOpen && selected && project && (
         <AppModal onClose={() => setRevisionAgentOpen(false)} panelStyle={{ width: '520px' }}>
-          <Heading>{t('artifacts.annotation_ai_revision') ?? 'Prepare revision with AI'}</Heading>
+          <Heading>{selected.status === 'approved' ? (t('artifacts.annotation_ai_revision') ?? 'Apply notes and submit a new version') : (t('artifacts.annotation_ai_revision') ?? 'Send notes for rework')}</Heading>
           <Stack gap={3}>
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.82rem' }}>{selected.title}</p>
             {revisionAgents.length > 0 ? (
@@ -1287,15 +1339,14 @@ export default function Artifacts({ project }: { project?: string }) {
               setBusy(true)
               try {
                 const version = showRevisionBody && revision ? revision.version : (selected.version ?? 1)
-                const sourceAnnotations = annotations.filter((item) => item.version === version)
-                const brief = sourceAnnotations.map((item) => `- [${item.kind}] ${item.quote}${item.replacement ? ` → ${item.replacement}` : ''}${item.comment ? ` — ${item.comment}` : ''}`).join('\n')
-                const prompt = `Revise artifact ${selected.id} (${selected.title}) using the human's fragment review below. Read the artifact with artifact_read first. Create/update the draft revision using artifact_update with new_version=true (use exact-fragment patches for large documents). Apply suggested replacements, preserve approved fragments, address rejected fragments, resolve comments/questions where possible, and note uncertain points. Do not submit for approval; report the resulting revision and unresolved questions.\n\n${brief}`
+                const baseVersion = selected.status === 'approved' ? version : (revision?.version ?? version)
+                const prompt = `Revise artifact ${selected.id} (${selected.title}) in response to the human's fragment review. First call artifact_feedback with artifact_id=${selected.id} and version=${version} to fetch the complete notes from the workspace, then call artifact_read. Apply suggested replacements, preserve approved fragments, address rejected fragments, and resolve comments/questions. For an approved source artifact call artifact_update with new_version=true; for an editable draft update it in place. Use exact-fragment patches for large documents. After editing, call artifact_submit for artifact ${selected.id}, reviewers ["user:<initiating human>"] (the run's actor_id), with a note that this version addresses the fragment feedback. Do not stop after editing: the task is complete only when artifact_submit succeeds. Report the submitted version and any unresolved questions. Source version: ${baseVersion}.`
                 const task = await workspaceApi.createTask({ project_id: project, agent_id: revisionAgentID, title: `Revise artifact: ${selected.title}`, prompt })
                 await workspaceApi.startRun(task.id, { agent_id: revisionAgentID })
                 setRevisionAgentOpen(false)
               } catch (f) { setError(message(f)) }
               finally { setBusy(false) }
-            }}>{t('artifacts.annotation_start_agent') ?? 'Start agent'}</Button>
+            }}>{selected.status === 'approved' ? (t('artifacts.annotation_start_agent_approved') ?? 'Apply notes and submit for approval') : (t('artifacts.annotation_start_agent_rework') ?? 'Send for rework')}</Button>
           </Stack>
         </AppModal>
       )}

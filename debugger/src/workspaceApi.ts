@@ -832,6 +832,8 @@ export interface ArtifactAnnotation {
   version: number
   kind: 'comment' | 'change' | 'approve' | 'reject'
   quote: string
+  start_offset: number
+  end_offset: number
   replacement?: string
   comment?: string
   created_by: string
