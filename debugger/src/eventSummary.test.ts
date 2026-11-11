@@ -9,6 +9,27 @@ const t = (key: string) => key
 const event = (type: string, data: Record<string, unknown>): ObservationEvent =>
   ({ type, data } as unknown as ObservationEvent)
 
+describe('run.user_note summary', () => {
+  const keyT = (key: string, vars?: Record<string, string>): string => {
+    const template = ru[key] ?? key
+    if (!vars) return template
+    return template.replace(/\{\{(\w+)\}\}/g, (match, name: string) => (name in vars ? vars[name] : match))
+  }
+
+  it('leads with the note text and trails the turn marker', () => {
+    const info = eventSummary(event('run.user_note', { turn: 70, text: 'подними лимит до 500' }), keyT)
+    expect(info.detail).toContain('подними лимит до 500')
+    expect(info.detail).toContain('учтено в ходе 70')
+  })
+
+  it('caps very long notes and keeps the plain form for pre-text events', () => {
+    const capped = eventSummary(event('run.user_note', { turn: 2, text: `${'x'.repeat(200)} y` }), keyT)
+    expect(capped.detail).toMatch(/… · сообщение из чата учтено в ходе 2$/)
+    const bare = eventSummary(event('run.user_note', { turn: 3 }), keyT)
+    expect(bare.detail).toBe('сообщение из чата учтено в ходе 3')
+  })
+})
+
 describe('model.completed stream shape', () => {
   const shapeOf = (data: Record<string, unknown>) => {
     const info = eventSummary(event('model.completed', data), t)

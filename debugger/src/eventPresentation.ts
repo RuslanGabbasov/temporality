@@ -284,7 +284,7 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
   'run.completed': (d, { t }) => ({ title: t('runs.event.run_completed'), fact: `${squash(d.turns ?? '?')} ${t('runs.turns')}`, status: 'ok' }),
   'run.failed': (d, { t }) => ({ title: t('runs.event.run_failed'), status: 'error', fact: causeOf(d) }),
   'run.cancelled': () => ({ status: 'cancelled' }),
-  'run.user_note': (d, { t }) => ({ title: t('runs.event.user_note'), fact: t('runs.event.user_note_detail', { turn: squash(d.turn ?? '?') }) }),
+  'run.user_note': (d, { t }) => ({ title: t('runs.event.user_note'), fact: userNoteFact(d, t) }),
   'run.note_dropped': (d, { t }) => ({ title: `⚠ ${t('runs.event.note_dropped')}`, fact: t('runs.event.note_dropped_detail'), status: 'error' }),
   'agent.summary': (d, { t }) => ({ title: t('runs.event.summary'), fact: squash(d.answer).slice(0, 80) || squash(d.kind) }),
   // ── §5.2 model ──
@@ -632,6 +632,17 @@ function failureOf(d: Record<string, unknown>): string {
   return ''
 }
 
+/** The user note's timeline fact: the note's own words lead — «что за
+ *  сообщение» is exactly what the reader came for — and the turn marker
+ *  trails. Events recorded before the text was journaled (or a dropped
+ *  note) keep the plain «учтено в ходе N» form. */
+function userNoteFact(d: Record<string, unknown>, t: TranslateFn): string {
+  const text = squash(d.text)
+  const turn = t('runs.event.user_note_detail', { turn: squash(d.turn ?? '?') })
+  if (!text) return turn
+  return `${text.slice(0, 100)}${text.length > 100 ? '…' : ''} · ${turn}`
+}
+
 /** §4.1: the timeline text caps at ~120 chars. */
 function capTitle(row: TimelineRow): TimelineRow {
   if (row.title.length <= 120) return row
@@ -752,6 +763,15 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   if (child) {
     links.push({ kind: 'child_run', label: child, url: `/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(child)}` })
   }
+  // A forwarded user note names the child runs it steered: each becomes a
+  // jump link, so «что отправили детям» is one click away.
+  if (event.type === 'run.user_note' && Array.isArray(d.forwarded_to)) {
+    for (const forwardedID of d.forwarded_to as unknown[]) {
+      const id = textOf(forwardedID)
+      if (!id) continue
+      links.push({ kind: 'child_run', label: id, url: `/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(id)}` })
+    }
+  }
   const artifact = textOf(d.artifact_id)
   if (artifact) {
     links.push({ kind: 'artifact', label: artifact, url: `/artifacts?project=${encodeURIComponent(project)}&id=${encodeURIComponent(artifact)}` })
@@ -766,10 +786,13 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   const exitCode = d.exit_code
   const exitFailed = typeof exitCode === 'number' && exitCode !== 0
   const resultValue = d.output ?? d.result ?? d.answer ?? d.response
+  // The user note's own words ARE the content: without this the row expanded
+  // into an empty pane — the text sat in the payload, visible only via {}.
+  const noteText = event.type === 'run.user_note' ? textOf(d.text) : ''
   return {
     actor: tool || squash(d.model) || squash(d.agent_id) || '',
     argumentLines,
-    result: humanResult(resultValue).slice(0, 400),
+    result: humanResult(noteText || resultValue).slice(0, 400),
     failureCause: rawError ? explained.cause.slice(0, 200) : '',
     timeout: rawError ? explained.timeout : false,
     links,

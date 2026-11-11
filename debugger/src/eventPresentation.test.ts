@@ -181,6 +181,35 @@ describe('details layer (§4.2)', () => {
     expect(noOp.consoleOperationId).toBe('')
   })
 
+  it('run.user_note carries the note text as the fact and the details result', () => {
+    const row = timelineRow(modelEvent('run.user_note', { turn: 70, actor_id: 'u9', text: 'подними лимит до 500 и перезапусти воркер\nвторой строкой' }), RU, t)
+    expect(row.title).toBe(t('runs.event.user_note'))
+    expect(row.fact).toContain('подними лимит до 500 и перезапусти воркер второй строкой')
+    expect(row.fact).toContain('учтено в ходе 70')
+    expect(row.hasDetails).toBe(true)
+
+    const long = timelineRow(modelEvent('run.user_note', { turn: 1, text: 'x'.repeat(160) }), RU, t)
+    expect(long.fact).toMatch(/… · сообщение из чата учтено в ходе 1$/)
+    expect(long.fact.startsWith('x'.repeat(100) + '…')).toBe(true)
+
+    // Pre-text history (or a dropped note): the plain turn-only form.
+    const bare = timelineRow(modelEvent('run.user_note', { turn: 3 }), RU, t)
+    expect(bare.fact).toBe('сообщение из чата учтено в ходе 3')
+
+    const details = eventDetails(modelEvent('run.user_note', { turn: 70, text: 'полный текст заметки' }), t)
+    expect(details.result).toContain('полный текст заметки')
+  })
+
+  it('a forwarded user note links every child run it steered', () => {
+    const details = eventDetails(modelEvent('run.user_note', { turn: 5, text: 'поправь тесты', forwarded: true, forwarded_to: ['root/team/01', 'root/team/02'] }), t)
+    expect(details.links.map((l) => l.kind)).toEqual(['child_run', 'child_run'])
+    expect(details.links[0].url).toContain('/agents?project=p&run=root%2Fteam%2F01')
+    expect(details.links[1].url).toContain('/agents?project=p&run=root%2Fteam%2F02')
+    // Non-forwarded notes stay link-free.
+    const plain = eventDetails(modelEvent('run.user_note', { turn: 5, text: 'поправь тесты' }), t)
+    expect(plain.links).toEqual([])
+  })
+
   it('peels the failure cause and flags model timeouts', () => {
     const details = eventDetails(modelEvent('run.failed', { error: 'child workflow execution error (type: AgentRun, x): activity error (type: kernel.call_model, y): context deadline exceeded' }), t)
     expect(details.failureCause).toBe('context deadline exceeded')

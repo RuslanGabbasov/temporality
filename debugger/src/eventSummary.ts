@@ -294,9 +294,14 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
 	      return { icon: '◌', label: t('runs.reasoning'), detail: String(d.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 120), color: 'var(--tm-text-3)' }
 	    case 'model.text_delta':
 	      return { icon: '✎', label: t('runs.event.model_text'), detail: String(d.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 120), color: 'var(--tm-text-3)' }
-	    case 'run.user_note':
+	    case 'run.user_note': {
       // Mid-run chat addendum drained into the conversation (kernel.user_note).
-      return { icon: '⤳', label: t('runs.event.user_note'), detail: t('runs.event.user_note_detail', { turn: String(d.turn ?? '?') }), color: 'var(--tm-teal)' }
+      // The note's own words lead — the reader wants WHAT was sent — the turn
+      // marker trails. Pre-text events keep the plain form.
+      const text = String(d.text ?? '').replace(/\s+/g, ' ').trim()
+      const turn = t('runs.event.user_note_detail', { turn: String(d.turn ?? '?') })
+      return { icon: '⤳', label: t('runs.event.user_note'), detail: text ? `${text.slice(0, 120)}${text.length > 120 ? '…' : ''} · ${turn}` : turn, color: 'var(--tm-teal)' }
+    }
     case 'run.note_dropped':
       return { icon: '⚠', label: t('runs.event.note_dropped'), detail: t('runs.event.note_dropped_detail'), color: '#e0af68' }
     case 'turn.started':

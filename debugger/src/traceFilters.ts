@@ -175,7 +175,7 @@ export function filterTraceItems(
 /** Events the «только мой ввод» chip covers (§8): the user's own words —
  *  the mid-run chat note and the answers to human questions. */
 const PAYLOAD_PICKS: Array<{ types: RegExp; keys: string[] }> = [
-  { types: /^(run\.user_note$)/, keys: ['note'] },
+  { types: /^(run\.user_note$)/, keys: ['note', 'text'] },
   { types: /^(human\.requested$|human\.reasked$)/, keys: ['question'] },
   { types: /^(human\.answered$)/, keys: ['response'] },
   { types: /^(agent\.summary$)/, keys: ['answer'] },
