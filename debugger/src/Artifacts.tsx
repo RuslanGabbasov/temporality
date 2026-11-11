@@ -396,6 +396,15 @@ export default function Artifacts({ project }: { project?: string }) {
     marginBottom: '0.4rem',
   })
 
+  // The list row's modification time, whether it rides the mono meta line
+  // (no tags) or the tag-chip row below it: same muted mono 0.7rem look in
+  // both spots, and no internal wrapping — a tight row wraps the whole date
+  // to its own line, never splits «10 нояб.» from «14:03».
+  const listRowDateStyle: CSSProperties = {
+    marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap',
+    fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.7rem', color: 'var(--tm-text-3)',
+  }
+
   const startCreate = () => {
     setForm({ id: '', title: '', description: '', provider: 'builtin', content: '', mime_type: '', kind: 'reference' })
     setEditing(null)
@@ -698,7 +707,7 @@ export default function Artifacts({ project }: { project?: string }) {
                       {(a.tags ?? []).length === 0 && (
                         // No tag row below → the modification time rides at the
                         // right end of this line, still the row's bottom corner.
-                        <TimeHint value={a.updated_at} style={{ marginLeft: 'auto', flexShrink: 0 }}>{briefDateTime(a.updated_at)}</TimeHint>
+                        <TimeHint value={a.updated_at} style={{ ...listRowDateStyle }}>{briefDateTime(a.updated_at)}</TimeHint>
                       )}
                     </div>
                     {(a.tags ?? []).length > 0 && (
@@ -707,7 +716,8 @@ export default function Artifacts({ project }: { project?: string }) {
                           <span key={tag} style={{ fontSize: '0.66rem', padding: '0.05rem 0.35rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.14))', color: 'var(--tm-text-3)' }}>#{tag}</span>
                         ))}
                         {(a.tags ?? []).length > 4 && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>+{(a.tags ?? []).length - 4}</span>}
-                        <TimeHint value={a.updated_at} style={{ marginLeft: 'auto', flexShrink: 0 }}>{briefDateTime(a.updated_at)}</TimeHint>
+                        {/* Same look as the meta line's date: inheriting the card font made it render larger and brighter than the chips it shares the row with. */}
+                        <TimeHint value={a.updated_at} style={{ ...listRowDateStyle }}>{briefDateTime(a.updated_at)}</TimeHint>
                       </div>
                     )}
                   </div>
