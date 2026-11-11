@@ -56,6 +56,8 @@ var channelMessages = map[string][2]string{
 		"Temporality: в комнате включено сквозное шифрование, бот не может читать зашифрованные сообщения — ваше сообщение НЕ было обработано. Отправьте задачу в комнату без шифрования или через веб-приложение."},
 	"notice_ask_dead": {"Temporality: the question you replied to is no longer active — its run has already ended. Your message was passed on as a new one.",
 		"Temporality: вопрос, на который вы ответили, уже неактуален — его ран завершился. Сообщение передано как новое."},
+	"notice_channel_disabled": {"Temporality: this channel is disabled in your profile settings — no tasks are accepted from it. Enable it back there, or send tasks through the web app.",
+		"Temporality: этот канал отключён в настройках вашего профиля — задачи от него не принимаются. Включите его в настройках или отправляйте задачи через веб-приложение."},
 	"ask_header":      {"Temporality: an agent is waiting for your answer", "Temporality: агент ждёт вашего ответа"},
 	"ask_context":     {"Context:", "Контекст:"},
 	"ask_options":     {"Options:", "Варианты:"},

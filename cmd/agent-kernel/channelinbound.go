@@ -528,10 +528,16 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 		entry := agent.UserChats{UserID: user.ID}
 		senderEntry := agent.UserSenderChannels{UserID: user.ID}
 		for _, channel := range user.Channels {
-			if channel.Type == l.driver.Type() && channel.Enabled && strings.TrimSpace(channel.Address) != "" {
-				entry.Chats = append(entry.Chats, channel.Address)
-				senderEntry.Channels = append(senderEntry.Channels, agent.SenderChannel{Address: channel.Address, SenderID: channel.SenderID})
+			if channel.Type != l.driver.Type() || strings.TrimSpace(channel.Address) == "" {
+				continue
 			}
+			if channel.Enabled {
+				entry.Chats = append(entry.Chats, channel.Address)
+			}
+			// Disabled rows ride along: the chat stays registered (a message
+			// from the owner gets the «channel disabled» pointer, not silent
+			// unregistered-room dead-air), but never matches replies.
+			senderEntry.Channels = append(senderEntry.Channels, agent.SenderChannel{Address: channel.Address, SenderID: channel.SenderID, Enabled: channel.Enabled})
 		}
 		chatsByUser[user.ID] = entry
 		senders = append(senders, senderEntry)
@@ -759,7 +765,7 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	// made an E2EE-enabled room look like a dead bot for that user while
 	// everyone in unencrypted rooms got answers.
 	if message.Encrypted {
-		senderUserID, roomRegistered := agent.IdentifyInboundSender(message, senders)
+		senderUserID, roomRegistered, _ := agent.IdentifyInboundSender(message, senders)
 		_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusRejected, SenderUserID: senderUserID})
 		if l.emit != nil {
 			l.emit(ctx, "intake.rejected", message, senderUserID, map[string]any{"reason": "encrypted_unsupported"})
@@ -771,7 +777,7 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 		l.log.Warn("intake rejected: encrypted message cannot be read (E2EE unsupported)", "channel", l.driver.Type(), "message", message.ID, "sender", message.Sender, "room", message.ChatID)
 		return
 	}
-	senderUserID, roomRegistered := agent.IdentifyInboundSender(message, senders)
+	senderUserID, roomRegistered, channelDisabled := agent.IdentifyInboundSender(message, senders)
 	if senderUserID == "" {
 		// Closed world: an initiative message from anyone but the registered
 		// identity of the room owner never creates work. A registered room
@@ -790,6 +796,27 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 				agent.ChannelText(agent.DetectLang(message.Text), "notice_room_owner"))
 		}
 		l.log.Info("intake rejected", "channel", l.driver.Type(), "message", message.ID, "reason", reason, "sender", message.Sender)
+		return
+	}
+	// The channel's owner writing from a surface they DISABLED in their
+	// profile: identity still matches, but no new work starts from a switched-
+	// off channel. The refusal must never be silent — a disabled channel met
+	// with dead-air reads as «the service stopped processing everything»
+	// (the report that motivated this branch), so the owner hears exactly
+	// what happened and how to fix it.
+	if channelDisabled {
+		_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusRejected, SenderUserID: senderUserID})
+		if l.emit != nil {
+			l.emit(ctx, "intake.rejected", message, senderUserID, map[string]any{"reason": "channel_disabled"})
+		}
+		_ = l.store.RecordAccessAudit(ctx, senderUserID, workspace.AuditIntakeRejected, "inbound_message", row.ID, map[string]any{
+			"reason": "channel_disabled", "channel": l.driver.Type(), "chat": message.ChatID,
+		})
+		if l.intakeEnabled {
+			l.sendRoomNotice(ctx, channelSettings, message.ChatID,
+				agent.ChannelText(agent.DetectLang(message.Text), "notice_channel_disabled"))
+		}
+		l.log.Info("intake rejected", "channel", l.driver.Type(), "message", message.ID, "reason", "channel_disabled", "sender", message.Sender)
 		return
 	}
 	_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{SenderUserID: senderUserID})

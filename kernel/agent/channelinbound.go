@@ -91,41 +91,70 @@ type UserChats struct {
 	Chats  []string
 }
 
-// SenderChannel is one enabled user channel of the loop's channel type with
-// its registered sender identity — the closed-world check input
-// (docs/inbound-messages.md §5).
+// SenderChannel is one user channel row of the loop's channel type with its
+// registered sender identity — the closed-world check input
+// (docs/inbound-messages.md §5). Enabled rows are live surfaces; a disabled
+// row still registers the ROOM (the row exists, it is the owner's chat) so a
+// message from it gets the «channel disabled» pointer instead of dead-air.
 type SenderChannel struct {
 	Address  string
 	SenderID string
+	Enabled  bool
 }
 
-// UserSenderChannels maps a workspace user to their enabled channels (with
-// sender identities) of one channel type.
+// UserSenderChannels maps a workspace user to their channel rows (with sender
+// identities) of one channel type — enabled and disabled alike.
 type UserSenderChannels struct {
 	UserID   string
 	Channels []SenderChannel
 }
 
 // IdentifyInboundSender resolves who may author initiative messages in a
-// chat (docs/inbound-messages.md §5 — closed world): the chat must be an
-// enabled channel address of some user, and the message sender must equal
-// that channel's registered sender identity exactly. The second return says
+// chat (docs/inbound-messages.md §5 — closed world): the chat must be a
+// channel address of some user, and the message sender must equal that
+// channel's registered sender identity exactly. The second return says
 // whether the chat is a registered channel address at all: a mismatch in a
 // registered room deserves a polite rejection reply, an unregistered room
-// must be recorded silently (anti-spam).
-func IdentifyInboundSender(msg InboundMessage, users []UserSenderChannels) (userID string, roomRegistered bool) {
+// must be recorded silently (anti-spam). The third return marks the owner
+// writing from a channel they DISABLED in their profile: the address and
+// identity still match, but the surface is switched off — the caller refuses
+// the work yet must tell the owner exactly why (a disabled channel reads to
+// the user as «the service stopped processing everything» if met with
+// silence).
+func IdentifyInboundSender(msg InboundMessage, users []UserSenderChannels) (userID string, roomRegistered bool, channelDisabled bool) {
+	type hit struct {
+		userID   string
+		disabled bool
+	}
+	var enabledHit, disabledHit hit
 	for _, user := range users {
 		for _, channel := range user.Channels {
 			if channel.Address != msg.ChatID {
 				continue
 			}
 			roomRegistered = true
-			if channel.SenderID != "" && channel.SenderID == msg.Sender {
-				return user.UserID, true
+			if channel.SenderID == "" || channel.SenderID != msg.Sender {
+				continue
+			}
+			if channel.Enabled {
+				if enabledHit.userID == "" {
+					enabledHit = hit{user.UserID, false}
+				}
+			} else if disabledHit.userID == "" {
+				disabledHit = hit{user.UserID, true}
 			}
 		}
 	}
-	return "", roomRegistered
+	// An enabled registration of the same sender in the same chat always
+	// wins over a remembered disabled one: when two accounts share one chat,
+	// a live row defines the surface's state for its own sender.
+	if enabledHit.userID != "" {
+		return enabledHit.userID, true, false
+	}
+	if disabledHit.userID != "" {
+		return disabledHit.userID, true, true
+	}
+	return "", roomRegistered, false
 }
 
 // ChannelReply is one matched reply: the message answers the ask.

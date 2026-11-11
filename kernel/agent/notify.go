@@ -183,6 +183,20 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	}
 	settings := a.transports(ctx)
 	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, settings.Configured)
+	// When every channel fell away, the web inbox tile must say WHY — the
+	// silent fallback read to users as «the bot ignores my messages» (a
+	// deleted transport config with the personal row still present was the
+	// report that motivated this). Skips name each enabled channel and its
+	// reason.
+	if mode == "web" {
+		if detail := channelSkipDetail(target.Channels, settings.Configured); detail != "" {
+			slog.Warn("notify: all channels unavailable, falling back to web inbox", "recipient", target.ID, "skips", detail)
+			if target.Preferred != "" && target.Preferred != "web" {
+				return NotificationDelivery{Recipient: target.ID, Channel: "web", Status: "delivered", Detail: fmt.Sprintf("preferred channel %s unavailable (%s); fell back to web inbox", target.Preferred, detail)}
+			}
+			return NotificationDelivery{Recipient: target.ID, Channel: "web", Status: "delivered", Detail: fmt.Sprintf("no deliverable channel (%s); fell back to web inbox", detail)}
+		}
+	}
 	// Hosted form link (docs/interactive-HITL.md §6.2): a schema ask mints a
 	// scoped-secret page URL — one per ask, before the channel pick, so every
 	// delivery (channel retries included) carries the same link. The base is
@@ -587,13 +601,32 @@ func ResolveRecipient(recipient, actor string, users []WorkspaceUser) (Workspace
 	}
 }
 
-// pickChannel applies the recipient policy (§6): preferred channel when it
-// is enabled and configured, otherwise the first enabled+configured channel,
+// ChannelResolvesDM reports whether the channel type can locate the user's
+// conversation from their registered sender identity alone (matrix: the
+// bot's shared DM room with the user's mxid). Such a channel row is
+// deliverable WITHOUT an explicit address — the address is resolved per
+// delivery (resolveChannelAddress), exactly as the personal-settings dialog
+// promises («optional — your bot DM is used»).
+func ChannelResolvesDM(channelType string) bool {
+	driver := channelDriverByType(channelType)
+	if driver == nil {
+		return false
+	}
+	_, ok := driver.(DMResolver)
+	return ok
+}
+
+// pickChannel applies the recipient policy (§6): preferred channel when it is
+// enabled and configured, otherwise the first enabled+configured channel,
 // otherwise the web inbox. The second return value is the delivery mode.
+// A channel without an explicit address still counts when its transport can
+// resolve the DM from the sender identity — excluding it here sent every ask
+// to the web inbox for the documented «matrix by mxid» pattern, which read
+// as the bot ignoring the user's channel after another transport went away.
 func pickChannel(profile recipientChannels, configured func(string) bool) (recipientChannel, string) {
 	enabled := make([]recipientChannel, 0, len(profile.Channels))
 	for _, channel := range profile.Channels {
-		if channel.Enabled && channel.Address != "" && configured(channel.Type) {
+		if channel.Enabled && (channel.Address != "" || ChannelResolvesDM(channel.Type)) && configured(channel.Type) {
 			enabled = append(enabled, channel)
 		}
 	}
@@ -608,6 +641,28 @@ func pickChannel(profile recipientChannels, configured func(string) bool) (recip
 		return enabled[0], enabled[0].Type
 	}
 	return recipientChannel{}, "web"
+}
+
+// channelSkipDetail explains why each enabled channel row was skipped by
+// pickChannel: the transport lost its config, or the row carries neither an
+// address nor a DM-resolvable sender identity. Empty when nothing was
+// skipped (the web pick came from an empty profile, and no explanation
+// applies).
+func channelSkipDetail(channels []recipientChannel, configured func(string) bool) string {
+	var reasons []string
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		if !configured(channel.Type) {
+			reasons = append(reasons, fmt.Sprintf("%s: transport not configured", channel.Type))
+			continue
+		}
+		if channel.Address == "" && !ChannelResolvesDM(channel.Type) {
+			reasons = append(reasons, fmt.Sprintf("%s: no address registered", channel.Type))
+		}
+	}
+	return strings.Join(reasons, "; ")
 }
 
 // sendToChannel dispatches one delivery to its channel driver

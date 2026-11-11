@@ -46,6 +46,49 @@ func TestPickChannelHonorsPreferredEnabledAndConfigured(t *testing.T) {
 	require.Equal(t, "web", mode)
 }
 
+// TestPickChannelDMResolvableRowWithoutAddress: a matrix channel registered
+// by mxid alone (the documented «optional — your bot DM is used» pattern)
+// is deliverable — the transport resolves the DM room per delivery. Before
+// this contract pickChannel required a literal address, so such rows were
+// silently skipped and every ask fell to the web inbox — visible to the
+// user as their main matrix channel being ignored.
+func TestPickChannelDMResolvableRowWithoutAddress(t *testing.T) {
+	profile := recipientChannels{
+		Channels: []recipientChannel{
+			{Type: "matrix", Address: "", SenderID: "@human:hs", Enabled: true},
+		},
+	}
+	channel, mode := pickChannel(profile, func(string) bool { return true })
+	require.Equal(t, "matrix", mode)
+	require.Empty(t, channel.Address, "the DM row carries no literal address; delivery resolves it")
+
+	// A channel type without a DM resolver still requires an address.
+	webhook := recipientChannels{Channels: []recipientChannel{{Type: "webhook", Address: "", Enabled: true}}}
+	_, mode = pickChannel(webhook, func(string) bool { return true })
+	require.Equal(t, "web", mode)
+
+	// The unconfigured transport still loses to the web inbox even when
+	// DM-resolvable.
+	_, mode = pickChannel(profile, func(channelType string) bool { return channelType != "matrix" })
+	require.Equal(t, "web", mode)
+}
+
+// TestChannelSkipDetail pins the fallback explanation: the web-inbox detail
+// must name every enabled channel and why it was skipped, so the silence
+// always carries its reason (the deleted-transport report).
+func TestChannelSkipDetail(t *testing.T) {
+	channels := []recipientChannel{
+		{Type: "telegram", Address: "424242", Enabled: true},  // transport gone
+		{Type: "webhook", Address: "", Enabled: true},         // no address, no DM
+		{Type: "matrix", Address: "", Enabled: false},         // disabled — not reported
+	}
+	require.Equal(t,
+		"telegram: transport not configured; webhook: no address registered",
+		channelSkipDetail(channels, func(channelType string) bool { return channelType != "telegram" }))
+	// Nothing skipped → no explanation.
+	require.Empty(t, channelSkipDetail(nil, func(string) bool { return true }))
+}
+
 // TestChannelRegistryIsWellFormed pins the extensibility contract: every
 // registry entry has a unique slug, self-contained transports are always
 // configured, bot-mediated ones explain what env is missing.
