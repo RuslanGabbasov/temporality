@@ -10037,7 +10037,12 @@ func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, 
 		}
 		wg.Wait()
 	}
-	apply()
+	// The first reconcile runs in the background: at kernel boot the MCP
+	// containers themselves are usually still coming up (a Streamable HTTP
+	// handshake into a not-ready server parks the whole 30s dial timeout), and
+	// blocking boot on it bought nothing — the ticker re-runs the reconcile
+	// within a minute and PrepareRun self-heals a run's own server on demand.
+	go apply()
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
