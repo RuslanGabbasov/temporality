@@ -153,6 +153,12 @@ func TestRouteArtifactReviewReplyApproves(t *testing.T) {
 	require.Contains(t, store.answered[artifactReviewRequestID("art-1-v1-1")], "approve")
 	require.Len(t, notices, 1)
 	require.Contains(t, notices[0], "Требования")
+	// The decision notice renders the deciding identity cleanly: the suffix
+	// pattern must be formatted once — taking it without the argument and
+	// re-formatting the result shipped «— %!!(string=user-…)s(MISSING)».
+	require.Contains(t, notices[0], "u-rev")
+	require.NotContains(t, notices[0], "%!")
+	require.NotContains(t, notices[0], "MISSING")
 	require.Contains(t, store.audits, workspace.AuditArtifactReviewApproved)
 }
 
@@ -167,6 +173,12 @@ func TestRouteArtifactReviewReplyRejects(t *testing.T) {
 	require.Equal(t, workspace.ArtifactRejected, store.reviews[0].Status)
 	require.Contains(t, store.answered[artifactReviewRequestID("art-1-v1-1")], "слишком сыро")
 	require.Contains(t, store.audits, workspace.AuditArtifactReviewRejected)
+	require.Len(t, notices, 1)
+	require.Contains(t, notices[0], "отклонено")
+	require.Contains(t, notices[0], "(v1)")
+	require.Contains(t, notices[0], "u-rev")
+	require.NotContains(t, notices[0], "%!")
+	require.NotContains(t, notices[0], "MISSING")
 }
 
 func TestRouteArtifactReviewReplyUnknownKeywordAsksHow(t *testing.T) {

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/temporality-project/temporality/kernel/agent"
@@ -152,10 +151,13 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 	if approve {
 		key = "review_decided"
 	}
+	// The suffix renders in ONE pass: taking the pattern without the argument
+	// and re-formatting the result turned "%s" into "%!s(MISSING)" and then
+	// re-parsed that garbage as a format — the notice shipped strings like
+	// «— %!!(string=user-…)s(MISSING)».
 	suffix := ""
 	if actor != "" {
-		suffix = agent.ChannelText(lang, "review_by")
-		suffix = fmt.Sprintf(suffix, actor)
+		suffix = agent.ChannelText(lang, "review_by", actor)
 	}
 	l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, key, artifact.Title, resolved.ArtifactVersion, suffix))
 	l.log.Info("artifact review decided from channel", "review", reviewID, "artifact", review.ArtifactID, "decision", decision, "actor", actor, "channel", l.driver.Type())
