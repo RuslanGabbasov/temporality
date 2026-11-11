@@ -39,6 +39,8 @@ type artifactLifecycleStore interface {
 	GetArtifactReview(ctx context.Context, reviewID string) (workspace.ArtifactReview, error)
 	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
 	ListArtifactReviews(ctx context.Context, artifactID string) ([]workspace.ArtifactReview, error)
+	AddArtifactAnnotation(ctx context.Context, artifactID string, version int, kind, quote, replacement, comment, createdBy string) (workspace.ArtifactAnnotation, error)
+	ListArtifactAnnotations(ctx context.Context, artifactID string, version int) ([]workspace.ArtifactAnnotation, error)
 	ListArtifactVersions(ctx context.Context, artifactID string) ([]workspace.ArtifactVersion, error)
 	PendingArtifactRevision(ctx context.Context, artifactID string) (*workspace.ArtifactVersion, error)
 	CountArtifactSubmits(ctx context.Context, runID string, since time.Time) (int, error)
@@ -91,6 +93,14 @@ type artifactReviewDecisionRequest struct {
 	Comment string `json:"comment"`
 }
 
+type artifactAnnotationRequest struct {
+	Version     int    `json:"version"`
+	Kind        string `json:"kind"`
+	Quote       string `json:"quote"`
+	Replacement string `json:"replacement"`
+	Comment     string `json:"comment"`
+}
+
 // emitArtifactLifecycleEvent journals one lifecycle event, best-effort: the
 // artifact and review rows stay the source of truth.
 func emitArtifactLifecycleEvent(ctx context.Context, events artifactLifecycleOutbox, eventType, artifactID string, data map[string]any) {
@@ -121,7 +131,52 @@ type ArtifactReviewNotifier interface {
 
 // RegisterArtifactLifecycleRoutes mounts submit/review endpoints. Create and
 // edit stay in main.go; this router owns everything past the draft state.
-func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws artifactLifecycleStore, events artifactLifecycleOutbox, notify ArtifactReviewNotifier) {
+func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws artifactLifecycleStore, events artifactLifecycleOutbox, notify ArtifactReviewNotifier, visibleUnits func(*http.Request) []string) {
+	mux.HandleFunc("GET /v1/workspace/artifacts/{artifactID}/annotations", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		version, err := strconv.Atoi(r.URL.Query().Get("version"))
+		if err != nil || version < 1 {
+			writeError(w, 422, errors.New("version must be a positive integer"))
+			return
+		}
+		artifact, err := ws.GetArtifactRange(r.Context(), r.PathValue("artifactID"), 0, 0)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+			} else {
+				writeError(w, 500, err)
+			}
+			return
+		}
+		if !workspace.OrgVisible(artifact.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		items, err := ws.ListArtifactAnnotations(r.Context(), r.PathValue("artifactID"), version)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"annotations": items})
+	})
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/annotations", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req artifactAnnotationRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		a, err := ws.AddArtifactAnnotation(r.Context(), r.PathValue("artifactID"), req.Version, req.Kind, req.Quote, req.Replacement, req.Comment, requestUserID(r))
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		writeJSON(w, 201, a)
+	})
 	// Open a review round for the artifact's current version. 202 + the round:
 	// the decision arrives later, through approve/reject below. Idempotent per
 	// open round — a retried submit returns the same row without a second one.

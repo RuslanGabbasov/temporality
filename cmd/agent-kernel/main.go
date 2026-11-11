@@ -3177,7 +3177,7 @@ func main() {
 	reviewNotifier := &channelReviewNotifier{
 		ws: ws, settings: activities.ChannelSettings, client: activities.HTTP, log: log,
 	}
-	RegisterArtifactLifecycleRoutes(mux, gate, ws, events, reviewNotifier)
+	RegisterArtifactLifecycleRoutes(mux, gate, ws, events, reviewNotifier, visibleUnits)
 	// Manual saga management (docs/sagas.md §8): rename, merge and task
 	// re-binding from the UI. Event-sourced like the agent tools — the routes
 	// only validate against the journal and emit through the same outbox.

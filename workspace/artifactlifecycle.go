@@ -49,8 +49,21 @@ type ArtifactReview struct {
 	ResolvedAt      *time.Time                `json:"resolved_at,omitempty"`
 	// Sweep bookkeeping (docs/artifact-lifecycle.md §6 Phase 2): when the
 	// deadline reminder and the escalation text went out. NULL = not sent.
-	RemindedAt  *time.Time `json:"reminded_at,omitempty"`
-	EscalatedAt *time.Time `json:"escalated_at,omitempty"`
+	RemindedAt  *time.Time           `json:"reminded_at,omitempty"`
+	EscalatedAt *time.Time           `json:"escalated_at,omitempty"`
+	Annotations []ArtifactAnnotation `json:"annotations,omitempty"`
+}
+
+// ArtifactAnnotation pins reviewer feedback to an exact text fragment and version.
+type ArtifactAnnotation struct {
+	ID          string    `json:"id"`
+	Version     int       `json:"version"`
+	Kind        string    `json:"kind"` // comment | change | approve | reject
+	Quote       string    `json:"quote"`
+	Replacement string    `json:"replacement,omitempty"`
+	Comment     string    `json:"comment,omitempty"`
+	CreatedBy   string    `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // ReviewDecision is one reviewer's answer inside a review round. Group
@@ -72,6 +85,74 @@ type ReviewDecision struct {
 const ArtifactRequestedByKey = "requested_by"
 
 const artifactReviewColumns = `id, artifact_id, artifact_version, reviewers, mode, status, note, requested_by, requested_at, decisions, resolved_by, resolved_at, reminded_at, escalated_at`
+
+func (s *Store) AddArtifactAnnotation(ctx context.Context, artifactID string, version int, kind, quote, replacement, comment, createdBy string) (ArtifactAnnotation, error) {
+	if version < 1 || len(quote) == 0 || len(quote) > 8192 {
+		return ArtifactAnnotation{}, errors.New("annotation requires a quoted fragment of at most 8192 bytes")
+	}
+	switch kind {
+	case "comment", "change", "approve", "reject":
+	default:
+		return ArtifactAnnotation{}, errors.New("annotation kind must be comment, change, approve or reject")
+	}
+	if kind == "change" && replacement == "" {
+		return ArtifactAnnotation{}, errors.New("change annotation requires replacement text")
+	}
+	if len(comment) > 4000 || len(replacement) > 8192 {
+		return ArtifactAnnotation{}, errors.New("annotation text is too long")
+	}
+	var currentVersion int
+	err := s.pool.QueryRow(ctx, `SELECT version FROM workspace_artifact WHERE id=$1`, artifactID).Scan(&currentVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ArtifactAnnotation{}, ErrNotFound
+	}
+	if err != nil {
+		return ArtifactAnnotation{}, err
+	}
+	if version != currentVersion {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_artifact_version WHERE artifact_id=$1 AND version=$2)`, artifactID, version).Scan(&exists); err != nil {
+			return ArtifactAnnotation{}, err
+		}
+		if !exists {
+			return ArtifactAnnotation{}, ErrNotFound
+		}
+	} else {
+		var status string
+		if err := s.pool.QueryRow(ctx, `SELECT status FROM workspace_artifact WHERE id=$1`, artifactID).Scan(&status); err != nil {
+			return ArtifactAnnotation{}, err
+		}
+		if status == ArtifactApproved {
+			var exists bool
+			if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_artifact_version WHERE artifact_id=$1 AND version=$2)`, artifactID, version).Scan(&exists); err != nil {
+				return ArtifactAnnotation{}, err
+			}
+			if exists {
+				return ArtifactAnnotation{}, errors.New("approved artifact annotations must target an archived version or a pending revision")
+			}
+		}
+	}
+	a := ArtifactAnnotation{ID: fmt.Sprintf("ann-%d", time.Now().UTC().UnixNano()), Version: version, Kind: kind, Quote: quote, Replacement: replacement, Comment: comment, CreatedBy: createdBy, CreatedAt: time.Now().UTC()}
+	_, err = s.pool.Exec(ctx, `INSERT INTO workspace_artifact_annotation (id, artifact_id, artifact_version, kind, quote, replacement, comment, created_by, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, a.ID, artifactID, a.Version, a.Kind, a.Quote, a.Replacement, a.Comment, a.CreatedBy, a.CreatedAt)
+	return a, err
+}
+
+func (s *Store) ListArtifactAnnotations(ctx context.Context, artifactID string, version int) ([]ArtifactAnnotation, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, artifact_version, kind, quote, replacement, comment, created_by, created_at FROM workspace_artifact_annotation WHERE artifact_id=$1 AND artifact_version=$2 ORDER BY created_at`, artifactID, version)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ArtifactAnnotation{}
+	for rows.Next() {
+		var a ArtifactAnnotation
+		if err := rows.Scan(&a.ID, &a.Version, &a.Kind, &a.Quote, &a.Replacement, &a.Comment, &a.CreatedBy, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, a)
+	}
+	return items, rows.Err()
+}
 
 func scanArtifactReview(row interface{ Scan(dest ...any) error }) (ArtifactReview, error) {
 	return scanArtifactReviewInto(row, nil)

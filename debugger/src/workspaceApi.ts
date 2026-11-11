@@ -827,6 +827,17 @@ export interface ArtifactReview {
   resolved_at?: string
 }
 
+export interface ArtifactAnnotation {
+  id: string
+  version: number
+  kind: 'comment' | 'change' | 'approve' | 'reject'
+  quote: string
+  replacement?: string
+  comment?: string
+  created_by: string
+  created_at: string
+}
+
 /** One open review round addressed to the caller (the approvals inbox). */
 export interface ArtifactInboxEntry {
   review: ArtifactReview
@@ -1708,12 +1719,18 @@ export const workspaceApi = {
     request<Artifact>('/v1/workspace/artifacts', { method: 'POST', body: JSON.stringify(data) }),
   updateArtifact: (id: string, data: Partial<Artifact>) =>
     request<Artifact>(`/v1/workspace/artifacts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  startArtifactRevision: (id: string, content: string) =>
+    request<Artifact>(`/v1/workspace/artifacts/${id}/revision`, { method: 'POST', body: JSON.stringify({ content }) }),
   deleteArtifact: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/artifacts/${id}`, { method: 'DELETE' }),
   submitArtifact: (id: string, data: { reviewers: string[]; mode?: string; note?: string }) =>
     request<ArtifactReview>(`/v1/workspace/artifacts/${id}/submit`, { method: 'POST', body: JSON.stringify(data) }),
   listArtifactReviews: (id: string) =>
     request<{ reviews: ArtifactReview[] }>(`/v1/workspace/artifacts/${id}/reviews`),
+  listArtifactAnnotations: (id: string, version: number) =>
+    request<{ annotations: ArtifactAnnotation[] }>(`/v1/workspace/artifacts/${id}/annotations?version=${version}`),
+  addArtifactAnnotation: (id: string, data: Omit<ArtifactAnnotation, 'id' | 'created_by' | 'created_at'>) =>
+    request<ArtifactAnnotation>(`/v1/workspace/artifacts/${id}/annotations`, { method: 'POST', body: JSON.stringify(data) }),
   resolveArtifactReview: (id: string, reviewId: string, approve: boolean, comment: string) =>
     request<{ review: ArtifactReview; artifact: Artifact }>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: JSON.stringify({ comment }) }),
   artifactReferences: () =>

@@ -23,10 +23,11 @@ import (
 type fakeArtifactLifecycleStore struct {
 	mu sync.Mutex
 
-	artifact workspace.Artifact
-	review   workspace.ArtifactReview
-	reviews  []workspace.ArtifactReview
-	users    []workspace.User
+	artifact    workspace.Artifact
+	review      workspace.ArtifactReview
+	reviews     []workspace.ArtifactReview
+	annotations []workspace.ArtifactAnnotation
+	users       []workspace.User
 
 	submitCount int
 	resolveErr  error
@@ -40,6 +41,26 @@ type fakeArtifactLifecycleStore struct {
 	deliveries    map[string][]workspace.HumanRequestDelivery
 	answeredRows  map[string]string
 	cancelledRows []string
+}
+
+func (f *fakeArtifactLifecycleStore) AddArtifactAnnotation(_ context.Context, artifactID string, version int, kind, quote, replacement, comment, createdBy string) (workspace.ArtifactAnnotation, error) {
+	a := workspace.ArtifactAnnotation{ID: "ann-1", Version: version, Kind: kind, Quote: quote, Replacement: replacement, Comment: comment, CreatedBy: createdBy, CreatedAt: time.Now().UTC()}
+	f.mu.Lock()
+	f.annotations = append(f.annotations, a)
+	f.mu.Unlock()
+	return a, nil
+}
+
+func (f *fakeArtifactLifecycleStore) ListArtifactAnnotations(_ context.Context, _ string, version int) ([]workspace.ArtifactAnnotation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []workspace.ArtifactAnnotation
+	for _, a := range f.annotations {
+		if a.Version == version {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeArtifactLifecycleStore) GetArtifactRange(_ context.Context, id string, _, _ int) (workspace.Artifact, error) {
@@ -242,7 +263,7 @@ func newArtifactLifecycleServerWithNotifier(t *testing.T, store *fakeArtifactLif
 	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*\nadmintoken:admin:admin:*\ninternaltoken:kernel-internal:operator:*")
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	RegisterArtifactLifecycleRoutes(mux, gate, store, outbox, notify)
+	RegisterArtifactLifecycleRoutes(mux, gate, store, outbox, notify, func(*http.Request) []string { return nil })
 	return httptest.NewServer(gate.Authenticate(mux))
 }
 
@@ -262,10 +283,41 @@ func artifactPost(t *testing.T, server *httptest.Server, token, path, body strin
 	return response.StatusCode, string(raw)
 }
 
+func artifactGet(t *testing.T, server *httptest.Server, token, path string) (int, string) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+	require.NoError(t, err)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	return response.StatusCode, string(raw)
+}
+
 func defaultArtifactFixture() *fakeArtifactLifecycleStore {
 	return &fakeArtifactLifecycleStore{
 		artifact: workspace.Artifact{ID: "req-spec", Title: "Requirements spec", Status: workspace.ArtifactDraft, Version: 2, OriginRun: "run-42"},
 	}
+}
+
+func TestArtifactAnnotationsAreVersionScopedAndWriterOnly(t *testing.T) {
+	store, outbox := defaultArtifactFixture(), &captureArtifactOutbox{}
+	store.artifact.Status = workspace.ArtifactApproved
+	server := newArtifactLifecycleServer(t, store, outbox)
+	defer server.Close()
+
+	status, body := artifactPost(t, server, "readertoken", "/v1/workspace/artifacts/req-spec/annotations", `{"version":2,"kind":"comment","quote":"Clause 4","comment":"Please clarify"}`)
+	require.Equal(t, http.StatusForbidden, status, body)
+	status, body = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/annotations", `{"version":2,"kind":"change","quote":"Clause 4","replacement":"New clause","comment":"More precise"}`)
+	require.Equal(t, http.StatusCreated, status, body)
+	status, body = artifactGet(t, server, "readertoken", "/v1/workspace/artifacts/req-spec/annotations?version=2")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, "New clause")
+	status, body = artifactGet(t, server, "readertoken", "/v1/workspace/artifacts/req-spec/annotations?version=1")
+	require.Equal(t, http.StatusOK, status, body)
+	require.NotContains(t, body, "New clause")
 }
 
 // A kernel submit opens a round: 202 with the round payload, an audit record
