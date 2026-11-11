@@ -58,12 +58,12 @@ describe('list card date with tags', () => {
     const tagRow = chip!.parentElement
     expect(tagRow).toBeTruthy()
 
-    // Exactly one date per card, sitting in the tag row: the meta line stays
+    // Exactly one date per chip row, sitting in the tag row: the meta line stays
     // date-free when tags carry it. (jsdom drops text-decoration-line, so the
     // TimeHint is identified by its title tooltip instead.)
     const dates = [...tagRow!.querySelectorAll('span[title]')]
     expect(dates).toHaveLength(1)
-    const date = dates[0]
+    const date = dates[0] as HTMLElement // querySelectorAll('span') types Element; the inline-style assertions need the style bag
     expect(date.style.fontFamily).toContain('monospace')
     expect(date.style.fontSize).toBe('0.7rem')
     expect(date.style.color).toBe('var(--tm-text-3)')
