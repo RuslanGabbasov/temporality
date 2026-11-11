@@ -3320,6 +3320,41 @@ button.header-nav-link {
 .artifact-annotation-editor { width: min(360px, calc(100vw - 24px)); padding: 0.75rem; transform: translate(-50%, calc(-100% - 8px)); }
 .artifact-annotation-editor-title { font-weight: 600; margin-bottom: 0.4rem; }
 .artifact-annotation-editor blockquote { max-height: 5rem; overflow: auto; margin: 0 0 0.6rem; padding-left: 0.5rem; border-left: 3px solid var(--tm-amber); font-size: 0.78rem; }
+
+/* The active fragment's note popover: pinned near the text (the anchor
+   computes viewport-left and document-top), 360px wide, opens above the
+   fragment when there is no room below. */
+.artifact-note-popover {
+  position: absolute;
+  z-index: 10000;
+  width: min(360px, calc(100vw - 24px));
+  padding: 0.6rem 0.75rem;
+  background: var(--tm-elevated, #1a302c);
+  border: 1px solid var(--tm-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 18px #0004;
+  transform: translateY(0);
+}
+.artifact-note-popover.above { transform: translateY(-100%); }
+.artifact-note-popover-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+.artifact-note-popover-quote {
+  margin: 0 0 0.4rem;
+  padding-left: 0.5rem;
+  border-left: 3px solid var(--tm-amber);
+  font-size: 0.78rem;
+  max-height: 4.5rem;
+  overflow: auto;
+}
+.artifact-note-popover-line {
+  margin: 0.15rem 0;
+  font-size: 0.78rem;
+}
 .artifact-review-rail { margin-top: 1rem; border-top: 1px solid var(--tm-border); padding-top: 0.75rem; }
 .artifact-review-rail-header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem; font-size: 0.8rem; }
 .artifact-review-note { display: block; text-align: left; width: 100%; border: 0; border-left: 3px solid; border-radius: 0 5px 5px 0; padding: 0.45rem 0.65rem; margin: 0.4rem 0; color: var(--tm-text); background: var(--tm-surface-2); cursor: pointer; }
@@ -3646,10 +3681,46 @@ button.header-nav-link {
   max-height: calc(100vh - 18rem);
   overflow-y: auto;
   border-radius: 8px;
-  --baseBg: var(--tm-bg);
-  --baseBgHover: var(--tm-surface-2);
-  --baseBgActive: var(--tm-surface-3, rgba(127, 127, 127, 0.14));
-  --border: var(--tm-border);
+  // Full semantic-token mapping (the same names MDXEditor's own themes set
+  // on the editor root): every color the control consumes resolves to an
+  // app token, so both app themes render a coherent editor with no dark
+  // leftovers. Accent = brand teal; surfaces ride the --tm hierarchy.
+  --basePageBg: var(--tm-bg);
+  --baseBase: var(--tm-surface);
+  --baseBgSubtle: var(--tm-surface);
+  --baseBg: var(--tm-surface);
+  --baseBgHover: var(--tm-elevated);
+  --baseBgActive: var(--tm-raised);
+  --baseLine: var(--tm-border);
+  --baseBorder: var(--tm-border);
+  --baseBorderHover: var(--tm-text-4);
+  --baseSolid: var(--tm-text-3);
+  --baseSolidHover: var(--tm-text-2);
+  --baseText: var(--tm-text);
+  --baseTextContrast: var(--tm-text);
+  --accentBase: var(--tm-teal);
+  --accentBgSubtle: var(--tm-surface);
+  --accentBg: var(--tm-elevated);
+  --accentBgHover: var(--tm-raised);
+  --accentBgActive: var(--tm-raised);
+  --accentLine: var(--tm-teal);
+  --accentBorder: var(--tm-teal);
+  --accentBorderHover: var(--tm-teal);
+  --accentSolid: var(--tm-teal);
+  --accentSolidHover: var(--tm-teal);
+  --accentText: var(--tm-teal);
+  --accentTextContrast: var(--tm-white);
+  --admonitionTipBg: var(--tm-surface);
+  --admonitionTipBorder: var(--tm-teal);
+  --admonitionInfoBg: var(--tm-surface);
+  --admonitionInfoBorder: var(--tm-success);
+  --admonitionCautionBg: var(--tm-surface);
+  --admonitionCautionBorder: var(--tm-amber);
+  --admonitionDangerBg: var(--tm-surface);
+  --admonitionDangerBorder: var(--tm-danger);
+  --admonitionNoteBg: var(--tm-surface);
+  --admonitionNoteBorder: var(--tm-border);
+  --error-color: var(--tm-danger);
 }
 .artifact-editor .mdxeditor [data-toolbar] {
   position: sticky;

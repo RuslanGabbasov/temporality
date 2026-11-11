@@ -68,7 +68,7 @@ function annotationKindPriority(kind: string): number {
   }
 }
 
-function highlightAnnotationRange(root: HTMLElement, item: { id: string; kind: string; start_offset: number; end_offset: number }) {
+function highlightAnnotationRange(root: HTMLElement, item: { id: string; kind: string; start_offset: number; end_offset: number; comment?: string; replacement?: string }) {
   if (item.start_offset < 0 || item.end_offset < 0) return
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   let node: Node | null
@@ -86,6 +86,10 @@ function highlightAnnotationRange(root: HTMLElement, item: { id: string; kind: s
       wrap.className = 'artifact-ann'
       wrap.dataset.kind = item.kind
       wrap.dataset.annId = item.id
+      // Hover hint right on the fragment: the note's substance without a
+      // scroll to the rail (kind + replacement/comment, capped).
+      const hint = [item.comment, item.replacement ? `→ ${item.replacement}` : ''].filter(Boolean).join(' · ')
+      if (hint) wrap.title = hint.slice(0, 300)
       const sub = document.createRange()
       sub.setStart(textNode, from)
       sub.setEnd(textNode, to)
@@ -509,8 +513,13 @@ export default function Artifacts({ project }: { project?: string }) {
     return () => { window.clearTimeout(first); window.clearTimeout(second); stripAnnotationHighlights(root) }
   }, [selected, displayedVersion, bodyText, annotationsForVersion, diffMode, bodyEditing, activeAnnotation])
 
-  // Clicking a highlight in the text pins the rail note (and vice versa):
-  // one delegated listener on the body container, no per-mark React nodes.
+  // Clicking a highlight in the text opens the note popover right at the
+  // fragment (kind, quote, comment, replacement, author — and edit/retract
+  // actions); the rail stays as the index and still focuses a fragment when
+  // its note is clicked there.
+  const [annPopoverEdit, setAnnPopoverEdit] = useState(false)
+  const [annPopoverAnchor, setAnnPopoverAnchor] = useState<{ left: number; top: number; placement: 'below' | 'above' } | null>(null)
+  const annPopoverRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const root = artifactBodyRef.current
     if (!root) return
@@ -518,13 +527,58 @@ export default function Artifacts({ project }: { project?: string }) {
       const target = (event.target as HTMLElement).closest('mark.artifact-ann') as HTMLElement | null
       if (!target?.dataset.annId) return
       event.preventDefault()
-      setActiveAnnotation(target.dataset.annId)
-      const note = document.querySelector(`[data-note-id='${target.dataset.annId}']`)
-      note?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setAnnPopoverEdit(false)
+      setActiveAnnotation((current) => {
+        const next = current === target.dataset.annId ? '' : (target.dataset.annId ?? '')
+        if (!next) setAnnPopoverAnchor(null)
+        return next
+      })
     }
     root.addEventListener('click', onClick)
     return () => root.removeEventListener('click', onClick)
   }, [selected, bodyEditing, diffMode])
+
+  // Anchor the popover to the active fragment's viewport rect: below the mark
+  // when there is room, above when not; follow scroll/resize so it stays
+  // glued to the text.
+  const activeItem = activeAnnotation ? annotationsForVersion.find((item) => item.id === activeAnnotation) : undefined
+  useEffect(() => {
+    if (!activeAnnotation || !activeItem) { setAnnPopoverAnchor(null); return }
+    const anchor = () => {
+      const mark = artifactBodyRef.current?.querySelector(`mark.artifact-ann[data-ann-id='${CSS.escape(activeAnnotation)}']`) as HTMLElement | null
+      if (!mark) { setAnnPopoverAnchor(null); return }
+      const rect = mark.getBoundingClientRect()
+      const below = window.innerHeight - rect.bottom
+      setAnnPopoverAnchor({
+        left: Math.min(Math.max(12, rect.left), window.innerWidth - 372),
+        top: below > 190 || below > rect.top ? rect.bottom + window.scrollY + 6 : rect.top + window.scrollY - 6,
+        placement: below > 190 || below > rect.top ? 'below' : 'above',
+      })
+    }
+    anchor()
+    const onMove = () => anchor()
+    window.addEventListener('scroll', onMove, true)
+    window.addEventListener('resize', onMove)
+    return () => {
+      window.removeEventListener('scroll', onMove, true)
+      window.removeEventListener('resize', onMove)
+    }
+  }, [activeAnnotation, activeItem, displayedVersion, bodyText])
+
+  // Clicks outside the popover (and outside its mark) release the pin — the
+  // same outside-dismiss the selection menu already follows.
+  useEffect(() => {
+    if (!activeAnnotation) return
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (target.closest('.artifact-note-popover')) return
+      if (target.closest('mark.artifact-ann')) return
+      setActiveAnnotation('')
+      setAnnPopoverEdit(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [activeAnnotation])
 
   // ── Fragment-note popup, the Notion model (docs/artifact-lifecycle.md §7) ──
   // The menu lives on `selectionchange`, not on mouseup: it tracks the live
@@ -742,14 +796,41 @@ export default function Artifacts({ project }: { project?: string }) {
       title: t('artifacts.annotation_delete_confirm') ?? 'Удалить заметку?',
       body: item.quote.slice(0, 120),
       danger: true,
-      confirmLabel: t('action.delete') ?? 'Delete',
+      confirmLabel: t('action.delete'),
     })
     if (!ok) return
     try {
       await workspaceApi.deleteArtifactAnnotation(selected.id, item.id)
       setAnnotations((items) => items.filter((x) => x.id !== item.id))
       if (activeAnnotation === item.id) setActiveAnnotation('')
+      setAnnPopoverEdit(false)
     } catch (f) { setError(message(f)) }
+  }
+
+  // In-place note edit: the API has no update — retract + re-add at the same
+  // text offsets (kind/quote preserved, comment/replacement replaced). The
+  // backend enforces the same can-delete rule before the retract.
+  const [annEditDraft, setAnnEditDraft] = useState<{ comment: string; replacement: string }>({ comment: '', replacement: '' })
+  const canEditAnnotation = canDeleteAnnotation
+  const saveAnnotationEdit = async (item: ArtifactAnnotation) => {
+    if (!selected) return
+    setBusy(true)
+    try {
+      await workspaceApi.deleteArtifactAnnotation(selected.id, item.id)
+      const created = await workspaceApi.addArtifactAnnotation(selected.id, {
+        version: item.version,
+        kind: item.kind,
+        quote: item.quote,
+        replacement: annEditDraft.replacement,
+        comment: annEditDraft.comment,
+        start_offset: item.start_offset,
+        end_offset: item.end_offset,
+      })
+      setAnnotations((items) => items.map((x) => x.id === item.id ? created : x))
+      setActiveAnnotation(created.id)
+      setAnnPopoverEdit(false)
+    } catch (f) { setError(message(f)) }
+    finally { setBusy(false) }
   }
 
   const remove = async (a: Artifact) => {
@@ -1148,19 +1229,19 @@ export default function Artifacts({ project }: { project?: string }) {
                       {selected.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${selected.saga_id}` : ''}
                     </p>
                   </div>
-                  <Stack orientation="horizontal" gap={2}>
-                    {(reviewable || (revisionOpen && revisionEditable)) && (
-                      <Button size="sm" onClick={() => {
-                        setSubmitReviewerTokens([])
-                        setSubmitNote('')
-                        setSubmitOpen(true)
-                        void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
-                      }}>
-                        {t('artifacts.submit_review') ?? 'На согласование'}
-                      </Button>
-                    )}
-                    <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
-                  </Stack>
+                  					<Stack orientation="horizontal" gap={2} style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                  						{(reviewable || (revisionOpen && revisionEditable)) && (
+                  							<Button size="sm" onClick={() => {
+                  								setSubmitReviewerTokens([])
+                  								setSubmitNote('')
+                  								setSubmitOpen(true)
+                  								void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
+                  							}}>
+                  								{t('artifacts.submit_review') ?? 'На согласование'}
+                  							</Button>
+                  						)}
+                  						<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
+                  					</Stack>
                 </div>
 
                 {/* One semantic row: lifecycle badges and catalog tags are the
@@ -1476,31 +1557,32 @@ export default function Artifacts({ project }: { project?: string }) {
                         <span style={{ width: '1px', height: '1.4rem', background: 'var(--tm-border)', margin: '0 0.2rem' }} />
                       </>
                     )}
-                    {selected.provider !== 'url' && (
-                      <Button
-                        size="sm"
-                        kind="ghost"
-                        hasIconOnly
-                        renderIcon={Download}
-                        iconDescription={t('artifacts.download_md') ?? 'Download .md'}
-                        tooltipPosition="bottom"
-                        onClick={() => {
-                          setError('')
-                          void exportArtifactMarkdown(selected.id, showRevisionBody && revision ? revision.version : undefined).catch((f) => setError(String((f as Error).message ?? f)))
-                        }}
-                      />
-                    )}
-                    {!bodyEditing && (
-                      <Button
-                        size="sm"
-                        kind="secondary"
-                        renderIcon={Edit}
-                        disabled={selected.provider === 'url' || (selected.status ?? '') === 'in_review' || revisionInReview}
-                        title={selected.provider === 'url' ? (t('artifacts.edit_locked_url') ?? 'The body lives in the external system') : ((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
-                        onClick={() => void startEdit(selected)}
-                      >{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
-                    )}
-                    {bodyEditing && <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)' }}>{t('artifacts.editing_now') ?? 'Редактирование'}</span>}
+                    					{!bodyEditing && (
+                    						<Button
+                    							size="sm"
+                    							kind="secondary"
+                    							renderIcon={Edit}
+                    							disabled={selected.provider === 'url' || (selected.status ?? '') === 'in_review' || revisionInReview}
+                    							title={selected.provider === 'url' ? (t('artifacts.edit_locked_url') ?? 'The body lives in the external system') : ((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+                    							onClick={() => void startEdit(selected)}
+                    						>{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
+                    					)}
+                    					{selected.provider !== 'url' && (
+                    						<Button
+                    							size="sm"
+                    							kind="ghost"
+                    							hasIconOnly
+                    							renderIcon={Download}
+                    							iconDescription={t('artifacts.download_md') ?? 'Download .md'}
+                    							tooltipPosition="bottom"
+                    							style={{ marginLeft: 'auto' }}
+                    							onClick={() => {
+                    								setError('')
+                    								void exportArtifactMarkdown(selected.id, showRevisionBody && revision ? revision.version : undefined).catch((f) => setError(String((f as Error).message ?? f)))
+                    							}}
+                    						/>
+                    					)}
+                    					{bodyEditing && <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)' }}>{t('artifacts.editing_now') ?? 'Редактирование'}</span>}
                   </div>
                   {selected.provider === 'url' ? (
                     selected.external_ref
@@ -1562,11 +1644,12 @@ export default function Artifacts({ project }: { project?: string }) {
                             >
                               <Icon size={20} style={{ color }} />
                             </button>
-                          ))}
-                          <span className="artifact-ann-pick-divider" />
-                          <button type="button" className="artifact-ann-close" aria-label="Close" title="Escape" onClick={closeSelectionMenu}>×</button>
-                        </div>
-                      )}
+                          							))}
+                          							<span className="artifact-ann-pick-divider" />
+                          							{/* No close button: any click outside, Escape and a collapsed
+                          							    selection already dismiss the menu (selectionchange). */}
+                          						</div>
+                          					)}
                       {selectionMenu && annotationDraft && (
                         <div
                           className={`artifact-annotation-editor${selectionMenu.below ? ' below' : ''}`}
@@ -1577,12 +1660,53 @@ export default function Artifacts({ project }: { project?: string }) {
                           <blockquote>{annotationDraft.quote}</blockquote>
                           {annotationDraft.kind === 'change' && <TextArea id="artifact-annotation-replacement" labelText={t('artifacts.annotation_replacement') ?? 'Suggested replacement'} value={annotationDraft.replacement} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnotationDraft({ ...annotationDraft, replacement: e.target.value })} rows={3} autoFocus />}
                           {annotationDraft.kind !== 'approve' && annotationDraft.kind !== 'reject' && <TextArea id="artifact-annotation-comment" labelText={t('artifacts.annotation_comment') ?? 'Comment'} value={annotationDraft.comment} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnotationDraft({ ...annotationDraft, comment: e.target.value })} rows={2} autoFocus />}
-                          <Stack orientation="horizontal" gap={2}>
-                            <Button size="sm" disabled={busy || (annotationDraft.kind === 'change' && !annotationDraft.replacement.trim())} onClick={() => void saveAnnotation()}>{t('action.save') ?? 'Save'}</Button>
-                            <Button size="sm" kind="ghost" onClick={closeSelectionMenu}>{t('action.cancel') ?? 'Cancel'}</Button>
-                          </Stack>
-                        </div>
-                      )}
+                          							<Stack orientation="horizontal" gap={2}>
+                          								<Button size="sm" disabled={busy || (annotationDraft.kind === 'change' && !annotationDraft.replacement.trim())} onClick={() => void saveAnnotation()}>{t('action.save') ?? 'Save'}</Button>
+                          								<Button size="sm" kind="ghost" onClick={closeSelectionMenu}>{t('action.cancel') ?? 'Cancel'}</Button>
+                          							</Stack>
+                          						</div>
+                          					)}
+                          					{/* The active fragment's note, pinned to the text: kind, quote,
+                          					    replacement, comment, author — with edit/retract right here,
+                          					    so reading a remark never means scrolling to the rail. */}
+                          					{activeItem && annPopoverAnchor && !annotationDraft && (
+                          						<div
+                          							ref={annPopoverRef}
+                          							className={`artifact-note-popover${annPopoverAnchor.placement === 'above' ? ' above' : ''}`}
+                          							style={{ left: annPopoverAnchor.left, top: annPopoverAnchor.top }}
+                          							onMouseDown={(event) => event.preventDefault()}
+                          						>
+                          							<div className="artifact-note-popover-head">
+                          								<strong style={{ fontSize: '0.75rem' }}>{t(`artifacts.annotation_${activeItem.kind}`) ?? activeItem.kind}</strong>
+                          								<span style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>{userNameOf(activeItem.created_by)} · {fmtTime(activeItem.created_at)}</span>
+                          							</div>
+                          							<blockquote className="artifact-note-popover-quote">{activeItem.quote}</blockquote>
+                          							{!annPopoverEdit && (
+                          								<>
+                          									{activeItem.replacement && <p className="artifact-note-popover-line">→ {activeItem.replacement}</p>}
+                          									{activeItem.comment && <p className="artifact-note-popover-line">{activeItem.comment}</p>}
+                          								</>
+                          							)}
+                          							{annPopoverEdit && (
+                          								<div style={{ display: 'grid', gap: '0.4rem', marginTop: '0.35rem' }}>
+                          									{activeItem.kind === 'change' && <TextArea id="artifact-note-edit-replacement" labelText={t('artifacts.annotation_replacement') ?? 'Suggested replacement'} value={annEditDraft.replacement} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnEditDraft({ ...annEditDraft, replacement: e.target.value })} rows={3} autoFocus />}
+                          									{activeItem.kind !== 'approve' && activeItem.kind !== 'reject' && <TextArea id="artifact-note-edit-comment" labelText={t('artifacts.annotation_comment') ?? 'Comment'} value={annEditDraft.comment} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnEditDraft({ ...annEditDraft, comment: e.target.value })} rows={2} />}
+                          									<Stack orientation="horizontal" gap={2}>
+                          										<Button size="sm" disabled={busy || (activeItem.kind === 'change' && !annEditDraft.replacement.trim())} onClick={() => void saveAnnotationEdit(activeItem)}>{t('action.save') ?? 'Save'}</Button>
+                          										<Button size="sm" kind="ghost" onClick={() => setAnnPopoverEdit(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+                          									</Stack>
+                          								</div>
+                          							)}
+                          							<div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.45rem' }}>
+                          								{canEditAnnotation(activeItem) && !annPopoverEdit && (
+                          									<Button size="sm" kind="ghost" renderIcon={Edit} onClick={() => { setAnnEditDraft({ comment: activeItem.comment ?? '', replacement: activeItem.replacement ?? '' }); setAnnPopoverEdit(true) }}>{t('action.edit') ?? 'Edit'}</Button>
+                          								)}
+                          								{canDeleteAnnotation(activeItem) && (
+                          									<Button size="sm" kind="danger--ghost" renderIcon={TrashCan} onClick={() => void removeAnnotation(activeItem)}>{t('artifacts.annotation_delete') ?? 'Retract'}</Button>
+                          								)}
+                          							</div>
+                          						</div>
+                          					)}
                       {annotationsForVersion.length > 0 && (
                         <div className="artifact-review-rail">
                           <div className="artifact-review-rail-header">
