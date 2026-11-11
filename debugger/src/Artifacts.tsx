@@ -538,9 +538,11 @@ export default function Artifacts({ project }: { project?: string }) {
     return () => root.removeEventListener('click', onClick)
   }, [selected, bodyEditing, diffMode])
 
-  // Anchor the popover to the active fragment's viewport rect: below the mark
-  // when there is room, above when not; follow scroll/resize so it stays
-  // glued to the text.
+  // Anchor the popover to the active fragment's viewport rect (position:
+  // fixed on the popover — document-space coordinates would shift by every
+  // positioned ancestor, landing the popover far from the fragment): below
+  // the mark when there is room, above when not; follow scroll/resize so it
+  // stays glued to the text.
   const activeItem = activeAnnotation ? annotationsForVersion.find((item) => item.id === activeAnnotation) : undefined
   useEffect(() => {
     if (!activeAnnotation || !activeItem) { setAnnPopoverAnchor(null); return }
@@ -549,10 +551,11 @@ export default function Artifacts({ project }: { project?: string }) {
       if (!mark) { setAnnPopoverAnchor(null); return }
       const rect = mark.getBoundingClientRect()
       const below = window.innerHeight - rect.bottom
+      const openUp = below < 190 && below <= rect.top
       setAnnPopoverAnchor({
         left: Math.min(Math.max(12, rect.left), window.innerWidth - 372),
-        top: below > 190 || below > rect.top ? rect.bottom + window.scrollY + 6 : rect.top + window.scrollY - 6,
-        placement: below > 190 || below > rect.top ? 'below' : 'above',
+        top: openUp ? Math.max(12, rect.top - 6) : rect.bottom + 6,
+        placement: openUp ? 'above' : 'below',
       })
     }
     anchor()
@@ -1213,36 +1216,37 @@ export default function Artifacts({ project }: { project?: string }) {
             const baseOption = compareOptions.find((o) => o.version === (diffBase ?? defaultBase?.version))
             return (
               <Tile style={{ padding: '1rem 1.1rem' }}>
-                {/* Header: title + the artifact-global actions (submit for
-                    review, delete) top-right; everything version-text related
-                    (download, edit) lives on the Document tab. */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                      <Heading style={{ margin: 0, fontSize: '1.05rem' }}>{selected.title}</Heading>
-                      <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
-                    </div>
-                    <p style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
-                      {selected.id}{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
-                      {' · '}{t('artifacts.updated_prefix') ?? 'Изменён'}: {fullDateTime(selected.updated_at)}
-                      {' · '}{originLabel(selected)}
-                      {selected.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${selected.saga_id}` : ''}
-                    </p>
-                  </div>
-                  					<Stack orientation="horizontal" gap={2} style={{ flexShrink: 0, marginLeft: 'auto' }}>
-                  						{(reviewable || (revisionOpen && revisionEditable)) && (
-                  							<Button size="sm" onClick={() => {
-                  								setSubmitReviewerTokens([])
-                  								setSubmitNote('')
-                  								setSubmitOpen(true)
-                  								void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
-                  							}}>
-                  								{t('artifacts.submit_review') ?? 'На согласование'}
-                  							</Button>
-                  						)}
-                  						<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
-                  					</Stack>
-                </div>
+                				{/* Header — the Agents-card pattern: the title block shrinks
+                				    (heading ellipsizes, the meta line wraps internally) and the
+                				    submit/delete buttons stay on the SAME line, pinned right —
+                				    no wrap, no wasted row. */}
+                				<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
+                					<div style={{ minWidth: 0 }}>
+                						<div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+                							<Heading style={{ margin: 0, fontSize: '1.05rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{selected.title}</Heading>
+                							<OrgBadge orgUnitID={selected.org_unit_id} org={org} />
+                						</div>
+                						<p style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.25rem', wordBreak: 'break-all' }}>
+                							{selected.id}{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
+                							{' · '}{t('artifacts.updated_prefix') ?? 'Изменён'}: {fullDateTime(selected.updated_at)}
+                							{' · '}{originLabel(selected)}
+                							{selected.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${selected.saga_id}` : ''}
+                						</p>
+                					</div>
+                					<Stack orientation="horizontal" gap={2} style={{ flexShrink: 0 }}>
+                						{(reviewable || (revisionOpen && revisionEditable)) && (
+                							<Button size="sm" onClick={() => {
+                								setSubmitReviewerTokens([])
+                								setSubmitNote('')
+                								setSubmitOpen(true)
+                								void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
+                							}}>
+                								{t('artifacts.submit_review') ?? 'На согласование'}
+                							</Button>
+                						)}
+                						<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
+                					</Stack>
+                				</div>
 
                 {/* One semantic row: lifecycle badges and catalog tags are the
                     same class of metadata — before they ate two full rows. */}
@@ -1666,10 +1670,12 @@ export default function Artifacts({ project }: { project?: string }) {
                           							</Stack>
                           						</div>
                           					)}
-                          					{/* The active fragment's note, pinned to the text: kind, quote,
-                          					    replacement, comment, author — with edit/retract right here,
-                          					    so reading a remark never means scrolling to the rail. */}
-                          					{activeItem && annPopoverAnchor && !annotationDraft && (
+					{/* The active fragment's note, pinned to the text: kind, quote,
+					    replacement, comment, author — with edit/retract right here,
+					    so reading a remark never means scrolling to the rail. Hidden
+					    while the selection draft editor is up — one overlay at a
+					    time, or the two collide over its Save button. */}
+					{activeItem && annPopoverAnchor && !annotationDraft && !selectionMenu && (
                           						<div
                           							ref={annPopoverRef}
                           							className={`artifact-note-popover${annPopoverAnchor.placement === 'above' ? ' above' : ''}`}
@@ -1687,24 +1693,30 @@ export default function Artifacts({ project }: { project?: string }) {
                           									{activeItem.comment && <p className="artifact-note-popover-line">{activeItem.comment}</p>}
                           								</>
                           							)}
-                          							{annPopoverEdit && (
-                          								<div style={{ display: 'grid', gap: '0.4rem', marginTop: '0.35rem' }}>
-                          									{activeItem.kind === 'change' && <TextArea id="artifact-note-edit-replacement" labelText={t('artifacts.annotation_replacement') ?? 'Suggested replacement'} value={annEditDraft.replacement} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnEditDraft({ ...annEditDraft, replacement: e.target.value })} rows={3} autoFocus />}
-                          									{activeItem.kind !== 'approve' && activeItem.kind !== 'reject' && <TextArea id="artifact-note-edit-comment" labelText={t('artifacts.annotation_comment') ?? 'Comment'} value={annEditDraft.comment} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnEditDraft({ ...annEditDraft, comment: e.target.value })} rows={2} />}
-                          									<Stack orientation="horizontal" gap={2}>
-                          										<Button size="sm" disabled={busy || (activeItem.kind === 'change' && !annEditDraft.replacement.trim())} onClick={() => void saveAnnotationEdit(activeItem)}>{t('action.save') ?? 'Save'}</Button>
-                          										<Button size="sm" kind="ghost" onClick={() => setAnnPopoverEdit(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
-                          									</Stack>
-                          								</div>
-                          							)}
-                          							<div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.45rem' }}>
-                          								{canEditAnnotation(activeItem) && !annPopoverEdit && (
-                          									<Button size="sm" kind="ghost" renderIcon={Edit} onClick={() => { setAnnEditDraft({ comment: activeItem.comment ?? '', replacement: activeItem.replacement ?? '' }); setAnnPopoverEdit(true) }}>{t('action.edit') ?? 'Edit'}</Button>
-                          								)}
-                          								{canDeleteAnnotation(activeItem) && (
-                          									<Button size="sm" kind="danger--ghost" renderIcon={TrashCan} onClick={() => void removeAnnotation(activeItem)}>{t('artifacts.annotation_delete') ?? 'Retract'}</Button>
-                          								)}
-                          							</div>
+							{annPopoverEdit && (
+								<div style={{ display: 'grid', gap: '0.4rem', marginTop: '0.35rem' }}>
+									{activeItem.kind === 'change' && <TextArea id="artifact-note-edit-replacement" labelText={t('artifacts.annotation_replacement') ?? 'Suggested replacement'} value={annEditDraft.replacement} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnEditDraft({ ...annEditDraft, replacement: e.target.value })} rows={3} autoFocus />}
+									{activeItem.kind !== 'approve' && activeItem.kind !== 'reject' && <TextArea id="artifact-note-edit-comment" labelText={t('artifacts.annotation_comment') ?? 'Comment'} value={annEditDraft.comment} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAnnEditDraft({ ...annEditDraft, comment: e.target.value })} rows={2} />}
+								</div>
+							)}
+							{/* One action line in both modes: save/cancel while editing,
+							    edit while reading; the retract is icon-only so the row
+							    never wraps (full text on the hint). */}
+							<div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.45rem', alignItems: 'center' }}>
+								{annPopoverEdit ? (
+									<>
+										<Button size="sm" disabled={busy || (activeItem.kind === 'change' && !annEditDraft.replacement.trim())} onClick={() => void saveAnnotationEdit(activeItem)}>{t('action.save') ?? 'Save'}</Button>
+										<Button size="sm" kind="ghost" onClick={() => setAnnPopoverEdit(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+									</>
+								) : (
+									canEditAnnotation(activeItem) && (
+										<Button size="sm" kind="ghost" renderIcon={Edit} onClick={() => { setAnnEditDraft({ comment: activeItem.comment ?? '', replacement: activeItem.replacement ?? '' }); setAnnPopoverEdit(true) }}>{t('action.edit') ?? 'Edit'}</Button>
+									)
+								)}
+								{canDeleteAnnotation(activeItem) && (
+									<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('artifacts.annotation_delete') ?? 'Retract note'} tooltipPosition="top" style={{ marginLeft: 'auto' }} onClick={() => void removeAnnotation(activeItem)} />
+								)}
+							</div>
                           						</div>
                           					)}
                       {annotationsForVersion.length > 0 && (
