@@ -631,14 +631,17 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
   // Assistant messages reference agent-produced files by /workspace/... path;
   // clicking such a link downloads the file from the project sandbox.
-  const onFileLink = async (path: string) => {
+  // Stable identity (useCallback): it rides into memoized Markdown as onFile —
+  // an inline arrow would remount the memo on every render and re-parse every
+  // bubble's markdown.
+  const onFileLink = useCallback(async (path: string) => {
     try {
       await workspaceApi.downloadFile(project, path)
     } catch (f) {
       setError(t('chat.download_failed') ?? 'Failed to download file')
       console.error(f)
     }
-  }
+  }, [project, t])
 
   useEffect(() => { saveConversations(conversations) }, [conversations])
 
@@ -1013,6 +1016,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     // model.text_delta / model.reasoning events remain the authoritative
     // per-turn text and replace the live preview once the turn completes.
     const closeTokenStream = () => {
+      stopLiveFlush() // a pending preview flush must not land after the streams closed
       const tes = tokenStreamRef.current.get(convId)
       if (tes) { tes.close(); tokenStreamRef.current.delete(convId) }
     }
@@ -1030,6 +1034,41 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     let settledTurn = -1
     let settledText = ''
     let settledReasoning = ''
+
+    // Coalesced live preview: token deltas land dozens of times a second, and
+    // one setState per delta re-parses the streaming markdown just as often —
+    // the bubble strobes (mid-stream constructs like an unclosed ``` fence
+    // flip between parses: the text renders, then «disappears» into the
+    // fence, then back) and the whole conversation list janks. Flush at most
+    // once per tick, like the activity feed's pushLine.
+    let liveFlushTimer: number | undefined
+    const stopLiveFlush = () => {
+      if (liveFlushTimer !== undefined) { window.clearTimeout(liveFlushTimer); liveFlushTimer = undefined }
+    }
+    // Monotonic merge of the live preview and the journal-authoritative text:
+    // within ONE turn a lagging token channel must never write a shorter text
+    // over the longer journal-settled one (the answer visibly shrinks, then
+    // grows back — the «renders / doesn't render» strobe); a newer turn
+    // replaces the segment wholesale and keeps the previous fragment as the
+    // never-blank fallback.
+    const mergedLive = () => {
+      const liveWins = liveTurn > settledTurn
+      const content = liveWins
+        ? (liveText || settledText)
+        : (liveText.length >= settledText.length ? liveText : settledText)
+      const reasoning = liveWins
+        ? (liveReasoning || settledReasoning)
+        : (liveReasoning.length >= settledReasoning.length ? liveReasoning : settledReasoning)
+      return { content, reasoning, liveTool: liveTool || undefined }
+    }
+    const flushLive = () => {
+      liveFlushTimer = undefined
+      updateMsg(convId, runId, mergedLive())
+    }
+    const scheduleLive = () => {
+      if (liveFlushTimer !== undefined) return
+      liveFlushTimer = window.setTimeout(flushLive, 120)
+    }
 
     // Tail-reconnect catch-up (?tail=1): while the server replays the recent
     // past, replayed turns must not strobe the answer block — the activity
@@ -1055,7 +1094,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         return { ...c, messages: c.messages.map((m) => {
           if (m.runId !== runId) return m
           if ((m.status && m.status !== 'running') || finalAnswerLanded) return m
-          return { ...m, content: liveText || settledText, reasoning: liveReasoning || settledReasoning, liveTool: liveTool || undefined }
+          return { ...m, ...mergedLive() }
         }) }
       }))
     }
@@ -1100,7 +1139,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       else if (data.text) liveTool = ''
       // During catch-up the token preview only accumulates: the answer block
       // stays frozen until finishCatchUp applies it in one step.
-      if (!catchingUp) updateMsg(convId, runId, { content: liveText || settledText, reasoning: liveReasoning || settledReasoning, liveTool: liveTool || undefined })
+      if (!catchingUp) scheduleLive()
     }
     tes.addEventListener('snapshot', (e) => {
       try { applyLive(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
@@ -1997,7 +2036,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     )}
 
                     {msg.content && msg.role === 'assistant' ? (
-                      <Markdown content={linkifyWorkspacePaths(stripPresentationFences(msg.content), project)} onFile={(path) => void onFileLink(path)} />
+                      <Markdown content={linkifyWorkspacePaths(stripPresentationFences(msg.content), project)} onFile={onFileLink} />
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -83,7 +84,15 @@ export function normalizeBlockquoteTable(content: string): string {
   return out.join('\n')
 }
 
-export default function Markdown({ content, onFile }: { content: string; onFile?: (path: string) => void }) {
+// Memoized: the chat re-renders on every token delta, stream line and the
+// 1Hz metrics ticker — without memo, EVERY bubble's markdown re-parses on
+// each of those (a long streaming answer re-parsing dozens of times per
+// second is the main source of the streaming bubble's jitter). content is
+// the full parse input, so comparing it is exact; onFile participates too —
+// Workspace passes a useCallback-stabilized handler.
+export default memo(MarkdownBase, (prev, next) => prev.content === next.content && prev.onFile === next.onFile)
+
+function MarkdownBase({ content, onFile }: { content: string; onFile?: (path: string) => void }) {
   const normalized = normalizeBlockquoteTable(content)
   const segments = normalized.includes('```mermaid') ? splitMermaidSegments(normalized) : null
   if (segments) {
@@ -96,7 +105,7 @@ export default function Markdown({ content, onFile }: { content: string; onFile?
   return <div className="markdown-body"><MarkdownSegment content={normalized} onFile={onFile} /></div>
 }
 
-function MarkdownSegment({ content, onFile }: { content: string; onFile?: (path: string) => void }) {
+const MarkdownSegment = memo(function MarkdownSegment({ content, onFile }: { content: string; onFile?: (path: string) => void }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm, remarkBreaks]}
     components={{
@@ -117,4 +126,4 @@ function MarkdownSegment({ content, onFile }: { content: string; onFile?: (path:
       img: ({ src, alt }) => <a className="markdown-image-link" href={src} target="_blank" rel="noopener noreferrer">Image: {alt || src}</a>,
     }}
   >{content}</ReactMarkdown>
-}
+})
