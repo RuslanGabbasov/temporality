@@ -12,7 +12,7 @@ import {
   SelectItem,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download, Chat, Checkmark } from '@carbon/icons-react'
 import { workspaceApi, exportArtifactMarkdown, type Artifact, type ArtifactAnnotation, type ArtifactInboxEntry, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
 import { MarkdownWithPresentations } from './PresentationView'
 import { whoami, canReconcile } from './kernelApi'
@@ -29,6 +29,7 @@ import RichDiff from './RichDiff'
 import { ArtifactEditor } from './ArtifactEditor'
 import type { User } from './workspaceApi'
 import Markdown from './Markdown'
+import { useFragmentNoteMenu } from './useFragmentNoteMenu'
 import { projectBudget, type SagaRollup } from './kernelApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -180,8 +181,6 @@ export default function Artifacts({ project }: { project?: string }) {
   const [bodyTruncated, setBodyTruncated] = useState(false)
   const [reviews, setReviews] = useState<ArtifactReview[]>([])
   const [annotations, setAnnotations] = useState<ArtifactAnnotation[]>([])
-  const [annotationDraft, setAnnotationDraft] = useState<{ quote: string; kind: ArtifactAnnotation['kind']; comment: string; replacement: string } | null>(null)
-  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; below: boolean; quote: string; start: number; end: number; seq: number } | null>(null)
   const artifactBodyRef = useRef<HTMLDivElement>(null)
   const [reviewsOpen, setReviewsOpen] = useState(false)
   const [submitOpen, setSubmitOpen] = useState(false)
@@ -426,8 +425,6 @@ export default function Artifacts({ project }: { project?: string }) {
     setBodyTruncated(false)
     setReviews([])
     setAnnotations([])
-    setSelectionMenu(null)
-    setAnnotationDraft(null)
     setReviewsOpen(false)
     setDecisionComment('')
     setRevision(null)
@@ -536,103 +533,14 @@ export default function Artifacts({ project }: { project?: string }) {
   // to its anchor rect on scroll while a note draft is open. A bare menu
   // hides on scroll instead — the anchor is gone from view, following it is
   // noise. Escape always closes.
-  const selectionAnchorRef = useRef<Range | null>(null)
-  const selectionRafRef = useRef(0)
-  const closeSelectionMenu = useCallback(() => {
-    selectionAnchorRef.current = null
-    setSelectionMenu(null)
-    setAnnotationDraft(null)
-  }, [])
-  const draftOpenRef = useRef(false)
-  draftOpenRef.current = annotationDraft !== null
-
-  const syncSelection = useCallback(() => {
-    const root = artifactBodyRef.current
-    if (!root || bodyEditing || diffMode || !selected || selected.provider === 'url' || !canAnnotate) {
-      if (!draftOpenRef.current) closeSelectionMenu()
-      return
-    }
-    const selection = window.getSelection()
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      // Clicked outside (or dragged to zero): discard the menu and a pending
-      // draft with it — the Notion discard gesture.
-      closeSelectionMenu()
-      return
-    }
-    const range = selection.getRangeAt(0)
-    if (!root.contains(range.commonAncestorContainer)) {
-      closeSelectionMenu()
-      return
-    }
-    const quote = range.toString().trim()
-    if (!quote) { closeSelectionMenu(); return }
-    const prefix = document.createRange()
-    prefix.selectNodeContents(root)
-    prefix.setEnd(range.startContainer, range.startOffset)
-    const renderedText = root.textContent ?? ''
-    const start = renderedText.indexOf(quote, prefix.toString().length)
-    if (start < 0) { closeSelectionMenu(); return }
-    selectionAnchorRef.current = range.cloneRange()
-    const rect = range.getBoundingClientRect()
-    const below = rect.top < 120
-    setSelectionMenu((prev) => ({
-      x: Math.min(Math.max(90, rect.left + rect.width / 2), window.innerWidth - 90),
-      y: below ? rect.bottom + 10 : rect.top - 10,
-      below,
-      quote, start, end: start + quote.length,
-      // A fresh selection resets the kind picker; the previous draft was for
-      // a different fragment.
-      seq: (prev?.seq ?? 0) + (prev && prev.start === start && prev.end === start + quote.length ? 0 : 1),
-    }))
-  }, [selected, bodyEditing, diffMode, canAnnotate, closeSelectionMenu])
-
-  useEffect(() => {
-    const schedule = () => {
-      cancelAnimationFrame(selectionRafRef.current)
-      selectionRafRef.current = requestAnimationFrame(syncSelection)
-    }
-    document.addEventListener('selectionchange', schedule)
-    return () => {
-      document.removeEventListener('selectionchange', schedule)
-      cancelAnimationFrame(selectionRafRef.current)
-    }
-  }, [syncSelection])
-
-  // Scroll: a bare menu disappears (Notion), a typing draft stays glued to
-  // its fragment; resize follows the same rule.
-  const menuOpen = selectionMenu !== null
-  useEffect(() => {
-    if (!menuOpen) return
-    const onScroll = () => {
-      if (!draftOpenRef.current) { closeSelectionMenu(); return }
-      const anchor = selectionAnchorRef.current
-      if (!anchor) { closeSelectionMenu(); return }
-      try {
-        const rect = anchor.getBoundingClientRect()
-        if (rect.width === 0 && rect.height === 0) { closeSelectionMenu(); return }
-        const below = rect.top < 120
-        setSelectionMenu((prev) => prev ? {
-          ...prev,
-          x: Math.min(Math.max(90, rect.left + rect.width / 2), window.innerWidth - 90),
-          y: below ? rect.bottom + 10 : rect.top - 10,
-          below,
-        } : prev)
-      } catch { closeSelectionMenu() }
-    }
-    window.addEventListener('scroll', onScroll, true)
-    window.addEventListener('resize', onScroll)
-    return () => {
-      window.removeEventListener('scroll', onScroll, true)
-      window.removeEventListener('resize', onScroll)
-    }
-  }, [menuOpen, closeSelectionMenu])
-
-  useEffect(() => {
-    if (!menuOpen) return
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') closeSelectionMenu() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [menuOpen, closeSelectionMenu])
+  // The fragment-note popup (docs/artifact-lifecycle.md §7) lives in a hook:
+  // the Notion selection model — open on selectionchange, discard on
+  // collapse/outside/Escape, hide on scroll unless a draft is typing.
+  const artifactNoteMenu = useFragmentNoteMenu({ enabled: Boolean(selected && selected.provider !== 'url' && !bodyEditing && !diffMode && canAnnotate), rootRef: artifactBodyRef })
+  const selectionMenu = artifactNoteMenu.menu
+  const annotationDraft = artifactNoteMenu.draft
+  const setAnnotationDraft = artifactNoteMenu.setDraft
+  const closeSelectionMenu = artifactNoteMenu.close
 
   // Lifecycle counters drive the status filter chips: how many artifacts sit in
   // each state. Pending reviews first — that is the human queue.
@@ -1631,10 +1539,28 @@ export default function Artifacts({ project }: { project?: string }) {
                           style={{ left: selectionMenu.x, top: selectionMenu.y }}
                           onMouseDown={(event) => { if (!(event.target as HTMLElement).closest('input, textarea')) event.preventDefault() }}
                         >
-                          {(['comment', 'change', 'approve', 'reject'] as const).map((kind) => (
-                            <button key={kind} type="button" onClick={() => setAnnotationDraft({ quote: selectionMenu.quote, kind, comment: '', replacement: '' })}>{t(`artifacts.annotation_${kind}`) ?? kind}</button>
+                          {/* Verdict icons, colored and large: the dark-on-dark
+                              text row was unreadable, and the verdicts read
+                              instantly as green-check / red-cross. */}
+                          {([
+                            ['comment', Chat, 'var(--tm-amber)'],
+                            ['change', Edit, 'var(--tm-teal)'],
+                            ['approve', Checkmark, 'var(--tm-success)'],
+                            ['reject', Close, 'var(--tm-danger)'],
+                          ] as const).map(([kind, Icon, color]) => (
+                            <button
+                              key={kind}
+                              type="button"
+                              className={`artifact-ann-pick artifact-ann-pick-${kind}`}
+                              title={t(`artifacts.annotation_${kind}`) ?? kind}
+                              aria-label={t(`artifacts.annotation_${kind}`) ?? kind}
+                              onClick={() => setAnnotationDraft({ quote: selectionMenu.quote, kind, comment: '', replacement: '' })}
+                            >
+                              <Icon size={20} style={{ color }} />
+                            </button>
                           ))}
-                          <button type="button" aria-label="Close" onClick={closeSelectionMenu}>×</button>
+                          <span className="artifact-ann-pick-divider" />
+                          <button type="button" className="artifact-ann-close" aria-label="Close" title="Escape" onClick={closeSelectionMenu}>×</button>
                         </div>
                       )}
                       {selectionMenu && annotationDraft && (

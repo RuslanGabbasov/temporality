@@ -3264,7 +3264,16 @@ button.header-nav-link {
 /* Below the selection (not enough room above): the transform anchors the
    popup's top-left corner instead of its bottom, so it hangs under the text. */
 .artifact-selection-menu.below, .artifact-annotation-editor.below { transform: translate(-50%, 0); }
-.artifact-selection-menu { display: flex; align-items: center; gap: 2px; padding: 4px; white-space: nowrap; }
+.artifact-selection-menu { display: flex; align-items: center; gap: 4px; padding: 6px; white-space: nowrap; background: var(--tm-elevated, #1a1b26); }
+.artifact-selection-menu button.artifact-ann-pick {
+  width: 38px; height: 38px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--tm-border); border-radius: 8px;
+  background: transparent; cursor: pointer;
+}
+.artifact-selection-menu button.artifact-ann-pick:hover { background: var(--tm-surface-2); filter: brightness(1.25); }
+.artifact-ann-pick-divider { width: 1px; height: 26px; background: var(--tm-border); margin: 0 2px; }
+.artifact-selection-menu button.artifact-ann-close { font-size: 1.1rem; line-height: 1; padding: 8px 10px; }
 .artifact-selection-menu button { border: 0; border-radius: 5px; padding: 6px 9px; color: var(--tm-text); background: transparent; cursor: pointer; font: inherit; font-size: 0.75rem; }
 .artifact-selection-menu button:hover { background: var(--tm-surface-2); }
 .artifact-annotation-editor { width: min(360px, calc(100vw - 24px)); padding: 0.75rem; transform: translate(-50%, calc(-100% - 8px)); }
