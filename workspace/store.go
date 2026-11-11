@@ -70,20 +70,28 @@ func ListMigrations(dir string) ([]string, error) {
 	return names, nil
 }
 
-// MigrateAll applies every migration in dir in file order. Every migration is
-// written idempotent — CREATE IF NOT EXISTS, ADD COLUMN IF NOT EXISTS, ON
-// CONFLICT DO NOTHING, guarded index creates, condition-matched UPDATEs —
-// because the set re-runs on every boot; that property lets a new migration
-// land as a single file in migrations/workspace, with no boot wiring to
-// forget (which is exactly how the 000075 column once shipped without ever
-// executing).
+// MigrateAll applies every not-yet-applied migration in dir in file order.
+// Each applied file is recorded in workspace_schema_migration and skipped on
+// every later boot — a re-run of the whole idempotent set used to grow boot
+// time with the data (the data-backfill UPDATEs re-scanned their tables on
+// every start). The files stay idempotent as a safety net: the very first
+// boot after this feature applies the whole set once to register it, and an
+// operator running a file by hand remains safe. Apply + marker ride one
+// transaction: a failed SQL leaves no marker, so the next boot retries it.
 func (s *Store) MigrateAll(ctx context.Context, dir string, log func(msg string, args ...any)) error {
 	files, err := ListMigrations(dir)
 	if err != nil {
 		return err
 	}
+	applied, err := s.appliedMigrations(ctx)
+	if err != nil {
+		return err
+	}
 	for _, name := range files {
-		if err := s.Migrate(ctx, filepath.Join(dir, name)); err != nil {
+		if applied[name] {
+			continue
+		}
+		if err := s.applyMigrationOnce(ctx, filepath.Join(dir, name), name); err != nil {
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
 		if log != nil {
@@ -91,6 +99,55 @@ func (s *Store) MigrateAll(ctx context.Context, dir string, log func(msg string,
 		}
 	}
 	return nil
+}
+
+// appliedMigrations reads the applied-file marker table, creating it on first
+// use (installations upgrading from the re-run-everything era register their
+// whole current set on that first boot).
+func (s *Store) appliedMigrations(ctx context.Context) (map[string]bool, error) {
+	if _, err := s.pool.Exec(ctx,
+		`CREATE TABLE IF NOT EXISTS workspace_schema_migration (
+			 name TEXT PRIMARY KEY,
+			 applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		 )`); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `SELECT name FROM workspace_schema_migration`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	applied := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		applied[name] = true
+	}
+	return applied, rows.Err()
+}
+
+// applyMigrationOnce runs the file's SQL and records the file name in one
+// transaction — the marker only lands when the SQL committed.
+func (s *Store) applyMigrationOnce(ctx context.Context, path, name string) error {
+	data, err := readFile(path)
+	if err != nil {
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, string(data)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO workspace_schema_migration (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, name); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // Projects

@@ -272,6 +272,12 @@ func main() {
 	}()
 	defer func() { _ = bootServer.Close() }()
 	defer func() { bootDone.Store(true) }() // never reached on the success path; the swap below does it
+	// Boot-stage timing: each milestone logs its cumulative elapsed seconds,
+	// so a slow start names its stage instead of hiding behind «booting».
+	bootStarted := time.Now()
+	bootMark := func(stage string) {
+		log.Info("boot", "stage", stage, "elapsed_s", float64(time.Since(bootStarted).Milliseconds())/1000)
+	}
 	if err := controlplane.LoadFileSecrets("DATABASE_URL", "TEMPORALITY_MODEL_API_KEY", "TEMPORALITY_API_TOKEN", "KERNEL_AUTH_TOKENS", "KERNEL_SECRET_MASTER_KEY"); err != nil {
 		log.Error("load file secrets", "error", err)
 		os.Exit(1)
@@ -291,6 +297,7 @@ func main() {
 	if quotas.Enabled() {
 		log.Info("run quotas enabled", "default_per_day", quotas.Default())
 	}
+	bootMark("quotas")
 	costPrices, err := cost.ParsePrices(os.Getenv("KERNEL_MODEL_PRICES"))
 	if err != nil {
 		log.Error("parse model prices", "error", err)
@@ -305,6 +312,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer ws.Close()
+	bootMark("workspace store")
 	// Each store applies its own migration directory — the directory is the
 	// ownership boundary, so a new migration lands as one file with no boot
 	// wiring to forget (the 000075 column once shipped without ever
@@ -315,6 +323,7 @@ func main() {
 		log.Error("migrate workspace", "error", err)
 		os.Exit(1)
 	}
+	bootMark("workspace migrations")
 	// UI-saved harness budget overrides (docs/harness-settings.md §6) layer
 	// over the env-resolved budgets. Runs pin the composed snapshot at start,
 	// so in-flight runs are untouched and new runs pick the saved values up.
@@ -346,6 +355,7 @@ func main() {
 	} else if err := ws.SeedBuiltinSkills(ctx); err != nil {
 		log.Error("seed builtin skills", "error", err)
 	}
+	bootMark("seeds")
 	// SSE event wake (PG LISTEN/NOTIFY): a dedicated connection to the shared
 	// journal database turns observation_events changes into instant wake-ups
 	// for /v1/workspace/runs/{id}/stream, instead of every stream polling
@@ -6899,6 +6909,21 @@ func main() {
 			}
 		}
 	}()
+
+	// Run-aware sandbox janitor (the third strike on sandbox leaks): the
+	// idle reaper and the 7-day scratch sweep keep a container whenever
+	// they are UNCERTAIN — an unfinished background-op marker or any extra
+	// process in docker top. But when the workspace says the RUN is
+	// terminal, no workflow will ever re-attach: abandoned markers and
+	// leftover processes are the leak itself. Terminal runs' containers
+	// go after a grace period; rows that do not exist (delegated
+	// children) are left to the existing reapers.
+	if swappable := activities.SandboxSwappable(); swappable != nil && swappable.Configured() {
+		janitor := newSandboxJanitor(swappable, func(ctx context.Context, runID string) (workspace.Run, error) {
+			return ws.GetRun(ctx, runID)
+		}, log)
+		go janitor.runLoop(ctx)
+	}
 
 	// Auth garbage sweep (docs/auth-federation.md §5.2): expired sessions and
 	// stale one-time login states leave rows behind — the hourly pass keeps

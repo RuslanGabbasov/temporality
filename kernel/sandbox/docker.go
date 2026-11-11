@@ -932,6 +932,61 @@ func (d *Docker) TeardownRun(key string) {
 	}
 }
 
+// ScratchContainerInfo is one live sandbox container the kernel owns, keyed
+// by its run's ScratchKey ("<project>/<run>") — the run-aware janitor's view
+// of the fleet.
+type ScratchContainerInfo struct {
+	Key  string
+	Name string
+}
+
+// ListScratchContainers lists every running sandbox container with its
+// ScratchKey label. Containers without the label (ancient or foreign) come
+// back with an empty key and are the caller's signal to skip them.
+func (d *Docker) ListScratchContainers(ctx context.Context) ([]ScratchContainerInfo, error) {
+	refs, err := d.listRunContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ScratchContainerInfo, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, ScratchContainerInfo{Key: ref.key, Name: ref.name})
+	}
+	return out, nil
+}
+
+// ForceRemoveRunContainers removes every container serving the scratch key —
+// the registry's keep-alive container, any labelled strays, busy or not, and
+// regardless of unfinished background-operation markers. The run-aware
+// janitor uses it once the RUN is terminal: an unanswered "is there still
+// work?" only protects containers whose run can still resume, and a terminal
+// run never does — abandoned op markers and leftover processes are exactly
+// the leak this guard was never meant to protect forever.
+func (d *Docker) ForceRemoveRunContainers(key string) {
+	if key == "" {
+		return
+	}
+	d.runMu.Lock()
+	rc := d.runs[key]
+	delete(d.runs, key)
+	if rc != nil && rc.busy > 0 {
+		rc.evict = true // an in-flight exec finishes; the flag retires the container at release
+	}
+	d.runMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	refs, err := d.listRunContainers(ctx)
+	if err != nil {
+		return
+	}
+	for _, ref := range refs {
+		if ref.key != key {
+			continue
+		}
+		_ = d.removeContainer(ref.name)
+	}
+}
+
 // startReaper launches the lazy reaper once per runner: containers unused
 // for longer than idleTTL are stopped, so a finished (or crashed) run's
 // keep-alive container cannot outlive its run by hours. Disabled with

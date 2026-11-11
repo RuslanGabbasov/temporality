@@ -66,6 +66,25 @@ func (s *Swappable) TeardownRun(key string) {
 	}
 }
 
+// ListScratchContainers lists the backing Docker runner's live run
+// containers with their scratch keys; nil when not backed by Docker.
+func (s *Swappable) ListScratchContainers(ctx context.Context) ([]ScratchContainerInfo, error) {
+	if d, ok := s.Current().(*Docker); ok && d != nil {
+		return d.ListScratchContainers(ctx)
+	}
+	return nil, nil
+}
+
+// ForceRemoveRunContainers drops every container of the scratch key on the
+// backing Docker runner, ignoring the idle/unfinished-work guards — the
+// run-aware janitor's force path for runs the workspace already reports
+// terminal. No-op when not backed by Docker.
+func (s *Swappable) ForceRemoveRunContainers(key string) {
+	if d, ok := s.Current().(*Docker); ok && d != nil {
+		d.ForceRemoveRunContainers(key)
+	}
+}
+
 func (s *Swappable) SandboxRoot() string {
 	if current := s.Current(); current != nil {
 		return current.SandboxRoot()
