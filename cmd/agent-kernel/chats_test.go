@@ -223,3 +223,69 @@ func TestChatOwnershipScoping(t *testing.T) {
 	require.Len(t, list("writertoken"), 1)
 	require.Len(t, list("othertoken"), 1)
 }
+
+// Ownerless legacy rows (owner_user_id = '' — env-token clients of the
+// pre-fallback era) used to fold into EVERY admin's sidebar, re-importing
+// foreign conversations after the ownership fix. An admin's default listing
+// is own chats only; the unattributed pool is reachable through ?all=1.
+func TestChatAdminListSkipsOwnerlessRows(t *testing.T) {
+	store := newFakeChatStore()
+	// Seed directly: an ownerless legacy row and another user's chat.
+	store.chats["legacy-1"] = workspace.Chat{ID: "legacy-1", ProjectID: "omni", OwnerUserID: "", Title: "legacy"}
+	store.chats["theirs-1"] = workspace.Chat{ID: "theirs-1", ProjectID: "omni", OwnerUserID: "otheruser", Title: "theirs"}
+
+	gate, err := controlplane.NewGate("admintoken:adminuser:admin:*")
+	require.NoError(t, err)
+	mux := http.NewServeMux()
+	RegisterChatRoutes(mux, gate, store)
+	server := httptest.NewServer(gate.Authenticate(mux))
+	defer server.Close()
+
+	// The admin's own chat.
+	putOwn := func() *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPut, server.URL+"/v1/workspace/chats/mine-1", strings.NewReader(`{"project_id":"omni","title":"mine","transcript":[{"role":"user","content":"hi"}]}`))
+		req.Header.Set("Authorization", "Bearer admintoken")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		return resp
+	}
+	resp := putOwn()
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+
+	list := func(all bool) []workspace.Chat {
+		t.Helper()
+		url := server.URL + "/v1/workspace/chats?project=omni"
+		if all {
+			url += "&all=1"
+		}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("Authorization", "Bearer admintoken")
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, 200, resp.StatusCode)
+		var payload struct {
+			Chats []workspace.Chat `json:"chats"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+		return payload.Chats
+	}
+
+	ids := func(chats []workspace.Chat) []string {
+		out := make([]string, 0, len(chats))
+		for _, c := range chats {
+			out = append(out, c.ID)
+		}
+		return out
+	}
+
+	// Default listing: the admin's own chat only — no legacy row, no foreign
+	// conversation (the «чужой чат в моём списке» report).
+	require.Equal(t, []string{"mine-1"}, ids(list(false)))
+
+	// The debugging escape still reaches everything.
+	require.ElementsMatch(t, []string{"mine-1", "legacy-1", "theirs-1"}, ids(list(true)))
+}

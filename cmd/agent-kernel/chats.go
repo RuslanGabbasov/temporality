@@ -43,14 +43,15 @@ func RegisterChatRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws chatsSto
 		}
 		// Ownership scoping (docs/resilience-and-scale.md §4): everyone lists
 		// their OWN chats — a shared wall leaked every user's conversations
-		// into every sidebar. Admins additionally see unattributed legacy rows
-		// so nothing orphans invisibly; ?all=1 (admin) is the debugging escape.
+		// into every sidebar. Unattributed legacy rows (owner_user_id = '') are
+		// visible ONLY through ?all=1 (admin debugging escape): folding them
+		// into every admin's sidebar re-imported foreign conversations after
+		// the ownership fix — env-token clients of the pre-fallback era left
+		// dozens of ownerless rows that all landed in the admin's list.
 		scope := workspace.ChatScope{Owners: []string{requestUserID(r)}}
 		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.Role >= controlplane.RoleAdmin {
 			if r.URL.Query().Get("all") == "1" {
 				scope = workspace.ChatScope{All: true}
-			} else {
-				scope.IncludeOwnerless = true
 			}
 		}
 		chats, err := ws.ListChats(r.Context(), project, limit, scope)
