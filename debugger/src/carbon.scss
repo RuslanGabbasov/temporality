@@ -673,12 +673,53 @@ body, #root, #main-content {
 // Tags
 // ═══════════════════════════════════════════════════════════════
 
-.cds--tag--blue { background-color: var(--tm-teal) !important; color: var(--tm-white) !important; border-radius: 999px !important; }
-.cds--tag--green { background-color: var(--tm-success) !important; color: var(--tm-white) !important; border-radius: 999px !important; }
-.cds--tag--red { background-color: var(--tm-danger) !important; color: var(--tm-white) !important; border-radius: 999px !important; }
-.cds--tag--warm-gray { background-color: var(--tm-amber) !important; color: var(--tm-ink) !important; border-radius: 999px !important; }
-.cds--tag--cyan { background-color: var(--tm-teal) !important; color: var(--tm-white) !important; border-radius: 999px !important; }
-.cds--tag--gray { background-color: var(--tm-raised) !important; color: var(--tm-text-2) !important; border-radius: 999px !important; }
+// Tag themes. Carbon paints BOTH the tag root (through per-type theme vars)
+// and the text span (.cds--tag__label, through two different render paths in
+// Tag.js) — a root-only override lost that race sporadically, showing «blue
+// text on green» running badges. The label color is therefore pinned on both
+// the root and the label span for every themed type.
+.cds--tag--blue,
+.cds--tag--cyan {
+  background-color: var(--tm-teal) !important;
+  border-radius: 999px !important;
+}
+.cds--tag--green {
+  background-color: var(--tm-success) !important;
+  border-radius: 999px !important;
+}
+.cds--tag--red {
+  background-color: var(--tm-danger) !important;
+  border-radius: 999px !important;
+}
+.cds--tag--blue .cds--tag__label,
+.cds--tag--blue,
+.cds--tag--cyan .cds--tag__label,
+.cds--tag--cyan,
+.cds--tag--green .cds--tag__label,
+.cds--tag--green,
+.cds--tag--red .cds--tag__label,
+.cds--tag--red {
+  color: var(--tm-white) !important;
+}
+.cds--tag--warm-gray {
+  background-color: var(--tm-amber) !important;
+  border-radius: 999px !important;
+}
+.cds--tag--warm-gray,
+.cds--tag--warm-gray .cds--tag__label {
+  color: var(--tm-ink) !important;
+}
+.cds--tag--gray,
+.cds--tag--cool-gray {
+  background-color: var(--tm-raised) !important;
+  border-radius: 999px !important;
+}
+.cds--tag--gray,
+.cds--tag--gray .cds--tag__label,
+.cds--tag--cool-gray,
+.cds--tag--cool-gray .cds--tag__label {
+  color: var(--tm-text-2) !important;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Notifications
@@ -3587,30 +3628,17 @@ button.header-nav-link {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Artifact in-place editor (MDXEditor): the app is dark — remap the
-// editor's chrome onto the --tm-* palette, keep the content typography
-// identical to the read view (.artifact-body), and give the pane real
-// height: the whole point of the in-place editor is editing BIG docs.
+// Artifact in-place editor (MDXEditor): the editor's own .dark-theme class
+// (set on the component) provides the full dark palette; the overrides below
+// only fit the pane into the app chrome — app-sized typography matching the
+// read view, real height for BIG documents, borders from the palette.
 // ═══════════════════════════════════════════════════════════════
 .artifact-editor {
   border: 1px solid var(--tm-border);
   border-radius: 8px;
   background: var(--tm-bg);
-  --mdxeditor-container-padding: 0;
-  --mdxeditor-popup-padding: 0.4rem;
 }
 .artifact-editor .mdxeditor {
-  --baseBg: var(--tm-bg);
-  --baseBgHover: var(--tm-surface-2);
-  --baseBgActive: var(--tm-surface-3, rgba(127, 127, 127, 0.14));
-  --baseText: var(--tm-text);
-  --baseTextHover: var(--tm-text);
-  --accentBg: var(--tm-teal);
-  --accentBgSubtle: rgba(122, 162, 247, 0.15);
-  --accentText: var(--tm-teal);
-  --border: var(--tm-border);
-  --toolbarBg: var(--tm-elevated);
-  --toolbarItemActiveBg: var(--tm-surface-3, rgba(127, 127, 127, 0.14));
   background: var(--tm-bg);
   color: var(--tm-text);
   font-size: 0.85rem;
@@ -3618,13 +3646,16 @@ button.header-nav-link {
   max-height: calc(100vh - 18rem);
   overflow-y: auto;
   border-radius: 8px;
+  --baseBg: var(--tm-bg);
+  --baseBgHover: var(--tm-surface-2);
+  --baseBgActive: var(--tm-surface-3, rgba(127, 127, 127, 0.14));
+  --border: var(--tm-border);
 }
 .artifact-editor .mdxeditor [data-toolbar] {
   position: sticky;
   top: 0;
   z-index: 2;
   flex-wrap: wrap;
-  background: var(--tm-elevated);
   border-bottom: 1px solid var(--tm-border);
 }
 .artifact-editor .mdxeditor [data-editor-container] {
@@ -3638,20 +3669,12 @@ button.header-nav-link {
 .artifact-editor .mdxeditor code {
   font-family: var(--tm-font-mono, monospace);
   font-size: 0.8em;
-  background: var(--tm-surface-2);
   border-radius: 4px;
   padding: 0.08em 0.3em;
 }
-.artifact-editor .mdxeditor [data-lexical-editor] pre.CodeMirror,
 .artifact-editor .mdxeditor .cm-editor {
-  background: var(--tm-surface-2);
-  border: 1px solid var(--tm-border);
   border-radius: 6px;
   font-size: 0.78rem;
-}
-.artifact-editor .mdxeditor table td, .artifact-editor .mdxeditor table th {
-  border: 1px solid var(--tm-border);
-  padding: 0.3rem 0.55rem;
 }
 
 // ═══════════════════════════════════════════════════════════════

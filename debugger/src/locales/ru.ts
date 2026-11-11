@@ -1756,6 +1756,7 @@ export const ru: Record<string, string> = {
     'artifacts.versions_title': 'История версий',
     'artifacts.versions_empty': 'Архивных редакций пока нет — история появляется, когда открывается новая редакция утверждённого артефакта.',
     'artifacts.versions_superseded': 'заменена',
+    'artifacts.editing_now': 'Редактирование — не забудьте сохранить',
     'artifacts.edit_locked_url': 'Тело живёт во внешней системе — править здесь нечего',
     'artifacts.edit_locked_review': 'Пока идёт согласование, версия заблокирована',
     'artifacts.body_current_version': 'v{{version}} · текущая',

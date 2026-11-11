@@ -97,6 +97,7 @@ export function ArtifactEditor({ markdown, onChange, onReady, readOnly }: {
     <div className="artifact-editor">
       <MDXEditor
         ref={ref}
+        className="dark-theme"
         markdown={markdown}
         onChange={onChange}
         readOnly={readOnly}

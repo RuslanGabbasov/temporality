@@ -1132,6 +1132,9 @@ export default function Artifacts({ project }: { project?: string }) {
             const baseOption = compareOptions.find((o) => o.version === (diffBase ?? defaultBase?.version))
             return (
               <Tile style={{ padding: '1rem 1.1rem' }}>
+                {/* Header: title + the artifact-global actions (submit for
+                    review, delete) top-right; everything version-text related
+                    (download, edit) lives on the Document tab. */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -1141,50 +1144,28 @@ export default function Artifacts({ project }: { project?: string }) {
                     <p style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
                       {selected.id}{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
                       {' · '}{t('artifacts.updated_prefix') ?? 'Изменён'}: {fullDateTime(selected.updated_at)}
+                      {' · '}{originLabel(selected)}
+                      {selected.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${selected.saga_id}` : ''}
                     </p>
                   </div>
-				<Stack orientation="horizontal" gap={2}>
-					{selected.provider !== 'url' && (
-						<Button
-							size="sm"
-							kind="tertiary"
-							renderIcon={Download}
-							onClick={() => {
-								setError('')
-								void exportArtifactMarkdown(selected.id, showRevisionBody && revision ? revision.version : undefined).catch((f) => setError(String((f as Error).message ?? f)))
-							}}
-						>
-							{t('artifacts.download_md') ?? 'Download .md'}
-						</Button>
-					)}
-					{(reviewable || (revisionOpen && revisionEditable)) && (
-                  						<Button size="sm" onClick={() => {
-                  							setSubmitReviewerTokens([])
-                  							setSubmitNote('')
-                  							setSubmitOpen(true)
-                  							void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
-                  						}}>
-                  							{t('artifacts.submit_review') ?? 'Send to review'}
-                  						</Button>
-                  					)}
-                  					{/* ONE edit action for every state: in_review is locked; approved
-                  					 opens a new revision draft (the dialog header says so); draft/
-                  					 rejected edits in place. The two pencil buttons that used to sit
-                  					 here said different things for the same gesture — the dialog
-                  					 now carries the state-specific wording instead. */}
-					                  <Button
-					                    size="sm"
-					                    kind="secondary"
-					                    renderIcon={Edit}
-					                    disabled={selected.provider === 'url' || (selected.status ?? '') === 'in_review' || revisionInReview}
-					                    title={selected.provider === 'url' ? (t('artifacts.edit_locked_url') ?? 'The body lives in the external system') : ((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
-					                    onClick={() => void startEdit(selected)}
-					                  >{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
-					<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
-                  				</Stack>
+                  <Stack orientation="horizontal" gap={2}>
+                    {(reviewable || (revisionOpen && revisionEditable)) && (
+                      <Button size="sm" onClick={() => {
+                        setSubmitReviewerTokens([])
+                        setSubmitNote('')
+                        setSubmitOpen(true)
+                        void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
+                      }}>
+                        {t('artifacts.submit_review') ?? 'На согласование'}
+                      </Button>
+                    )}
+                    <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
+                  </Stack>
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem', alignItems: 'center' }}>
+                {/* One semantic row: lifecycle badges and catalog tags are the
+                    same class of metadata — before they ate two full rows. */}
+                <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.5rem', alignItems: 'center' }}>
                   <Tag type={statusTagType(selected.status)} size="sm" title={`status: ${selected.status ?? 'approved'}`}>{statusLabel(selected.status)}</Tag>
                   <Tag type={selected.provider === 'builtin' ? 'blue' : 'gray'} size="sm" title={selected.provider}>{providerLabel(selected.provider)}</Tag>
                   {selected.kind === 'work' && <Tag type="cool-gray" size="sm">{t('artifacts.kind_work') ?? 'work product'}</Tag>}
@@ -1192,12 +1173,7 @@ export default function Artifacts({ project }: { project?: string }) {
                   {usedBy.length > 0
                     ? <Tag type="green" size="sm" title={usedBy.join(', ')}>{t('artifacts.used_by', { n: String(usedBy.length) }) ?? `used by ${usedBy.length} skill(s)`}</Tag>
                     : <Tag size="sm">{t('artifacts.not_used') ?? 'not referenced'}</Tag>}
-                </div>
-
-                {/* Tag editor: live on the card, lifecycle-independent — tags
-                    drive the catalog filters, locking them behind the review
-                    state just breaks other people's navigation. */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', alignItems: 'center', marginTop: '0.5rem' }}>
+                  {(selected.tags ?? []).length > 0 && <span style={{ width: '1px', height: '1.1rem', background: 'var(--tm-border)' }} />}
                   {(selected.tags ?? []).map((tag) => (
                     <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.15rem', padding: '0.1rem 0.3rem 0.1rem 0.45rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.15))', fontSize: '0.75rem' }}>
                       #{tag}
@@ -1251,10 +1227,6 @@ export default function Artifacts({ project }: { project?: string }) {
                       : (t('artifacts.revision_draft') ?? 'draft — the approved version keeps serving until the revision is approved')}
                   </div>
                 )}
-                <p style={{ fontSize: '0.7rem', marginTop: '0.4rem', color: 'var(--tm-text-3)' }}>
-                  {t('artifacts.origin_prefix') ?? 'created by'}: {originLabel(selected)}
-                  {selected.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${selected.saga_id}` : ''}
-                </p>
 
                 {/* The detail card is tabbed: the document (read + edit +
                     fragment reviews), the version archive, the review rounds
@@ -1488,16 +1460,48 @@ export default function Artifacts({ project }: { project?: string }) {
 
                 {detailTab === 'document' && (
                 <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem' }}>
-                  {revisionOpen && revision && !bodyEditing && (
-                    <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.65rem', flexWrap: 'wrap' }}>
-                      <Button size="sm" kind={showRevisionBody ? 'ghost' : 'primary'} onClick={() => { setShowRevisionBody(false); setBodyEditing(false) }}>
-                        {t('artifacts.body_current_version', { version: String(selected.version ?? 1) }) ?? `v${selected.version ?? 1} · current`}
-                      </Button>
-                      <Button size="sm" kind={showRevisionBody ? 'primary' : 'ghost'} onClick={() => { setShowRevisionBody(true); setBodyEditing(false) }}>
-                        {t('artifacts.body_revision', { version: String(revision.version) }) ?? `v${revision.version} · revision`}{revision.status === 'in_review' ? ` — ${t('artifacts.status_in_review') ?? 'in review'}` : ''}
-                      </Button>
-                    </div>
-                  )}
+                  {/* Version-text toolbar: the version switch and the two
+                      actions that belong to THIS version's text (download,
+                      edit) — they used to sit in the card header and ate a
+                      full row of it. */}
+                  <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.65rem' }}>
+                    {revisionOpen && revision && !bodyEditing && (
+                      <>
+                        <Button size="sm" kind={showRevisionBody ? 'ghost' : 'primary'} onClick={() => { setShowRevisionBody(false); setBodyEditing(false) }}>
+                          {t('artifacts.body_current_version', { version: String(selected.version ?? 1) }) ?? `v${selected.version ?? 1} · current`}
+                        </Button>
+                        <Button size="sm" kind={showRevisionBody ? 'primary' : 'ghost'} onClick={() => { setShowRevisionBody(true); setBodyEditing(false) }}>
+                          {t('artifacts.body_revision', { version: String(revision.version) }) ?? `v${revision.version} · revision`}{revision.status === 'in_review' ? ` — ${t('artifacts.status_in_review') ?? 'in review'}` : ''}
+                        </Button>
+                        <span style={{ width: '1px', height: '1.4rem', background: 'var(--tm-border)', margin: '0 0.2rem' }} />
+                      </>
+                    )}
+                    {selected.provider !== 'url' && (
+                      <Button
+                        size="sm"
+                        kind="ghost"
+                        hasIconOnly
+                        renderIcon={Download}
+                        iconDescription={t('artifacts.download_md') ?? 'Download .md'}
+                        tooltipPosition="bottom"
+                        onClick={() => {
+                          setError('')
+                          void exportArtifactMarkdown(selected.id, showRevisionBody && revision ? revision.version : undefined).catch((f) => setError(String((f as Error).message ?? f)))
+                        }}
+                      />
+                    )}
+                    {!bodyEditing && (
+                      <Button
+                        size="sm"
+                        kind="secondary"
+                        renderIcon={Edit}
+                        disabled={selected.provider === 'url' || (selected.status ?? '') === 'in_review' || revisionInReview}
+                        title={selected.provider === 'url' ? (t('artifacts.edit_locked_url') ?? 'The body lives in the external system') : ((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+                        onClick={() => void startEdit(selected)}
+                      >{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
+                    )}
+                    {bodyEditing && <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)' }}>{t('artifacts.editing_now') ?? 'Редактирование'}</span>}
+                  </div>
                   {selected.provider === 'url' ? (
                     selected.external_ref
                       ? <p style={{ fontSize: '0.85rem', wordBreak: 'break-all' }}>

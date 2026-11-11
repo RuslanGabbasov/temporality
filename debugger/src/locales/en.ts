@@ -1756,6 +1756,7 @@ export const en: Record<string, string> = {
     'artifacts.versions_title': 'Version history',
     'artifacts.versions_empty': 'No archived revisions yet — history appears when a new revision of an approved artifact opens.',
     'artifacts.versions_superseded': 'superseded',
+    'artifacts.editing_now': 'Editing — remember to save',
     'artifacts.edit_locked_url': 'The body lives in the external system — nothing to edit here',
     'artifacts.edit_locked_review': 'Locked while a review is open',
     'artifacts.body_current_version': 'v{{version}} · current',
