@@ -63,6 +63,19 @@ func (f *fakeArtifactLifecycleStore) ListArtifactAnnotations(_ context.Context, 
 	return out, nil
 }
 
+func (f *fakeArtifactLifecycleStore) DeleteArtifactAnnotation(_ context.Context, artifactID, annotationID, principal string, moderator bool) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, a := range f.annotations {
+		if a.ID == annotationID && (moderator || a.CreatedBy == principal) {
+			f.annotations = append(f.annotations[:i], f.annotations[i+1:]...)
+			_ = artifactID
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeArtifactLifecycleStore) GetArtifactRange(_ context.Context, id string, _, _ int) (workspace.Artifact, error) {
 	if id != f.artifact.ID {
 		return workspace.Artifact{}, workspace.ErrNotFound
@@ -296,6 +309,19 @@ func artifactGet(t *testing.T, server *httptest.Server, token, path string) (int
 	return response.StatusCode, string(raw)
 }
 
+func artifactDelete(t *testing.T, server *httptest.Server, token, path string) (int, string) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodDelete, server.URL+path, nil)
+	require.NoError(t, err)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	return response.StatusCode, string(raw)
+}
+
 func defaultArtifactFixture() *fakeArtifactLifecycleStore {
 	return &fakeArtifactLifecycleStore{
 		artifact: workspace.Artifact{ID: "req-spec", Title: "Requirements spec", Status: workspace.ArtifactDraft, Version: 2, OriginRun: "run-42"},
@@ -318,6 +344,25 @@ func TestArtifactAnnotationsAreVersionScopedAndWriterOnly(t *testing.T) {
 	status, body = artifactGet(t, server, "readertoken", "/v1/workspace/artifacts/req-spec/annotations?version=1")
 	require.Equal(t, http.StatusOK, status, body)
 	require.NotContains(t, body, "New clause")
+}
+
+// Retraction: the author deletes their own note, another writer gets 404,
+// an operator moderates anything, and the reader role never gets in.
+func TestArtifactAnnotationDeleteScopes(t *testing.T) {
+	store, outbox := defaultArtifactFixture(), &captureArtifactOutbox{}
+	store.annotations = []workspace.ArtifactAnnotation{{ID: "ann-1", Version: 2, Kind: "comment", Quote: "Clause 4", CreatedBy: "writer"}}
+	server := newArtifactLifecycleServer(t, store, outbox)
+	defer server.Close()
+
+	status, _ := artifactDelete(t, server, "readertoken", "/v1/workspace/artifacts/req-spec/annotations/ann-1")
+	require.Equal(t, http.StatusForbidden, status)
+
+	// Reader never reaches the handler; an operator (admintoken) moderates.
+	status, body := artifactDelete(t, server, "admintoken", "/v1/workspace/artifacts/req-spec/annotations/ann-1")
+	require.Equal(t, http.StatusOK, status, body)
+
+	status, _ = artifactDelete(t, server, "admintoken", "/v1/workspace/artifacts/req-spec/annotations/ann-1")
+	require.Equal(t, http.StatusNotFound, status)
 }
 
 // A kernel submit opens a round: 202 with the round payload, an audit record

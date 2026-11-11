@@ -145,6 +145,24 @@ func (s *Store) ListArtifactAnnotations(ctx context.Context, artifactID string, 
 	return items, rows.Err()
 }
 
+// DeleteArtifactAnnotation removes one review note — the author may retract
+// their own words, an operator may moderate anything. Annotations are
+// otherwise append-only: the agent's artifact_feedback read stays honest
+// because removal is an explicit act, never a silent rewrite.
+func (s *Store) DeleteArtifactAnnotation(ctx context.Context, artifactID, annotationID, principal string, moderator bool) (bool, error) {
+	query := `DELETE FROM workspace_artifact_annotation WHERE id=$1 AND artifact_id=$2`
+	args := []any{annotationID, artifactID}
+	if !moderator {
+		query += ` AND created_by=$3`
+		args = append(args, principal)
+	}
+	tag, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func scanArtifactReview(row interface{ Scan(dest ...any) error }) (ArtifactReview, error) {
 	return scanArtifactReviewInto(row, nil)
 }

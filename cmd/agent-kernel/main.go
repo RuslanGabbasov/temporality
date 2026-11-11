@@ -9869,6 +9869,12 @@ func keepArtifactEditsOnEmpty(req *artifactRequest, current workspace.Artifact) 
 	if strings.TrimSpace(req.ExternalRef) == "" {
 		req.ExternalRef = current.ExternalRef
 	}
+	// Omitted tags inherit the stored set (the agent tool never sends them —
+	// without this backfill every artifact_update wiped the catalog labels).
+	// An explicit array still replaces: "[]" clears, per SetArtifactTags.
+	if req.Tags == nil {
+		req.Tags = current.Tags
+	}
 	// A url artifact keeps its body outside the registry: only backfill the
 	// body of builtin ones — backfilling a url artifact would trip its
 	// "content must be empty" rule and break the provider contract.

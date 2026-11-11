@@ -24,7 +24,7 @@ vi.mock('./workspaceApi', async (importOriginal) => {
     ...actual,
     workspaceApi: {
       ...actual.workspaceApi,
-      listUsers: vi.fn(async () => ({ users: [] })),
+      listUsers: vi.fn(async () => ({ users: [{ id: 'user-22d0f237249ad45b', name: 'Руслан Габбасов', active: true }, { id: 'me', name: 'Me Me', active: true }] })),
       listArtifacts: vi.fn(async () => ({ artifacts: [artifact] })),
       artifactInbox: vi.fn(async () => ({ entries: [] })),
       artifactTags: vi.fn(async () => ({ tags: [] })),
@@ -38,7 +38,10 @@ vi.mock('./workspaceApi', async (importOriginal) => {
       })),
       listArtifactReviews: vi.fn(async () => ({
         reviews: [{
-          id: 'rev-1', artifact_id: 'a1', artifact_version: 2, reviewers: ['user:me'],
+          id: 'rev-1', artifact_id: 'a1', artifact_version: 2,
+          // The agent submits raw tokens: a bare directory id, a bare name,
+          // a proper user: token — all three must read as people.
+          reviewers: ['user-22d0f237249ad45b', 'Руслан Габбасов', 'user:me', 'role:admin'],
           mode: 'any', status: 'open', requested_at: '2026-11-03T10:00:00Z',
           note: 'please check the rework', decisions: {},
         }],
@@ -71,6 +74,20 @@ async function mountSelectedArtifact() {
   await settle()
 }
 
+/** The detail card is tabbed: switch by the localized tab label. */
+function switchDetailTab(scope: HTMLElement, tab: 'versions' | 'review' | 'settings' | 'document') {
+  const labels: Record<string, RegExp> = {
+    document: /^(Document|Документ)$/,
+    review: /(Review queue|Согласование|Review history)/,
+    versions: /(Version history|Версии)$/,
+    settings: /(Settings|Настройки)$/,
+  }
+  const tabButton = [...scope.querySelectorAll('[role="tab"]')]
+    .find((el) => labels[tab].test(el.textContent?.trim() ?? ''))
+  expect(tabButton).toBeTruthy()
+  ;(tabButton as HTMLButtonElement).click()
+}
+
 afterEach(() => {
   act(() => root?.unmount())
   container?.remove()
@@ -86,13 +103,16 @@ describe('approved artifact with a revision in review', () => {
     // …the approved text is one switch away, clearly labelled.
     expect(text).toMatch(/v1 · (current|текущая)/)
     expect(text).toMatch(/v2 · (revision|редакция)/)
-    // The review surface is reachable: the open round carries its decisions.
+    // The review surface lives in its own tab and opens automatically for a
+    // round under review; the decision buttons are right there.
     expect(text).toMatch(/(Approve|Утвердить)/)
     expect(text).toMatch(/(Reject|Отклонить)/)
   })
 
   it('compares versions as a rich diff against the previous one by default', async () => {
     await mountSelectedArtifact()
+    await act(async () => { switchDetailTab(container, 'versions') })
+    await settle()
     const compare = [...container.querySelectorAll('button')]
       .find((b) => /(Compare versions|Сравнить версии)/.test(b.textContent ?? ''))
     expect(compare).toBeTruthy()
@@ -106,6 +126,26 @@ describe('approved artifact with a revision in review', () => {
     // …with the word-level story and the added/removed accounting visible.
     expect(text).toMatch(/(What changed|Что изменилось)/)
     expect(text).toMatch(/[+~−-][0-9]/)
+  })
+
+  it('reads review rounds as people, not raw reviewer tokens', async () => {
+    await mountSelectedArtifact()
+    await act(async () => { switchDetailTab(container, 'review') })
+    await settle()
+    const text = container.textContent ?? ''
+    expect(text).toMatch(/(Reviewers|Согласующие)/)
+    // The review mode is human text, never the raw enum value.
+    expect(text).toMatch(/(any reviewer|любой рецензент)/)
+    expect(text).not.toMatch(/(режим|mode): any\b(?! reviewer)/)
+    // A bare directory id resolves to the human name…
+    expect(text).toContain('Руслан Габбасов')
+    // …a proper user: token too…
+    expect(text).toContain('Me Me')
+    // …and no raw ids leak through (the role token localizes by locale).
+    expect(text).toMatch(/admin/)
+    expect(text).not.toContain('user-22d0f237249ad45b')
+    expect(text).not.toContain('user:me')
+    expect(text).not.toContain('role:admin')
   })
 })
 

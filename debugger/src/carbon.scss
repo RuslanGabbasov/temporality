@@ -3573,3 +3573,96 @@ button.header-nav-link {
 .run-flash {
   animation: run-flash 2.2s ease-out;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Artifact in-place editor (MDXEditor): the app is dark — remap the
+// editor's chrome onto the --tm-* palette, keep the content typography
+// identical to the read view (.artifact-body), and give the pane real
+// height: the whole point of the in-place editor is editing BIG docs.
+// ═══════════════════════════════════════════════════════════════
+.artifact-editor {
+  border: 1px solid var(--tm-border);
+  border-radius: 8px;
+  background: var(--tm-bg);
+  --mdxeditor-container-padding: 0;
+  --mdxeditor-popup-padding: 0.4rem;
+}
+.artifact-editor .mdxeditor {
+  --baseBg: var(--tm-bg);
+  --baseBgHover: var(--tm-surface-2);
+  --baseBgActive: var(--tm-surface-3, rgba(127, 127, 127, 0.14));
+  --baseText: var(--tm-text);
+  --baseTextHover: var(--tm-text);
+  --accentBg: var(--tm-teal);
+  --accentBgSubtle: rgba(122, 162, 247, 0.15);
+  --accentText: var(--tm-teal);
+  --border: var(--tm-border);
+  --toolbarBg: var(--tm-elevated);
+  --toolbarItemActiveBg: var(--tm-surface-3, rgba(127, 127, 127, 0.14));
+  background: var(--tm-bg);
+  color: var(--tm-text);
+  font-size: 0.85rem;
+  min-height: 16rem;
+  max-height: calc(100vh - 18rem);
+  overflow-y: auto;
+  border-radius: 8px;
+}
+.artifact-editor .mdxeditor [data-toolbar] {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-wrap: wrap;
+  background: var(--tm-elevated);
+  border-bottom: 1px solid var(--tm-border);
+}
+.artifact-editor .mdxeditor [data-editor-container] {
+  padding: 0.75rem 1rem;
+  min-height: 14rem;
+}
+// Content typography mirrors the read view so the edit does not reflow.
+.artifact-editor .mdxeditor h1 { font-size: 1.15rem; }
+.artifact-editor .mdxeditor h2 { font-size: 1.02rem; }
+.artifact-editor .mdxeditor h3, .artifact-editor .mdxeditor h4 { font-size: 0.92rem; }
+.artifact-editor .mdxeditor code {
+  font-family: var(--tm-font-mono, monospace);
+  font-size: 0.8em;
+  background: var(--tm-surface-2);
+  border-radius: 4px;
+  padding: 0.08em 0.3em;
+}
+.artifact-editor .mdxeditor [data-lexical-editor] pre.CodeMirror,
+.artifact-editor .mdxeditor .cm-editor {
+  background: var(--tm-surface-2);
+  border: 1px solid var(--tm-border);
+  border-radius: 6px;
+  font-size: 0.78rem;
+}
+.artifact-editor .mdxeditor table td, .artifact-editor .mdxeditor table th {
+  border: 1px solid var(--tm-border);
+  padding: 0.3rem 0.55rem;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Fragment review highlights: annotated ranges in the rendered body carry
+// a persistent <mark> tinted by verdict kind (amber=comment/change,
+// green=approve, red=reject), so the document itself shows what reviewers
+// flagged — the rail below is the index, the text is the evidence.
+// ═══════════════════════════════════════════════════════════════
+mark.artifact-ann {
+  background: transparent;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow: inset 0 -0.45em 0 var(--ann-tint, rgba(224, 175, 104, 0.28));
+}
+mark.artifact-ann[data-kind='approve'] { --ann-tint: rgba(158, 206, 106, 0.26); }
+mark.artifact-ann[data-kind='reject'] { --ann-tint: rgba(247, 118, 142, 0.26); }
+mark.artifact-ann[data-kind='comment'], mark.artifact-ann[data-kind='change'] { --ann-tint: rgba(224, 175, 104, 0.28); }
+mark.artifact-ann.artifact-ann-active {
+  background: var(--ann-tint);
+  outline: 1px solid var(--tm-teal);
+}
+.artifact-review-note.artifact-review-note-active {
+  outline: 1px solid var(--tm-teal);
+}

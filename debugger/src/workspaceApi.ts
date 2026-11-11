@@ -1733,6 +1733,8 @@ export const workspaceApi = {
     request<{ annotations: ArtifactAnnotation[] }>(`/v1/workspace/artifacts/${id}/annotations?version=${version}`),
   addArtifactAnnotation: (id: string, data: Omit<ArtifactAnnotation, 'id' | 'created_by' | 'created_at'>) =>
     request<ArtifactAnnotation>(`/v1/workspace/artifacts/${id}/annotations`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteArtifactAnnotation: (id: string, annotationId: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/artifacts/${id}/annotations/${annotationId}`, { method: 'DELETE' }),
   resolveArtifactReview: (id: string, reviewId: string, approve: boolean, comment: string) =>
     request<{ review: ArtifactReview; artifact: Artifact }>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: JSON.stringify({ comment }) }),
   artifactReferences: () =>

@@ -15,8 +15,9 @@ function message(error: unknown) { return error instanceof Error ? error.message
 
 /** Saga picker with typeahead search (docs/sagas.md): hundreds of sagas
  *  stopped fitting a plain select — the combobox filters by title/id as you
- *  type and shows the task count next to each option. */
-function SagaComboBox({ id, labelText, sagas, exclude, value, onChange }: {
+ *  type and shows the task count next to each option. Exported for reuse:
+ *  the artifact settings tab binds an artifact to a saga the same way. */
+export function SagaComboBox({ id, labelText, sagas, exclude, value, onChange }: {
   id: string
   labelText: string
   sagas: SagaRollup[]

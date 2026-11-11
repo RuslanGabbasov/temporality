@@ -42,3 +42,26 @@ func TestKeepArtifactEditsOnEmptyFillsBeforeValidation(t *testing.T) {
 	require.Equal(t, "https://example.com/doc", req.ExternalRef)
 	require.Empty(t, req.Content)
 }
+
+// Omitted tags keep the stored set; an explicit array still replaces it.
+// The incident: the agent's artifact_update never sends tags, and the edit
+// path wrote the payload unconditionally — every body patch silently wiped
+// the catalog labels the filters search by.
+func TestKeepArtifactEditsOnEmptyKeepsTags(t *testing.T) {
+	current := workspace.Artifact{ID: "doc", Title: "Регламент", Provider: "builtin", Content: "# тело", Tags: []string{"go", "quality"}}
+
+	// Omitted (nil) — the agent-tool case: tags survive the edit.
+	req := artifactRequest{Content: "# тело v2"}
+	keepArtifactEditsOnEmpty(&req, current)
+	require.Equal(t, []string{"go", "quality"}, req.Tags)
+
+	// An explicit array replaces the set — "[]" clears, like SetArtifactTags.
+	req = artifactRequest{Content: "# тело v2", Tags: []string{}}
+	keepArtifactEditsOnEmpty(&req, current)
+	require.NotNil(t, req.Tags)
+	require.Empty(t, req.Tags)
+
+	req = artifactRequest{Content: "# тело v2", Tags: []string{"renewed"}}
+	keepArtifactEditsOnEmpty(&req, current)
+	require.Equal(t, []string{"renewed"}, req.Tags)
+}

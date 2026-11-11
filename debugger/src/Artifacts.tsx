@@ -24,9 +24,12 @@ import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 import { ReviewerPicker } from './ReviewerPicker'
+import { SagaComboBox } from './ProjectOverview'
 import RichDiff from './RichDiff'
+import { ArtifactEditor } from './ArtifactEditor'
 import type { User } from './workspaceApi'
 import Markdown from './Markdown'
+import { projectBudget, type SagaRollup } from './kernelApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -35,6 +38,60 @@ export function humanArtifactSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
+
+// ── Fragment review highlights (docs/artifact-lifecycle.md §7) ─────────────
+// Annotated ranges in the rendered body carry a persistent <mark> tinted by
+// verdict kind: the document itself shows what reviewers flagged, the rail
+// below is the index. The anchors are text offsets of the RENDERED document
+// (the same coordinates the kernel stores at capture time), so the marks are
+// re-wrapped after every render — markdown re-renders discard foreign DOM.
+function stripAnnotationHighlights(root: HTMLElement | null) {
+  root?.querySelectorAll('mark.artifact-ann').forEach((mark) => {
+    const parent = mark.parentNode
+    if (!parent) return
+    while (mark.firstChild) parent.insertBefore(mark.firstChild, mark)
+    mark.remove()
+    parent.normalize()
+  })
+}
+
+// The rail groups by verdict weight: rejects first — they block the round —
+// then change requests, comments, approvals last.
+function annotationKindPriority(kind: string): number {
+  switch (kind) {
+    case 'reject': return 0
+    case 'change': return 1
+    case 'comment': return 2
+    default: return 3 // approve
+  }
+}
+
+function highlightAnnotationRange(root: HTMLElement, item: { id: string; kind: string; start_offset: number; end_offset: number }) {
+  if (item.start_offset < 0 || item.end_offset < 0) return
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node: Node | null
+  let cursor = 0
+  while ((node = walker.nextNode())) {
+    const text = node.textContent ?? ''
+    const nodeEnd = cursor + text.length
+    if (nodeEnd <= item.start_offset) { cursor = nodeEnd; continue }
+    if (cursor >= item.end_offset) break
+    const from = Math.max(item.start_offset, cursor) - cursor
+    const to = Math.min(item.end_offset, nodeEnd) - cursor
+    if (to > from) {
+      const textNode = node as Text
+      const wrap = document.createElement('mark')
+      wrap.className = 'artifact-ann'
+      wrap.dataset.kind = item.kind
+      wrap.dataset.annId = item.id
+      const sub = document.createRange()
+      sub.setStart(textNode, from)
+      sub.setEnd(textNode, to)
+      try { sub.surroundContents(wrap) } catch { /* cross-node boundary — the segment stays unwrapped */ }
+    }
+    cursor = nodeEnd
+  }
 }
 
 type ArtifactForm = Partial<Artifact>
@@ -91,7 +148,17 @@ export default function Artifacts({ project }: { project?: string }) {
   const [tagDraft, setTagDraft] = useState('')
   const [tagsBusy, setTagsBusy] = useState(false)
   const [operator, setOperator] = useState(false)
-  useEffect(() => { void whoami().then((identity) => setOperator(canReconcile(identity.role))).catch(() => setOperator(false)) }, [])
+  // Fragment reviews are written by anyone who can edit documents (writer+):
+  // the review conversation is not an admin duty.
+  const [canAnnotate, setCanAnnotate] = useState(false)
+  const [myUserID, setMyUserID] = useState('')
+  useEffect(() => {
+    void whoami().then((identity) => {
+      setOperator(canReconcile(identity.role))
+      setCanAnnotate(['writer', 'operator', 'admin'].includes(identity.role))
+      setMyUserID(identity.user_id || identity.subject || '')
+    }).catch(() => { setOperator(false); setCanAnnotate(false); setMyUserID('') })
+  }, [])
   const saveTags = async (artifact: Artifact, tags: string[]) => {
     setTagsBusy(true)
     try {
@@ -134,6 +201,22 @@ export default function Artifacts({ project }: { project?: string }) {
     const user = directory.find((u) => u.id === id || u.name === id)
     return user ? (user.name || user.id) : id
   }, [directory])
+
+  // Reviewer tokens follow the ask_human recipient syntax (user:<id>,
+  // org:<unit>, role:<role>, project_owner — plus whatever the submitter
+  // typed by hand, e.g. a bare "user-…" id or a bare name). The review card
+  // shows people, not envelopes: every token resolves to its human label,
+  // falling back to the raw token when the directory does not know it.
+  const reviewerLabel = useCallback((raw: string): string => {
+    if (raw === 'project_owner') return t('reviewers.owner_label') ?? 'Project owner (admins)'
+    if (raw.startsWith('org:')) return org.nameOf(raw.slice(4)) || raw.slice(4)
+    if (raw.startsWith('role:')) {
+      const role = raw.slice(5)
+      return t(`reviewers.role_${role}`) ?? role
+    }
+    if (raw.startsWith('user:')) return userNameOf(raw.slice(5)) || raw
+    return userNameOf(raw) || raw
+  }, [t, org, userNameOf])
   const [submitReviewers, setSubmitReviewers] = useState('')
   const [submitNote, setSubmitNote] = useState('')
   const [decisionComment, setDecisionComment] = useState('')
@@ -152,6 +235,45 @@ export default function Artifacts({ project }: { project?: string }) {
   const [diffMode, setDiffMode] = useState(false)
   const [diffBase, setDiffBase] = useState<number | null>(null)
   const [archivedVersions, setArchivedVersions] = useState<ArtifactVersion[] | null>(null)
+  // The detail card is tabbed: the document (read + the big in-place editor
+  // + fragment reviews), the version archive, the review rounds and the
+  // compact entity settings live in separate tabs — the old single-page card
+  // mixed version-bound (body, mime) and version-free (title, tags, saga,
+  // storage) attributes in one giant dialog, which made editing a large
+  // document impossible.
+  type DetailTab = 'document' | 'versions' | 'review' | 'settings'
+  const [detailTab, setDetailTab] = useState<DetailTab>('document')
+  // In-place editing state: enter loads the current text into the editor,
+  // save lands it via the same endpoints as before (draft edits in place,
+  // approved opens a draft revision), cancel just leaves.
+  const [bodyEditing, setBodyEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState('')
+  const [editBusy, setEditBusy] = useState(false)
+  // Which review note the text highlight and the rail pin to (one at a time).
+  const [activeAnnotation, setActiveAnnotation] = useState('')
+  // Saga suggest: the project's registered sagas (the same source the
+  // Dashboard sagas tab uses), loaded when the settings tab opens.
+  const [sagas, setSagas] = useState<SagaRollup[]>([])
+  const [settingsBusy, setSettingsBusy] = useState(false)
+  const [settingsDraft, setSettingsDraft] = useState<ArtifactForm>({})
+  const [sagaTouched, setSagaTouched] = useState(false)
+
+  const openSettings = useCallback((a: Artifact) => {
+    setSettingsDraft({
+      title: a.title,
+      description: a.description ?? '',
+      kind: a.kind ?? 'reference',
+      provider: a.provider ?? 'builtin',
+      external_ref: a.external_ref ?? '',
+      mime_type: a.mime_type ?? '',
+      tags: [...(a.tags ?? [])],
+      saga_id: a.saga_id ?? '',
+    })
+    setSagaTouched(false)
+    if (project) {
+      void projectBudget(project).then((budget) => setSagas(budget.sagas ?? [])).catch(() => setSagas([]))
+    }
+  }, [project])
 
   // Deep link (/artifacts?project=…&id=…): the linked artifact opens even
   // when the server page does not include it. Applied once, after the first
@@ -313,6 +435,10 @@ export default function Artifacts({ project }: { project?: string }) {
     setDiffMode(false)
     setDiffBase(null)
     setArchivedVersions(null)
+    setBodyEditing(false)
+    setEditDraft('')
+    setActiveAnnotation('')
+    setDetailTab('document')
     if (!selected) return
     if (selected.provider === 'url') return
     let stale = false
@@ -361,6 +487,47 @@ export default function Artifacts({ project }: { project?: string }) {
     return () => { stale = true }
   }, [diffMode, selectedId, archivedVersions])
 
+  // Review highlights repaint after the markdown render settles. Mermaid and
+  // presentation blocks hydrate asynchronously — the second pass catches the
+  // layout they shift. The read view only: the editor shows its own text.
+  const displayedVersion = showRevisionBody && revision ? revision.version : (selected?.version ?? 1)
+  const bodyText = showRevisionBody && revision ? (revision.content ?? '') : selectedBody
+  const annotationsForVersion = useMemo(
+    () => annotations.filter((item) => item.version === displayedVersion),
+    [annotations, displayedVersion],
+  )
+  useEffect(() => {
+    const root = artifactBodyRef.current
+    if (!root || !selected || selected.provider === 'url' || diffMode || bodyEditing) return
+    const apply = () => {
+      stripAnnotationHighlights(root)
+      for (const item of annotationsForVersion) highlightAnnotationRange(root, item)
+      root.querySelectorAll('mark.artifact-ann').forEach((mark) => {
+        mark.classList.toggle('artifact-ann-active', Boolean(activeAnnotation) && mark.dataset.annId === activeAnnotation)
+      })
+    }
+    const first = window.setTimeout(apply, 60)
+    const second = window.setTimeout(apply, 700)
+    return () => { window.clearTimeout(first); window.clearTimeout(second); stripAnnotationHighlights(root) }
+  }, [selected, displayedVersion, bodyText, annotationsForVersion, diffMode, bodyEditing, activeAnnotation])
+
+  // Clicking a highlight in the text pins the rail note (and vice versa):
+  // one delegated listener on the body container, no per-mark React nodes.
+  useEffect(() => {
+    const root = artifactBodyRef.current
+    if (!root) return
+    const onClick = (event: Event) => {
+      const target = (event.target as HTMLElement).closest('mark.artifact-ann') as HTMLElement | null
+      if (!target?.dataset.annId) return
+      event.preventDefault()
+      setActiveAnnotation(target.dataset.annId)
+      const note = document.querySelector(`[data-note-id='${target.dataset.annId}']`)
+      note?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    root.addEventListener('click', onClick)
+    return () => root.removeEventListener('click', onClick)
+  }, [selected, bodyEditing, diffMode])
+
   // Lifecycle counters drive the status filter chips: how many artifacts sit in
   // each state. Pending reviews first — that is the human queue.
   const statusCounts = artifacts.reduce<Record<string, number>>((acc, a) => {
@@ -393,7 +560,7 @@ export default function Artifacts({ project }: { project?: string }) {
   const originLabel = (a: Artifact) =>
     a.origin_type === 'agent'
       ? (t('artifacts.origin_agent', { run: a.origin_run ? ` · ${a.origin_run}` : '' }) ?? `agent${a.origin_run ? ` · ${a.origin_run}` : ''}`)
-      : (t('artifacts.origin_human', { user: a.origin_user ? ` · ${a.origin_user}` : '' }) ?? `human${a.origin_user ? ` · ${a.origin_user}` : ''}`)
+      : (t('artifacts.origin_human', { user: a.origin_user ? ` · ${userNameOf(a.origin_user)}` : '' }) ?? `human${a.origin_user ? ` · ${userNameOf(a.origin_user)}` : ''}`)
 
   const chipStyle = (active: boolean): CSSProperties => ({
     background: active ? 'var(--tm-teal)' : 'transparent',
@@ -424,9 +591,10 @@ export default function Artifacts({ project }: { project?: string }) {
   }
 
   const startCreate = () => {
-    setForm({ id: '', title: '', description: '', provider: 'builtin', content: '', mime_type: '', kind: 'reference' })
+    setForm({ id: '', title: '', description: '', provider: 'builtin', content: '', mime_type: '', kind: 'reference', tags: [] })
     setEditing(null)
     setShowForm(true)
+    if (project) void projectBudget(project).then((budget) => setSagas(budget.sagas ?? [])).catch(() => setSagas([]))
   }
 
   // The single edit action's label follows the state: an approved artifact is
@@ -438,78 +606,136 @@ export default function Artifacts({ project }: { project?: string }) {
     return t('artifacts.edit_btn') ?? 'Edit'
   }
 
-  const startEdit = async (a: Artifact) => {
-    let content = a.content ?? ''
-    let form: ArtifactForm = { ...a, content }
-    if (a.provider !== 'url') {
-      try {
-        const page = await workspaceApi.getArtifact(a.id)
-        content = page.artifact.content ?? ''
-        form = { ...a, content }
-      } catch { /* the form still opens with what the listing carries */ }
-    }
-    // An open revision is the editing surface: the approved body the live
-    // row carries is NOT what the revision continues from.
-    if (a.status === 'approved') {
-      try {
-        const page = await workspaceApi.getArtifactRevision(a.id)
-        if (page.revision) {
-          form = {
-            ...a,
-            title: page.revision.title,
-            description: page.revision.description ?? '',
-            provider: (page.revision.provider as Artifact['provider']) ?? a.provider,
-            external_ref: page.revision.external_ref ?? a.external_ref,
-            content: page.revision.content ?? '',
-            mime_type: page.revision.mime_type ?? a.mime_type,
-            kind: (page.revision.kind as Artifact['kind']) ?? a.kind,
-            saga_id: page.revision.saga_id ?? a.saga_id,
-            content_hash: page.revision.content_hash ?? undefined,
-            size_bytes: page.revision.size_bytes,
-          }
-        }
-      } catch { /* fall back to the live body */ }
-    }
-    setForm(form)
-    setEditing(a)
-    setShowForm(true)
-  }
-
+  // Create-only save: the body is optional — a big document is written in
+  // the in-place editor right after the shell lands. mime stays empty → the
+  // server default text/markdown.
   const save = async () => {
     setError('')
     setBusy(true)
     try {
-      if (editing) {
-        await workspaceApi.updateArtifact(editing.id, {
-          title: form.title,
-          description: form.description,
-          provider: form.provider,
-          external_ref: form.external_ref,
-          content: form.content,
-          mime_type: form.mime_type,
-          kind: form.kind,
-          saga_id: form.saga_id,
-          org_unit_id: form.org_unit_id,
-        })
-      } else {
-        await workspaceApi.createArtifact({
-          id: form.id?.trim() ?? '',
-          title: form.title ?? '',
-          description: form.description,
-          provider: form.provider,
-          external_ref: form.external_ref,
-          content: form.content,
-          mime_type: form.mime_type,
-          org_unit_id: form.org_unit_id,
-          kind: form.kind,
-          saga_id: form.saga_id,
-        })
-      }
+      await workspaceApi.createArtifact({
+        id: form.id?.trim() ?? '',
+        title: form.title ?? '',
+        description: form.description,
+        provider: form.provider,
+        external_ref: form.external_ref,
+        content: form.content,
+        org_unit_id: form.org_unit_id,
+        kind: form.kind,
+        saga_id: form.saga_id,
+        tags: form.tags,
+      })
       setShowForm(false)
       setEditing(null)
       await load()
     } catch (f) { setError(message(f)) }
     finally { setBusy(false) }
+  }
+
+  // Entering the in-place editor: the body pane itself becomes the editing
+  // surface (a large document never fits the old modal), pre-filled with the
+  // version currently displayed — the live body, or the open revision's text
+  // when the approved row is being continued.
+  const startEdit = async (a: Artifact) => {
+    if (a.provider === 'url') return
+    setDetailTab('document')
+    setEditBusy(true)
+    try {
+      let content = selectedBody
+      if (showRevisionBody && revision) {
+        content = revision.content ?? ''
+      } else if (!content) {
+        const page = await workspaceApi.getArtifact(a.id)
+        content = page.artifact.content ?? ''
+        if (!showRevisionBody) setSelectedBody(content)
+      }
+      setEditDraft(content)
+      setBodyEditing(true)
+    } finally {
+      setEditBusy(false)
+    }
+  }
+
+  // Save lands the edited markdown: a draft/rejected row updates in place
+  // (same version), an approved row opens/updates the draft revision — the
+  // server decides by status, the omitted fields (title, tags, saga…) keep
+  // their stored values. Only the BODY changes here; the metadata lives in
+  // the Settings tab.
+  const saveEdit = async () => {
+    if (!selected) return
+    setError('')
+    setEditBusy(true)
+    try {
+      await workspaceApi.updateArtifact(selected.id, { content: editDraft })
+      setBodyEditing(false)
+      // The row changed: a draft edit bumps updated_at, an approved one
+      // opened a draft revision. Reload the row and the body.
+      const [page, full] = await Promise.all([
+        workspaceApi.getArtifact(selected.id).catch(() => null),
+        load(),
+      ])
+      if (page) {
+        setSelectedBody(page.artifact.content ?? '')
+        setBodyTruncated(Boolean(page.truncated))
+        if (selected.status === 'approved') {
+          const rPage = await workspaceApi.getArtifactRevision(selected.id).catch(() => ({ revision: null }))
+          setRevision(rPage.revision ?? null)
+          setShowRevisionBody(false)
+        }
+      }
+      void workspaceApi.listArtifactAnnotations(selected.id, selected.version ?? 1).then((p) => setAnnotations(p.annotations ?? [])).catch(() => {})
+    } catch (f) { setError(message(f)) }
+    finally { setEditBusy(false) }
+  }
+
+  // Settings save carries the VERSION-FREE attributes only: title,
+  // description, kind, provider/reference, saga link and tags. The body and
+  // mime stay untouched — the backend backfills omitted fields, and an
+  // explicit saga_id="" detaches (nil keeps it).
+  const saveSettings = async () => {
+    if (!selected) return
+    setError('')
+    setSettingsBusy(true)
+    try {
+      const payload: Record<string, unknown> = {
+        title: (settingsDraft.title ?? '').trim(),
+        description: settingsDraft.description ?? '',
+        provider: settingsDraft.provider ?? 'builtin',
+        external_ref: settingsDraft.external_ref ?? '',
+        kind: settingsDraft.kind ?? 'reference',
+        tags: settingsDraft.tags ?? [],
+      }
+      if (sagaTouched) payload.saga_id = settingsDraft.saga_id ?? ''
+      if ((settingsDraft.provider ?? 'builtin') === 'builtin') payload.mime_type = settingsDraft.mime_type ?? ''
+      const updated = await workspaceApi.updateArtifact(selected.id, payload)
+      setArtifacts((current) => current.map((a) => (a.id === selected.id ? { ...updated, content: a.content } : a)))
+    } catch (f) { setError(message(f)) }
+    finally { setSettingsBusy(false) }
+  }
+
+  // Retract one review note: own notes for any writer, anything for an
+  // operator (the backend enforces the same rule).
+  // Retract one review note: own notes for any writer, anything for an
+  // operator (the backend enforces the same rule).
+  const canDeleteAnnotation = useCallback((item: ArtifactAnnotation) => {
+    if (!canAnnotate) return false
+    return item.created_by === myUserID || operator
+  }, [canAnnotate, myUserID, operator])
+
+  const removeAnnotation = async (item: ArtifactAnnotation) => {
+    if (!selected) return
+    const ok = await confirmDialog({
+      title: t('artifacts.annotation_delete_confirm') ?? 'Удалить заметку?',
+      body: item.quote.slice(0, 120),
+      danger: true,
+      confirmLabel: t('action.delete') ?? 'Delete',
+    })
+    if (!ok) return
+    try {
+      await workspaceApi.deleteArtifactAnnotation(selected.id, item.id)
+      setAnnotations((items) => items.filter((x) => x.id !== item.id))
+      if (activeAnnotation === item.id) setActiveAnnotation('')
+    } catch (f) { setError(message(f)) }
   }
 
   const remove = async (a: Artifact) => {
@@ -554,6 +780,29 @@ export default function Artifacts({ project }: { project?: string }) {
     setBusy(true)
     try {
       await workspaceApi.resolveArtifactReview(selected.id, r.id, approve, decisionComment)
+      setDecisionComment('')
+      const page = await workspaceApi.listArtifactReviews(selected.id)
+      setReviews(page.reviews ?? [])
+      await load()
+    } catch (f) { setError(message(f)) }
+    finally { setBusy(false) }
+  }
+
+  // The document-tab decision strip: settle the open round right where the
+  // approver finished reading. The round loads lazily — the panel only
+  // renders when one is open, so the fetch happens at most once.
+  const decideOpenRound = async (approve: boolean) => {
+    if (!selected) return
+    setBusy(true)
+    try {
+      let open = reviews.find((r) => r.status === 'open')
+      if (!open) {
+        const page = await workspaceApi.listArtifactReviews(selected.id)
+        open = (page.reviews ?? []).find((r) => r.status === 'open')
+        if (page.reviews) setReviews(page.reviews)
+      }
+      if (!open) return
+      await workspaceApi.resolveArtifactReview(selected.id, open.id, approve, decisionComment)
       setDecisionComment('')
       const page = await workspaceApi.listArtifactReviews(selected.id)
       setReviews(page.reviews ?? [])
@@ -617,11 +866,11 @@ export default function Artifacts({ project }: { project?: string }) {
                   <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.2rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
                     {entry.review.mode === 'all' ? (t('artifacts.inbox_mode_all') ?? 'все рецензенты') : (t('artifacts.inbox_mode_any') ?? 'любой рецензент')}
                     {' · '}<TimeHint value={entry.review.requested_at}>{shortTime(entry.review.requested_at)}</TimeHint>
-                    {entry.origin_user ? ` · ${entry.origin_user}` : ''}
+                    {entry.origin_user ? ` · ${userNameOf(entry.origin_user)}` : ''}
                   </div>
                   {entry.matched.length > 0 && (
                     <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)', marginTop: '0.2rem' }}>
-                      {t('artifacts.inbox_matched') ?? 'ты рецензент как'}: {entry.matched.join(', ')}
+                      {t('artifacts.inbox_matched') ?? 'ты рецензент как'}: {entry.matched.map((matched) => reviewerLabel(matched)).join(', ')}
                     </div>
                   )}
                 </div>
@@ -791,7 +1040,6 @@ export default function Artifacts({ project }: { project?: string }) {
             const revisionEditable = revision?.status === 'draft' || revision?.status === 'rejected'
             // The body pane reads the version being decided: a pending
             // revision is what an approver must actually read.
-            const bodyText = showRevisionBody && revision ? (revision.content ?? '') : selectedBody
             // Compare mode: the universe of readable versions (live, open
             // revision, archived) and the base — by default the previous
             // version of the one being read.
@@ -805,8 +1053,6 @@ export default function Artifacts({ project }: { project?: string }) {
               }
               return opts.sort((a, b) => b.version - a.version)
             })()
-            const displayedVersion = showRevisionBody && revision ? revision.version : (selected.version ?? 1)
-            const annotationsForVersion = annotations.filter((item) => item.version === displayedVersion)
             const saveAnnotation = async () => {
               if (!annotationDraft) return
               const anchor = selectionMenu
@@ -821,7 +1067,7 @@ export default function Artifacts({ project }: { project?: string }) {
               finally { setBusy(false) }
             }
             const captureSelection = () => {
-              if (selected.provider === 'url' || !artifactBodyRef.current) return
+              if (selected.provider === 'url' || !artifactBodyRef.current || !canAnnotate) return
               const selection = window.getSelection()
               if (!selection || selection.isCollapsed || !selection.toString().trim()) return
               const range = selection.getRangeAt(0)
@@ -841,6 +1087,14 @@ export default function Artifacts({ project }: { project?: string }) {
             const focusAnnotation = (item: ArtifactAnnotation) => {
               const root = artifactBodyRef.current
               if (!root) return
+              setActiveAnnotation(item.id)
+              // The persistent <mark> is the anchor: when it exists (the render
+              // settled), scroll to it — no native selection needed.
+              const mark = root.querySelector(`mark.artifact-ann[data-ann-id='${CSS.escape(item.id)}']`)
+              if (mark) {
+                mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                return
+              }
               const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
               let node: Node | null
               let cursor = 0
@@ -926,8 +1180,8 @@ export default function Artifacts({ project }: { project?: string }) {
 					                    size="sm"
 					                    kind="secondary"
 					                    renderIcon={Edit}
-					                    disabled={(selected.status ?? '') === 'in_review' || revisionInReview}
-					                    title={((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+					                    disabled={selected.provider === 'url' || (selected.status ?? '') === 'in_review' || revisionInReview}
+					                    title={selected.provider === 'url' ? (t('artifacts.edit_locked_url') ?? 'The body lives in the external system') : ((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
 					                    onClick={() => void startEdit(selected)}
 					                  >{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
 					<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
@@ -1006,18 +1260,30 @@ export default function Artifacts({ project }: { project?: string }) {
                   {selected.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${selected.saga_id}` : ''}
                 </p>
 
-                {(openReview || selected.status === 'rejected' || reviewsOpen) && (
-                  <div style={{ marginTop: '0.75rem' }}>
-                    <Button size="sm" kind="secondary" onClick={() => (reviewsOpen ? setReviewsOpen(false) : void openReviews(selected))}>
-                      {openReview
-                        ? (t('artifacts.open_reviews') ?? 'Review queue')
-                        : (t('artifacts.review_history') ?? 'Review history')}
-                    </Button>
-                  </div>
-                )}
+                {/* The detail card is tabbed: the document (read + edit +
+                    fragment reviews), the version archive, the review rounds
+                    and the compact entity settings — version-bound attributes
+                    (body, mime) live on the document tab, version-free ones
+                    (title, tags, saga, storage) in settings. */}
+                <div role="tablist" aria-label={t('artifacts.title') ?? 'Reference Artifacts'} style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.75rem', borderBottom: '1px solid var(--tm-border)', paddingBottom: 0 }}>
+                  {([
+                    ['document', t('artifacts.tab_document') ?? 'Документ'],
+                    ['review', openReview ? `${t('artifacts.open_reviews') ?? 'Согласование'} (${(reviews.length > 0 ? reviews : [{ status: 'open' }]).filter((r) => r.status === 'open').length})` : (t('artifacts.review_history') ?? 'Согласование')],
+                    ['versions', t('artifacts.versions_title') ?? 'Версии'],
+                    ['settings', t('artifacts.tab_settings') ?? 'Настройки'],
+                  ] as Array<[DetailTab, string]>).map(([tab, label]) => (
+                    <button
+                      key={tab}
+                      role="tab"
+                      aria-selected={detailTab === tab}
+                      onClick={() => { setDetailTab(tab); if (tab === 'review' && reviews.length === 0) void openReviews(selected); if (tab === 'settings') openSettings(selected) }}
+                      style={{ background: detailTab === tab ? 'var(--tm-elevated)' : 'none', border: '1px solid var(--tm-border)', borderBottomColor: detailTab === tab ? 'var(--tm-elevated)' : 'var(--tm-border)', borderRadius: '6px 6px 0 0', padding: '0.3rem 0.75rem', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem' }}
+                    >{label}</button>
+                  ))}
+                </div>
 
-                {reviewsOpen && (
-                  <div style={{ marginTop: '0.6rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.6rem' }}>
+                {detailTab === 'review' && (
+                  <div style={{ marginTop: '0.6rem', paddingTop: '0.6rem' }}>
                     <Stack gap={3}>
                       {reviews.length === 0 && (
                         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.reviews_empty') ?? 'No review rounds yet.'}</p>
@@ -1034,7 +1300,7 @@ export default function Artifacts({ project }: { project?: string }) {
                                     : (t('artifacts.status_rejected') ?? 'rejected')}
                               </Tag>
                               <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginLeft: '0.5rem' }}>
-                                v{r.artifact_version} · {t('artifacts.review_mode_label') ?? 'mode'}: {r.mode} · {fmtTime(r.requested_at)}
+                                v{r.artifact_version} · {t('artifacts.review_mode_label') ?? 'mode'}: {r.mode === 'all' ? (t('artifacts.inbox_mode_all') ?? 'all reviewers') : (t('artifacts.inbox_mode_any') ?? 'any reviewer')} · {fmtTime(r.requested_at)}
                               </span>
                             </div>
                             {r.status === 'open' && (
@@ -1045,12 +1311,12 @@ export default function Artifacts({ project }: { project?: string }) {
                             )}
                           </div>
                           <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginTop: '0.4rem' }}>
-                            {t('artifacts.reviewers_label') ?? 'Reviewers'}: {r.reviewers.join(', ')}
+                            {t('artifacts.reviewers_label') ?? 'Reviewers'}: {r.reviewers.map((reviewer) => reviewerLabel(reviewer)).join(', ')}
                           </p>
                           {r.note && <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>{r.note}</p>}
                           {Object.entries(r.decisions ?? {}).map(([who, d]) => (
                             <p key={who} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
-                              <strong>{who}{d.decided_by && d.decided_by !== who ? ` (${d.decided_by})` : ''}</strong>: {d.decision}{d.comment ? ` — ${d.comment}` : ''} ({fmtTime(d.at)})
+                              <strong>{reviewerLabel(who)}{d.decided_by && d.decided_by !== who ? ` (${reviewerLabel(d.decided_by)})` : ''}</strong>: {d.decision}{d.comment ? ` — ${d.comment}` : ''} ({fmtTime(d.at)})
                             </p>
                           ))}
                         </div>
@@ -1064,61 +1330,204 @@ export default function Artifacts({ project }: { project?: string }) {
                           placeholder={t('artifacts.decision_comment_placeholder') ?? 'Shown to the requesting agent in the resolution event'}
                         />
                       )}
+                      {annotationsForVersion.length > 0 && selected.status !== 'in_review' && (
+                        <div>
+                          <Button size="sm" kind="secondary" disabled={busy} onClick={() => setRevisionAgentOpen(true)}>
+                            {selected.status === 'approved' ? (t('artifacts.annotation_ai_revision') ?? 'Apply notes and submit a new version') : (t('artifacts.annotation_ai_revision') ?? 'Send notes for rework')}
+                          </Button>
+                          <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
+                            {t('artifacts.annotation_ai_hint', { count: String(annotationsForVersion.length) }) ?? `The agent receives all ${annotationsForVersion.length} notes of this version`}
+                          </p>
+                        </div>
+                      )}
                     </Stack>
                   </div>
                 )}
 
-                {/* The body: the document itself, rendered for reading. A
-                    pending revision adds a version switch — the decision is
-                    about the revision, so its text must be readable here. */}
-                <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
-                  {revisionOpen && revision && (
+                {detailTab === 'versions' && (
+                  <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem' }}>
+                    {selected.provider !== 'url' && compareOptions.length > 1 && (
+                      <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.65rem' }}>
+                        <Button size="sm" kind="ghost" onClick={() => setDiffMode((v) => !v)}>
+                          {diffMode ? (t('artifacts.diff_close') ?? 'Close diff') : (t('artifacts.diff_open') ?? 'Compare versions')}
+                        </Button>
+                        {diffMode && (
+                          <>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)' }}>{t('artifacts.diff_compare_with') ?? 'Compare with:'}</span>
+                            <select
+                              value={String(diffBase ?? defaultBase?.version ?? '')}
+                              onChange={(e) => setDiffBase(Number(e.target.value))}
+                              style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.3rem 0.5rem' }}
+                            >
+                              {compareOptions.filter((o) => o.version !== displayedVersion).map((o) => (
+                                <option key={o.version} value={o.version}>{`v${o.version} · ${o.label}`}</option>
+                              ))}
+                            </select>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {diffMode && compareOptions.length > 1 && baseOption ? (
+                      <RichDiff
+                        oldText={baseOption.content}
+                        newText={bodyText}
+                        oldLabel={`v${baseOption.version}`}
+                        newLabel={`v${displayedVersion}`}
+                      />
+                    ) : diffMode ? (
+                      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.diff_no_base') ?? 'No other version to compare with yet.'}</p>
+                    ) : (
+                      <VersionHistory artifactID={selected.id} project={project} defaultOpen />
+                    )}
+                  </div>
+                )}
+
+                {detailTab === 'settings' && (
+                  <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem' }}>
+                    {/* Version-free attributes only: the body and its mime belong
+                        to the document tab (the editor owns the body). org_unit
+                        is create-time — shown read-only here. */}
+                    <Stack gap={3}>
+                      <TextInput
+                        id="artifact-settings-title"
+                        labelText={t('artifacts.title_label') ?? 'Title'}
+                        value={settingsDraft.title ?? ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, title: e.target.value })}
+                      />
+                      <TextArea
+                        id="artifact-settings-description"
+                        labelText={t('artifacts.description_label') ?? 'Applicability (when to read this)'}
+                        value={settingsDraft.description ?? ''}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSettingsDraft({ ...settingsDraft, description: e.target.value })}
+                        rows={2}
+                        helperText={t('artifacts.description_helper') ?? 'The agent matches the task against this condition — it decides whether artifact_read is worth the tokens'}
+                      />
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                        <Select
+                          id="artifact-settings-kind"
+                          labelText={t('artifacts.kind_label') ?? 'Kind'}
+                          value={settingsDraft.kind ?? 'reference'}
+                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettingsDraft({ ...settingsDraft, kind: e.target.value as Artifact['kind'] })}
+                        >
+                          <SelectItem value="reference" text={t('artifacts.kind_reference') ?? 'reference — regulation, instruction, checklist'} />
+                          <SelectItem value="work" text={t('artifacts.kind_work_option') ?? 'work — saga work product (requirement, spec, report)'} />
+                        </Select>
+                        <Select
+                          id="artifact-settings-provider"
+                          labelText={t('artifacts.provider_label') ?? 'Storage'}
+          
+                          value={settingsDraft.provider ?? 'builtin'}
+                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettingsDraft({ ...settingsDraft, provider: e.target.value as Artifact['provider'] })}
+                        >
+                          <SelectItem value="builtin" text={t('artifacts.provider_builtin') ?? 'builtin — body stored in the registry (≤ 2 MiB)'} />
+                          <SelectItem value="url" text={t('artifacts.provider_url') ?? 'url — body lives in an external system'} />
+                        </Select>
+                      </div>
+                      {(settingsDraft.provider ?? 'builtin') === 'url' && (
+                        <TextInput
+                          id="artifact-settings-external-ref"
+                          labelText={t('artifacts.external_ref_label') ?? 'External reference'}
+                          value={settingsDraft.external_ref ?? ''}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, external_ref: e.target.value })}
+                          placeholder="https://wiki.internal.example.com/deploy-runbook"
+                        />
+                      )}
+                      <div>
+                        <SagaComboBox
+                          id="artifact-settings-saga"
+                          labelText={t('artifacts.saga_label') ?? 'Saga'}
+                          sagas={sagas}
+                          value={settingsDraft.saga_id ?? ''}
+                          onChange={(sagaID) => { setSettingsDraft({ ...settingsDraft, saga_id: sagaID }); setSagaTouched(true) }}
+                        />
+                        <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
+                          {sagaTouched
+                            ? (t('artifacts.saga_helper_edit') ?? 'An empty field detaches the saga; the change lands on save')
+                            : (t('artifacts.saga_current', { saga: settingsDraft.saga_id ?? '' }) ?? `Linked saga: ${settingsDraft.saga_id || '—'}`)}
+                        </p>
+                      </div>
+                      {(settingsDraft.provider ?? 'builtin') === 'builtin' && (
+                        <TextInput
+                          id="artifact-settings-mime"
+                          labelText={t('artifacts.mime_label') ?? 'MIME type'}
+                          value={settingsDraft.mime_type ?? ''}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, mime_type: e.target.value })}
+                          placeholder="text/markdown"
+                          helperText={t('artifacts.mime_helper') ?? 'Leave empty for markdown (the default); change only when the body is not markdown'}
+                        />
+                      )}
+                      <div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('artifacts.tags_label') ?? 'Tags'}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', alignItems: 'center', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.35rem 0.5rem', minHeight: '2.2rem' }}>
+                          {(settingsDraft.tags ?? []).map((tag) => (
+                            <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', padding: '0.1rem 0.3rem 0.1rem 0.45rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.15))', fontSize: '0.78rem' }}>
+                              #{tag}
+                              <button type="button" aria-label={`remove ${tag}`} onClick={() => setSettingsDraft({ ...settingsDraft, tags: (settingsDraft.tags ?? []).filter((x) => x !== tag) })} style={{ background: 'none', border: 0, cursor: 'pointer', color: 'inherit', opacity: 0.7, display: 'inline-flex', padding: 0 }}>
+                                <Close size={12} />
+                              </button>
+                            </span>
+                          ))}
+                          <TagEditorInput
+                            draft={tagDraft}
+                            onDraft={setTagDraft}
+                            onCommit={(tag) => { setSettingsDraft({ ...settingsDraft, tags: [...new Set([...(settingsDraft.tags ?? []), tag.toLowerCase()])] }) }}
+                            options={tagOptions}
+                            exclude={settingsDraft.tags ?? []}
+                          />
+                        </div>
+                      </div>
+                      {selected.org_unit_id && (
+                        <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
+                          {t('artifacts.org_label') ?? 'Availability'}: <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
+                          {' · '}{t('artifacts.org_readonly_hint') ?? 'The org scope is set at creation and changes only through admins'}
+                        </p>
+                      )}
+                      <div className="form-actions">
+                        <Button disabled={settingsBusy || !(settingsDraft.title ?? '').trim()} onClick={() => void saveSettings()}>{t('action.save') ?? 'Save'}</Button>
+                        <Button kind="secondary" disabled={settingsBusy} onClick={() => { openSettings(selected); setTagDraft('') }}>{t('action.cancel') ?? 'Reset'}</Button>
+                      </div>
+                    </Stack>
+                  </div>
+                )}
+
+                {detailTab === 'document' && (
+                <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem' }}>
+                  {revisionOpen && revision && !bodyEditing && (
                     <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.65rem', flexWrap: 'wrap' }}>
-                      <Button size="sm" kind={showRevisionBody ? 'ghost' : 'primary'} onClick={() => setShowRevisionBody(false)}>
+                      <Button size="sm" kind={showRevisionBody ? 'ghost' : 'primary'} onClick={() => { setShowRevisionBody(false); setBodyEditing(false) }}>
                         {t('artifacts.body_current_version', { version: String(selected.version ?? 1) }) ?? `v${selected.version ?? 1} · current`}
                       </Button>
-                      <Button size="sm" kind={showRevisionBody ? 'primary' : 'ghost'} onClick={() => setShowRevisionBody(true)}>
+                      <Button size="sm" kind={showRevisionBody ? 'primary' : 'ghost'} onClick={() => { setShowRevisionBody(true); setBodyEditing(false) }}>
                         {t('artifacts.body_revision', { version: String(revision.version) }) ?? `v${revision.version} · revision`}{revision.status === 'in_review' ? ` — ${t('artifacts.status_in_review') ?? 'in review'}` : ''}
                       </Button>
                     </div>
                   )}
-                					  {selected.provider !== 'url' && compareOptions.length > 1 && (
-                					    <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap', marginTop: revisionOpen ? '0.65rem' : 0, marginBottom: '0.65rem' }}>
-                      <Button size="sm" kind="ghost" onClick={() => setDiffMode((v) => !v)}>
-                        {diffMode ? (t('artifacts.diff_close') ?? 'Close diff') : (t('artifacts.diff_open') ?? 'Compare versions')}
-                      </Button>
-                      {diffMode && (
-                        <>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)' }}>{t('artifacts.diff_compare_with') ?? 'Compare with:'}</span>
-                          <select
-                            value={String(diffBase ?? defaultBase?.version ?? '')}
-                            onChange={(e) => setDiffBase(Number(e.target.value))}
-                            style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.3rem 0.5rem' }}
-                          >
-                            {compareOptions.filter((o) => o.version !== displayedVersion).map((o) => (
-                              <option key={o.version} value={o.version}>{`v${o.version} · ${o.label}`}</option>
-                            ))}
-                          </select>
-                        </>
-                      )}
-                    </div>
-                  )}
-                					  {diffMode && compareOptions.length > 1 && baseOption ? (
-                    <RichDiff
-                      oldText={baseOption.content}
-                      newText={bodyText}
-                      oldLabel={`v${baseOption.version}`}
-                      newLabel={`v${displayedVersion}`}
-                    />
-                  ) : diffMode ? (
-                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.diff_no_base') ?? 'No other version to compare with yet.'}</p>
-                  ) : selected.provider === 'url' ? (
+                  {selected.provider === 'url' ? (
                     selected.external_ref
                       ? <p style={{ fontSize: '0.85rem', wordBreak: 'break-all' }}>
                           {t('artifacts.external_body_hint') ?? 'The body lives in the external system:'}{' '}
                           <a href={selected.external_ref} target="_blank" rel="noreferrer">{selected.external_ref}</a>
                         </p>
                       : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.external_body_missing') ?? 'No external reference set.'}</p>
+                  ) : bodyEditing ? (
+                    <>
+                      {selected.status === 'approved' && (
+                        <InlineNotification kind="info" lowContrast hideCloseButton slim
+                          title={t('artifacts.new_revision_banner_title') ?? 'New revision'}
+                          subtitle={t('artifacts.new_revision_banner') ?? 'The edit is saved as draft revision; the approved version keeps serving agents and skills until the revision is approved.'}
+                          style={{ marginBottom: '0.6rem' }} />
+                      )}
+                      <ArtifactEditor
+                        key={`${selected.id}:${displayedVersion}`}
+                        markdown={editDraft}
+                        onChange={setEditDraft}
+                      />
+                      <div style={{ display: 'flex', gap: '0.45rem', marginTop: '0.6rem', alignItems: 'center' }}>
+                        <Button disabled={editBusy || editDraft === (showRevisionBody && revision ? (revision.content ?? '') : selectedBody)} onClick={() => void saveEdit()}>{t('action.save') ?? 'Save'}</Button>
+                        <Button kind="secondary" disabled={editBusy} onClick={() => { setBodyEditing(false); setEditDraft('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
+                        {editBusy && <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{t('common.loading') ?? 'Working…'}</span>}
+                      </div>
+                    </>
                   ) : bodyText ? (
                     <>
                       <div className="artifact-body artifact-review-body" ref={artifactBodyRef} onMouseUp={() => window.setTimeout(captureSelection, 0)} onKeyUp={() => window.setTimeout(captureSelection, 0)}>
@@ -1148,35 +1557,56 @@ export default function Artifacts({ project }: { project?: string }) {
                         <div className="artifact-review-rail">
                           <div className="artifact-review-rail-header">
                             <strong>{t('artifacts.annotations_title') ?? 'Review notes'} · {annotationsForVersion.length}</strong>
-                            {selected.status !== 'in_review' && <Button size="sm" kind="secondary" disabled={busy} onClick={() => setRevisionAgentOpen(true)}>{selected.status === 'approved' ? (t('artifacts.annotation_ai_revision') ?? 'Apply with AI and submit for approval') : (t('artifacts.annotation_ai_revision') ?? 'Send for rework')}</Button>}
                           </div>
-                        {annotationsForVersion.map((item) => (
-                          <button className="artifact-review-note" key={item.id} type="button" onClick={() => focusAnnotation(item)} style={{ borderLeftColor: item.kind === 'reject' ? 'var(--tm-danger)' : item.kind === 'approve' ? 'var(--tm-success)' : 'var(--tm-amber)' }}>
-                            <strong style={{ fontSize: '0.75rem' }}>{t(`artifacts.annotation_${item.kind}`) ?? item.kind}</strong>
-                            <blockquote style={{ margin: '0.25rem 0', fontSize: '0.78rem' }}>{item.quote}</blockquote>
-                            {item.replacement && <p style={{ fontSize: '0.78rem' }}>→ {item.replacement}</p>}
-                            {item.comment && <p style={{ fontSize: '0.78rem' }}>{item.comment}</p>}
-                            <span style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>{userNameOf(item.created_by)} · {fmtTime(item.created_at)}</span>
-                          </button>
-                        ))}
-                      </div>
+                          {[...annotationsForVersion].sort((a, b) => annotationKindPriority(a.kind) - annotationKindPriority(b.kind)).map((item) => (
+                            <div key={item.id} data-note-id={item.id}>
+                              <button
+                                className={`artifact-review-note${activeAnnotation === item.id ? ' artifact-review-note-active' : ''}`}
+                                type="button"
+                                onClick={() => focusAnnotation(item)}
+                                style={{ borderLeftColor: item.kind === 'reject' ? 'var(--tm-danger)' : item.kind === 'approve' ? 'var(--tm-success)' : 'var(--tm-amber)', width: 'calc(100% - 2rem)', display: 'inline-block' }}
+                              >
+                                <strong style={{ fontSize: '0.75rem' }}>{t(`artifacts.annotation_${item.kind}`) ?? item.kind}</strong>
+                                <blockquote style={{ margin: '0.25rem 0', fontSize: '0.78rem' }}>{item.quote}</blockquote>
+                                {item.replacement && <p style={{ fontSize: '0.78rem' }}>→ {item.replacement}</p>}
+                                {item.comment && <p style={{ fontSize: '0.78rem' }}>{item.comment}</p>}
+                                <span style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>{userNameOf(item.created_by)} · {fmtTime(item.created_at)}</span>
+                              </button>
+                              {canDeleteAnnotation(item) && (
+                                <button
+                                  type="button"
+                                  aria-label={t('action.delete') ?? 'Delete'}
+                                  title={t('artifacts.annotation_delete') ?? 'Retract note'}
+                                  onClick={() => void removeAnnotation(item)}
+                                  style={{ background: 'none', border: 0, cursor: 'pointer', color: 'var(--tm-text-3)', fontSize: '0.72rem', padding: '0 0.3rem', verticalAlign: 'top' }}
+                                >✕</button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       )}
                       {bodyTruncated && !showRevisionBody && (
                         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', marginTop: '0.5rem' }}>
                           {t('artifacts.body_truncated') ?? 'The body is shown partially; agents read it in 32 KiB chunks.'}
                         </p>
                       )}
+                      {/* The decision rides the document: an approver reads the
+                          text and settles the round without leaving the tab —
+                          the full round cards live in the review tab. */}
+                      {openReview && (
+                        <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.6rem', display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <strong style={{ fontSize: '0.8rem' }}>{t('artifacts.decision_here') ?? 'Ваше решение по этой версии:'}</strong>
+                          <Button size="sm" renderIcon={CheckmarkOutline} disabled={busy} onClick={() => void decideOpenRound(true)}>{t('artifacts.approve') ?? 'Approve'}</Button>
+                          <Button size="sm" kind="danger" renderIcon={CloseOutline} disabled={busy} onClick={() => void decideOpenRound(false)}>{t('artifacts.reject') ?? 'Reject'}</Button>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>{t('artifacts.decision_in_review_tab') ?? 'раунды и замечания — в табе «Согласование»'}</span>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.body_empty') ?? 'No stored body.'}</p>
                   )}
                 </div>
-
-                {/* Version history (docs/artifact-lifecycle.md §12): every
-                    approved revision is archived when a new revision opens.
-                    Bodies are viewable — the point of history is reading what
-                    the old version actually said. */}
-                <VersionHistory artifactID={selected.id} project={project} />
+                )}
               </Tile>
             )
           })()}
@@ -1184,17 +1614,8 @@ export default function Artifacts({ project }: { project?: string }) {
       </div>
 
       {showForm && (
-        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '640px' }}>
-          <Heading>{editing
-            ? (editing.status === 'approved' ? (t('artifacts.new_revision_title', { version: String((editing.version ?? 1) + 1) }) ?? `New revision (v${(editing.version ?? 1) + 1})`)
-              : (t('artifacts.edit') ?? 'Edit Artifact'))
-            : (t('artifacts.new') ?? 'New Artifact')}</Heading>
-          {editing?.status === 'approved' && (
-            <InlineNotification kind="info" lowContrast hideCloseButton
-              title={t('artifacts.new_revision_banner_title') ?? 'New revision'}
-              subtitle={t('artifacts.new_revision_banner') ?? 'The edit is saved as draft revision; the approved version keeps serving agents and skills until the revision is approved.'}
-              style={{ marginBottom: '0.75rem' }} />
-          )}
+        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '560px' }}>
+          <Heading>{t('artifacts.new') ?? 'New Artifact'}</Heading>
           <Stack gap={3}>
             <TextInput
               id="artifact-id"
@@ -1222,25 +1643,27 @@ export default function Artifacts({ project }: { project?: string }) {
               placeholder={t('artifacts.description_placeholder') ?? 'Read before changing any Go code in this repository'}
               helperText={t('artifacts.description_helper') ?? 'The agent matches the task against this condition — it decides whether artifact_read is worth the tokens'}
             />
-            <Select
-              id="artifact-kind"
-              labelText={t('artifacts.kind_label') ?? 'Kind'}
-              value={form.kind ?? 'reference'}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, kind: e.target.value as Artifact['kind'] })}
-            >
-              <SelectItem value="reference" text={t('artifacts.kind_reference') ?? 'reference — regulation, instruction, checklist'} />
-              <SelectItem value="work" text={t('artifacts.kind_work_option') ?? 'work — saga work product (requirement, spec, report)'} />
-            </Select>
-            <Select
-              id="artifact-provider"
-              labelText={t('artifacts.provider_label') ?? 'Provider'}
-              value={form.provider ?? 'builtin'}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, provider: e.target.value as Artifact['provider'] })}
-            >
-              <SelectItem value="builtin" text={t('artifacts.provider_builtin') ?? 'builtin — body stored in the registry (≤ 2 MiB)'} />
-              <SelectItem value="url" text={t('artifacts.provider_url') ?? 'url — body lives in an external system; the kernel fetches and caches it'} />
-            </Select>
-            {(form.provider ?? 'builtin') === 'url' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <Select
+                id="artifact-kind"
+                labelText={t('artifacts.kind_label') ?? 'Kind'}
+                value={form.kind ?? 'reference'}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, kind: e.target.value as Artifact['kind'] })}
+              >
+                <SelectItem value="reference" text={t('artifacts.kind_reference') ?? 'reference — regulation, instruction, checklist'} />
+                <SelectItem value="work" text={t('artifacts.kind_work_option') ?? 'work — saga work product (requirement, spec, report)'} />
+              </Select>
+              <Select
+                id="artifact-provider"
+                labelText={t('artifacts.provider_label') ?? 'Storage'}
+                value={form.provider ?? 'builtin'}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, provider: e.target.value as Artifact['provider'] })}
+              >
+                <SelectItem value="builtin" text={t('artifacts.provider_builtin') ?? 'builtin — body stored in the registry (≤ 2 MiB)'} />
+                <SelectItem value="url" text={t('artifacts.provider_url') ?? 'url — body lives in an external system'} />
+              </Select>
+            </div>
+            {(form.provider ?? 'builtin') === 'url' && (
               <TextInput
                 id="artifact-external-ref"
                 labelText={t('artifacts.external_ref_label') ?? 'External reference'}
@@ -1249,35 +1672,18 @@ export default function Artifacts({ project }: { project?: string }) {
                 placeholder="https://wiki.internal.example.com/deploy-runbook"
                 helperText={t('artifacts.external_ref_helper') ?? 'Absolute http(s) URL; the sandbox never dials out — the kernel proxies the fetch'}
               />
-            ) : (
-              <TextArea
-                id="artifact-content"
-                labelText={t('artifacts.content_label') ?? 'Document body'}
-                value={form.content ?? ''}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, content: e.target.value })}
-                rows={12}
-                placeholder="# Standard…"
-                helperText={t('artifacts.content_helper') ?? 'Markdown; served to agents in 32 KiB chunks, never inlined into the prompt'}
-                style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.8rem' }}
-              />
             )}
-            <TextInput
-              id="artifact-mime"
-              labelText={t('artifacts.mime_label') ?? 'MIME type'}
-              value={form.mime_type ?? ''}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, mime_type: e.target.value })}
-              placeholder="text/markdown"
-            />
-            <TextInput
-              id="artifact-saga"
-              labelText={t('artifacts.saga_label') ?? 'Saga'}
-              value={form.saga_id ?? ''}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, saga_id: e.target.value })}
-              placeholder="saga-…"
-              helperText={editing
-                ? (t('artifacts.saga_helper_edit') ?? 'Saga this work product belongs to; clear the field to detach — regulations usually carry none')
-                : (t('artifacts.saga_helper') ?? 'Optional: the saga this work product belongs to; company/department regulations do not need one')}
-            />
+            <div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('artifacts.saga_label') ?? 'Saga'}</div>
+              <SagaComboBox
+                id="artifact-saga"
+                labelText={t('artifacts.saga_label') ?? 'Saga'}
+                sagas={sagas}
+                value={form.saga_id ?? ''}
+                onChange={(sagaID) => setForm({ ...form, saga_id: sagaID })}
+              />
+              <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>{t('artifacts.saga_helper') ?? 'Optional: the saga this work product belongs to; company/department regulations do not need one'}</p>
+            </div>
             <div>
               <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('artifacts.tags_label') ?? 'Tags'}</div>
               <div style={{
@@ -1306,7 +1712,6 @@ export default function Artifacts({ project }: { project?: string }) {
                   style={{ flex: 1, minWidth: '9rem', border: 0, outline: 0, background: 'transparent', color: 'inherit', fontSize: '0.85rem', padding: '0.2rem 0' }}
                 />
               </div>
-              <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>{t('artifacts.tags_hint') ?? 'Catalog labels: topic, product, team. The registry filters by them with AND.'}</p>
             </div>
             {org.units.length > 0 && (
               <OrgUnitSelect
@@ -1317,8 +1722,19 @@ export default function Artifacts({ project }: { project?: string }) {
                 onChange={(v: string) => setForm({ ...form, org_unit_id: v })}
               />
             )}
+            {(form.provider ?? 'builtin') === 'builtin' && (
+              <TextArea
+                id="artifact-content"
+                labelText={t('artifacts.content_label') ?? 'Initial text (optional)'}
+                value={form.content ?? ''}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, content: e.target.value })}
+                rows={4}
+                placeholder="# Standard…"
+                helperText={t('artifacts.content_optional_helper') ?? 'Paste a draft or leave empty — the document is written in the big editor after creating'}
+              />
+            )}
             <div className="form-actions">
-              <Button onClick={() => void save()} disabled={busy || !form.title?.trim() || (!editing && !form.id?.trim()) || ((form.provider ?? 'builtin') === 'url' ? !form.external_ref?.trim() : !form.content?.trim())}>{t('action.save') ?? 'Save'}</Button>
+              <Button onClick={() => void save()} disabled={busy || !form.title?.trim() || (!editing && !form.id?.trim()) || ((form.provider ?? 'builtin') === 'url' && !form.external_ref?.trim())}>{t('action.save') ?? 'Save'}</Button>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>
           </Stack>
@@ -1393,9 +1809,9 @@ export default function Artifacts({ project }: { project?: string }) {
  *  approved revisions, newest first. The discloser stays collapsed — history
  *  matters after the first «Новая редакция», not before. A version row
  *  expands into its stored body. */
-function VersionHistory({ artifactID, project }: { artifactID: string; project?: string }) {
+function VersionHistory({ artifactID, project, defaultOpen }: { artifactID: string; project?: string; defaultOpen?: boolean }) {
   const t = useT()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(Boolean(defaultOpen))
   const [versions, setVersions] = useState<ArtifactVersion[] | null>(null)
   const [expanded, setExpanded] = useState(0)
   const [error, setError] = useState('')

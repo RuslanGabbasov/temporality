@@ -41,6 +41,7 @@ type artifactLifecycleStore interface {
 	ListArtifactReviews(ctx context.Context, artifactID string) ([]workspace.ArtifactReview, error)
 	AddArtifactAnnotation(ctx context.Context, artifactID string, version, startOffset, endOffset int, kind, quote, replacement, comment, createdBy string) (workspace.ArtifactAnnotation, error)
 	ListArtifactAnnotations(ctx context.Context, artifactID string, version int) ([]workspace.ArtifactAnnotation, error)
+	DeleteArtifactAnnotation(ctx context.Context, artifactID, annotationID, principal string, moderator bool) (bool, error)
 	ListArtifactVersions(ctx context.Context, artifactID string) ([]workspace.ArtifactVersion, error)
 	PendingArtifactRevision(ctx context.Context, artifactID string) (*workspace.ArtifactVersion, error)
 	CountArtifactSubmits(ctx context.Context, runID string, since time.Time) (int, error)
@@ -203,6 +204,27 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			return
 		}
 		writeJSON(w, 201, a)
+	})
+	// Retract one review note: the author retracts their own, an operator
+	// moderates any (docs/artifact-lifecycle.md §7). Agents keep their
+	// artifact_feedback read honest — removal is an explicit human act, the
+	// kernel service identity has no delete path.
+	mux.HandleFunc("DELETE /v1/workspace/artifacts/{artifactID}/annotations/{annotationID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		principal, ok := controlplane.FromContext(r.Context())
+		moderator := ok && principal.Role >= controlplane.RoleOperator
+		deleted, err := ws.DeleteArtifactAnnotation(r.Context(), r.PathValue("artifactID"), r.PathValue("annotationID"), requestUserID(r), moderator)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if !deleted {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 	// Open a review round for the artifact's current version. 202 + the round:
 	// the decision arrives later, through approve/reject below. Idempotent per
