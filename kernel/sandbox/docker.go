@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"os"
 	"os/exec"
@@ -306,7 +307,11 @@ func newDocker(image, root string, createRoot bool) (*Docker, error) {
 	if err != nil || !info.IsDir() {
 		return nil, errors.New("KERNEL_SANDBOX_ROOT must be an existing directory")
 	}
-	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: clampCPUs(env("KERNEL_SANDBOX_CPUS", "2"), runtime.NumCPU()), PIDs: pidsFromEnv("KERNEL_SANDBOX_PIDS", 512), UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m"), TmpSize: env("KERNEL_SANDBOX_TMP_SIZE", "256m"), idleTTL: containerIdleTTL()}, nil
+	runner := &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: clampCPUs(env("KERNEL_SANDBOX_CPUS", "2"), runtime.NumCPU()), PIDs: pidsFromEnv("KERNEL_SANDBOX_PIDS", 512), UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m"), TmpSize: env("KERNEL_SANDBOX_TMP_SIZE", "256m"), idleTTL: containerIdleTTL()}
+	// The reaper starts with the runner, not with the first command: a
+	// kernel restart previously left whole deploy windows without a reaper.
+	runner.StartReaper()
+	return runner, nil
 }
 
 // commandTimeout resolves the effective per-command budget: the request's
@@ -987,33 +992,81 @@ func (d *Docker) ForceRemoveRunContainers(key string) {
 	}
 }
 
-// startReaper launches the lazy reaper once per runner: containers unused
-// for longer than idleTTL are stopped, so a finished (or crashed) run's
-// keep-alive container cannot outlive its run by hours. Disabled with
-// idleTTL 0 — directly-constructed runners (tests) never start one.
+// startReaper is the lazy fallback: the production constructors call
+// StartReaper at runner creation, so this only covers a runner whose ticker
+// somehow did not start (older assembled instances). Disabled with idleTTL 0.
 func (d *Docker) startReaper() {
 	if d.idleTTL <= 0 {
 		return
 	}
-	d.reaperOnce.Do(func() {
+	reapOnce(d, &d.reaperOnce)
+}
+
+// orphanTTL is the age floor of the orphan reaper. It follows idleTTL when
+// that is positive; a disabled idle reaper (KERNEL_SANDBOX_CONTAINER_IDLE=0)
+// must not disable the orphan safety net too — that coupling once let a day
+// of abandoned containers pile up while the operator believed cleanup was
+// merely gentler.
+const defaultOrphanTTL = time.Hour
+
+func (d *Docker) orphanTTL() time.Duration {
+	if d.idleTTL > 0 {
+		return d.idleTTL
+	}
+	return defaultOrphanTTL
+}
+
+// StartReaper turns the reaper ticker on for this runner. Production
+// entrypoints call it right after the runner exists (boot install,
+// onboarding swap, env construction) — the previous lazy-only start (first
+// sandbox command) left whole rebuild windows without a reaper: a kernel
+// restarted between agent runs never reaped anything, and abandoned
+// containers piled up until a human ran a cleanup script by hand.
+func (d *Docker) StartReaper() {
+	reapOnce(d, &d.reaperOnce)
+}
+
+// reapOnce starts the ticker exactly once per runner. The period follows
+// idleTTL/2 capped at a minute; a disabled idle reaper (idleTTL 0) still
+// ticks for the orphan sweep on the orphanTTL floor.
+func reapOnce(d *Docker, once *sync.Once) {
+	once.Do(func() {
 		period := d.idleTTL / 2
-		if period > time.Minute {
+		if period <= 0 || period > time.Minute {
 			period = time.Minute
 		}
 		go func() {
 			ticker := time.NewTicker(period)
+			defer ticker.Stop()
 			for range ticker.C {
-				d.reapIdle()
+				// idleTTL 0 disables the registered-container teardown for the
+				// automatic ticker (the operator's «never kill run containers»
+				// contract); the orphan sweep carries on on its own floor.
+				if d.idleTTL > 0 {
+					d.reapIdle()
+				} else {
+					_, seen, kept := d.reapOrphans()
+					if seen > 0 {
+						slog.Info("sandbox orphan sweep", "orphans_seen", seen, "orphans_kept_work", kept)
+					}
+				}
 			}
 		}()
 	})
 }
 
 func (d *Docker) reapIdle() {
-	for _, rc := range d.idleContainers(time.Now()) {
-		d.evictRunContainer(rc)
+	removed, keptWork := d.reapRegistered()
+	orphans, orphanRemoved, orphanKept := d.reapOrphans()
+	if removed+orphanRemoved > 0 || orphans > 0 {
+		// Observability for the «похоронный сервис не сработал» class: every
+		// pass names what it saw, what it removed and what is still being
+		// held, so an operator can tell a working reaper from a dead one
+		// without a hand-written cleanup script.
+		slog.Info("sandbox reaper pass", "removed", removed, "kept_work", keptWork,
+			"orphans_seen", orphans, "orphans_removed", orphanRemoved, "orphans_kept_work", orphanKept,
+			"idle_ttl", d.idleTTL.String(), "orphan_ttl", d.orphanTTL().String())
 	}
-	d.reapOrphans()
 }
 
 // SandboxMarkerLabel marks every container this runner creates — observability
@@ -1048,10 +1101,8 @@ const SandboxNamePrefix = "temporality-sandbox-"
 // still be running a command or a background operation, so the reaper only
 // reaps when age AND durable operation markers AND the live process table
 // all agree the container is abandoned. Uncertainty keeps the container.
-func (d *Docker) reapOrphans() {
-	if d.idleTTL <= 0 {
-		return
-	}
+func (d *Docker) reapOrphans() (seen, removed, keptWork int) {
+	ttl := d.orphanTTL()
 	known := map[string]bool{}
 	d.runMu.Lock()
 	for _, rc := range d.runs {
@@ -1076,17 +1127,22 @@ func (d *Docker) reapOrphans() {
 		if known[name] || !strings.HasPrefix(name, SandboxNamePrefix) {
 			continue
 		}
+		seen++
 		// Age gates the candidate; it is never the sole criterion for
 		// inactivity — RunningFor measures the container, not its work.
 		age, ok := dockerRunningForAge(runningFor)
-		if !ok || age <= d.idleTTL {
+		if !ok || age <= ttl {
 			continue
 		}
 		if d.containerHasWork(runContainerRef{id: id, name: name, key: scratchKey}) {
+			keptWork++
 			continue
 		}
-		_ = d.removeContainer(id)
+		if err := d.removeContainer(id); err == nil {
+			removed++
+		}
 	}
+	return seen, removed, keptWork
 }
 
 // containerHasWork is the orphan reaper's "is anything still using this?"
@@ -1215,6 +1271,22 @@ func (d *Docker) idleContainers(now time.Time) []*runContainer {
 		}
 	}
 	return idle
+}
+
+// reapRegistered tears down the registry entries idle past the TTL and
+// returns (removed, kept-for-work) counts for the pass log. A disabled idle
+// reaper (idleTTL 0) keeps the operator's «never tear down run containers»
+// contract: this part no-ops, the orphan sweep carries on on its own floor.
+// reapRegistered tears down the registry entries idle past the TTL and
+// returns (removed, kept-for-work) counts for the pass log. Called directly
+// (reapIdle) it is the explicit janitor pass — age-gated regardless of the
+// idleTTL=0 contract, which only governs the automatic ticker.
+func (d *Docker) reapRegistered() (removed, keptWork int) {
+	for _, rc := range d.idleContainers(time.Now()) {
+		d.evictRunContainer(rc)
+		removed++
+	}
+	return removed, 0
 }
 
 // SandboxNetworkName is the dedicated bridge for network-needing sandboxes:
