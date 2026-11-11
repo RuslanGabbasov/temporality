@@ -95,6 +95,31 @@ func SupervisorCaseKey(eventID string) string {
 // watermark replays never inflate counts. The first verdict decides the
 // lane: an already-acknowledged event (legacy acks) lands as decided, a
 // digest family lands in the digest lane, everything else opens.
+// supervisorCaseUpsertSQL folds one verdict event into its case row. The
+// timestamp value rides THREE DISTINCT parameters ($11 first_seen, $12
+// last_seen, $13 decided_at): one parameter through several inference
+// contexts (plain column vs CASE…ELSE NULL) once broke the parse with
+// 42P08 «inconsistent types deduced», sticking the whole sync pass.
+const supervisorCaseUpsertSQL = `INSERT INTO workspace_supervisor_case
+	 (case_key, family, cause, subject, project, summary, recommendation, payload, status,
+	  occurrences, first_seen, last_seen, last_event_id, decided_by, decided_at, decision)
+	 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'decided'
+	              WHEN $10 THEN 'digest'
+	              ELSE 'open' END,
+	         1, $11, $12, $9,
+	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'legacy-ack' ELSE '' END,
+	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN $13 ELSE NULL END,
+	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'acknowledge' ELSE '' END)
+	 ON CONFLICT (case_key) DO UPDATE SET
+	   occurrences = workspace_supervisor_case.occurrences + 1,
+	   last_seen = GREATEST(workspace_supervisor_case.last_seen, EXCLUDED.last_seen),
+	   last_event_id = EXCLUDED.last_event_id,
+	   cause = COALESCE(NULLIF(EXCLUDED.cause, ''), workspace_supervisor_case.cause),
+	   summary = EXCLUDED.summary,
+	   recommendation = EXCLUDED.recommendation,
+	   payload = EXCLUDED.payload`
+
 func (s *Store) UpsertSupervisorCase(ctx context.Context, eventID string, family, cause, subject, project, summary, recommendation string, payload json.RawMessage, occurredAt time.Time) (bool, error) {
 	caseKey := SupervisorCaseKey(eventID)
 	if caseKey == "" || eventID == "" {
@@ -115,28 +140,9 @@ func (s *Store) UpsertSupervisorCase(ctx context.Context, eventID string, family
 	if err != nil {
 		return false, err
 	}
-	_, err = s.pool.Exec(ctx,
-		`INSERT INTO workspace_supervisor_case
-		 (case_key, family, cause, subject, project, summary, recommendation, payload, status,
-		  occurrences, first_seen, last_seen, last_event_id, decided_by, decided_at, decision)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-		         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'decided'
-		              WHEN $10 THEN 'digest'
-		              ELSE 'open' END,
-		         1, $11, $11, $9,
-		         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'legacy-ack' ELSE '' END,
-		         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN $11 ELSE NULL END,
-		         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'acknowledge' ELSE '' END)
-		 ON CONFLICT (case_key) DO UPDATE SET
-		   occurrences = workspace_supervisor_case.occurrences + 1,
-		   last_seen = GREATEST(workspace_supervisor_case.last_seen, EXCLUDED.last_seen),
-		   last_event_id = EXCLUDED.last_event_id,
-		   cause = COALESCE(NULLIF(EXCLUDED.cause, ''), workspace_supervisor_case.cause),
-		   summary = EXCLUDED.summary,
-		   recommendation = EXCLUDED.recommendation,
-		   payload = EXCLUDED.payload`,
+	_, err = s.pool.Exec(ctx, supervisorCaseUpsertSQL,
 		caseKey, family, cause, subject, project, summary, recommendation, payload,
-		eventID, supervisorDigestFamilies[family], occurredAt)
+		eventID, supervisorDigestFamilies[family], occurredAt, occurredAt, occurredAt)
 	return inserted, err
 }
 
