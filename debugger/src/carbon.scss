@@ -3261,6 +3261,9 @@ button.header-nav-link {
 .artifact-body a { color: var(--tm-teal); }
 .artifact-review-body { user-select: text; }
 .artifact-selection-menu, .artifact-annotation-editor { position: fixed; z-index: 10000; transform: translate(-50%, -100%); background: var(--tm-bg); border: 1px solid var(--tm-border); box-shadow: 0 4px 18px #0004; border-radius: 8px; }
+/* Below the selection (not enough room above): the transform anchors the
+   popup's top-left corner instead of its bottom, so it hangs under the text. */
+.artifact-selection-menu.below, .artifact-annotation-editor.below { transform: translate(-50%, 0); }
 .artifact-selection-menu { display: flex; align-items: center; gap: 2px; padding: 4px; white-space: nowrap; }
 .artifact-selection-menu button { border: 0; border-radius: 5px; padding: 6px 9px; color: var(--tm-text); background: transparent; cursor: pointer; font: inherit; font-size: 0.75rem; }
 .artifact-selection-menu button:hover { background: var(--tm-surface-2); }

@@ -20,8 +20,9 @@ import {
   InsertThematicBreak,
   ListsToggle,
   CreateLink,
-  ChangeCodeMirrorLanguage,
   InsertCodeBlock,
+  ConditionalContents,
+  ChangeCodeMirrorLanguage,
   DiffSourceToggleWrapper,
   codeMirrorPlugin,
 } from '@mdxeditor/editor'
@@ -49,6 +50,10 @@ export function artifactEditorPlugins(withToolbar = true) {
   if (withToolbar) {
     plugins.push(
       toolbarPlugin({
+        // ChangeCodeMirrorLanguage renders ONLY when a code block is in
+        // focus (ConditionalContents) — outside that guard it read a null
+        // node and crashed the whole editor (the «rootNode of null» page
+        // killer on first Edit click).
         toolbarContents: () => (
           <DiffSourceToggleWrapper>
             <UndoRedo />
@@ -60,7 +65,9 @@ export function artifactEditorPlugins(withToolbar = true) {
             <CreateLink />
             <InsertTable />
             <InsertThematicBreak />
-            <ChangeCodeMirrorLanguage />
+            <ConditionalContents
+              options={[{ when: (editor) => editor?.editorType === 'codeblock', contents: () => <ChangeCodeMirrorLanguage /> }]}
+            />
           </DiffSourceToggleWrapper>
         ),
       }),
