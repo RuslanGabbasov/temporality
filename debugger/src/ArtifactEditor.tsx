@@ -42,8 +42,8 @@ export function artifactEditorPlugins(withToolbar = true) {
     tablePlugin(),
     thematicBreakPlugin(),
     markdownShortcutPlugin(),
-    codeBlockPlugin({ codeBlockLanguages: { md: 'markdown', text: 'text', js: 'JavaScript', ts: 'TypeScript', go: 'Go', sql: 'SQL', bash: 'Bash', json: 'JSON', yaml: 'YAML', mermaid: 'mermaid', presentation: 'presentation' } }),
-    codeMirrorPlugin({ codeMirrorTheme: 'dark' }),
+    codeBlockPlugin({ defaultCodeBlockLanguage: 'md' }),
+    codeMirrorPlugin({ codeBlockLanguages: { md: 'markdown', text: 'text', js: 'JavaScript', ts: 'TypeScript', go: 'Go', sql: 'SQL', bash: 'Bash', json: 'JSON', yaml: 'YAML', mermaid: 'mermaid', presentation: 'presentation' } }),
     diffSourcePlugin({ viewMode: 'rich-text', diffMarkdown: '' }),
   ]
   if (withToolbar) {

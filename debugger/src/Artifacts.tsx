@@ -503,7 +503,8 @@ export default function Artifacts({ project }: { project?: string }) {
       stripAnnotationHighlights(root)
       for (const item of annotationsForVersion) highlightAnnotationRange(root, item)
       root.querySelectorAll('mark.artifact-ann').forEach((mark) => {
-        mark.classList.toggle('artifact-ann-active', Boolean(activeAnnotation) && mark.dataset.annId === activeAnnotation)
+        const html = mark as HTMLElement
+        html.classList.toggle('artifact-ann-active', Boolean(activeAnnotation) && html.dataset.annId === activeAnnotation)
       })
     }
     const first = window.setTimeout(apply, 60)
@@ -1512,7 +1513,7 @@ export default function Artifacts({ project }: { project?: string }) {
                   ) : bodyEditing ? (
                     <>
                       {selected.status === 'approved' && (
-                        <InlineNotification kind="info" lowContrast hideCloseButton slim
+                        <InlineNotification kind="info" lowContrast hideCloseButton
                           title={t('artifacts.new_revision_banner_title') ?? 'New revision'}
                           subtitle={t('artifacts.new_revision_banner') ?? 'The edit is saved as draft revision; the approved version keeps serving agents and skills until the revision is approved.'}
                           style={{ marginBottom: '0.6rem' }} />
