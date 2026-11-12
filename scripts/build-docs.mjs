@@ -54,6 +54,7 @@ const LANGS = [
       docsLead: 'Temporality наблюдает, как ИИ-агент выполняет задачи: что он знал и делал, откуда взялись знания, что подтвердилось, и возвращает проверенный опыт в следующие запуски. Этот раздел — практическое руководство: от запуска до повседневной работы.',
       startLabel: 'Начать знакомство',
       htmlLang: 'ru',
+      llmsHeading: 'Руководство пользователя (русский)',
     },
   },
   {
@@ -76,6 +77,7 @@ const LANGS = [
       docsLead: 'Temporality observes how an AI agent works: what it knew and did, where its knowledge came from, what held up — and returns verified experience to later runs. This section is a practical guide, from installation to everyday work.',
       startLabel: 'Get started',
       htmlLang: 'en',
+      llmsHeading: 'User guide (English)',
     },
   },
   {
@@ -101,6 +103,7 @@ const LANGS = [
       docsLead: 'Внутренние документы разработки: архитектура, модели событий и знаний, контракты подсистем, планы и разборы. Рабочие материалы инженеров — точность важнее полировки.',
       startLabel: '',
       htmlLang: 'ru',
+      llmsHeading: 'Engineering reference (русский)',
     },
   },
 ]
@@ -150,6 +153,8 @@ function makeRenderer(techPrefix) {
 }
 
 // ── build one language tree ─────────────────────────────────────────────────
+
+const llmsSections = []
 
 function buildLang(lang) {
   const { srcDir, outDir, rootPrefix, strings } = lang
@@ -305,6 +310,15 @@ ${cards}
   }
   writeFileSync(join(outDir, 'index.html'), docsIndex())
   console.log(`✓ ${lang.code}/index.html (${pages.length} pages)`)
+  // llms.txt section: every page's clean markdown source on GitHub — the
+  // LLM-friendly form the llms.txt convention asks links to point at.
+  const raw = (slug) => `https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/${lang.editBase}/${slug}.md`
+  llmsSections.push({
+    code: lang.code,
+    heading: lang.strings.llmsHeading ?? lang.strings.docsTitle,
+    entries: pages.map((p) => `- [${p.title}](${raw(p.slug)})${p.description ? `: ${p.description}` : ''}`),
+    index: `- [${lang.strings.docsTitle}](${raw('index')})`,
+  })
 }
 
 // The shared stylesheet lives with the primary language tree. Its name
@@ -357,5 +371,78 @@ const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://w
 writeFileSync(join(ROOT, 'pages', 'sitemap.xml'), sitemap)
 writeFileSync(join(ROOT, 'pages', 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${siteUrl('/sitemap.xml')}\n`)
 console.log(`✓ sitemap.xml (${urlEntries.length} urls) + robots.txt`)
+
+// ── AI-agent discovery: llms.txt + ai-catalog.json (ARD 1.0) ────────────────
+// llms.txt (llmstxt.org): an H1, a blockquote summary, then curated H2
+// sections of links — every link points at the CLEAN MARKDOWN source on
+// GitHub, the LLM-friendly form of the page. ai-catalog.json follows the
+// Agentic Resource Discovery schema (specVersion 1.0) so registries and
+// autonomous agents can verify the resources; it is published twice — at
+// the site root and under .well-known/ — because project sites cannot
+// write to the origin's root well-known directory.
+const llms = [`# Temporality`, '',
+  '> Temporality is an open-source runtime and control plane for AI agent systems: it runs long-lived tasks, keeps an evidence-backed history of every action, governs permissions and oversight, and turns verified experience into knowledge and skills. Self-hosted on your infrastructure. Go · Temporal · PostgreSQL.',
+  '',
+  'Documentation is available in Russian and English; every link below points at the clean Markdown source of the page (the rendered HTML lives at the matching .html path on this site).',
+  '',
+]
+for (const section of llmsSections) {
+  if (section.entries.length === 0) continue
+  llms.push(`## ${section.heading}`, section.index, ...section.entries, '')
+}
+llms.push('## Project', '',
+  '- [Source code (GitHub)](https://github.com/RuslanGabbasov/temporality): the full runtime, control plane, agent kernel and this site',
+  '- [License (Apache-2.0)](https://github.com/RuslanGabbasov/temporality/blob/main/LICENSE)',
+  '- [Issue tracker](https://github.com/RuslanGabbasov/temporality/issues)',
+  '- [Sitemap](https://ruslangabbasov.github.io/temporality/sitemap.xml): every indexed page for crawlers',
+  '')
+writeFileSync(join(ROOT, 'pages', 'llms.txt'), llms.join('\n'))
+
+const site = siteUrl('/')
+const catalog = {
+  specVersion: '1.0',
+  host: {
+    displayName: 'Temporality',
+    documentationUrl: site,
+    logoUrl: siteUrl('/assets/temporality-mark.svg'),
+  },
+  entries: [
+    {
+      identifier: 'urn:air:ruslangabbasov.github.io:temporality:docs',
+      displayName: 'Temporality documentation',
+      type: 'text/html',
+      url: siteUrl('/docs/index.html'),
+      description: 'User guide for the Temporality agent runtime and control plane: installation, chat runs, traces, artifacts with review flows, knowledge and skills.',
+      tags: ['documentation', 'ai-agents', 'temporal', 'postgresql', 'self-hosted'],
+      capabilities: ['installation-guide', 'run-traces', 'artifact-review', 'knowledge-management', 'skills'],
+      representativeQueries: [
+        'How do I install and run Temporality?',
+        'How does artifact review work in Temporality?',
+        'Где посмотреть историю действий агента?',
+      ],
+      version: '1',
+      updatedAt: `${today}T00:00:00Z`,
+    },
+    {
+      identifier: 'urn:air:ruslangabbasov.github.io:temporality:llms-txt',
+      displayName: 'Temporality llms.txt',
+      type: 'text/plain',
+      url: siteUrl('/llms.txt'),
+      description: 'LLM-oriented overview of the site: curated links to the clean Markdown source of every documentation page.',
+      tags: ['llms-txt', 'documentation', 'markdown'],
+      representativeQueries: [
+        'Temporality documentation for LLM agents',
+        'Clean markdown sources of Temporality docs',
+      ],
+      version: '1',
+      updatedAt: `${today}T00:00:00Z`,
+    },
+  ],
+}
+const catalogJson = JSON.stringify(catalog, null, 2) + '\n'
+writeFileSync(join(ROOT, 'pages', 'ai-catalog.json'), catalogJson)
+mkdirSync(join(ROOT, 'pages', '.well-known'), { recursive: true })
+writeFileSync(join(ROOT, 'pages', '.well-known', 'ai-catalog.json'), catalogJson)
+console.log(`✓ llms.txt + ai-catalog.json (root + .well-known)`)
 
 

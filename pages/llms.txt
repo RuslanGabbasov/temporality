@@ -1,0 +1,116 @@
+# Temporality
+
+> Temporality is an open-source runtime and control plane for AI agent systems: it runs long-lived tasks, keeps an evidence-backed history of every action, governs permissions and oversight, and turns verified experience into knowledge and skills. Self-hosted on your infrastructure. Go · Temporal · PostgreSQL.
+
+Documentation is available in Russian and English; every link below points at the clean Markdown source of the page (the rendered HTML lives at the matching .html path on this site).
+
+## Руководство пользователя (русский)
+- [Temporality — Руководство пользователя](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/index.md)
+- [Введение](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/intro.md): Что такое Temporality, зачем он нужен и из чего состоит — десятитысячный обзор системы.
+- [Быстрый старт](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/quickstart.md): От нуля до первой задачи агента — установка, онбординг, первый запуск.
+- [Чат и запуски](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/chat.md): Диалог с агентом — от сообщения до результата: стриминг, поправки, подтверждения, делегирование.
+- [Агенты и команды](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/agents.md): Создание и настройка агентов — модели, инструменты, песочницы, эволюция; команды агентов как конвейеры.
+- [Знания](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/knowledge.md): Как агент накапливает опыт — жизненный цикл знаний, карта областей, досье, противоречия, битемпоральность.
+- [Наблюдаемость и хранилище](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/observability.md): Дашборд, трассы запусков, таймлайн опыта и файловое хранилище песочниц.
+- [Навыки](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/skills.md): Живые навыки — переиспользуемые процедуры агентов с контрактом, версиями и оценками качества.
+- [Артефакты](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/artifacts.md): Реестр документов с согласованием людьми — регламенты, требования и инструкции, которым агенты доверяют.
+- [Входящие и каналы](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/inbound.md): Подключаем Matrix, Telegram, Slack, Mattermost и вебхуки — агент получает задачи из чата вашей команды.
+- [Персонализация](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/personalization.md): Факты о людях — как агенты запоминают предпочтения и роли отправителей, где это работает и чем не является.
+- [Триггеры](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/triggers.md): Запуск агентов по расписанию, вебхукам и событиям системы.
+- [Администрирование](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/administration.md): Пользователи и RBAC, оргструктура, провайдеры, секреты, песочницы и настройки качества.
+- [Внешние агенты (experience-слой)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/external-agents.md): Как подключить любой фреймворк или собственный пайплайн к петле опыта — события, извлечение знаний, подсказки.
+- [Оргструктура, пользователи и политики](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/org-policies.md): Дерево подразделений, роли и гранты, проекты и видимость. Политики Org Policies — все измерения, наследование и effective-политика запуска.
+- [Справочник](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/reference.md): Переменные окружения, порты, страницы интерфейса и ссылки на подробные документы.
+- [Эксплуатация харнеса](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/operations.md): Как правильно развернуть, настроить и эксплуатировать Temporality как рабочий харнес — стек, обновления, провайдеры, аутентификация, знания, навыки, песочницы, наблюдаемость, бэкапы и диагностика.
+- [Формы и подтверждения](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/hitl-forms.md): Как агент задаёт человеку структурированные вопросы: карточки в чате, кнопка в мессенджере, форма в браузере по одноразовой ссылке — и как всё это валидируется.
+- [Файлы](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/files.md): Как агент передаёт человеку файлы — в чат, в мессенджер — и где их забрать.
+- [Эволюция и качество](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/evolution.md): Как агенты предлагают изменения своей конфигурации, как оценочный гейт проверяет их эффект, как откатить версию — и откуда берутся оценочные кейсы.
+- [Должности и группы](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/job-titles.md): Должность сотрудника — естественный адрес для групповых вопросов: позови всех тестировщиков, отправь разработчикам инструкцию.
+
+## User guide (English)
+- [Temporality — User Guide](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/index.md)
+- [Introduction](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/intro.md): What Temporality is, who it is for and what it is made of — a ten-minute overview of the system.
+- [Quick start](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/quickstart.md): From zero to your first agent task — installation, onboarding, the first run.
+- [Chat and runs](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/chat.md): Dialogue with the agent — from a message to a result: streaming, amendments, approvals, delegation.
+- [Agents and teams](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/agents.md): Creating and configuring agents — models, tools, sandboxes, evolution; agent teams as pipelines.
+- [Knowledge](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/knowledge.md): How the agent accumulates experience — the knowledge lifecycle, the area map, dossiers, contradictions, bitemporality.
+- [Observability and storage](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/observability.md): The dashboard, run traces, the experience timeline and the sandbox file storage.
+- [Skills](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/skills.md): Living skills — reusable agent procedures with a contract, versions and quality evaluations.
+- [Artifacts](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/artifacts.md): A registry of documents with human approval — coding policies, requirements and instructions agents can trust.
+- [Inbound and channels](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/inbound.md): Connect Matrix, Telegram, Slack, Mattermost and webhooks — the agent receives tasks from your team's chat.
+- [Personalization](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/personalization.md): Facts about people — how agents remember senders' preferences and roles, where it works, and what it is not.
+- [Triggers](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/triggers.md): Start agents on a schedule, by webhook or on system events.
+- [Administration](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/administration.md): Users and RBAC, the org structure, providers, secrets, sandboxes and quality settings.
+- [External agents (experience layer)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/external-agents.md): How to wire any framework or pipeline into the experience loop — events, knowledge extraction, hints.
+- [Org structure, users and policies](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/org-policies.md): The department tree, roles and grants, projects and visibility. Org Policies — every dimension, inheritance and the run's effective policy.
+- [Reference](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/reference.md): Environment variables, ports, UI pages and links to the in-depth documents.
+- [Harness Operations](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/operations.md): How to deploy, configure and operate Temporality as a working harness — the stack, upgrades, providers, authentication, knowledge, skills, sandboxes, observability, backups and troubleshooting.
+- [Forms & approvals](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/hitl-forms.md): How the agent asks a human structured questions — cards in the chat, a button in your messenger, a browser form behind a one-time link — with server-side validation.
+- [Files](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/files.md): How the agent hands files to a human — into the chat, into your messenger — and where to pick them up.
+- [Evolution & quality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/evolution.md): How agents propose changes to their own configuration, how the evaluation gate verifies the effect, how to roll a version back — and where evaluation cases come from without hand-writing them.
+- [Job titles & groups](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/job-titles.md): A job title is the natural group address — invite every QA engineer to a call, or send the new instructions to all developers.
+
+## Engineering reference (русский)
+- [Temporality — Инженерные документы](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/index.md)
+- [Temporality — visual design specification](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/DESIGN.md)
+- [Temporality Roadmap](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/ROADMAP.md)
+- [Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/activity-scoping.md)
+- [Асинхронные операции агента (background run_command)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-async-operations.md)
+- [Детекция опасного поведения агента](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-behavior-monitoring.md)
+- [Делегирование задач между агентами](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-delegation.md)
+- [Эволюция агентов: версии, предложения, наблюдение (v2)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-evolution.md)
+- [ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-knowledge-exploration.md)
+- [Контур качества агентов (Quality Loop)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-quality-loop.md)
+- [Команды агентов](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-teams.md)
+- [Автопродолжение при упоре в лимит ходов (turn_limit_restarts)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-turn-limit-restarts.md)
+- [Approval model (Phase 2)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/approval-model.md)
+- [Agent Kernel and Temporality architecture](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/architecture.md)
+- [Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/artifact-lifecycle.md)
+- [Реестр артефактов (Artifact Registry)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/artifact-registry.md)
+- [Федеративная аутентификация и провижининг пользователей (Auth Federation)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/auth-federation.md)
+- [Предустановленные скилы: офисный пакет (builtin skills)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/builtin-skills.md)
+- [Каналы коммуникации: единая абстракция (Channel Drivers)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/channels.md)
+- [Компакция контекста: карточка состояния для длинных ранов](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/context-compaction.md)
+- [Dev-стек: живучесть ранов при пересборках](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/dev-stack-runs.md)
+- [Формирование системного промта агента](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/evaluable-agent.md)
+- [Event model audit (Phase 2)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/event-model.md)
+- [Experiment 9 — corpus of experience evolution comprehension](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/experiment-9-corpus.md)
+- [Agent Kernel failure and delivery model](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/failure-model.md)
+- [Side-effect and event reconciliation (Phase 2 audit)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/failure-reconciliation.md)
+- [Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/filesystem-policy-implementation.md)
+- [ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/filesystem-policy.md)
+- [Настройки харнеса: модели и бюджеты в одном месте](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/harness-settings.md)
+- [Knowledge Explorer — этап 1: аудит и технический план](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/human-knowledge-explorer-plan.md)
+- [ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/human-knowledge-explorer.md)
+- [Входящие сообщения: задачи по инициативе пользователя](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/inbound-messages.md)
+- [HITL: унифицированный контракт для каналов и встроенного чата](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/interactive-HITL.md)
+- [Разделение Experience, Knowledge, Skills и контекстной эволюции агента](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/knowledge-evolution.md)
+- [Knowledge Extraction из агентских траекторий](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/knowledge-extraction.md)
+- [Knowledge model](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/knowledge-model.md)
+- [Living Skills — эволюционирующие capabilities в Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/living-skills.md)
+- [Организационная структура и модель доступа Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/org-structure.md)
+- [План работ: Evaluable Agent — определение агента и компиляция системного промта](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/plan-evaluable-agent.md)
+- [Priming v2: от каталога знаний к полезным рекомендациям](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/plan-priming-relevance.md)
+- [Техническое задание: Presentation Engine для Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/presentation-engine.md)
+- [Replay model (Phase 2 audit)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/replay-model.md)
+- [Отказоустойчивость и масштабируемость](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/resilience-and-scale.md)
+- [Runbook — Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/runbook.md)
+- [Саги: явная регистрация долгой работы (Sagas)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/sagas.md)
+- [Профили песочниц (Sandbox Profiles) [L1-360]](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/sandbox-profiles.md)
+- [Sandbox security matrix](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/sandbox-security-matrix.md)
+- [Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/sandbox-storage.md)
+- [Управление секретами агентов (Secrets Management)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/secrets-management.md)
+- [Модель-супервайзер: роль, кейсы и метрики человеческого фактора](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/supervisor-model.md)
+- [Дашборд здоровья системы (System Dashboard)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/system-dashboard.md)
+- [Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/temporality-agent-collaboration-implementation.md)
+- [ТЗ: межагентное взаимодействие и обнаружение участников Saga](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/temporality-agent-collaboration-spec.md)
+- [Temporality event contract](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/temporality-contract.md)
+- [Триггеры запуска операций и обращение агента к человеку](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/triggers-and-escalations.md)
+- [Веб-исследования агентов (Web Research)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/web-research.md)
+
+## Project
+
+- [Source code (GitHub)](https://github.com/RuslanGabbasov/temporality): the full runtime, control plane, agent kernel and this site
+- [License (Apache-2.0)](https://github.com/RuslanGabbasov/temporality/blob/main/LICENSE)
+- [Issue tracker](https://github.com/RuslanGabbasov/temporality/issues)
+- [Sitemap](https://ruslangabbasov.github.io/temporality/sitemap.xml): every indexed page for crawlers

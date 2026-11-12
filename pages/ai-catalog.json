@@ -1,0 +1,56 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "Temporality",
+    "documentationUrl": "https://ruslangabbasov.github.io/temporality/",
+    "logoUrl": "https://ruslangabbasov.github.io/temporality/assets/temporality-mark.svg"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:ruslangabbasov.github.io:temporality:docs",
+      "displayName": "Temporality documentation",
+      "type": "text/html",
+      "url": "https://ruslangabbasov.github.io/temporality/docs/index.html",
+      "description": "User guide for the Temporality agent runtime and control plane: installation, chat runs, traces, artifacts with review flows, knowledge and skills.",
+      "tags": [
+        "documentation",
+        "ai-agents",
+        "temporal",
+        "postgresql",
+        "self-hosted"
+      ],
+      "capabilities": [
+        "installation-guide",
+        "run-traces",
+        "artifact-review",
+        "knowledge-management",
+        "skills"
+      ],
+      "representativeQueries": [
+        "How do I install and run Temporality?",
+        "How does artifact review work in Temporality?",
+        "Где посмотреть историю действий агента?"
+      ],
+      "version": "1",
+      "updatedAt": "2026-11-12T00:00:00Z"
+    },
+    {
+      "identifier": "urn:air:ruslangabbasov.github.io:temporality:llms-txt",
+      "displayName": "Temporality llms.txt",
+      "type": "text/plain",
+      "url": "https://ruslangabbasov.github.io/temporality/llms.txt",
+      "description": "LLM-oriented overview of the site: curated links to the clean Markdown source of every documentation page.",
+      "tags": [
+        "llms-txt",
+        "documentation",
+        "markdown"
+      ],
+      "representativeQueries": [
+        "Temporality documentation for LLM agents",
+        "Clean markdown sources of Temporality docs"
+      ],
+      "version": "1",
+      "updatedAt": "2026-11-12T00:00:00Z"
+    }
+  ]
+}
