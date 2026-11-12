@@ -113,4 +113,4 @@ Documentation is available in Russian and English; every link below points at th
 - [Source code (GitHub)](https://github.com/RuslanGabbasov/temporality): the full runtime, control plane, agent kernel and this site
 - [License (Apache-2.0)](https://github.com/RuslanGabbasov/temporality/blob/main/LICENSE)
 - [Issue tracker](https://github.com/RuslanGabbasov/temporality/issues)
-- [Sitemap](https://ruslangabbasov.github.io/temporality/sitemap.xml): every indexed page for crawlers
+- [Sitemap](https://temporality.tech/sitemap.xml): every indexed page for crawlers

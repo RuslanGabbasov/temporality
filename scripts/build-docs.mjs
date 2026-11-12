@@ -23,13 +23,12 @@ const ROOT = new URL('..', import.meta.url).pathname
 // mirror exists — hreflang alternates; the builder also emits sitemap.xml
 // and pages/robots.txt points at it.
 const SITE = {
-  origin: 'https://ruslangabbasov.github.io',
-  base: '/temporality',
+  base: 'https://temporality.tech',
   ogImage: '/assets/run.webp',
   ogImageWidth: 1600,
   ogImageHeight: 900,
 }
-const siteUrl = (path) => `${SITE.origin}${SITE.base}${path}`
+const siteUrl = (path) => `${SITE.base}${path}`
 
 // ── language configuration ──────────────────────────────────────────────────
 
@@ -394,7 +393,7 @@ llms.push('## Project', '',
   '- [Source code (GitHub)](https://github.com/RuslanGabbasov/temporality): the full runtime, control plane, agent kernel and this site',
   '- [License (Apache-2.0)](https://github.com/RuslanGabbasov/temporality/blob/main/LICENSE)',
   '- [Issue tracker](https://github.com/RuslanGabbasov/temporality/issues)',
-  '- [Sitemap](https://ruslangabbasov.github.io/temporality/sitemap.xml): every indexed page for crawlers',
+  '- [Sitemap](https://temporality.tech/sitemap.xml): every indexed page for crawlers',
   '')
 writeFileSync(join(ROOT, 'pages', 'llms.txt'), llms.join('\n'))
 
@@ -408,7 +407,7 @@ const catalog = {
   },
   entries: [
     {
-      identifier: 'urn:air:ruslangabbasov.github.io:temporality:docs',
+      identifier: 'urn:air:temporality.tech:temporality:docs',
       displayName: 'Temporality documentation',
       type: 'text/html',
       url: siteUrl('/docs/index.html'),
@@ -424,7 +423,7 @@ const catalog = {
       updatedAt: `${today}T00:00:00Z`,
     },
     {
-      identifier: 'urn:air:ruslangabbasov.github.io:temporality:llms-txt',
+      identifier: 'urn:air:temporality.tech:temporality:llms-txt',
       displayName: 'Temporality llms.txt',
       type: 'text/plain',
       url: siteUrl('/llms.txt'),

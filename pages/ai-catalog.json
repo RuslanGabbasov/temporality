@@ -2,15 +2,15 @@
   "specVersion": "1.0",
   "host": {
     "displayName": "Temporality",
-    "documentationUrl": "https://ruslangabbasov.github.io/temporality/",
-    "logoUrl": "https://ruslangabbasov.github.io/temporality/assets/temporality-mark.svg"
+    "documentationUrl": "https://temporality.tech/",
+    "logoUrl": "https://temporality.tech/assets/temporality-mark.svg"
   },
   "entries": [
     {
-      "identifier": "urn:air:ruslangabbasov.github.io:temporality:docs",
+      "identifier": "urn:air:temporality.tech:temporality:docs",
       "displayName": "Temporality documentation",
       "type": "text/html",
-      "url": "https://ruslangabbasov.github.io/temporality/docs/index.html",
+      "url": "https://temporality.tech/docs/index.html",
       "description": "User guide for the Temporality agent runtime and control plane: installation, chat runs, traces, artifacts with review flows, knowledge and skills.",
       "tags": [
         "documentation",
@@ -35,10 +35,10 @@
       "updatedAt": "2026-11-12T00:00:00Z"
     },
     {
-      "identifier": "urn:air:ruslangabbasov.github.io:temporality:llms-txt",
+      "identifier": "urn:air:temporality.tech:temporality:llms-txt",
       "displayName": "Temporality llms.txt",
       "type": "text/plain",
-      "url": "https://ruslangabbasov.github.io/temporality/llms.txt",
+      "url": "https://temporality.tech/llms.txt",
       "description": "LLM-oriented overview of the site: curated links to the clean Markdown source of every documentation page.",
       "tags": [
         "llms-txt",
