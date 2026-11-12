@@ -38,6 +38,9 @@ type artifactLifecycleStore interface {
 	SubmitArtifactReview(ctx context.Context, artifactID string, reviewers []string, mode, note, requestedBy string) (workspace.ArtifactReview, error)
 	GetArtifactReview(ctx context.Context, reviewID string) (workspace.ArtifactReview, error)
 	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
+	AddArtifactReviewers(ctx context.Context, reviewID string, reviewers []string, by string) (workspace.ArtifactReview, error)
+	DelegateArtifactReview(ctx context.Context, reviewID string, target string, by string) (workspace.ArtifactReview, error)
+	SetArtifactReviewMode(ctx context.Context, reviewID string, mode string, by string) (workspace.ArtifactReview, workspace.Artifact, error)
 	ListArtifactReviews(ctx context.Context, artifactID string) ([]workspace.ArtifactReview, error)
 	AddArtifactAnnotation(ctx context.Context, artifactID string, version, startOffset, endOffset int, kind, quote, replacement, comment, createdBy string) (workspace.ArtifactAnnotation, error)
 	ListArtifactAnnotations(ctx context.Context, artifactID string, version int) ([]workspace.ArtifactAnnotation, error)
@@ -454,6 +457,88 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 	}
 	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/reviews/{reviewID}/approve", decisionHandler(true))
 	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/reviews/{reviewID}/reject", decisionHandler(false))
+
+	// Add reviewers to an open round (§6): the requester (or an operator)
+	// widens the approval set mid-round — a specialist the model-authored
+	// list missed. Same writer gate as submit; humans only — the kernel must
+	// not grow the approval set of its own work product.
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/reviews/{reviewID}/reviewers", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		if isKernelInternal(r) {
+			writeError(w, 403, errors.New("review rounds are managed by humans only"))
+			return
+		}
+		var req struct {
+			Reviewers []string `json:"reviewers"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if len(req.Reviewers) == 0 {
+			writeError(w, 422, errors.New("reviewers is required"))
+			return
+		}
+		review, err := ws.AddArtifactReviewers(r.Context(), r.PathValue("reviewID"), req.Reviewers, requestUserID(r))
+		if err != nil {
+			writeError(w, artifactReviewErrorStatus(err), err)
+			return
+		}
+		writeJSON(w, 200, review)
+	})
+
+	// Delegate a seat to another user (§6): the delegate joins the reviewers,
+	// the delegator's personal undecided entries retire. Humans only.
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/reviews/{reviewID}/delegate", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		if isKernelInternal(r) {
+			writeError(w, 403, errors.New("review rounds are managed by humans only"))
+			return
+		}
+		var req struct {
+			Target string `json:"target"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		review, err := ws.DelegateArtifactReview(r.Context(), r.PathValue("reviewID"), strings.TrimSpace(req.Target), requestUserID(r))
+		if err != nil {
+			writeError(w, artifactReviewErrorStatus(err), err)
+			return
+		}
+		writeJSON(w, 200, review)
+	})
+
+	// Flip the round's closing rule between all and any (§6). May close the
+	// round retroactively (an approve already on the table under any) — the
+	// response then carries the promoted artifact like a decision does.
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/reviews/{reviewID}/mode", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		if isKernelInternal(r) {
+			writeError(w, 403, errors.New("review rounds are managed by humans only"))
+			return
+		}
+		var req struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		review, artifact, err := ws.SetArtifactReviewMode(r.Context(), r.PathValue("reviewID"), strings.TrimSpace(req.Mode), requestUserID(r))
+		if err != nil {
+			writeError(w, artifactReviewErrorStatus(err), err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"review": review, "artifact": artifact})
+	})
 }
 
 // artifactSubmitErrorStatus maps store errors to submit responses: validation
@@ -472,13 +557,16 @@ func artifactSubmitErrorStatus(err error) int {
 }
 
 // artifactReviewErrorStatus maps store errors to decision responses: double
-// resolution and non-reviewer decisions are 409 conflicts.
+// resolution and non-reviewer decisions are 409 conflicts; malformed
+// reviewer/mode payloads are 422.
 func artifactReviewErrorStatus(err error) int {
 	switch {
 	case errors.Is(err, workspace.ErrNotFound):
 		return 404
 	case errors.Is(err, workspace.ErrConflict), errors.Is(err, workspace.ErrArtifactLocked):
 		return 409
+	case strings.Contains(err.Error(), "reviewers") || strings.Contains(err.Error(), "mode must be") || strings.Contains(err.Error(), "delegate target"):
+		return 422
 	default:
 		return 500
 	}

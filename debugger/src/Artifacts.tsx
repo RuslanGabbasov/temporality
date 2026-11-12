@@ -873,6 +873,50 @@ export default function Artifacts({ project }: { project?: string }) {
     finally { setBusy(false) }
   }
 
+  // Round management (add reviewers / delegate / mode flip): one busy flag,
+  // the handlers reload the rounds list after each mutation so the cards and
+  // the «Согласование» tab badge stay truthful. A mode flip can CLOSE the
+  // round retroactively (any + an approve already on the table) — the reload
+  // also refreshes the row's status.
+  const [roundManage, setRoundManage] = useState<{ reviewID: string; kind: 'add' | 'delegate' } | null>(null)
+  const [roundTokens, setRoundTokens] = useState<string[]>([])
+  const [delegateTarget, setDelegateTarget] = useState('')
+  const [roundBusy, setRoundBusy] = useState(false)
+  const reloadReviews = async (artifactID: string) => {
+    const page = await workspaceApi.listArtifactReviews(artifactID)
+    setReviews(page.reviews ?? [])
+  }
+  const addReviewers = async (r: ArtifactReview) => {
+    if (roundTokens.length === 0) return
+    setRoundBusy(true)
+    try {
+      await workspaceApi.addArtifactReviewers(selected!.id, r.id, roundTokens)
+      await reloadReviews(selected!.id)
+      setRoundManage(null); setRoundTokens([])
+    } catch (f) { setError(message(f)) }
+    finally { setRoundBusy(false) }
+  }
+  const delegateRound = async (r: ArtifactReview) => {
+    if (!delegateTarget.trim()) return
+    setRoundBusy(true)
+    try {
+      await workspaceApi.delegateArtifactReview(selected!.id, r.id, delegateTarget.trim())
+      await reloadReviews(selected!.id)
+      setRoundManage(null); setDelegateTarget('')
+    } catch (f) { setError(message(f)) }
+    finally { setRoundBusy(false) }
+  }
+  const flipRoundMode = async (r: ArtifactReview, mode: 'all' | 'any') => {
+    if (r.mode === mode) return
+    setRoundBusy(true)
+    try {
+      await workspaceApi.setArtifactReviewMode(selected!.id, r.id, mode)
+      await reloadReviews(selected!.id)
+      await load()
+    } catch (f) { setError(message(f)) }
+    finally { setRoundBusy(false) }
+  }
+
   const decide = async (r: ArtifactReview, approve: boolean) => {
     if (!selected) return
     setBusy(true)
@@ -1353,7 +1397,7 @@ export default function Artifacts({ project }: { project?: string }) {
                                     : (t('artifacts.status_rejected') ?? 'rejected')}
                               </Tag>
                               <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginLeft: '0.5rem' }}>
-                                v{r.artifact_version} · {t('artifacts.review_mode_label') ?? 'mode'}: {r.mode === 'all' ? (t('artifacts.inbox_mode_all') ?? 'all reviewers') : (t('artifacts.inbox_mode_any') ?? 'any reviewer')} · {fmtTime(r.requested_at)}
+                                v{r.artifact_version} · {fmtTime(r.requested_at)}
                               </span>
                             </div>
                             {r.status === 'open' && (
@@ -1363,9 +1407,76 @@ export default function Artifacts({ project }: { project?: string }) {
                               </Stack>
                             )}
                           </div>
+                          {/* The closing rule is a live knob of an open round:
+                              switching can close it retroactively (any + an
+                              approve already cast). */}
+                          {r.status === 'open' ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{t('artifacts.review_mode_label') ?? 'Режим'}:</span>
+                              {(['all', 'any'] as const).map((mode) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  disabled={roundBusy}
+                                  onClick={() => void flipRoundMode(r, mode)}
+                                  style={{ background: r.mode === mode ? 'var(--tm-teal)' : 'transparent', border: '1px solid var(--tm-border)', borderRadius: 999, padding: '0.12rem 0.6rem', cursor: r.mode === mode ? 'default' : 'pointer', color: r.mode === mode ? '#fff' : 'var(--tm-text-2)', fontSize: '0.72rem' }}
+                                >{mode === 'all' ? (t('artifacts.inbox_mode_all') ?? 'все рецензенты') : (t('artifacts.inbox_mode_any') ?? 'любой рецензент')}</button>
+                              ))}
+                            </div>
+                          ) : (
+                            <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginTop: '0.4rem' }}>
+                              {t('artifacts.review_mode_label') ?? 'Режим'}: {r.mode === 'all' ? (t('artifacts.inbox_mode_all') ?? 'все рецензенты') : (t('artifacts.inbox_mode_any') ?? 'любой рецензент')}
+                            </p>
+                          )}
                           <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginTop: '0.4rem' }}>
                             {t('artifacts.reviewers_label') ?? 'Reviewers'}: {r.reviewers.map((reviewer) => reviewerLabel(reviewer)).join(', ')}
                           </p>
+                          {r.status === 'open' && (
+                            <div style={{ marginTop: '0.5rem' }}>
+                              {roundManage?.reviewID === r.id ? (
+                                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '0.5rem 0.6rem' }}>
+                                  {roundManage.kind === 'add' ? (
+                                    <>
+                                      <ReviewerPicker value={roundTokens} onChange={setRoundTokens} users={directory} org={org} />
+                                      <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.4rem' }}>
+                                        <Button size="sm" disabled={roundBusy || roundTokens.length === 0} onClick={() => void addReviewers(r)}>{t('artifacts.round_add_apply') ?? 'Добавить'}</Button>
+                                        <Button size="sm" kind="ghost" disabled={roundBusy} onClick={() => { setRoundManage(null); setRoundTokens([]) }}>{t('action.cancel') ?? 'Cancel'}</Button>
+                                      </Stack>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <select
+                                          value={delegateTarget}
+                                          onChange={(e) => setDelegateTarget(e.target.value)}
+                                          style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.3rem 0.5rem', minWidth: '12rem' }}
+                                        >
+                                          <option value="">{t('artifacts.round_delegate_pick') ?? 'Кому передать…'}</option>
+                                          {directory.filter((u) => u.active).map((u) => (
+                                            <option key={u.id} value={`user:${u.id}`}>{u.name || u.id}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.4rem' }}>
+                                        <Button size="sm" disabled={roundBusy || !delegateTarget} onClick={() => void delegateRound(r)}>{t('artifacts.round_delegate_apply') ?? 'Делегировать'}</Button>
+                                        <Button size="sm" kind="ghost" disabled={roundBusy} onClick={() => { setRoundManage(null); setDelegateTarget('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
+                                      </Stack>
+                                      <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>{t('artifacts.round_delegate_hint') ?? 'Ваш персональный голос (если вы ещё не голосовали) перейдёт выбранному человеку; групповые места (роль, подразделение) остаются.'}</p>
+                                    </>
+                                  )}
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                  <Button size="sm" kind="ghost" onClick={() => { setRoundManage({ reviewID: r.id, kind: 'add' }); setRoundTokens([]); void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([])) }}>
+                                    {t('artifacts.round_add') ?? '+ согласующий'}
+                                  </Button>
+                                  <Button size="sm" kind="ghost" onClick={() => { setRoundManage({ reviewID: r.id, kind: 'delegate' }); setDelegateTarget(''); void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([])) }}>
+                                    {t('artifacts.round_delegate') ?? 'Делегировать'}
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {r.note && <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>{r.note}</p>}
                           {Object.entries(r.decisions ?? {}).map(([who, d]) => (
                             <p key={who} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>

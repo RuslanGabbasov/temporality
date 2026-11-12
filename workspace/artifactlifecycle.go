@@ -331,6 +331,216 @@ func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, rev
 // members, and one principal may satisfy several entries at once — the
 // decision then lands under each of them. decidedBy is the concrete
 // principal, kept on every decision and in resolved_by.
+// openArtifactReviewRound locks the review row and returns it open-only —
+// the shared precondition of every round mutation (add reviewer, delegate,
+// mode change): a decided round is history, not a working surface.
+func (s *Store) openArtifactReviewRound(ctx context.Context, tx pgx.Tx, reviewID string) (ArtifactReview, error) {
+	review, err := scanArtifactReview(tx.QueryRow(ctx,
+		`SELECT `+artifactReviewColumns+` FROM workspace_artifact_review WHERE id = $1 FOR UPDATE`, reviewID))
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	if review.Status != "open" {
+		return ArtifactReview{}, fmt.Errorf("%w: review is already %s", ErrConflict, review.Status)
+	}
+	return review, nil
+}
+
+// roundWouldClose evaluates the closing rules of ResolveArtifactReview over
+// a reviewer/decision state: a reject already closes at decide-time, so
+// mid-round the only question is whether the approvals on the table are
+// enough under the round's mode.
+func roundWouldClose(review ArtifactReview) (bool, string) {
+	if review.Mode == "any" {
+		for _, d := range review.Decisions {
+			if d.Decision == "approve" {
+				return true, "approved"
+			}
+		}
+		return false, ""
+	}
+	allApproved := len(review.Reviewers) > 0
+	for _, who := range review.Reviewers {
+		d, ok := review.Decisions[who]
+		if !ok || d.Decision != "approve" {
+			return false, ""
+		}
+	}
+	_ = allApproved
+	return allApproved, "approved"
+}
+
+// AddArtifactReviewers appends reviewer tokens to an OPEN round: «добавить
+// дополнительного согласующего». Deduped, validated by the same rules as
+// submit; already-cast decisions stay. Under mode=all the newcomers widen
+// the approval set — the requester adding a specialist mid-round is the
+// intended flow, a newcomer with no decision simply holds the round open.
+func (s *Store) AddArtifactReviewers(ctx context.Context, reviewID string, reviewers []string, by string) (ArtifactReview, error) {
+	if err := ValidateArtifactReviewers(append([]string{"sentinel"}, reviewers...)); err != nil {
+		return ArtifactReview{}, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	defer tx.Rollback(ctx)
+	review, err := s.openArtifactReviewRound(ctx, tx, reviewID)
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	changed := false
+	for _, who := range reviewers {
+		listed := false
+		for _, existing := range review.Reviewers {
+			if strings.EqualFold(existing, who) {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			review.Reviewers = append(review.Reviewers, who)
+			changed = true
+		}
+	}
+	if !changed {
+		return review, nil
+	}
+	encoded, _ := json.Marshal(review.Reviewers)
+	if _, err := tx.Exec(ctx,
+		`UPDATE workspace_artifact_review SET reviewers = $2 WHERE id = $1`,
+		review.ID, encoded); err != nil {
+		return ArtifactReview{}, err
+	}
+	// Best-effort contributor stamp (the same contract Resolve uses).
+	_, _ = s.pool.Exec(ctx,
+		`UPDATE workspace_artifact SET contributors = (SELECT array_agg(DISTINCT x) FROM unnest(contributors || ARRAY[$2]) AS x)
+		 WHERE id = $1`, review.ArtifactID, by)
+	if err := tx.Commit(ctx); err != nil {
+		return ArtifactReview{}, err
+	}
+	return review, nil
+}
+
+// DelegateArtifactReview hands a reviewer's seat to another user: the
+// delegate joins the reviewers, and the delegator's own PERSONAL entries
+// (`user:<id>` or a bare id) without a cast decision retire — their vote
+// moved. Group entries (org:/role:/project_owner) stay: a delegate cannot
+// take away a seat that belongs to a whole unit or role, other members can
+// still decide it.
+func (s *Store) DelegateArtifactReview(ctx context.Context, reviewID string, target string, by string) (ArtifactReview, error) {
+	if target == "" {
+		return ArtifactReview{}, errors.New("delegate target is required")
+	}
+	if err := ValidateArtifactReviewers([]string{"sentinel", target}); err != nil {
+		return ArtifactReview{}, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	defer tx.Rollback(ctx)
+	review, err := s.openArtifactReviewRound(ctx, tx, reviewID)
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	listed := false
+	for _, existing := range review.Reviewers {
+		if strings.EqualFold(existing, target) {
+			listed = true
+			break
+		}
+	}
+	if !listed {
+		review.Reviewers = append(review.Reviewers, target)
+	}
+	// Resign the delegator's personal undecided seats.
+	kept := make([]string, 0, len(review.Reviewers))
+	resigned := false
+	for _, who := range review.Reviewers {
+		personal := strings.EqualFold(strings.TrimPrefix(who, "user:"), by) && who != "project_owner" && !strings.Contains(who, ":")
+		_, decided := review.Decisions[who]
+		if personal && !decided {
+			resigned = true
+			continue
+		}
+		kept = append(kept, who)
+	}
+	review.Reviewers = kept
+	if len(review.Reviewers) == 0 {
+		return ArtifactReview{}, fmt.Errorf("%w: delegating the last undecided personal seat would leave the round without reviewers", ErrConflict)
+	}
+	encoded, _ := json.Marshal(review.Reviewers)
+	if _, err := tx.Exec(ctx,
+		`UPDATE workspace_artifact_review SET reviewers = $2 WHERE id = $1`,
+		review.ID, encoded); err != nil {
+		return ArtifactReview{}, err
+	}
+	_, _ = s.pool.Exec(ctx,
+		`UPDATE workspace_artifact SET contributors = (SELECT array_agg(DISTINCT x) FROM unnest(contributors || ARRAY[$2]) AS x)
+		 WHERE id = $1`, review.ArtifactID, by)
+	_ = resigned
+	if err := tx.Commit(ctx); err != nil {
+		return ArtifactReview{}, err
+	}
+	return review, nil
+}
+
+// SetArtifactReviewMode flips an OPEN round between all (every reviewer must
+// approve) and any (the first approve closes). Flipping may satisfy the
+// closing rules retroactively — a mode→any flip with an approve already on
+// the table, or a mode→all flip when every listed reviewer has approved —
+// and then the round closes right here with the same promotion/retirement
+// semantics as a decision.
+func (s *Store) SetArtifactReviewMode(ctx context.Context, reviewID string, mode string, by string) (ArtifactReview, Artifact, error) {
+	if mode != "all" && mode != "any" {
+		return ArtifactReview{}, Artifact{}, fmt.Errorf("mode must be all or any (got %q)", mode)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	defer tx.Rollback(ctx)
+	review, err := s.openArtifactReviewRound(ctx, tx, reviewID)
+	if err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	if review.Decisions == nil {
+		review.Decisions = map[string]ReviewDecision{}
+	}
+	review.Mode = mode
+	closes, closedStatus := roundWouldClose(review)
+	encodedDecisions, _ := json.Marshal(review.Decisions)
+	encodedReviewers, _ := json.Marshal(review.Reviewers)
+	if closes {
+		now := time.Now().UTC()
+		review.Status = closedStatus
+		review.ResolvedBy = by
+		review.ResolvedAt = &now
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact_review SET reviewers = $2, mode = $3, decisions = $4, status = $5, resolved_by = $6, resolved_at = $7 WHERE id = $1`,
+			review.ID, encodedReviewers, review.Mode, encodedDecisions, review.Status, by, now); err != nil {
+			return ArtifactReview{}, Artifact{}, err
+		}
+		artifact, err := s.closeArtifactRound(ctx, tx, review, closedStatus, now)
+		if err != nil {
+			return ArtifactReview{}, Artifact{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return ArtifactReview{}, Artifact{}, err
+		}
+		return review, artifact, nil
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE workspace_artifact_review SET reviewers = $2, mode = $3 WHERE id = $1`,
+		review.ID, encodedReviewers, review.Mode); err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	return review, Artifact{}, nil
+}
+
 func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (ArtifactReview, Artifact, error) {
 	// Best-effort: the decision recording below is the source of truth; the
 	// contributor stamp just feeds the «who touched this» list.
@@ -388,6 +598,7 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entr
 	}
 
 	closes, closedStatus := false, ""
+	var artifact Artifact
 	if !approve {
 		closes, closedStatus = true, "rejected"
 	} else if review.Mode == "any" {
@@ -416,65 +627,17 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entr
 			review.ID, encoded, review.Status, decidedBy, now); err != nil {
 			return ArtifactReview{}, Artifact{}, err
 		}
-		// The round may review a pending revision (a draft row in the version
-		// table) rather than the live row — the live row stayed approved and
-		// kept serving agents while the revision was open. Approve promotes
-		// the draft wholesale (the previous approved version is stamped
-		// superseded exactly now); reject retires the draft row.
-		var draftStatus string
-		draftErr := tx.QueryRow(ctx,
-			`SELECT status FROM workspace_artifact_version WHERE artifact_id=$1 AND version=$2 FOR UPDATE`,
-			review.ArtifactID, review.ArtifactVersion).Scan(&draftStatus)
-		switch {
-		case draftErr == nil:
-			if !approve {
-				if _, err := tx.Exec(ctx,
-					`UPDATE workspace_artifact_version SET status = 'rejected' WHERE artifact_id=$1 AND version=$2`,
-					review.ArtifactID, review.ArtifactVersion); err != nil {
-					return ArtifactReview{}, Artifact{}, err
-				}
-				break
-			}
-			if _, err := tx.Exec(ctx,
-				`UPDATE workspace_artifact a SET
-				   title = v.title, description = v.description, provider = v.provider, external_ref = v.external_ref,
-				   content = v.content, content_hash = v.content_hash, size_bytes = v.size_bytes, mime_type = v.mime_type,
-				   kind = v.kind, saga_id = v.saga_id, status = 'approved', version = v.version, updated_at = now()
-				 FROM workspace_artifact_version v
-				 WHERE a.id = $1 AND v.artifact_id = a.id AND v.version = $2`,
-				review.ArtifactID, review.ArtifactVersion); err != nil {
-				return ArtifactReview{}, Artifact{}, err
-			}
-			if _, err := tx.Exec(ctx,
-				`UPDATE workspace_artifact_version SET status = 'approved' WHERE artifact_id=$1 AND version=$2`,
-				review.ArtifactID, review.ArtifactVersion); err != nil {
-				return ArtifactReview{}, Artifact{}, err
-			}
-			if _, err := tx.Exec(ctx,
-				`UPDATE workspace_artifact_version SET superseded_at = $3
-				 WHERE artifact_id=$1 AND version < $2 AND status = 'approved' AND superseded_at IS NULL`,
-				review.ArtifactID, review.ArtifactVersion, now); err != nil {
-				return ArtifactReview{}, Artifact{}, err
-			}
-		case errors.Is(draftErr, pgx.ErrNoRows):
-			// Live-row flow: the row itself was in_review.
-			if _, err := tx.Exec(ctx,
-				`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1`, review.ArtifactID, closedStatus); err != nil {
-				return ArtifactReview{}, Artifact{}, err
-			}
-		default:
-			return ArtifactReview{}, Artifact{}, draftErr
+		closed, cerr := s.closeArtifactRound(ctx, tx, review, closedStatus, now)
+		if cerr != nil {
+			return ArtifactReview{}, Artifact{}, cerr
 		}
+		artifact = closed
 	} else if _, err := tx.Exec(ctx,
 		`UPDATE workspace_artifact_review SET decisions = $2 WHERE id = $1`, review.ID, encoded); err != nil {
 		return ArtifactReview{}, Artifact{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ArtifactReview{}, Artifact{}, err
-	}
-	artifact, err := s.GetArtifactRange(ctx, review.ArtifactID, 0, 0)
-	if err != nil {
-		return review, artifact, err
 	}
 	return review, artifact, nil
 }
@@ -495,6 +658,66 @@ func (s *Store) GetArtifactReview(ctx context.Context, reviewID string) (Artifac
 // by a model, and "Ivanov" vs "ivanov" must not void a review. An account
 // without an active workspace row satisfies nothing: deactivated reviewers
 // must not decide.
+// closeArtifactRound applies a closing decision to the artifact state, in
+// the round's transaction. The round may review a pending revision (a draft
+// row in the version table) rather than the live row — the live row stayed
+// approved and kept serving agents while the revision was open. Approve
+// promotes the draft wholesale (the previous approved version is stamped
+// superseded exactly now); reject retires the draft row. Shared by the
+// decision path and the mode-flip path, so both carry identical semantics.
+func (s *Store) closeArtifactRound(ctx context.Context, tx pgx.Tx, review ArtifactReview, closedStatus string, now time.Time) (Artifact, error) {
+	approve := closedStatus == "approved"
+	var draftStatus string
+	draftErr := tx.QueryRow(ctx,
+		`SELECT status FROM workspace_artifact_version WHERE artifact_id=$1 AND version=$2 FOR UPDATE`,
+		review.ArtifactID, review.ArtifactVersion).Scan(&draftStatus)
+	switch {
+	case draftErr == nil:
+		if !approve {
+			if _, err := tx.Exec(ctx,
+				`UPDATE workspace_artifact_version SET status = 'rejected' WHERE artifact_id=$1 AND version=$2`,
+				review.ArtifactID, review.ArtifactVersion); err != nil {
+				return Artifact{}, err
+			}
+			break
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact a SET
+			   title = v.title, description = v.description, provider = v.provider, external_ref = v.external_ref,
+			   content = v.content, content_hash = v.content_hash, size_bytes = v.size_bytes, mime_type = v.mime_type,
+			   kind = v.kind, saga_id = v.saga_id, status = 'approved', version = v.version, updated_at = now()
+			 FROM workspace_artifact_version v
+			 WHERE a.id = $1 AND v.artifact_id = a.id AND v.version = $2`,
+			review.ArtifactID, review.ArtifactVersion); err != nil {
+			return Artifact{}, err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact_version SET status = 'approved' WHERE artifact_id=$1 AND version=$2`,
+			review.ArtifactID, review.ArtifactVersion); err != nil {
+			return Artifact{}, err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact_version SET superseded_at = $3
+			 WHERE artifact_id=$1 AND version < $2 AND status = 'approved' AND superseded_at IS NULL`,
+			review.ArtifactID, review.ArtifactVersion, now); err != nil {
+			return Artifact{}, err
+		}
+	case errors.Is(draftErr, pgx.ErrNoRows):
+		// Live-row flow: the row itself was in_review.
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1`, review.ArtifactID, closedStatus); err != nil {
+			return Artifact{}, err
+		}
+	default:
+		return Artifact{}, draftErr
+	}
+	artifact, err := s.GetArtifactRange(ctx, review.ArtifactID, 0, 0)
+	if err != nil {
+		return Artifact{}, err
+	}
+	return artifact, nil
+}
+
 // MatchArtifactReviewers returns the reviewer entries the principal
 // satisfies: personal entries match the user's id/name/email, group entries
 // match membership (org:) or the platform role (role:), and an org entry

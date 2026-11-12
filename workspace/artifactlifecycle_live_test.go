@@ -44,3 +44,50 @@ func TestListArtifactReviewInboxLive(t *testing.T) {
 	require.Contains(t, e.Matched, "org:rd")
 	require.Equal(t, "run-1", e.OriginRun)
 }
+
+// Round management semantics against the real schema: add-reviewer dedupes,
+// delegate retires the delegator's personal undecided seat (a group entry
+// stays), and the mode flip closes the round retroactively (any + an approve
+// already on the table).
+func TestArtifactRoundManagementLive(t *testing.T) {
+	dsn := os.Getenv("TEMPORALITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEMPORALITY_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	require.NoError(t, err)
+
+	err = store.CreateArtifact(ctx, &Artifact{ID: "round-mgmt", Title: "Round management", Provider: "builtin", Content: "# body", Status: "draft"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.DeleteArtifact(ctx, "round-mgmt") })
+
+	round, err := store.SubmitArtifactReview(ctx, "round-mgmt", []string{"user:alice", "user:bob"}, "all", "", "requester")
+	require.NoError(t, err)
+	require.Equal(t, "open", round.Status)
+
+	// 1) add a reviewer — deduped.
+	round, err = store.AddArtifactReviewers(ctx, round.ID, []string{"user:carol", "user:alice"}, "requester")
+	require.NoError(t, err)
+	require.Equal(t, []string{"user:alice", "user:bob", "user:carol"}, round.Reviewers)
+
+	// 2) alice approves; mode=all keeps the round open (bob, carol pending).
+	round, _, err = store.ResolveArtifactReview(ctx, round.ID, []string{"user:alice"}, "alice", true, "")
+	require.NoError(t, err)
+	require.Equal(t, "open", round.Status)
+
+	// 3) bob delegates to dave: bob's personal undecided seat retires, dave
+	// joins, alice's decision stays.
+	round, err = store.DelegateArtifactReview(ctx, round.ID, "user:dave", "bob")
+	require.NoError(t, err)
+	require.Equal(t, []string{"user:alice", "user:carol", "user:dave"}, round.Reviewers)
+	require.NotContains(t, round.Reviewers, "user:bob")
+
+	// 4) flip to any: alice's approve is already on the table — the round
+	// closes approved right here and the draft promotes.
+	round, artifact, err := store.SetArtifactReviewMode(ctx, round.ID, "any", "requester")
+	require.NoError(t, err)
+	require.Equal(t, "approved", round.Status)
+	require.Equal(t, "approved", artifact.Status)
+	require.Equal(t, 2, artifact.Version)
+}

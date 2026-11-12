@@ -1737,6 +1737,12 @@ export const workspaceApi = {
     request<{ deleted: boolean }>(`/v1/workspace/artifacts/${id}/annotations/${annotationId}`, { method: 'DELETE' }),
   resolveArtifactReview: (id: string, reviewId: string, approve: boolean, comment: string) =>
     request<{ review: ArtifactReview; artifact: Artifact }>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: JSON.stringify({ comment }) }),
+  addArtifactReviewers: (id: string, reviewId: string, reviewers: string[]) =>
+    request<ArtifactReview>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/reviewers`, { method: 'POST', body: JSON.stringify({ reviewers }) }),
+  delegateArtifactReview: (id: string, reviewId: string, target: string) =>
+    request<ArtifactReview>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/delegate`, { method: 'POST', body: JSON.stringify({ target }) }),
+  setArtifactReviewMode: (id: string, reviewId: string, mode: 'all' | 'any') =>
+    request<{ review: ArtifactReview; artifact?: Artifact }>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/mode`, { method: 'POST', body: JSON.stringify({ mode }) }),
   artifactReferences: () =>
     request<{ references: Record<string, string[]> }>('/v1/workspace/artifacts/references'),
 

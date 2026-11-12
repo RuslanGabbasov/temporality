@@ -63,6 +63,44 @@ func (f *fakeArtifactLifecycleStore) ListArtifactAnnotations(_ context.Context, 
 	return out, nil
 }
 
+func (f *fakeArtifactLifecycleStore) AddArtifactReviewers(_ context.Context, _ string, reviewers []string, _ string) (workspace.ArtifactReview, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, who := range reviewers {
+		listed := false
+		for _, existing := range f.review.Reviewers {
+			if strings.EqualFold(existing, who) {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			f.review.Reviewers = append(f.review.Reviewers, who)
+		}
+	}
+	return f.review, nil
+}
+
+func (f *fakeArtifactLifecycleStore) DelegateArtifactReview(_ context.Context, _ string, target string, _ string) (workspace.ArtifactReview, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.review.Reviewers = append(f.review.Reviewers, target)
+	return f.review, nil
+}
+
+func (f *fakeArtifactLifecycleStore) SetArtifactReviewMode(_ context.Context, reviewID string, mode string, _ string) (workspace.ArtifactReview, workspace.Artifact, error) {
+	if reviewID != f.review.ID {
+		return workspace.ArtifactReview{}, workspace.Artifact{}, workspace.ErrNotFound
+	}
+	if mode != "all" && mode != "any" {
+		return workspace.ArtifactReview{}, workspace.Artifact{}, fmt.Errorf("mode must be all or any (got %q)", mode)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.review.Mode = mode
+	return f.review, workspace.Artifact{}, nil
+}
+
 func (f *fakeArtifactLifecycleStore) DeleteArtifactAnnotation(_ context.Context, artifactID, annotationID, principal string, moderator bool) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -548,4 +586,38 @@ func TestArtifactSubmitLockedIs409(t *testing.T) {
 	require.Equal(t, 409, status)
 	require.Contains(t, body, "in_review")
 	require.True(t, errors.Is(store.submitErr, workspace.ErrArtifactLocked))
+}
+
+// Round management: add-reviewers / delegate / mode — writer-only, humans
+// only, and the kernel-internal identity gets the same 403 as decisions.
+func TestArtifactRoundManagementRoutes(t *testing.T) {
+	store := defaultArtifactFixture()
+	store.review = workspace.ArtifactReview{ID: "round-1", ArtifactID: "req-spec", ArtifactVersion: 2, Reviewers: []string{"user:ivanov"}, Mode: "all", Status: "open"}
+	server := newArtifactLifecycleServer(t, store, &captureArtifactOutbox{})
+	defer server.Close()
+
+	status, _ := artifactPost(t, server, "readertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/reviewers", `{"reviewers":["user:petrov"]}`)
+	require.Equal(t, http.StatusForbidden, status)
+
+	status, body := artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/reviewers", `{"reviewers":["user:petrov","user:ivanov"]}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, "user:petrov")
+	require.Len(t, store.review.Reviewers, 2, "the duplicate must dedupe")
+
+	status, body = artifactPost(t, server, "internaltoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/reviewers", `{"reviewers":["user:x"]}`)
+	require.Equal(t, http.StatusForbidden, status)
+
+	status, body = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/delegate", `{"target":"user:smirnov"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, "user:smirnov")
+
+	status, body = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/mode", `{"mode":"any"}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"mode":"any"`)
+
+	status, _ = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/mode", `{"mode":"unanimous"}`)
+	require.Equal(t, http.StatusUnprocessableEntity, status)
+
+	status, _ = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-missing/mode", `{"mode":"any"}`)
+	require.Equal(t, http.StatusNotFound, status)
 }
