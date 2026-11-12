@@ -1027,7 +1027,7 @@ export default function Artifacts({ project }: { project?: string }) {
                 <div
                   key={entry.review.id}
                   style={{ ...rowStyle(selectedId === entry.artifact_id), borderLeft: '3px solid var(--tm-amber, #e0af68)' }}
-                  onClick={() => { setSelectedId(entry.artifact_id); setInboxMode(false) }}
+                  onClick={() => setSelectedId(entry.artifact_id)}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
                     <strong style={{ fontSize: '0.85rem' }}>{entry.artifact_title}</strong>
@@ -1593,7 +1593,7 @@ export default function Artifacts({ project }: { project?: string }) {
                     ) : diffMode ? (
                       <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.diff_no_base') ?? 'No other version to compare with yet.'}</p>
                     ) : (
-                      <VersionHistory artifactID={selected.id} project={project} defaultOpen />
+                      <VersionHistory artifactID={selected.id} project={project} />
                     )}
                   </div>
                 )}
@@ -2138,22 +2138,23 @@ export default function Artifacts({ project }: { project?: string }) {
  *  approved revisions, newest first. The discloser stays collapsed — history
  *  matters after the first «Новая редакция», not before. A version row
  *  expands into its stored body. */
-function VersionHistory({ artifactID, project, defaultOpen }: { artifactID: string; project?: string; defaultOpen?: boolean }) {
+function VersionHistory({ artifactID, project }: { artifactID: string; project?: string }) {
   const t = useT()
-  const [open, setOpen] = useState(Boolean(defaultOpen))
   const [versions, setVersions] = useState<ArtifactVersion[] | null>(null)
   const [expanded, setExpanded] = useState(0)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    setOpen(false)
     setVersions(null)
     setExpanded(0)
     setError('')
   }, [artifactID])
 
+  // The versions TAB is the discloser now — the component mounts only when
+  // the tab is active, so the archive loads eagerly with no extra toggle:
+  // one click (the tab) must be enough to see the history.
   useEffect(() => {
-    if (!open || versions !== null) return
+    if (versions !== null) return
     let cancelled = false
     ;(async () => {
       try {
@@ -2164,19 +2165,11 @@ function VersionHistory({ artifactID, project, defaultOpen }: { artifactID: stri
       }
     })()
     return () => { cancelled = true }
-  }, [open, versions, artifactID])
+  }, [versions, artifactID])
 
   return (
-    <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        style={{ background: 'none', border: 'none', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.78rem', padding: 0, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
-      >
-        <span className="chevron-rotate" style={{ display: 'inline-flex', ...(open ? { transform: 'rotate(90deg)' } : {}) }}>›</span>
-        {t('artifacts.versions_title') ?? 'Version history'}
-      </button>
-      {open && (
-        <div style={{ marginTop: '0.4rem' }}>
+    <div>
+      <div>
           {error && <p style={{ color: 'var(--tm-danger)', fontSize: '0.75rem' }}>{error}</p>}
           {versions !== null && versions.length === 0 && (
             <p style={{ color: 'var(--tm-muted)', fontSize: '0.75rem' }}>{t('artifacts.versions_empty') ?? 'No archived revisions yet — history appears when a new revision of an approved artifact opens.'}</p>
@@ -2205,8 +2198,7 @@ function VersionHistory({ artifactID, project, defaultOpen }: { artifactID: stri
 
             </div>
           ))}
-        </div>
-      )}
+      </div>
 
     </div>
   )
