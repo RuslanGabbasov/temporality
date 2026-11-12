@@ -54,7 +54,12 @@ func TestAgentRunContinuesAsNewAtHistoryBudget(t *testing.T) {
 	}, activity.RegisterOptions{Name: ActivityRunTool})
 	registerExtraction(env, KnowledgeExtractResult{}, nil)
 
-	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-1", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "build the thing", MaxTurns: 4})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-1", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "build the thing", MaxTurns: 4, Resume: &RunState{
+		Messages: []llm.Message{{Role: "system", Content: "system"}, {Role: "user", Content: "build the thing"}},
+		NextTurn: 1, IssuedKnowledgeIDs: []string{"knowledge-primed"},
+		ActivatedMCPServers: []string{"github"}, ProcessedActivationKeys: []string{"tool.failed|stable"},
+		ActivationCount: 2, DynamicActivationTokensUsed: 240,
+	}})
 	require.True(t, env.IsWorkflowCompleted())
 
 	var continued *workflow.ContinueAsNewError
@@ -70,4 +75,9 @@ func TestAgentRunContinuesAsNewAtHistoryBudget(t *testing.T) {
 	require.Greater(t, next.Resume.EventSequence, 0, "the journal chain must continue, not restart")
 	require.NotEmpty(t, next.Resume.PreviousEventID, "the caused_by chain must survive")
 	require.Contains(t, next.Resume.Messages[len(next.Resume.Messages)-1].Content, "hi", "the tool replies must survive the handoff")
+	require.Equal(t, []string{"knowledge-primed"}, next.Resume.IssuedKnowledgeIDs)
+	require.Equal(t, []string{"github"}, next.Resume.ActivatedMCPServers)
+	require.Equal(t, []string{"tool.failed|stable"}, next.Resume.ProcessedActivationKeys)
+	require.Equal(t, 2, next.Resume.ActivationCount)
+	require.Equal(t, 240, next.Resume.DynamicActivationTokensUsed)
 }

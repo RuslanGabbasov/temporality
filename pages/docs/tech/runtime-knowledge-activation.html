@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>Техническое задание: Runtime Knowledge Activation в Temporality — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/runtime-knowledge-activation.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/runtime-knowledge-activation.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="Техническое задание: Runtime Knowledge Activation в Temporality — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/runtime-knowledge-activation.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Техническое задание: Runtime Knowledge Activation в Temporality — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/runtime-knowledge-activation.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row active" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Техническое задание: Runtime Knowledge Activation в Temporality</h1>
+
+<p><strong>Статус:</strong> проект задания на разработку<br><strong>Компонент:</strong> Temporality Kernel + Observation<br><strong>Цель:</strong> завершить исходную концепцию Temporality — реактивную активацию накопленных знаний во время исполнения агента, а не только предварительную выдачу знаний при старте run.</p>
+<hr>
+<h2 id="1-контекст-и-проблема"><a class="anchor" href="#1-контекст-и-проблема" aria-label="Section link">#</a>1. Контекст и проблема</h2><p>Изначальная идея Temporality состояла в том, чтобы предлагать агенту накопленный опыт в момент, когда он может повлиять на следующее решение:</p>
+<ul>
+<li>после неудачного вызова инструмента — предложить известные способы диагностики и исправления;</li>
+<li>после успешного первого обращения к MCP-серверу — предложить проверенные практики работы с этим сервером;</li>
+<li>при появлении нового рабочего контекста — предоставить знания, относящиеся к следующему этапу задачи.</li>
+</ul>
+<p>Текущая реализация преимущественно использует <strong>task priming</strong>: знания выбираются один раз при старте run и добавляются в начальный контекст агента. После этого агент выполняет инструменты и получает их результаты, но новые поводы для поиска знаний практически не приводят к повторной активации.</p>
+<p>При этом Observation уже содержит значительную часть необходимого механизма:</p>
+<ul>
+<li><code>POST /v1/observations/hints</code>;</li>
+<li>поля <code>query</code>, <code>tool</code>, <code>tool_result</code>, <code>entities</code>, <code>topics</code>;</li>
+<li><code>active_skills</code>, <code>issued_knowledge_ids</code>, <code>team_root</code>;</li>
+<li>существующий <code>FindHints</code>;</li>
+<li>telemetry <code>hint.query</code> и <code>hint.offered</code>;</li>
+<li>идентификаторы <code>activation_id</code> и <code>hint_id</code>.</li>
+</ul>
+<p>Следовательно, задача не предполагает создание второго механизма поиска знаний. Необходимо связать события исполнения Kernel с существующим retrieval-контуром Observation и обеспечить корректную доставку результатов в работающий контекст модели.</p>
+<h2 id="2-цель-разработки"><a class="anchor" href="#2-цель-разработки" aria-label="Section link">#</a>2. Цель разработки</h2><p>Реализовать <strong>Runtime Knowledge Activation</strong> — механизм повторного поиска и контекстной инъекции накопленных знаний во время исполнения агента.</p>
+<p>Система должна:</p>
+<ol>
+<li>Реагировать на значимые события исполнения.</li>
+<li>Формировать контекстный запрос к существующему Observation API.</li>
+<li>Получать релевантные знания с учётом уже выданных знаний и активных Skills.</li>
+<li>Не допускать повторной выдачи одного знания в рамках run.</li>
+<li>Вставлять новые подсказки в историю модели в корректной точке протокола tool calls.</li>
+<li>Учитывать бюджет контекста, ограничения частоты и ошибки retrieval.</li>
+<li>Сохранять состояние активации при <code>ContinueAsNew</code>.</li>
+<li>Позволять проследить причинную цепочку от события исполнения до выдачи знания и последующего результата.</li>
+</ol>
+<p><strong>Главный принцип:</strong> Temporality предлагает опыт в подходящий момент, но не управляет действиями агента. Агент самостоятельно решает, использовать ли предложенное знание.</p>
+<h2 id="3-термины"><a class="anchor" href="#3-термины" aria-label="Section link">#</a>3. Термины</h2><table>
+<thead>
+<tr>
+<th>Термин</th>
+<th>Значение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Run</td>
+<td>Один запуск агента, включая продолжения через <code>ContinueAsNew</code></td>
+</tr>
+<tr>
+<td>Activation</td>
+<td>Один запрос на поиск знаний, вызванный событием исполнения или начальным priming</td>
+</tr>
+<tr>
+<td>Trigger</td>
+<td>Событие, инициирующее activation</td>
+</tr>
+<tr>
+<td>Candidate</td>
+<td>Знание, найденное Observation</td>
+</tr>
+<tr>
+<td>Offered</td>
+<td>Знание, выбранное Observation и записанное как предложение</td>
+</tr>
+<tr>
+<td>Injected</td>
+<td>Знание, фактически добавленное Kernel в историю модели</td>
+</tr>
+<tr>
+<td>Used</td>
+<td>Знание, которое агент фактически использовал по принятой эвристике</td>
+</tr>
+<tr>
+<td>Outcome</td>
+<td>Оценка полезности или вреда знания по результатам run</td>
+</tr>
+<tr>
+<td>MCP server key</td>
+<td>Стабильный идентификатор MCP-сервера в конфигурации инструмента, не имя отдельного tool</td>
+</tr>
+</tbody></table>
+<h2 id="4-область-работ"><a class="anchor" href="#4-область-работ" aria-label="Section link">#</a>4. Область работ</h2><h3 id="41-входит-в-задачу"><a class="anchor" href="#41-входит-в-задачу" aria-label="Section link">#</a>4.1. Входит в задачу</h3><ul>
+<li>Расширение контракта Kernel → Observation для динамических активаций.</li>
+<li>Динамический retrieval после ошибок инструментов.</li>
+<li>Первичная активация при первом успешном обращении к MCP-серверу в рамках run.</li>
+<li>Сбор сигналов нескольких tool calls одного ответа модели.</li>
+<li>Дедупликация уже внедрённых знаний.</li>
+<li>Контекстная инъекция после завершения последовательности tool replies.</li>
+<li>Бюджетирование и throttling.</li>
+<li>Персистентность состояния в <code>RunState</code> и <code>ContinueAsNew</code>.</li>
+<li>Событийная трассировка и отображение причин активации.</li>
+<li>Unit-, workflow-, integration- и behavioral-тесты.</li>
+</ul>
+<h3 id="42-не-входит-в-задачу"><a class="anchor" href="#42-не-входит-в-задачу" aria-label="Section link">#</a>4.2. Не входит в задачу</h3><ul>
+<li>Изменение алгоритма <code>FindHints</code> и его ранжирования без доказанной необходимости.</li>
+<li>Создание отдельного хранилища или второго retrieval engine.</li>
+<li>Автоматическое исправление ошибок инструментов.</li>
+<li>Автоматический повтор операций на основании найденных знаний.</li>
+<li>Принудительное преобразование знаний в системные инструкции или policy.</li>
+<li>Активация после каждого успешного tool call.</li>
+<li>Полноценная семантическая интерпретация каждого промежуточного ответа модели.</li>
+<li>Новый механизм межагентной коммуникации.</li>
+<li>Изменение существующей модели Knowledge lifecycle и правил подтверждения знаний.</li>
+</ul>
+<h2 id="5-триггеры-активации"><a class="anchor" href="#5-триггеры-активации" aria-label="Section link">#</a>5. Триггеры активации</h2><p>Реализовать триггеры как расширяемую политику Kernel. На первом этапе обязательны следующие типы.</p>
+<h3 id="51-toolfailed"><a class="anchor" href="#51-toolfailed" aria-label="Section link">#</a>5.1. <code>tool.failed</code></h3><p><strong>Назначение:</strong> найти известный опыт диагностики и устранения проблемы после неудачного вызова инструмента.</p>
+<p>Условия:</p>
+<ul>
+<li>Инструмент действительно завершился ошибкой.</li>
+<li>Событие отражает результат исполнения, а не отказ пользователя или блокировку политикой.</li>
+<li>Для запроса доступен содержательный текст ошибки либо диагностический результат.</li>
+<li>Повторная активация допускается, если ситуация отличается от уже обработанной.</li>
+</ul>
+<p>В запрос передавать:</p>
+<ul>
+<li>исходную задачу run;</li>
+<li>имя инструмента;</li>
+<li>MCP server key, если применимо;</li>
+<li>ограниченный и очищенный текст ошибки;</li>
+<li>сведения о типе/классе ошибки, если они доступны;</li>
+<li>активные Skills;</li>
+<li>список уже внедрённых knowledge IDs;</li>
+<li>run/task/actor/team context.</li>
+</ul>
+<p>Не считать <code>tool.blocked</code>, отказ в approval и policy denial обычной ошибкой инструмента. Для них автоматический retrieval в рамках P0 не выполнять.</p>
+<p>Не делать вывод о безопасности повтора операции. Подсказка не должна отменять существующие сведения об effect/side effects (<code>none</code>, <code>uncertain</code> и другие статусы).</p>
+<h3 id="52-mcpfirstcall"><a class="anchor" href="#52-mcpfirstcall" aria-label="Section link">#</a>5.2. <code>mcp.first_call</code></h3><p><strong>Назначение:</strong> предложить проверенные практики работы с MCP-сервером при первом обращении к нему в данном run.</p>
+<p>Условия:</p>
+<ul>
+<li>Первый вызов инструмента конкретного MCP-сервера в пределах run.</li>
+<li>Вызов завершился успешно.</li>
+<li>MCP server key определён и стабилен.</li>
+<li>Для одного сервера первичная активация выполняется не более одного раза за run.</li>
+</ul>
+<p>В запрос передавать:</p>
+<ul>
+<li>исходную задачу;</li>
+<li>имя MCP-сервера;</li>
+<li>имя первого вызванного инструмента;</li>
+<li>ограниченный фрагмент результата, если он содержателен и безопасен для передачи;</li>
+<li>активные Skills;</li>
+<li>уже внедрённые knowledge IDs;</li>
+<li>контекст run/team.</li>
+</ul>
+<p>Первичный вызов сервера, завершившийся ошибкой, обрабатывается триггером <code>tool.failed</code>. Он также должен пометить сервер как уже встречавшийся, чтобы последующий успешный вызов не запускал вторую первичную активацию. Если при первой ошибке идентификатор сервера не был доступен, последующий вызов может стать первым распознанным MCP-вызовом.</p>
+<h3 id="53-будущие-триггеры"><a class="anchor" href="#53-будущие-триггеры" aria-label="Section link">#</a>5.3. Будущие триггеры</h3><p>Архитектура должна допускать добавление новых trigger types без переработки основного цикла исполнения. В частности, потенциально могут появиться:</p>
+<ul>
+<li>переход к новому этапу плана;</li>
+<li>появление новой технологии, API или сущности;</li>
+<li>существенное изменение понимания задачи;</li>
+<li>результат инструмента, открывающий новый рабочий контекст.</li>
+</ul>
+<p>В рамках текущего задания эти триггеры не реализовывать. Не добавлять извлечение смысловых сигналов из каждого ответа модели до отдельного обоснования и проектирования.</p>
+<h2 id="6-архитектура-исполнения"><a class="anchor" href="#6-архитектура-исполнения" aria-label="Section link">#</a>6. Архитектура исполнения</h2><h3 id="61-общий-цикл"><a class="anchor" href="#61-общий-цикл" aria-label="Section link">#</a>6.1. Общий цикл</h3><p>Ожидаемый цикл:</p>
+<ol>
+<li>Модель возвращает один или несколько <code>ToolCalls</code>.</li>
+<li>Kernel выполняет все вызовы согласно существующему механизму.</li>
+<li>Kernel добавляет в историю все соответствующие tool replies.</li>
+<li>По результатам исполнения собираются activation candidates.</li>
+<li>Применяются trigger policy, дедупликация и ограничения частоты.</li>
+<li>Для оставшихся activation candidates выполняется retrieval через <code>ActivityKnowledgeHints</code>.</li>
+<li>Kernel проверяет бюджет и отбирает знания для фактической инъекции.</li>
+<li>Новые knowledge cues добавляются в историю модели отдельным сообщением после всех tool replies.</li>
+<li>Следующий вызов модели получает результаты инструментов и новые знания.</li>
+</ol>
+<h3 id="62-требование-к-протоколу-tool-calls"><a class="anchor" href="#62-требование-к-протоколу-tool-calls" aria-label="Section link">#</a>6.2. Требование к протоколу tool calls</h3><p>Нельзя вставлять сообщения с подсказками между assistant tool-call message и ответами на вызовы инструментов, относящиеся к этому сообщению.</p>
+<p>Если модель вернула несколько <code>ToolCalls</code>, ответы на них должны остаться непрерывной последовательностью в соответствии с используемым API-протоколом.</p>
+<p><strong>Dynamic context injection выполняется только после того, как Kernel добавил ответы на все tool calls данного ответа модели.</strong></p>
+<p>Если в текущей реализации есть отдельные ветки для background operations, ожидания результата, HITL, plan/delegate или иных типов инструментов, необходимо проверить их совместимость с этим правилом. Нельзя добавлять подсказку в промежуточную точку, где модель ещё должна получить tool reply.</p>
+<h3 id="63-разделение-ответственности"><a class="anchor" href="#63-разделение-ответственности" aria-label="Section link">#</a>6.3. Разделение ответственности</h3><ul>
+<li><strong>Tool execution activity:</strong> выполняет инструмент и возвращает результат.</li>
+<li><strong>Workflow:</strong> интерпретирует события исполнения, выбирает триггеры, управляет состоянием и временем retrieval.</li>
+<li><strong>KnowledgeHints activity:</strong> вызывает Observation API.</li>
+<li><strong>Observation:</strong> выбирает знания, формирует activation telemetry и возвращает hints.</li>
+<li><strong>Workflow:</strong> решает, какие hints реально попадут в историю модели.</li>
+<li><strong>Agent:</strong> самостоятельно интерпретирует полученные знания и выбирает дальнейшие действия.</li>
+</ul>
+<p>Не помещать HTTP-вызов Observation непосредственно внутрь <code>ActivityRunTool</code>. Не смешивать выполнение инструмента и поиск знаний.</p>
+<h2 id="7-контракт-kernel-observation"><a class="anchor" href="#7-контракт-kernel-observation" aria-label="Section link">#</a>7. Контракт Kernel → Observation</h2><h3 id="71-расширение-hintrequest"><a class="anchor" href="#71-расширение-hintrequest" aria-label="Section link">#</a>7.1. Расширение <code>HintRequest</code></h3><p>Расширить существующий контракт <code>HintRequest</code> полями, необходимыми для динамической активации. Конкретные имена согласовать с текущими типами, но логически должны присутствовать:</p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Тип/смысл</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Trigger</code></td>
+<td>Тип активации: <code>task.priming</code>, <code>tool.failed</code>, <code>mcp.first_call</code></td>
+</tr>
+<tr>
+<td><code>Tool</code></td>
+<td>Имя вызванного инструмента</td>
+</tr>
+<tr>
+<td><code>MCPServer</code></td>
+<td>Стабильный ключ MCP-сервера, если применимо</td>
+</tr>
+<tr>
+<td><code>ToolResult</code></td>
+<td>Ограниченный диагностический/результирующий текст</td>
+</tr>
+<tr>
+<td><code>ErrorClass</code></td>
+<td>Класс ошибки, если доступен</td>
+</tr>
+<tr>
+<td><code>IssuedKnowledgeIDs</code></td>
+<td>Knowledge IDs, уже фактически внедрённые в контекст этого run</td>
+</tr>
+<tr>
+<td><code>ActivationSourceID</code></td>
+<td>Идентификатор события/операции, вызвавшей активацию</td>
+</tr>
+</tbody></table>
+<p>Сохранить совместимость с существующими полями:</p>
+<ul>
+<li><code>Project</code>;</li>
+<li><code>RunID</code>;</li>
+<li><code>TaskID</code>;</li>
+<li><code>ActorID</code>;</li>
+<li><code>Query</code>;</li>
+<li><code>Skills</code>;</li>
+<li><code>TeamRootRunID</code>.</li>
+</ul>
+<p>Не дублировать данные, которые уже надёжно выводятся на стороне Observation из существующего контракта. Не вводить необязательные поля без конкретного потребителя.</p>
+<h3 id="72-observation-http-api"><a class="anchor" href="#72-observation-http-api" aria-label="Section link">#</a>7.2. Observation HTTP API</h3><p>Использовать существующий <code>POST /v1/observations/hints</code>.</p>
+<p>Расширить <code>observationHintRequest</code> только теми полями, которых пока не хватает для трассировки или корректной семантики trigger. Сохранить текущую обработку:</p>
+<ul>
+<li><code>query</code>;</li>
+<li><code>tool</code>;</li>
+<li><code>tool_result</code>;</li>
+<li><code>active_skills</code>;</li>
+<li><code>issued_knowledge_ids</code>;</li>
+<li><code>team_root</code>;</li>
+<li>semantic embedding, если используется текущим Kernel.</li>
+</ul>
+<p><code>FindHints</code> остаётся единым механизмом поиска для начального и динамического priming.</p>
+<p><code>hint.query</code> должен содержать как минимум:</p>
+<ul>
+<li>trigger type;</li>
+<li>activation ID;</li>
+<li>идентификатор источника активации;</li>
+<li>число кандидатов;</li>
+<li>версию алгоритма;</li>
+<li>диагностические признаки запроса без записи чувствительного полного содержимого.</li>
+</ul>
+<p><code>hint.offered</code> должен содержать:</p>
+<ul>
+<li>activation ID;</li>
+<li>hint ID;</li>
+<li>knowledge ID;</li>
+<li>proposition;</li>
+<li>trigger type;</li>
+<li>источник активации;</li>
+<li>алгоритм/версию matcher.</li>
+</ul>
+<p>Если текущая схема событий не допускает новые поля без изменения схемы, расширять её обратно совместимым способом.</p>
+<h3 id="73-ограничение-и-очистка-содержимого"><a class="anchor" href="#73-ограничение-и-очистка-содержимого" aria-label="Section link">#</a>7.3. Ограничение и очистка содержимого</h3><p>Текст <code>tool_result</code> и ошибки может содержать секреты, персональные данные, большие документы и недоверенные инструкции.</p>
+<p>Требования:</p>
+<ul>
+<li>применять существующий механизм redaction до записи в журнал;</li>
+<li>не отправлять в retrieval полный бинарный/мультимодальный результат;</li>
+<li>использовать ограниченный текстовый фрагмент;</li>
+<li>не передавать содержимое, не нужное для определения релевантных знаний;</li>
+<li>не интерпретировать текст результата инструмента как инструкции для Kernel;</li>
+<li>учитывать существующие лимиты Observation API: <code>query</code> до 4096 символов, <code>tool_result</code> до 8192 символов, а также прочие текущие лимиты запроса.</li>
+</ul>
+<p>Kernel должен ограничивать данные до отправки, а Observation сохраняет собственную валидацию как второй рубеж.</p>
+<h2 id="8-состояние-workflow"><a class="anchor" href="#8-состояние-workflow" aria-label="Section link">#</a>8. Состояние Workflow</h2><p>Состояние динамической активации должно быть частью сериализуемого состояния run и корректно переноситься через <code>ContinueAsNew</code>.</p>
+<p>Предлагаемые логические поля:</p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Назначение</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>IssuedKnowledgeIDs</code></td>
+<td>Набор знаний, фактически внедрённых в контекст</td>
+</tr>
+<tr>
+<td><code>ActivatedMCPServers</code></td>
+<td>Набор MCP server keys, для которых обработан первичный триггер</td>
+</tr>
+<tr>
+<td><code>ActivationCount</code></td>
+<td>Количество выполненных динамических retrieval</td>
+</tr>
+<tr>
+<td><code>DynamicActivationTokensUsed</code></td>
+<td>Учёт токен-бюджета динамических подсказок</td>
+</tr>
+<tr>
+<td><code>ProcessedActivationKeys</code></td>
+<td>Ключи уже обработанных однотипных ситуаций для дедупликации</td>
+</tr>
+</tbody></table>
+<p>Требования:</p>
+<ol>
+<li>Состояние должно быть детерминированным и сериализуемым средствами используемого workflow engine.</li>
+<li>Порядок элементов в сериализуемых коллекциях должен быть детерминированным, если это важно для воспроизводимости.</li>
+<li>Нельзя хранить в состоянии полный tool output или полный ответ Observation, если достаточно ID и агрегированных счётчиков.</li>
+<li>Состояние должно переноситься в <code>ContinueAsNew</code>.</li>
+<li>Повторное выполнение workflow/activity не должно приводить к неконтролируемой повторной инъекции.</li>
+<li>Учесть семантику retry и replay используемого workflow engine.</li>
+</ol>
+<p><code>IssuedKnowledgeIDs</code> обновляется после фактической инъекции, а не сразу после получения ответа Observation.</p>
+<h2 id="9-дедупликация-и-throttling"><a class="anchor" href="#9-дедупликация-и-throttling" aria-label="Section link">#</a>9. Дедупликация и throttling</h2><h3 id="91-дедупликация-знаний"><a class="anchor" href="#91-дедупликация-знаний" aria-label="Section link">#</a>9.1. Дедупликация знаний</h3><p>Observation уже поддерживает <code>issued_knowledge_ids</code>. Kernel обязан передавать туда только знания, которые действительно были внедрены.</p>
+<p>Если знание было найдено, но отброшено из-за бюджета, оно не должно автоматически считаться внедрённым. При этом необходимо избегать повторных дорогостоящих запросов, которые каждый раз возвращают тот же неподходящий кандидат. Для этого допускается отдельное состояние suppression/deferred IDs, но оно не должно смешиваться с <code>IssuedKnowledgeIDs</code>.</p>
+<h3 id="92-дедупликация-ситуаций"><a class="anchor" href="#92-дедупликация-ситуаций" aria-label="Section link">#</a>9.2. Дедупликация ситуаций</h3><p>Повторные идентичные ошибки не должны порождать бесконечный retrieval.</p>
+<p>Ключ ситуации формировать из нормализованных признаков, например:</p>
+<ul>
+<li>trigger type;</li>
+<li>MCP server key или tool name;</li>
+<li>класс ошибки;</li>
+<li>нормализованный диагностический fingerprint.</li>
+</ul>
+<p>Не включать в fingerprint случайные идентификаторы, timestamps и нестабильные части текста ошибки.</p>
+<p>Новая ошибка другого класса или содержательно другая ситуация должна иметь возможность инициировать новую активацию.</p>
+<p>Точный алгоритм fingerprint и нормализации покрыть тестами и документировать.</p>
+<h3 id="93-ограничение-частоты"><a class="anchor" href="#93-ограничение-частоты" aria-label="Section link">#</a>9.3. Ограничение частоты</h3><p>Начальные рекомендуемые ограничения (конфигурируемые константы; значения уточнить по benchmark):</p>
+<ul>
+<li>не более одной <code>mcp.first_call</code> активации на MCP server key за run;</li>
+<li>не более одной активации для одного fingerprint ошибки за run;</li>
+<li>общий верхний предел динамических активаций на run;</li>
+<li>отдельный предел на один model turn;</li>
+<li>таймаут retrieval;</li>
+<li>отсутствие автоматических повторов retrieval при ошибке HTTP-запроса, кроме retry-политики, явно предусмотренной для идемпотентной activity.</li>
+</ul>
+<p>Лимиты не должны блокировать новую содержательно отличающуюся ошибку только потому, что достигнут лимит для другого инструмента. Общий лимит остаётся предохранителем от патологического поведения.</p>
+<h2 id="10-контекстная-инъекция"><a class="anchor" href="#10-контекстная-инъекция" aria-label="Section link">#</a>10. Контекстная инъекция</h2><h3 id="101-формат"><a class="anchor" href="#101-формат" aria-label="Section link">#</a>10.1. Формат</h3><p>Использовать существующий формат <code>temporality.memory</code> / <code>RenderHintBlock</code>, не создавать отдельный формат динамической памяти без необходимости.</p>
+<p>Сообщение должно явно сообщать агенту, что это дополнительный опыт, найденный по текущей ситуации, а не результат инструмента и не обязательная инструкция.</p>
+<p>Рекомендуемая семантика текста:</p>
+<blockquote>
+<p>Дополнительные знания Temporality, найденные по текущему событию исполнения. Используй их, если они применимы к текущей задаче; проверяй применимость и не считай их гарантией корректности.</p>
+</blockquote>
+<p>Не требуется дословно использовать этот текст, если существующий <code>RenderHintBlock</code> уже задаёт эквивалентную семантику.</p>
+<h3 id="102-положение-в-истории"><a class="anchor" href="#102-положение-в-истории" aria-label="Section link">#</a>10.2. Положение в истории</h3><ul>
+<li>После всех tool replies текущего набора вызовов.</li>
+<li>До следующего запроса к модели.</li>
+<li>Не заменять и не редактировать tool replies.</li>
+<li>Не добавлять отдельное сообщение, если нет ни одного пригодного к инъекции знания.</li>
+<li>Сохранять порядок и форматирование, принятые существующим <code>RenderHintBlock</code>.</li>
+</ul>
+<h3 id="103-учёт-фактической-инъекции"><a class="anchor" href="#103-учёт-фактической-инъекции" aria-label="Section link">#</a>10.3. Учёт фактической инъекции</h3><p>Разделить следующие состояния:</p>
+<ol>
+<li><code>retrieved</code> — Observation вернул кандидат.</li>
+<li><code>offered</code> — Observation записал <code>hint.offered</code>.</li>
+<li><code>selected</code> — Kernel выбрал подсказку с учётом бюджета.</li>
+<li><code>injected</code> — подсказка фактически добавлена в messages.</li>
+<li><code>used</code> — существующая логика оценки определила использование.</li>
+<li><code>outcome</code> — оценён полезный/вредный эффект.</li>
+</ol>
+<p>Нельзя считать <code>offered</code> эквивалентом <code>injected</code>, а <code>injected</code> — эквивалентом <code>used</code> или <code>helpful</code>.</p>
+<p>Если Kernel не смог внедрить подсказку после ответа Observation, это должно быть видно в telemetry. Необходимо выбрать совместимый с текущей моделью событий способ фиксации результата доставки, например отдельное событие <code>hint.delivery</code> либо расширение существующего события, если это допустимо схемой.</p>
+<h2 id="11-бюджетирование"><a class="anchor" href="#11-бюджетирование" aria-label="Section link">#</a>11. Бюджетирование</h2><p>Начальный priming и динамические подсказки должны иметь раздельные бюджеты.</p>
+<p>Требования:</p>
+<ul>
+<li>отдельный лимит токенов на одну динамическую активацию;</li>
+<li>общий лимит токенов динамической активации на run;</li>
+<li>ограничение числа подсказок на одну активацию;</li>
+<li>ограничение числа активаций на один turn;</li>
+<li>использование существующего механизма оценки размера <code>RenderHintBlock</code>, если он подходит;</li>
+<li>бюджет учитывать по фактически внедрённому блоку, а не по числу найденных кандидатов.</li>
+</ul>
+<p>Начальные значения вынести в конфигурацию или централизованные константы. В качестве стартовой настройки для тестового профиля можно использовать небольшой бюджет: до 300–500 токенов на одну активацию и до 1500–2000 токенов динамического контекста на run. Эти значения являются исходными для эксперимента, а не окончательными продуктовыми нормативами.</p>
+<p>Если кандидат не помещается в бюджет:</p>
+<ul>
+<li>не внедрять его;</li>
+<li>не добавлять его ID в <code>IssuedKnowledgeIDs</code>;</li>
+<li>зафиксировать причину недоставки;</li>
+<li>не допускать бесконечного повторного возврата того же кандидата без изменения контекста или бюджета.</li>
+</ul>
+<h2 id="12-отказоустойчивость-и-производительность"><a class="anchor" href="#12-отказоустойчивость-и-производительность" aria-label="Section link">#</a>12. Отказоустойчивость и производительность</h2><p>Retrieval является best-effort подсистемой.</p>
+<ul>
+<li>Недоступность Observation не должна ломать run.</li>
+<li>Таймаут retrieval не должен превращаться в ошибку инструмента.</li>
+<li>Ошибка записи telemetry не должна блокировать доставку уже полученных hints.</li>
+<li>Ошибка подсчёта/оценки бюджета не должна приводить к неконтролируемому росту prompt.</li>
+<li>Отсутствие подходящих знаний — штатный результат, не ошибка.</li>
+<li>Retrieval не должен выполняться для каждого успешного инструмента.</li>
+<li>Не допускать последовательного N+1 поиска для нескольких инструментов одного turn, если запросы можно объединить без потери контекста.</li>
+<li>Не добавлять заметную задержку к обычному успешному исполнению инструментов.</li>
+</ul>
+<p>Для P0 допустим синхронный retrieval на границе model turn с небольшим таймаутом. Асинхронная доставка не входит в обязательный объём: она усложняет согласование с моментом следующего model call и должна рассматриваться отдельно, если измерения покажут необходимость.</p>
+<h2 id="13-telemetry-и-диагностика"><a class="anchor" href="#13-telemetry-и-диагностика" aria-label="Section link">#</a>13. Telemetry и диагностика</h2><p>Нужно обеспечить возможность восстановить полную цепочку:</p>
+<p><code>trigger event → activation request → retrieved candidates → selected hints → injected hints → subsequent execution → usage/outcome</code></p>
+<p>Для каждой активации должны быть доступны:</p>
+<ul>
+<li><code>activation_id</code>;</li>
+<li>trigger type;</li>
+<li>run/task/actor;</li>
+<li>operation/event ID источника;</li>
+<li>tool name;</li>
+<li>MCP server key, если применимо;</li>
+<li>число найденных кандидатов;</li>
+<li>число отобранных кандидатов;</li>
+<li>число реально внедрённых подсказок;</li>
+<li>потраченный бюджет;</li>
+<li>длительность retrieval;</li>
+<li>результат retrieval: success / empty / timeout / error / skipped;</li>
+<li>причина skip, если активация не выполнялась.</li>
+</ul>
+<p>Не записывать в диагностические события полные секретоносные tool outputs.</p>
+<p>Существующие <code>hint.query</code>, <code>hint.offered</code>, <code>hint.used</code>, <code>hint.ignored</code>, <code>hint.outcome</code> сохранить. Новые события должны быть совместимы с текущей проекцией Knowledge и не приводить к лишней инвалидации knowledge cache.</p>
+<p>Отдельно проверить комментарии и allow-list <code>knowledgeProjectionTypes</code> / <code>affectsKnowledgeProjection</code>: события активации и доставки, не влияющие на Knowledge projection, не должны ошибочно инвалидировать её кеш.</p>
+<h2 id="14-изменения-в-debugger-observability"><a class="anchor" href="#14-изменения-в-debugger-observability" aria-label="Section link">#</a>14. Изменения в Debugger / Observability</h2><p>В рамках базовой реализации обеспечить доступность причин активации в существующем run timeline/inspector.</p>
+<p>Минимально необходимо видеть:</p>
+<ul>
+<li>событие, инициировавшее активацию;</li>
+<li>trigger type;</li>
+<li>найденные знания;</li>
+<li>фактически внедрённые знания;</li>
+<li>причину, по которой найденное знание не было внедрено;</li>
+<li>связь с последующим использованием и outcome, если они определены.</li>
+</ul>
+<p>Полноценные аналитические панели эффективности триггеров можно вынести в отдельную задачу P2, но данные для такой аналитики должны собираться уже сейчас.</p>
+<h2 id="15-требования-к-continueasnew-и-восстановлению"><a class="anchor" href="#15-требования-к-continueasnew-и-восстановлению" aria-label="Section link">#</a>15. Требования к ContinueAsNew и восстановлению</h2><p>Проверить все места, где формируется и восстанавливается <code>RunState</code>, включая:</p>
+<ul>
+<li>обычный run;</li>
+<li>background operations;</li>
+<li>ожидание завершения фоновой операции;</li>
+<li>HITL;</li>
+<li>plan/delegate и team runs;</li>
+<li><code>ContinueAsNew</code>.</li>
+</ul>
+<p>Состояние динамической активации должно переноситься без потери:</p>
+<ul>
+<li>уже внедрённых knowledge IDs;</li>
+<li>уже обработанных MCP server keys;</li>
+<li>fingerprints обработанных ошибок;</li>
+<li>счётчиков активаций и бюджета.</li>
+</ul>
+<p>Не переносить временные объекты или контексты activity. В состоянии должны оставаться только сериализуемые значения.</p>
+<p>Повторный replay не должен приводить к дублированию сообщений или повторной выдаче знаний. Использовать принятые в проекте практики детерминизма workflow engine и идемпотентности activity.</p>
+<h2 id="16-тестирование"><a class="anchor" href="#16-тестирование" aria-label="Section link">#</a>16. Тестирование</h2><h3 id="161-unit-tests"><a class="anchor" href="#161-unit-tests" aria-label="Section link">#</a>16.1. Unit tests</h3><p>Проверить:</p>
+<ul>
+<li>построение <code>HintRequest</code> для <code>tool.failed</code>;</li>
+<li>построение <code>HintRequest</code> для <code>mcp.first_call</code>;</li>
+<li>нормализацию и fingerprint ошибок;</li>
+<li>определение первого вызова MCP server key;</li>
+<li>дедупликацию уже обработанных ситуаций;</li>
+<li>дедупликацию внедрённых knowledge IDs;</li>
+<li>бюджетирование и отбор подсказок;</li>
+<li>различие offered / injected;</li>
+<li>обработку пустого ответа Observation;</li>
+<li>ограничение размера tool result;</li>
+<li>корректное исключение blocked/policy/approval событий.</li>
+</ul>
+<h3 id="162-workflow-tests"><a class="anchor" href="#162-workflow-tests" aria-label="Section link">#</a>16.2. Workflow tests</h3><p>Обязательные сценарии:</p>
+<table>
+<thead>
+<tr>
+<th>Сценарий</th>
+<th>Ожидаемый результат</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Первый успешный вызов MCP</td>
+<td>Выполняется одна активация <code>mcp.first_call</code></td>
+</tr>
+<tr>
+<td>Второй вызов того же MCP</td>
+<td>Повторной первичной активации нет</td>
+</tr>
+<tr>
+<td>Первый вызов MCP завершился ошибкой</td>
+<td>Выполняется <code>tool.failed</code>; сервер отмечается как встречавшийся</td>
+</tr>
+<tr>
+<td>Обычная ошибка инструмента</td>
+<td>Выполняется динамический retrieval</td>
+</tr>
+<tr>
+<td>Повтор идентичной ошибки</td>
+<td>Повторный retrieval подавляется</td>
+</tr>
+<tr>
+<td>Другая ошибка того же инструмента</td>
+<td>Новая активация допускается</td>
+</tr>
+<tr>
+<td>Несколько tool calls в одном ответе</td>
+<td>Все tool replies идут непрерывно; подсказки добавляются после них</td>
+</tr>
+<tr>
+<td>Два разных MCP в одном ответе</td>
+<td>Обрабатываются оба первичных триггера, если позволяет per-turn budget</td>
+</tr>
+<tr>
+<td>Знание уже внедрялось</td>
+<td>Повторная инъекция подавляется</td>
+</tr>
+<tr>
+<td>Знание найдено, но не помещается в бюджет</td>
+<td>Оно не попадает в <code>IssuedKnowledgeIDs</code></td>
+</tr>
+<tr>
+<td>Observation недоступен</td>
+<td>Run продолжается штатно</td>
+</tr>
+<tr>
+<td>ContinueAsNew</td>
+<td>Состояние активации сохраняется</td>
+</tr>
+<tr>
+<td>Background operation</td>
+<td>Активация происходит после фактического результата, а не после выдачи operation ID</td>
+</tr>
+<tr>
+<td>Tool blocked / approval denied</td>
+<td>Автоматическая активация не запускается</td>
+</tr>
+<tr>
+<td>Неопределённый side effect</td>
+<td>Подсказка не разрешает безусловный повтор операции</td>
+</tr>
+</tbody></table>
+<h3 id="163-integration-test"><a class="anchor" href="#163-integration-test" aria-label="Section link">#</a>16.3. Integration test</h3><p>Создать тестовый проект Observation с заранее подготовленным знанием, релевантным конкретной ошибке инструмента.</p>
+<p>Сценарий:</p>
+<ol>
+<li>Запустить агента с задачей, которая сама по себе не активирует это знание на старте.</li>
+<li>Выполнить инструмент, возвращающий известную ошибку.</li>
+<li>Убедиться, что Kernel инициировал <code>tool.failed</code>.</li>
+<li>Убедиться, что Observation нашёл подготовленное знание.</li>
+<li>Убедиться, что Kernel добавил его в историю после tool reply.</li>
+<li>Убедиться, что следующий запрос модели содержит подсказку.</li>
+<li>Убедиться, что telemetry связывает событие, activation и hint.</li>
+</ol>
+<p>Отдельно выполнить аналогичный сценарий для первого успешного MCP-вызова.</p>
+<h3 id="164-behavioral-test"><a class="anchor" href="#164-behavioral-test" aria-label="Section link">#</a>16.4. Behavioral test</h3><p>Провести контролируемый эксперимент на одинаковом наборе задач:</p>
+<ul>
+<li>контрольная группа: только начальный priming;</li>
+<li>экспериментальная группа: начальный priming + runtime activation.</li>
+</ul>
+<p>Сравнить:</p>
+<ul>
+<li>долю успешного завершения задач;</li>
+<li>число повторных неудачных вызовов;</li>
+<li>число бесполезных повторов;</li>
+<li>токены динамических подсказок;</li>
+<li>задержку на retrieval;</li>
+<li>долю реально использованных динамических знаний;</li>
+<li>helpful/harmful outcomes.</li>
+</ul>
+<p>Не считать простое увеличение <code>hint.used</code> доказательством улучшения качества. Основной критерий — улучшение результата задачи при приемлемой стоимости и задержке.</p>
+<h2 id="17-этапы-разработки"><a class="anchor" href="#17-этапы-разработки" aria-label="Section link">#</a>17. Этапы разработки</h2><h3 id="p0-замкнуть-цикл-на-ошибках"><a class="anchor" href="#p0-замкнуть-цикл-на-ошибках" aria-label="Section link">#</a>P0. Замкнуть цикл на ошибках</h3><ol>
+<li>Изучить все ветки исполнения инструментов в <code>kernel/agent/workflow.go</code>.</li>
+<li>Расширить <code>HintRequest</code> и <code>KnowledgeHints</code>.</li>
+<li>Провести <code>issued_knowledge_ids</code> от Workflow до Observation.</li>
+<li>Добавить состояние фактически внедрённых знаний.</li>
+<li>Реализовать сбор trigger candidates после tool execution.</li>
+<li>Реализовать <code>tool.failed</code>.</li>
+<li>Добавить безопасную инъекцию после всех tool replies.</li>
+<li>Реализовать базовую дедупликацию и лимиты.</li>
+<li>Обеспечить <code>ContinueAsNew</code>.</li>
+<li>Добавить workflow и integration tests.</li>
+<li>Обеспечить telemetry offered/injected.</li>
+</ol>
+<p><strong>Критерий завершения P0:</strong> знание, которое не было найдено на старте run, может быть найдено после ошибки инструмента и попасть в следующий model request без нарушения протокола tool calls.</p>
+<h3 id="p1-контекстная-активация-по-mcp"><a class="anchor" href="#p1-контекстная-активация-по-mcp" aria-label="Section link">#</a>P1. Контекстная активация по MCP</h3><ol>
+<li>Определить стабильный MCP server key в представлении инструмента.</li>
+<li>Добавить <code>ActivatedMCPServers</code> в RunState.</li>
+<li>Реализовать <code>mcp.first_call</code>.</li>
+<li>Обрабатывать несколько новых MCP-серверов в одном turn.</li>
+<li>Добавить bounded tool result для успешных вызовов.</li>
+<li>Добавить тесты на первый вызов, повторные вызовы и ContinueAsNew.</li>
+<li>Сравнить полезность MCP-triggered activation с failure-triggered activation.</li>
+</ol>
+<p><strong>Критерий завершения P1:</strong> первое успешное обращение к каждому MCP-серверу в run может активировать относящиеся к нему знания ровно один раз.</p>
+<h3 id="p2-измерение-эффективности"><a class="anchor" href="#p2-измерение-эффективности" aria-label="Section link">#</a>P2. Измерение эффективности</h3><ol>
+<li>Добавить отображение trigger и activation chain в Debugger.</li>
+<li>Добавить группировку effectiveness по trigger type.</li>
+<li>Сравнить helpful/harmful outcomes для разных типов активации.</li>
+<li>Провести behavioral benchmark.</li>
+<li>По результатам определить необходимость новых триггеров и изменения бюджетов.</li>
+</ol>
+<p><strong>Критерий завершения P2:</strong> можно оценить не только качество найденных знаний, но и эффективность момента, в который они были предложены.</p>
+<h2 id="18-критерии-приёмки-всей-задачи"><a class="anchor" href="#18-критерии-приёмки-всей-задачи" aria-label="Section link">#</a>18. Критерии приёмки всей задачи</h2><p>Разработка считается завершённой, если выполняются все условия:</p>
+<ul>
+<li><input disabled="" type="checkbox"> Существующий начальный priming продолжает работать без регрессий.</li>
+<li><input disabled="" type="checkbox"> После содержательной ошибки инструмента возможен повторный поиск знаний.</li>
+<li><input disabled="" type="checkbox"> Первый успешный вызов MCP-сервера может инициировать поиск знаний.</li>
+<li><input disabled="" type="checkbox"> Повторные вызовы того же MCP не запускают первичную активацию повторно.</li>
+<li><input disabled="" type="checkbox"> Повтор одинаковой ошибки не создаёт бесконечный цикл retrieval.</li>
+<li><input disabled="" type="checkbox"> Новые подсказки добавляются только после завершения всех tool replies текущего набора вызовов.</li>
+<li><input disabled="" type="checkbox"> Kernel передаёт Observation IDs знаний, фактически внедрённых в текущий run.</li>
+<li><input disabled="" type="checkbox"> Найденные, предложенные и внедрённые знания различаются в telemetry.</li>
+<li><input disabled="" type="checkbox"> Динамические подсказки ограничены отдельным бюджетом.</li>
+<li><input disabled="" type="checkbox"> Ошибка или недоступность Observation не ломает выполнение агента.</li>
+<li><input disabled="" type="checkbox"> Состояние динамической активации сохраняется через ContinueAsNew.</li>
+<li><input disabled="" type="checkbox"> Background operations активируют знания по фактическому результату, а не по выдаче operation ID.</li>
+<li><input disabled="" type="checkbox"> Секреты и избыточные данные tool outputs не попадают в журнал.</li>
+<li><input disabled="" type="checkbox"> Есть integration test, подтверждающий фактическое попадание динамической подсказки в следующий model request.</li>
+<li><input disabled="" type="checkbox"> Есть behavioral benchmark, позволяющий оценить пользу механизма.</li>
+</ul>
+<h2 id="19-рекомендуемые-точки-изменения-кода"><a class="anchor" href="#19-рекомендуемые-точки-изменения-кода" aria-label="Section link">#</a>19. Рекомендуемые точки изменения кода</h2><p>Перед реализацией разработчик должен повторно проверить актуальное состояние ветки и найти фактические точки исполнения. Предварительные ориентиры:</p>
+<table>
+<thead>
+<tr>
+<th>Область</th>
+<th>Файл / компонент</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Основной цикл и состояние run</td>
+<td><code>kernel/agent/workflow.go</code></td>
+</tr>
+<tr>
+<td>Контракт HintRequest и activity</td>
+<td><code>kernel/agent/activities.go</code></td>
+</tr>
+<tr>
+<td>Механизм выбора знаний</td>
+<td><code>observation/hints.go</code></td>
+</tr>
+<tr>
+<td>HTTP endpoint активации</td>
+<td><code>observation/httpapi/server.go</code></td>
+</tr>
+<tr>
+<td>Алгоритм priming и ограничения релевантности</td>
+<td><code>docs/plan-priming-relevance.md</code></td>
+</tr>
+<tr>
+<td>Событийная модель и Knowledge projection</td>
+<td><code>observation/knowledge.go</code> и связанные типы</td>
+</tr>
+<tr>
+<td>ContinueAsNew</td>
+<td><code>kernel/agent/workflow.go</code> и соответствующие тесты</td>
+</tr>
+<tr>
+<td>Workflow tests</td>
+<td><code>kernel/agent/*_test.go</code></td>
+</tr>
+<tr>
+<td>Benchmark priming</td>
+<td><code>observation/testdata/priming/</code> и связанные тесты</td>
+</tr>
+</tbody></table>
+<p>Список не является исчерпывающим. Необходимо найти все реализации tool execution, включая специальные пути background, delegation, plan и HITL.</p>
+<h2 id="20-архитектурные-решения-которые-нельзя-нарушать"><a class="anchor" href="#20-архитектурные-решения-которые-нельзя-нарушать" aria-label="Section link">#</a>20. Архитектурные решения, которые нельзя нарушать</h2><ol>
+<li><strong>Один retrieval engine.</strong> Начальный и динамический поиск используют существующий Observation <code>FindHints</code>.</li>
+<li><strong>Kernel управляет моментом доставки.</strong> Observation не должен самостоятельно менять историю модели.</li>
+<li><strong>Никаких подсказок между tool replies.</strong> Инъекция выполняется на безопасной границе model turn.</li>
+<li><strong>Offered не равно injected.</strong> Событие предложения не доказывает, что агент получил знание.</li>
+<li><strong>Injected не равно used/helpful.</strong> Оценка применения остаётся отдельной.</li>
+<li><strong>Только best effort.</strong> Отказ подсистемы знаний не должен ломать выполнение задачи.</li>
+<li><strong>Никакого автоматического исполнения рекомендаций.</strong> Знание — контекст для решения агента, а не команда Kernel.</li>
+<li><strong>Детерминизм workflow.</strong> Все изменения состояния должны быть совместимы с replay и ContinueAsNew.</li>
+<li><strong>Минимизация контекста.</strong> Передавать только данные, необходимые для поиска релевантного опыта.</li>
+<li><strong>Измерять behavioral impact.</strong> Количество найденных подсказок само по себе не является метрикой успеха.</li>
+</ol>
+<hr>
+<h2 id="21-ожидаемый-результат"><a class="anchor" href="#21-ожидаемый-результат" aria-label="Section link">#</a>21. Ожидаемый результат</h2><p>После реализации Temporality должна работать не только как система предварительной подготовки контекста, но и как система <strong>runtime knowledge activation</strong>:</p>
+<ul>
+<li>агент начинает работу с релевантным накопленным опытом;</li>
+<li>при столкновении с известной проблемой получает подходящие способы диагностики;</li>
+<li>при первом обращении к новому MCP-серверу получает проверенные практики работы с ним;</li>
+<li>по мере работы может получать новые знания, если возникают новые объективные сигналы;</li>
+<li>каждое вмешательство можно проследить и оценить;</li>
+<li>накопленный опыт улучшает последующие исполнения без превращения Kernel в систему жёстко заданных сценариев.</li>
+</ul>
+<p>Итоговый принцип: <strong>Temporality наблюдает за исполнением, распознаёт моменты потенциальной потребности в опыте и предлагает знания; агент сохраняет свободу принятия решения, а результат исполнения становится новым свидетельством полезности этого опыта.</strong></p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="runbook.html"><small>← Назад</small><strong>Runbook — Temporality</strong></a>
+    <a class="pager-next" href="sagas.html"><small>Далее →</small><strong>Саги: явная регистрация долгой работы (Sagas)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

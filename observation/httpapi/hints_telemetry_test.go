@@ -126,6 +126,60 @@ func TestHintTelemetryBatchFraming(t *testing.T) {
 	}
 }
 
+func TestRuntimeHintTelemetryCarriesActivationContext(t *testing.T) {
+	store := memory.New()
+	s := NewServer(store, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	if res, body := doJSON(t, s, http.MethodPost, "/v1/observations/events", map[string]any{
+		"events": []observation.Event{proposedEvent("lighthouse", "evt-runtime-k1", "K-runtime-1", "When GitHub returns 429 rate limit, honor Retry-After before retrying")},
+	}); res.StatusCode != http.StatusOK {
+		t.Fatalf("seed runtime knowledge status = %d, body = %v", res.StatusCode, body)
+	}
+	res, body := doJSON(t, s, http.MethodPost, "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "run": "run-runtime", "task": "task-7",
+		"query": "retry the repository operation", "tool": "mcp__github__list_issues",
+		"tool_result": "429 rate limit; retry after 30 seconds", "trigger": "tool.failed",
+		"activation_id": "run-runtime/activation/abc", "mcp_server": "github",
+		"error_class": "rate_limited", "activation_source_id": "run-runtime/turn/02/op-1",
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("runtime hints status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["activation_id"] != "run-runtime/activation/abc" {
+		t.Fatalf("activation id = %v", body["activation_id"])
+	}
+	queries, offers := storedTelemetry(t, store)
+	if len(queries) != 1 {
+		t.Fatalf("hint.query events = %d", len(queries))
+	}
+	data := queries[0].Data
+	for key, want := range map[string]string{
+		"trigger": "tool.failed", "tool": "mcp__github__list_issues", "mcp_server": "github",
+		"error_class": "rate_limited", "activation_source_id": "run-runtime/turn/02/op-1",
+	} {
+		if data[key] != want {
+			t.Errorf("hint.query %s = %v, want %s", key, data[key], want)
+		}
+	}
+	if len(offers) == 0 {
+		t.Fatal("runtime activation should offer the relevant seeded knowledge")
+	}
+	for _, offer := range offers {
+		if offer.Data["trigger"] != "tool.failed" || offer.Data["activation_source_id"] != "run-runtime/turn/02/op-1" {
+			t.Errorf("hint.offered lacks activation context: %#v", offer.Data)
+		}
+	}
+}
+
+func TestRuntimeHintTelemetryRejectsUnknownTrigger(t *testing.T) {
+	s := NewServer(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	res, _ := doJSON(t, s, http.MethodPost, "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "query": "an activation", "trigger": "tool.started",
+	})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown trigger status = %d, want 422", res.StatusCode)
+	}
+}
+
 // A telemetry write failure must not turn an answered hints call into a 500:
 // the offer events are reuse statistics, the agent still needs the hints.
 func TestHintTelemetryFailureStillAnswersHints(t *testing.T) {

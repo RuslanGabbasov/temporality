@@ -58,6 +58,7 @@ function eventHasPresentation(row: { title: string }): boolean {
   return !row.title.startsWith('Событие:') && !row.title.startsWith('Event:')
 }
 const isHint = (type: string): boolean => type.startsWith('hint.')
+const isHintTraffic = (type: string): boolean => ['hint.query', 'hint.offered', 'hint.used', 'hint.ignored', 'hint.outcome'].includes(type)
 const isKnowledge = (type: string): boolean =>
   type === 'knowledge.proposed' || type === 'knowledge.extraction.started' || type === 'knowledge.extraction.completed'
 
@@ -205,7 +206,7 @@ export function groupSummary(group: Extract<TraceItem, { kind: 'group' }>, t: Tr
       return { label: t('runs.layers.group.ops_noise'), detail: t('runs.layers.group.ops_noise_hint', { count: String(group.events.length) }) }
     case 'knowledge': {
       const learned = group.events.filter((e) => e.type === 'knowledge.proposed').length
-      const hints = group.events.filter((e) => isHint(e.type))
+      const hints = group.events.filter((e) => isHintTraffic(e.type))
       const used = hints.filter((e) => e.type === 'hint.used').length
       const completed = group.events.find((e) => e.type === 'knowledge.extraction.completed')
       const candidates = completed?.data?.candidates_count
@@ -228,7 +229,7 @@ export function groupSummary(group: Extract<TraceItem, { kind: 'group' }>, t: Tr
 /** Hint-aggregate counter «N подсказок, M использовано» (§5.6). */
 export function hintAggregate(events: ObservationEvent[]): { total: number; used: number; offered: number } {
   return {
-    total: events.filter((e) => isHint(e.type)).length,
+    total: events.filter((e) => isHintTraffic(e.type)).length,
     used: events.filter((e) => e.type === 'hint.used').length,
     offered: events.filter((e) => e.type === 'hint.offered').length,
   }

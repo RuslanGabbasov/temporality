@@ -1851,16 +1851,21 @@ func (s *Server) exploreObservationKnowledge(w http.ResponseWriter, r *http.Requ
 }
 
 type observationHintRequest struct {
-	Project    string            `json:"project"`
-	Run        string            `json:"run,omitempty"`
-	Task       string            `json:"task,omitempty"`
-	Actor      observation.Actor `json:"actor,omitempty"`
-	Query      string            `json:"query,omitempty"`
-	Tool       string            `json:"tool,omitempty"`
-	ToolResult string            `json:"tool_result,omitempty"`
-	Entities   []string          `json:"entities,omitempty"`
-	Topics     []string          `json:"topics,omitempty"`
-	Limit      int               `json:"limit,omitempty"`
+	Project            string            `json:"project"`
+	Run                string            `json:"run,omitempty"`
+	Task               string            `json:"task,omitempty"`
+	Actor              observation.Actor `json:"actor,omitempty"`
+	Query              string            `json:"query,omitempty"`
+	Tool               string            `json:"tool,omitempty"`
+	ToolResult         string            `json:"tool_result,omitempty"`
+	Trigger            string            `json:"trigger,omitempty"`
+	ActivationID       string            `json:"activation_id,omitempty"`
+	MCPServer          string            `json:"mcp_server,omitempty"`
+	ErrorClass         string            `json:"error_class,omitempty"`
+	ActivationSourceID string            `json:"activation_source_id,omitempty"`
+	Entities           []string          `json:"entities,omitempty"`
+	Topics             []string          `json:"topics,omitempty"`
+	Limit              int               `json:"limit,omitempty"`
 	// ActiveSkills carries the digests of skills already attached to the
 	// agent's prompt (plan-priming-relevance.md §7); duplicating candidates
 	// are demoted, not excluded.
@@ -1890,6 +1895,18 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 	input.Project = strings.TrimSpace(input.Project)
 	input.Query = strings.TrimSpace(input.Query)
 	input.Tool = strings.TrimSpace(input.Tool)
+	input.Trigger = strings.TrimSpace(input.Trigger)
+	input.ActivationID = strings.TrimSpace(input.ActivationID)
+	input.MCPServer = strings.TrimSpace(input.MCPServer)
+	input.ErrorClass = strings.TrimSpace(input.ErrorClass)
+	input.ActivationSourceID = strings.TrimSpace(input.ActivationSourceID)
+	if input.Trigger == "" {
+		input.Trigger = "task.priming"
+	}
+	if input.Trigger != "task.priming" && input.Trigger != "tool.failed" && input.Trigger != "mcp.first_call" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("trigger must be task.priming, tool.failed or mcp.first_call"))
+		return
+	}
 	if len([]rune(input.Query)) > 4096 || len([]rune(input.ToolResult)) > 8192 {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("query exceeds the 4096 character limit or tool_result exceeds the 8192 character limit"))
 		return
@@ -1924,6 +1941,10 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 	}
 	if len([]rune(input.TeamRunRoot)) > 256 {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("team_root exceeds the 256 character limit"))
+		return
+	}
+	if len(input.ActivationID) > 256 || len(input.ActivationSourceID) > 512 || len(input.MCPServer) > 256 || len(input.ErrorClass) > 128 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("activation metadata exceeds size limits"))
 		return
 	}
 	// The plain per-turn path rides the shared projection cache (the same
@@ -1994,7 +2015,10 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		}
 	}
 	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs, Embedding: input.Embedding, KnowledgeEmbeddings: knowledgeEmbeddings, Now: time.Now()})
-	activationID := newUUID()
+	activationID := input.ActivationID
+	if activationID == "" {
+		activationID = newUUID()
+	}
 	context := observation.Context{Project: input.Project, Run: input.Run, Task: input.Task, Actor: input.Actor}
 	// Activation telemetry in one frame: hint.query plus one hint.offered per
 	// offer, appended by a single batched store call. Hint IDs ride on the
@@ -2005,7 +2029,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		Schema: observation.Schema, EventID: activationID, OccurredAt: s.now().UTC(), ReceivedAt: s.now().UTC(),
 		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 		Context: context, Type: "hint.query",
-		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs), "team_root": input.TeamRunRoot, "team_run_knowledge_count": len(teamRunKnowledgeIDs), "semantic_tier": embeddingUsed},
+		Data: map[string]any{"activation_id": activationID, "trigger": input.Trigger, "activation_source_id": input.ActivationSourceID, "tool": input.Tool, "mcp_server": input.MCPServer, "error_class": input.ErrorClass, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs), "team_root": input.TeamRunRoot, "team_run_knowledge_count": len(teamRunKnowledgeIDs), "semantic_tier": embeddingUsed},
 	})
 	for i := range hints {
 		offerID := newUUID()
@@ -2017,7 +2041,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 			Context: context, Type: "hint.offered",
 			// The proposition rides along so run timelines show what was actually
 			// suggested — raw hint/knowledge ids mean nothing to a human.
-			Data: map[string]any{"hint_id": offerID, "activation_id": activationID, "knowledge_id": hints[i].KnowledgeID, "state": hints[i].State, "matched_by": hints[i].MatchedBy, "proposition": hints[i].Proposition, "algorithm_version": observation.HintsAlgorithmVersion},
+			Data: map[string]any{"hint_id": offerID, "activation_id": activationID, "knowledge_id": hints[i].KnowledgeID, "state": hints[i].State, "matched_by": hints[i].MatchedBy, "proposition": hints[i].Proposition, "trigger": input.Trigger, "activation_source_id": input.ActivationSourceID, "algorithm_version": observation.HintsAlgorithmVersion},
 		})
 	}
 	// Telemetry is advisory: a storage failure costs reuse statistics, not the

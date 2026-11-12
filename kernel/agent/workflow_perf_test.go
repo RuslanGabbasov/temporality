@@ -155,7 +155,8 @@ func TestTitleAndHintsDefaultVersionKeepsSequentialOrder(t *testing.T) {
 	env.RegisterWorkflowWithOptions(func(ctx workflow.Context, input RunInput) (string, error) {
 		activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		state := &eventState{run: input, eventScope: eventScope(input.SourceID, input.Project, input.RunID)}
-		return runTitleAndHints(ctx, activityCtx, state, input, map[string]any{"task_id": input.TaskID}, workflow.DefaultVersion)
+		block, _, err := runTitleAndHints(ctx, activityCtx, state, input, map[string]any{"task_id": input.TaskID}, workflow.DefaultVersion)
+		return block, err
 	}, workflow.RegisterOptions{Name: "titleHintsSequentialProbe"})
 	env.ExecuteWorkflow("titleHintsSequentialProbe", RunInput{RunID: "perf-title-sequential", Project: "repo-a", Prompt: "please fix the login timeout", SourceID: "test-source"})
 	require.NoError(t, env.GetWorkflowError())
@@ -187,7 +188,8 @@ func TestTitleAndHintsParallelVersionSchedulesBothUpFront(t *testing.T) {
 	env.RegisterWorkflowWithOptions(func(ctx workflow.Context, input RunInput) (string, error) {
 		activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		state := &eventState{run: input, eventScope: eventScope(input.SourceID, input.Project, input.RunID)}
-		return runTitleAndHints(ctx, activityCtx, state, input, map[string]any{"task_id": input.TaskID}, 1)
+		block, _, err := runTitleAndHints(ctx, activityCtx, state, input, map[string]any{"task_id": input.TaskID}, 1)
+		return block, err
 	}, workflow.RegisterOptions{Name: "titleHintsParallelProbe"})
 	env.ExecuteWorkflow("titleHintsParallelProbe", RunInput{RunID: "perf-title-parallel-probe", Project: "repo-a", Prompt: "please fix the login timeout", SourceID: "test-source"})
 	require.NoError(t, env.GetWorkflowError())

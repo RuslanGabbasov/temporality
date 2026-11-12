@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,53 @@ import (
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+func TestKnowledgeHintsRuntimeRequestIsBoundedAndCarriesActivation(t *testing.T) {
+	var got map[string]any
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/v1/observations/hints" {
+			t.Errorf("path = %s", request.URL.Path)
+		}
+		if err := json.NewDecoder(request.Body).Decode(&got); err != nil {
+			return nil, err
+		}
+		responseBody := `{"activation_id":"run-1/activation/abc","hints":[]}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(responseBody)), Header: make(http.Header)}, nil
+	})}
+	activities := &Activities{HTTP: client, TemporalityURL: "http://observation.invalid"}
+	toolResult := strings.Repeat("x", 8100) + " token=super-secret"
+	hints, err := activities.KnowledgeHints(context.Background(), HintRequest{
+		Project: "demo", RunID: "run-1", Query: "the task", Trigger: "tool.failed",
+		ActivationID: "run-1/activation/abc", Tool: "mcp__git__status", MCPServer: "git",
+		ToolResult: toolResult, ErrorClass: "timeout", IssuedKnowledgeIDs: []string{"k1"},
+		ActivationSourceID: "run-1/turn/1/op-1",
+	})
+	if err != nil {
+		t.Fatalf("KnowledgeHints: %v", err)
+	}
+	if len(hints) != 0 {
+		t.Fatalf("hints = %#v", hints)
+	}
+	for key, want := range map[string]string{
+		"trigger": "tool.failed", "activation_id": "run-1/activation/abc", "tool": "mcp__git__status",
+		"mcp_server": "git", "error_class": "timeout", "activation_source_id": "run-1/turn/1/op-1",
+	} {
+		if got[key] != want {
+			t.Errorf("payload[%s] = %v, want %s", key, got[key], want)
+		}
+	}
+	if got["issued_knowledge_ids"].([]any)[0] != "k1" {
+		t.Errorf("issued ids = %v", got["issued_knowledge_ids"])
+	}
+	result, ok := got["tool_result"].(string)
+	if !ok || len([]rune(result)) > 8000 || strings.Contains(result, "super-secret") {
+		t.Errorf("tool_result was not bounded/redacted (runes=%d)", len([]rune(result)))
+	}
+}
 
 type recordingSandbox struct {
 	mu       sync.Mutex

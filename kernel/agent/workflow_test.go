@@ -187,6 +187,77 @@ func TestRejectedToolArgumentsAreReportedAsFixable(t *testing.T) {
 	}
 }
 
+func TestRuntimeActivationKeysNormalizeVolatileErrorDetails(t *testing.T) {
+	first := runtimeActivation{Trigger: "tool.failed", Tool: "mcp__github__issues", ErrorClass: "activity_failed", ToolResult: "request 19382 timed out for 550e8400-e29b-41d4-a716-446655440000"}
+	second := runtimeActivation{Trigger: "tool.failed", Tool: "mcp__github__issues", ErrorClass: "activity_failed", ToolResult: "request 98765 timed out for 123e4567-e89b-12d3-a456-426614174000"}
+	if runtimeActivationKey(first) != runtimeActivationKey(second) {
+		t.Fatal("volatile request ids must not defeat situation deduplication")
+	}
+	second.ToolResult = "permission denied by repository policy"
+	if runtimeActivationKey(first) == runtimeActivationKey(second) {
+		t.Fatal("distinct failure situations must have distinct activation keys")
+	}
+	second.ToolResult = first.ToolResult
+	second.MCPServer = "another-server"
+	if runtimeActivationKey(first) == runtimeActivationKey(second) {
+		t.Fatal("identical tool failures on different MCP servers must remain distinct")
+	}
+	if runtimeActivationID("run-a", runtimeActivationKey(first)) == runtimeActivationID("run-b", runtimeActivationKey(first)) {
+		t.Fatal("activation ids must be scoped to their run")
+	}
+	if runtimeActivationErrorClass(errors.New("provider returned 429: rate limit exceeded")) != "rate_limited" || runtimeActivationErrorClass(errors.New("provider returned 500: service failed")) == "rate_limited" {
+		t.Fatal("failure classes must retain actionable distinctions when numeric details are normalized")
+	}
+}
+
+func TestRuntimeActivationBlocksPolicyAndArgumentErrors(t *testing.T) {
+	for _, kind := range []string{"InvalidToolArguments", "ToolNotAllowed", "FilesystemDenied", "NetworkDisabled"} {
+		if !runtimeActivationBlocked(temporal.NewNonRetryableApplicationError("rejected before execution", kind, nil)) {
+			t.Errorf("%s must not trigger knowledge activation", kind)
+		}
+	}
+	if runtimeActivationBlocked(errors.New("remote service unavailable")) {
+		t.Fatal("execution failures should remain eligible for activation")
+	}
+}
+
+func TestRuntimeActivationSeparatesRetrievalTimeoutFromFailure(t *testing.T) {
+	status, reason := runtimeActivationRetrievalFailure(errors.New("activity timeout: context deadline exceeded"))
+	if status != "timeout" || reason != "retrieval_timeout" {
+		t.Fatalf("timeout classification = %s/%s", status, reason)
+	}
+	status, reason = runtimeActivationRetrievalFailure(errors.New("connection refused"))
+	if status != "error" || reason != "retrieval_failed" {
+		t.Fatalf("error classification = %s/%s", status, reason)
+	}
+}
+
+func TestRuntimeHintBudgetIsStrictAndTracksInjectedHintsOnly(t *testing.T) {
+	hints := []Hint{{KnowledgeID: "k1", Proposition: "The deployment token expires every hour and requires refresh", State: "confirmed", MatchedBy: []string{"term:deployment"}}}
+	for _, used := range []int{maxDynamicActivationTokens, maxDynamicActivationTokens + 1} {
+		if got := renderRuntimeHints(hints, used); got.Block != "" || got.Tokens != 0 || len(got.KeptIDs) != 0 {
+			t.Errorf("tokens already used %d: unexpected render %#v", used, got)
+		}
+	}
+	first := renderRuntimeHints(hints, maxDynamicActivationTokens-maxDynamicActivationTokensEach)
+	if first.Block == "" || first.Tokens > maxDynamicActivationTokensEach || len(first.KeptIDs) != 1 {
+		t.Fatalf("first hint should fit the remaining per-activation budget: %#v", first)
+	}
+	remaining := 150
+	last := renderRuntimeHints(hints, maxDynamicActivationTokens-remaining)
+	if last.Tokens > remaining {
+		t.Fatalf("last hint exceeded remaining run budget: %#v", last)
+	}
+}
+
+func TestRuntimeActivationTextIsRedactedAndBounded(t *testing.T) {
+	input := strings.Repeat("diagnostic ", 8100) + " token=private-value"
+	got := boundedActivationText(input)
+	if len([]rune(got)) > 8000 || strings.Contains(got, "private-value") {
+		t.Fatalf("activation text exceeded limit or retained a credential (runes=%d)", len([]rune(got)))
+	}
+}
+
 func TestEventScopeIncludesProjectAndRun(t *testing.T) {
 	first := eventScope("source-a", "project-a", "run-1")
 	if first != eventScope("source-a", "project-a", "run-1") {
@@ -1097,6 +1168,120 @@ func TestMCPCallEventsCarryServerAndResultRef(t *testing.T) {
 	}
 	require.Equal(t, 1, started)
 	require.Equal(t, 1, completed)
+}
+
+func TestRuntimeMCPActivationIsInjectedBeforeNextModelCall(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var hintRequests []HintRequest
+	env.RegisterActivityWithOptions(func(_ context.Context, request HintRequest) ([]Hint, error) {
+		hintRequests = append(hintRequests, request)
+		if request.Trigger != "mcp.first_call" {
+			return nil, nil
+		}
+		proposition := "GitHub pagination uses cursor tokens"
+		if request.MCPServer == "gitlab" {
+			proposition = "GitLab projects use numeric project ids"
+		}
+		return []Hint{{KnowledgeID: "knowledge-" + request.MCPServer, Proposition: proposition, State: "confirmed", MatchedBy: []string{"term:repository"}}}, nil
+	}, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	modelCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		modelCalls++
+		if modelCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{
+				{ID: "mcp-runtime-1", Name: "mcp__github__list_issues", Args: map[string]any{}},
+				{ID: "mcp-runtime-2", Name: "mcp__gitlab__list_projects", Args: map[string]any{}},
+				{ID: "mcp-runtime-3", Name: "mcp__github__list_issues", Args: map[string]any{}},
+			}}, nil
+		}
+		var githubCue, gitlabCue bool
+		lastToolReply, toolReplies, githubHint, gitlabHint := -1, 0, -1, -1
+		for index, message := range request.Messages {
+			if message.Role == "tool" {
+				lastToolReply = index
+				toolReplies++
+			}
+			if message.Role == "system" {
+				if strings.Contains(message.Content, "GitHub pagination uses cursor tokens") {
+					githubCue, githubHint = true, index
+				}
+				if strings.Contains(message.Content, "GitLab projects use numeric project ids") {
+					gitlabCue, gitlabHint = true, index
+				}
+			}
+		}
+		require.True(t, githubCue && gitlabCue, "both MCP activations must reach the next model request")
+		require.Equal(t, 3, toolReplies, "all tool replies must remain present before activation messages")
+		require.Greater(t, githubHint, lastToolReply, "knowledge must follow all replies from the tool-call batch")
+		require.Greater(t, gitlabHint, lastToolReply, "knowledge must follow all replies from the tool-call batch")
+		return llm.Completion{Content: "completed"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(context.Context, observation.Event) error { return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		return ToolResult{Content: "429 rate limit"}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "runtime-mcp", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "list issues", MaxTurns: 3})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Len(t, hintRequests, 3)
+	require.Equal(t, "task.priming", hintRequests[0].Trigger)
+	require.Equal(t, "mcp.first_call", hintRequests[1].Trigger)
+	require.Equal(t, "github", hintRequests[1].MCPServer)
+	require.Equal(t, "mcp__github__list_issues", hintRequests[1].Tool)
+	require.Equal(t, "runtime-mcp/turn/01/mcp-runtime-1", hintRequests[1].ActivationSourceID)
+	require.Equal(t, "mcp.first_call", hintRequests[2].Trigger)
+	require.Equal(t, "gitlab", hintRequests[2].MCPServer)
+	require.Equal(t, "runtime-mcp/turn/01/mcp-runtime-2", hintRequests[2].ActivationSourceID)
+	for _, request := range hintRequests[1:] {
+		require.NotEqual(t, "runtime-mcp/turn/01/mcp-runtime-3", request.ActivationSourceID, "repeat server calls must not retrigger MCP priming")
+	}
+}
+
+func TestRuntimeToolFailureActivationReachesNextModelCall(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var dynamicRequest HintRequest
+	env.RegisterActivityWithOptions(func(_ context.Context, request HintRequest) ([]Hint, error) {
+		if request.Trigger == "tool.failed" {
+			dynamicRequest = request
+			return []Hint{{KnowledgeID: "knowledge-permission", Proposition: "Refresh the deployment token before retrying", State: "confirmed", MatchedBy: []string{"term:permission"}}}, nil
+		}
+		return nil, nil
+	}, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	modelCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		modelCalls++
+		if modelCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "failed-command", Name: "run_command", Args: map[string]any{"command": []any{"deploy"}}}}}, nil
+		}
+		var prompt string
+		for _, message := range request.Messages {
+			if message.Role == "system" {
+				prompt += message.Content
+			}
+		}
+		require.Contains(t, prompt, "Refresh the deployment token before retrying")
+		return llm.Completion{Content: "reported"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(context.Context, observation.Event) error { return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		exitCode := 1
+		return ToolResult{Content: "permission denied; token=secret-value", ExitCode: &exitCode}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "runtime-failure", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "deploy the project", MaxTurns: 3})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, "tool.failed", dynamicRequest.Trigger)
+	require.Equal(t, "run_command", dynamicRequest.Tool)
+	require.Equal(t, "process_exit_1", dynamicRequest.ErrorClass)
+	require.NotContains(t, dynamicRequest.ToolResult, "secret-value")
 }
 
 func TestAgentRunDelegatesToAnotherAgent(t *testing.T) {

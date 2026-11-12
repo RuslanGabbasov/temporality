@@ -96,6 +96,7 @@ Documentation is available in Russian and English; every link below points at th
 - [Replay model (Phase 2 audit)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/replay-model.md)
 - [Отказоустойчивость и масштабируемость](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/resilience-and-scale.md)
 - [Runbook — Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/runbook.md)
+- [Техническое задание: Runtime Knowledge Activation в Temporality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/runtime-knowledge-activation.md)
 - [Саги: явная регистрация долгой работы (Sagas)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/sagas.md)
 - [Профили песочниц (Sandbox Profiles) [L1-360]](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/sandbox-profiles.md)
 - [Sandbox security matrix](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/sandbox-security-matrix.md)

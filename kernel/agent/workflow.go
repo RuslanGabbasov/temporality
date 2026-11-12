@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -75,6 +76,94 @@ const (
 	// card (when configured) still caps what the child may use.
 	DelegatedTurnsFloor = 24
 )
+
+var activationVolatileText = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b0x[0-9a-f]+\b|\b\d{2,}\b`)
+
+func runtimeActivationKey(candidate runtimeActivation) string {
+	if candidate.Trigger == "mcp.first_call" {
+		return candidate.Trigger + "|" + candidate.MCPServer
+	}
+	text := strings.ToLower(strings.Join(strings.Fields(activationVolatileText.ReplaceAllString(redactProse(candidate.ToolResult), "#")), " "))
+	digest := sha256.Sum256([]byte(candidate.MCPServer + "\x00" + candidate.Tool + "\x00" + candidate.ErrorClass + "\x00" + text))
+	return candidate.Trigger + "|" + hex.EncodeToString(digest[:])
+}
+
+func runtimeActivationID(runID, key string) string {
+	digest := sha256.Sum256([]byte(runID + "\x00" + key))
+	return runID + "/activation/" + hex.EncodeToString(digest[:12])
+}
+
+func runtimeActivationBlocked(err error) bool {
+	var application *temporal.ApplicationError
+	if !errors.As(err, &application) {
+		return false
+	}
+	// Not an execution result worth retrieval (docs/runtime-knowledge-activation.md
+	// §5.1): malformed arguments, tool-allowlist and policy denials (filesystem,
+	// network) are pre-execution refusals, and approval rejections never reach
+	// here — their path marks toolBlocked directly.
+	switch application.Type() {
+	case "InvalidToolArguments", "ToolNotAllowed", "FilesystemDenied", "NetworkDisabled":
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeActivationErrorClass(err error) string {
+	var application *temporal.ApplicationError
+	if errors.As(err, &application) && application.Type() != "" {
+		return "activity_" + strings.ToLower(application.Type())
+	}
+	detail := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(detail, "429"), strings.Contains(detail, "rate limit"), strings.Contains(detail, "rate_limit"):
+		return "rate_limited"
+	case strings.Contains(detail, "timeout"), strings.Contains(detail, "timed out"), strings.Contains(detail, "deadline exceeded"):
+		return "timeout"
+	case strings.Contains(detail, "connection refused"), strings.Contains(detail, "connection reset"), strings.Contains(detail, "unavailable"):
+		return "service_unavailable"
+	default:
+		return "activity_failed"
+	}
+}
+
+func runtimeActivationRetrievalFailure(err error) (status, reason string) {
+	text := strings.ToLower(err.Error())
+	if strings.Contains(text, "timeout") || strings.Contains(text, "timed out") || strings.Contains(text, "deadline exceeded") {
+		return "timeout", "retrieval_timeout"
+	}
+	return "error", "retrieval_failed"
+}
+
+func sortedTrueKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key, value := range values {
+		if value {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func renderRuntimeHints(hints []Hint, tokensUsed int) observation.RenderResult {
+	remaining := maxDynamicActivationTokens - tokensUsed
+	if remaining <= 0 {
+		return observation.RenderHintBlock(nil, observation.RenderOptions{})
+	}
+	budget := min(maxDynamicActivationTokensEach, remaining)
+	return observation.RenderHintBlock(toObservationHints(hints), observation.RenderOptions{MaxTokens: budget, MaxCueTokens: 100, MaxHints: maxDynamicHintsEach})
+}
+
+func boundedActivationText(value string) string {
+	text := redactProse(value)
+	runes := []rune(text)
+	if len(runes) > 8000 {
+		return string(runes[:8000])
+	}
+	return text
+}
 
 type RunInput struct {
 	RunID   string `json:"run_id"`
@@ -271,26 +360,48 @@ type RunInput struct {
 // Tool futures (background ops, inflight delegations) are NOT carried: the
 // boundary is only taken when they are settled.
 type RunState struct {
-	Messages           []llm.Message           `json:"messages"`
-	NextTurn           int                     `json:"next_turn"`
-	UsedTokens         int                     `json:"used_tokens"`
-	UsedCostUSD        float64                 `json:"used_cost_usd"`
-	StartedAt          time.Time               `json:"started_at"`
-	PlanAnswers        map[string]string       `json:"plan_answers,omitempty"`
-	Plans              int                     `json:"plans"`
-	Delegations        int                     `json:"delegations"`
-	SubtreeTokens      int                     `json:"subtree_tokens"`
-	SubtreeCostUSD     float64                 `json:"subtree_cost_usd"`
-	GateQueuedTotal    time.Duration           `json:"gate_queued_total"`
-	ForcedFinaleReason string                  `json:"forced_finale_reason,omitempty"`
-	DeferredReplies    []AgentReply            `json:"deferred_replies,omitempty"`
-	CollabIncoming     map[string]AgentMessage `json:"collab_incoming,omitempty"`
-	AnsweredAsks       map[string]bool         `json:"answered_asks,omitempty"`
-	Continues          int                     `json:"continues"`
-	Frames             []string                `json:"frames,omitempty"`
-	EventSequence      int                     `json:"event_sequence"`
-	PreviousEventID    string                  `json:"previous_event_id"`
-	Frame              string                  `json:"frame"`
+	Messages                    []llm.Message           `json:"messages"`
+	NextTurn                    int                     `json:"next_turn"`
+	UsedTokens                  int                     `json:"used_tokens"`
+	UsedCostUSD                 float64                 `json:"used_cost_usd"`
+	StartedAt                   time.Time               `json:"started_at"`
+	PlanAnswers                 map[string]string       `json:"plan_answers,omitempty"`
+	Plans                       int                     `json:"plans"`
+	Delegations                 int                     `json:"delegations"`
+	SubtreeTokens               int                     `json:"subtree_tokens"`
+	SubtreeCostUSD              float64                 `json:"subtree_cost_usd"`
+	GateQueuedTotal             time.Duration           `json:"gate_queued_total"`
+	ForcedFinaleReason          string                  `json:"forced_finale_reason,omitempty"`
+	DeferredReplies             []AgentReply            `json:"deferred_replies,omitempty"`
+	CollabIncoming              map[string]AgentMessage `json:"collab_incoming,omitempty"`
+	AnsweredAsks                map[string]bool         `json:"answered_asks,omitempty"`
+	Continues                   int                     `json:"continues"`
+	Frames                      []string                `json:"frames,omitempty"`
+	EventSequence               int                     `json:"event_sequence"`
+	PreviousEventID             string                  `json:"previous_event_id"`
+	Frame                       string                  `json:"frame"`
+	IssuedKnowledgeIDs          []string                `json:"issued_knowledge_ids,omitempty"`
+	ActivatedMCPServers         []string                `json:"activated_mcp_servers,omitempty"`
+	ProcessedActivationKeys     []string                `json:"processed_activation_keys,omitempty"`
+	ActivationCount             int                     `json:"activation_count,omitempty"`
+	DynamicActivationTokensUsed int                     `json:"dynamic_activation_tokens_used,omitempty"`
+}
+
+const (
+	maxDynamicActivationsPerRun    = 5
+	maxDynamicActivationsPerTurn   = 2
+	maxDynamicActivationTokens     = 1800
+	maxDynamicActivationTokensEach = 400
+	maxDynamicHintsEach            = 4
+)
+
+type runtimeActivation struct {
+	Trigger    string
+	Tool       string
+	MCPServer  string
+	ToolResult string
+	ErrorClass string
+	SourceID   string
 }
 
 // subtreeTotals accumulates the spend of a run's child runs as their results
@@ -655,10 +766,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// the title and the hint block ride in the resume state, and run.started
 	// belongs to the original execution.
 	var messages []llm.Message
+	var initialIssuedKnowledgeIDs []string
 	if input.Resume != nil {
 		messages = input.Resume.Messages
 	} else {
-		hintBlock, err := runTitleAndHints(ctx, activityCtx, state, input, started, titleParallel)
+		hintBlock, initialIssued, err := runTitleAndHints(ctx, activityCtx, state, input, started, titleParallel)
 		if err != nil {
 			return result, err
 		}
@@ -676,6 +788,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if hintBlock != "" {
 			messages = append(messages, llm.Message{Role: "system", Content: hintBlock})
 		}
+		initialIssuedKnowledgeIDs = initialIssued
 		// Mentioned workspace entities (docs/chat-mentions.md): `@kind:id`, bare
 		// `@id` and plain pasted ids in the prompt resolve to one compact system
 		// block. Version-gated like every schedule change — histories recorded
@@ -695,6 +808,88 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if len(input.MCPUnavailable) > 0 {
 			messages = append(messages, llm.Message{Role: "system", Content: mcpUnavailableNotice(input.MCPUnavailable)})
 		}
+	}
+	issuedKnowledge := map[string]bool{}
+	activatedMCP := map[string]bool{}
+	processedActivations := map[string]bool{}
+	activationCount, dynamicTokensUsed := 0, 0
+	for _, id := range initialIssuedKnowledgeIDs {
+		issuedKnowledge[id] = true
+	}
+	if input.Resume != nil {
+		for _, id := range input.Resume.IssuedKnowledgeIDs {
+			issuedKnowledge[id] = true
+		}
+		for _, key := range input.Resume.ActivatedMCPServers {
+			activatedMCP[key] = true
+		}
+		for _, key := range input.Resume.ProcessedActivationKeys {
+			processedActivations[key] = true
+		}
+		activationCount = input.Resume.ActivationCount
+		dynamicTokensUsed = input.Resume.DynamicActivationTokensUsed
+	}
+	activateRuntimeCandidates := func(candidates []runtimeActivation, turn int) error {
+		if input.SkipKnowledge || input.Project == "" || len(candidates) == 0 {
+			return nil
+		}
+		attemptedThisTurn := 0
+		for _, candidate := range candidates {
+			key := runtimeActivationKey(candidate)
+			activationID := runtimeActivationID(input.RunID, key)
+			if processedActivations[key] {
+				if err := emit(activityCtx, state, "hint.delivery", map[string]any{"activation_id": activationID, "trigger": candidate.Trigger, "activation_source_id": candidate.SourceID, "tool": candidate.Tool, "mcp_server": candidate.MCPServer, "status": "skipped", "reason": "duplicate_situation"}); err != nil {
+					return err
+				}
+				continue
+			}
+			if attemptedThisTurn >= maxDynamicActivationsPerTurn || activationCount >= maxDynamicActivationsPerRun {
+				if err := emit(activityCtx, state, "hint.delivery", map[string]any{"activation_id": activationID, "trigger": candidate.Trigger, "activation_source_id": candidate.SourceID, "tool": candidate.Tool, "mcp_server": candidate.MCPServer, "status": "skipped", "reason": "activation_limit"}); err != nil {
+					return err
+				}
+				continue
+			}
+			processedActivations[key] = true
+			attemptedThisTurn++
+			activationCount++
+			query := input.Prompt
+			if input.HintQuery != "" {
+				query = input.HintQuery
+			}
+			hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 8 * time.Second, ScheduleToCloseTimeout: 9 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+			request := HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: query, Skills: input.Skills, TeamRoot: input.TeamRootRunID, Trigger: candidate.Trigger, ActivationID: activationID, Tool: candidate.Tool, MCPServer: candidate.MCPServer, ToolResult: candidate.ToolResult, ErrorClass: candidate.ErrorClass, IssuedKnowledgeIDs: sortedTrueKeys(issuedKnowledge), ActivationSourceID: candidate.SourceID}
+			startedAt := workflow.Now(ctx)
+			var hints []Hint
+			err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, request).Get(ctx, &hints)
+			elapsed := workflow.Now(ctx).Sub(startedAt).Milliseconds()
+			if err != nil {
+				status, reason := runtimeActivationRetrievalFailure(err)
+				if eventErr := emit(activityCtx, state, "hint.delivery", map[string]any{"activation_id": activationID, "trigger": candidate.Trigger, "activation_source_id": candidate.SourceID, "tool": candidate.Tool, "mcp_server": candidate.MCPServer, "status": status, "reason": reason, "retrieval_ms": elapsed}); eventErr != nil {
+					return eventErr
+				}
+				continue
+			}
+			rendered := renderRuntimeHints(hints, dynamicTokensUsed)
+			if rendered.Block == "" {
+				reason := "no_candidates"
+				if len(hints) > 0 {
+					reason = "budget_exhausted"
+				}
+				if eventErr := emit(activityCtx, state, "hint.delivery", map[string]any{"activation_id": activationID, "trigger": candidate.Trigger, "activation_source_id": candidate.SourceID, "tool": candidate.Tool, "mcp_server": candidate.MCPServer, "status": map[bool]string{true: "empty", false: "skipped"}[len(hints) == 0], "reason": reason, "candidate_count": len(hints), "selected_count": 0, "injected_count": 0, "tokens": 0, "retrieval_ms": elapsed}); eventErr != nil {
+					return eventErr
+				}
+				continue
+			}
+			messages = append(messages, llm.Message{Role: "system", Content: rendered.Block})
+			for _, id := range rendered.KeptIDs {
+				issuedKnowledge[id] = true
+			}
+			dynamicTokensUsed += rendered.Tokens
+			if eventErr := emit(activityCtx, state, "hint.delivery", map[string]any{"activation_id": activationID, "trigger": candidate.Trigger, "activation_source_id": candidate.SourceID, "tool": candidate.Tool, "mcp_server": candidate.MCPServer, "status": "injected", "candidate_count": len(hints), "selected_count": rendered.Kept, "injected_count": rendered.Kept, "knowledge_ids": rendered.KeptIDs, "tokens": rendered.Tokens, "dropped_count": rendered.Dropped, "retrieval_ms": elapsed}); eventErr != nil {
+				return eventErr
+			}
+		}
+		return nil
 	}
 	// Hint usage is NOT recorded here: injection is an offer, not a use. The
 	// honest used/ignored signal is derived from the run's own output after it
@@ -1690,26 +1885,31 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if continuation == 1 && historyBytes >= int64(state.budget().ContinueAsNewBytes) && len(background) == 0 {
 			next := input
 			next.Resume = &RunState{
-				Messages:           messages,
-				NextTurn:           turn,
-				UsedTokens:         usedTokens,
-				UsedCostUSD:        usedCostUSD,
-				StartedAt:          runStartedAt,
-				PlanAnswers:        planAnswers,
-				Plans:              plans,
-				Delegations:        delegations,
-				SubtreeTokens:      subtree.tokens,
-				SubtreeCostUSD:     subtree.costUSD,
-				GateQueuedTotal:    gateQueuedTotal,
-				ForcedFinaleReason: forcedFinaleReason,
-				DeferredReplies:    deferredReplies,
-				CollabIncoming:     collabState.incoming,
-				AnsweredAsks:       collabState.answered,
-				Continues:          continues,
-				Frames:             frames,
-				EventSequence:      state.sequence,
-				PreviousEventID:    state.previousEventID,
-				Frame:              state.frame,
+				Messages:                    messages,
+				NextTurn:                    turn,
+				UsedTokens:                  usedTokens,
+				UsedCostUSD:                 usedCostUSD,
+				StartedAt:                   runStartedAt,
+				PlanAnswers:                 planAnswers,
+				Plans:                       plans,
+				Delegations:                 delegations,
+				SubtreeTokens:               subtree.tokens,
+				SubtreeCostUSD:              subtree.costUSD,
+				GateQueuedTotal:             gateQueuedTotal,
+				ForcedFinaleReason:          forcedFinaleReason,
+				DeferredReplies:             deferredReplies,
+				CollabIncoming:              collabState.incoming,
+				AnsweredAsks:                collabState.answered,
+				Continues:                   continues,
+				Frames:                      frames,
+				EventSequence:               state.sequence,
+				PreviousEventID:             state.previousEventID,
+				Frame:                       state.frame,
+				IssuedKnowledgeIDs:          sortedTrueKeys(issuedKnowledge),
+				ActivatedMCPServers:         sortedTrueKeys(activatedMCP),
+				ProcessedActivationKeys:     sortedTrueKeys(processedActivations),
+				ActivationCount:             activationCount,
+				DynamicActivationTokensUsed: dynamicTokensUsed,
 			}
 			return result, workflow.NewContinueAsNewError(ctx, AgentRun, next)
 		}
@@ -1915,8 +2115,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				usedTokens += completion.Usage.TotalTokens
 				usedCostUSD += modelCallCostUSD(input, completion.Usage)
 				messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content})
-				if _, waitErr := awaitBackgroundOps(ctx, activityCtx, state, &messages, background); waitErr != nil {
+				_, backgroundActivations, waitErr := awaitBackgroundOps(ctx, activityCtx, state, &messages, background)
+				if waitErr != nil {
 					return result, waitErr
+				}
+				if err := activateRuntimeCandidates(backgroundActivations, turn); err != nil {
+					return result, err
 				}
 				if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "reopened_by_background": true}); err != nil {
 					return result, err
@@ -2008,6 +2212,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// at a width-limit slot or, at the latest, before the turn closes. FIFO
 		// awaiting keeps the event order deterministic for replay.
 		var inflight []*pendingDelegation
+		var turnActivations []runtimeActivation
 		awaitDelegation := func(p *pendingDelegation) error {
 			var child RunResult
 			// Mid-delegation steering (docs/agent-delegation.md §steering):
@@ -2093,6 +2298,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "tool.failed", toolFailedData); err != nil {
 					return err
 				}
+				turnActivations = append(turnActivations, runtimeActivation{Trigger: "tool.failed", Tool: "delegate", ErrorClass: "delegated_run_failed", ToolResult: boundedFailureDetail(childErr), SourceID: p.operationID})
 			} else {
 				if err := emit(activityCtx, state, "delegation.completed", map[string]any{"operation_id": p.operationID, "child_run_id": p.childRunID, "agent_id": p.agentID, "child_status": child.Status, "turns": child.Turns}); err != nil {
 					return err
@@ -2273,6 +2479,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			var toolResult ToolResult
 			toolFailed := false
+			activationErrorClass := ""
+			activationDiagnostic := ""
 			toolBlocked := false
 			if call.Name == "ask_human" {
 				// Escalation to a human (docs/triggers-and-escalations.md §5-13,
@@ -2894,7 +3102,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						// and execution — the honest end-to-end cost of the operation.
 						toolStarted := workflow.Now(ctx)
 						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion, VisionDescribe: input.VisionDescribe}).Get(ctx, &toolResult); err != nil {
-							toolFailed = true
+							toolBlocked = runtimeActivationBlocked(err)
+							toolFailed = !toolBlocked
 							failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
 							if eventErr := emit(activityCtx, state, "tool.failed", failure); eventErr != nil {
@@ -3069,6 +3278,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					toolStarted := workflow.Now(ctx)
 					if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox, Filesystem: input.Filesystem, PolicyVersion: input.PolicyVersion, VisionDescribe: input.VisionDescribe}).Get(ctx, &toolResult); err != nil {
 						toolFailed = true
+						activationErrorClass = runtimeActivationErrorClass(err)
+						activationDiagnostic = boundedFailureDetail(err)
 						failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 						failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
 						if eventErr := emit(activityCtx, state, "tool.failed", failure); eventErr != nil {
@@ -3076,6 +3287,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						}
 						toolResult.Content = toolFailureMessage(call.Name, err)
 					} else {
+						activationDiagnostic = redactProse(toolResult.Content)
+						if toolResult.ExitCode != nil && *toolResult.ExitCode != 0 {
+							toolFailed = true
+							activationErrorClass = fmt.Sprintf("process_exit_%d", *toolResult.ExitCode)
+							if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "process_exit", "exit_code": *toolResult.ExitCode, "effect": map[bool]string{true: "none", false: "uncertain"}[isReadOnlyCall(call.Name, call.Args)]}); err != nil {
+								return result, err
+							}
+						}
 						completed := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "latency_ms": workflow.Now(ctx).Sub(toolStarted).Milliseconds()}
 						// Exit code makes tool completion a first-class trajectory fact:
 						// a command exiting non-zero is a failed attempt even though the
@@ -3102,6 +3321,16 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// Deferred delegate calls skip the per-call tail: their tool message,
 				// executed entry and completion events land at await time instead.
 				if isMCP && !toolBlocked {
+					server := mcpServerForTool(call.Name, input.MCPServer)
+					firstServerCall := server != "" && !activatedMCP[server]
+					if server != "" {
+						activatedMCP[server] = true
+					}
+					if toolFailed || (toolResult.ExitCode != nil && *toolResult.ExitCode != 0) {
+						turnActivations = append(turnActivations, runtimeActivation{Trigger: "tool.failed", Tool: call.Name, MCPServer: server, ToolResult: activationDiagnostic, ErrorClass: activationErrorClass, SourceID: operationID})
+					} else if firstServerCall {
+						turnActivations = append(turnActivations, runtimeActivation{Trigger: "mcp.first_call", Tool: call.Name, MCPServer: server, ToolResult: boundedActivationText(toolResult.Content), SourceID: operationID})
+					}
 					eventType := "mcp.call.completed"
 					data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": mcpServerForTool(call.Name, input.MCPServer)}
 					if toolFailed {
@@ -3118,6 +3347,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					if err := emit(activityCtx, state, eventType, data); err != nil {
 						return result, err
 					}
+				}
+				if !isMCP && !toolBlocked && (toolFailed || (toolResult.ExitCode != nil && *toolResult.ExitCode != 0)) {
+					turnActivations = append(turnActivations, runtimeActivation{Trigger: "tool.failed", Tool: call.Name, ToolResult: activationDiagnostic, ErrorClass: activationErrorClass, SourceID: operationID})
 				}
 				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: boundedToolOutput(toolResult.Content, state.budget().ToolOutputMaxBytes, state.budget().ToolOutputTailBytes)})
 				turnImages = append(turnImages, toolResult.Images...)
@@ -3163,6 +3395,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return result, err
 				}
 			}
+		}
+		if err := activateRuntimeCandidates(turnActivations, turn); err != nil {
+			return result, err
 		}
 		if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "tool_calls": len(completion.ToolCalls), "behavior_monitor": input.BehaviorMonitor}); err != nil {
 			return result, err
@@ -3265,7 +3500,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// bounded by its own timeout_sec) and journal the outcomes. No further
 	// model turns: the finale answer stands, the events carry the outcomes.
 	if len(background) > 0 {
-		if _, err := awaitBackgroundOps(ctx, activityCtx, state, &messages, background); err != nil {
+		if _, _, err := awaitBackgroundOps(ctx, activityCtx, state, &messages, background); err != nil {
 			return result, err
 		}
 	}
@@ -3531,7 +3766,7 @@ func conversationTail(messages []llm.Message, budget int) string {
 // recorded before the gate) issues the original sequence: title activity →
 // run.started → hints activity. When only one of the two applies, the
 // sequential path runs as before — there is nothing to overlap.
-func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state *eventState, input RunInput, started map[string]any, titleParallel workflow.Version) (string, error) {
+func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state *eventState, input RunInput, started map[string]any, titleParallel workflow.Version) (string, []string, error) {
 	title := cleanTitle(input.Title)
 	needTitle := input.ParentRunID == "" && title == ""
 	// A team program run has no model turns at the root, so prior-knowledge
@@ -3556,7 +3791,7 @@ func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state 
 	if titleParallel == 1 && needTitle && needHints {
 		titleCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		titleFuture = workflow.ExecuteActivity(titleCtx, ActivityGenerateTitle, TitleRequest{Prompt: input.Prompt})
-		hintsFuture = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID})
+		hintsFuture = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID, Trigger: "task.priming"})
 	}
 	if input.ParentRunID == "" {
 		// Root runs get a short human title for the Runs list; delegated child
@@ -3585,16 +3820,17 @@ func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state 
 		}
 	}
 	if err := emit(activityCtx, state, "run.started", started); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var priorHints []Hint
 	var hintBlock string
+	var issuedIDs []string
 	if needHints {
 		var hintsErr error
 		if hintsFuture != nil {
 			hintsErr = hintsFuture.Get(ctx, &priorHints)
 		} else {
-			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
+			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID, Trigger: "task.priming"}).Get(ctx, &priorHints)
 		}
 		if hintsErr != nil {
 			// The common miss is the boot-order race (kernel up, journal still
@@ -3603,24 +3839,25 @@ func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state 
 			// The parallel path retries only after the first attempt's future has
 			// been resolved, so the recorded command order stays deterministic.
 			workflow.Sleep(ctx, 3*time.Second)
-			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
+			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: hintQuery, Skills: input.Skills, TeamRoot: input.TeamRootRunID, Trigger: "task.priming"}).Get(ctx, &priorHints)
 		}
 		if hintsErr != nil {
 			// Retrieval is best-effort, but the miss is still part of the trajectory.
 			if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable", "detail": boundedFailureDetail(hintsErr)}); eventErr != nil {
-				return "", eventErr
+				return "", nil, eventErr
 			}
 		} else {
 			// One budgeted block instead of per-hint messages: the model sees a
 			// compact cue list with the knowledge_id contract, not a wall of prose.
 			rendered := observation.RenderHintBlock(toObservationHints(priorHints), observation.DefaultRenderOptions())
 			hintBlock = rendered.Block
+			issuedIDs = rendered.KeptIDs
 			if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints), "primed_hints": rendered.Kept, "primed_tokens": rendered.Tokens, "dropped_hints": rendered.Dropped}); err != nil {
-				return "", err
+				return "", nil, err
 			}
 		}
 	}
-	return hintBlock, nil
+	return hintBlock, issuedIDs, nil
 }
 
 // delegationWidthLimit is the concurrency cap for one run's plan children:
@@ -5119,9 +5356,10 @@ func backgroundActivityRetryPolicy() *temporal.RetryPolicy {
 // notification — the outcome fragment plus the still-running list — is
 // appended to the conversation so the next model turn can act on it.
 // Returns the wake reason: "completed" or "note".
-func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, state *eventState, messages *[]llm.Message, background map[string]*backgroundOp) (string, error) {
+
+func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, state *eventState, messages *[]llm.Message, background map[string]*backgroundOp) (string, []runtimeActivation, error) {
 	if len(background) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 	// Fast path: everything already resolved (the activity finished while the
 	// turn was still executing) — no waiting, just the batch.
@@ -5171,6 +5409,7 @@ func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, stat
 	slices.Sort(resolved)
 
 	lines := make([]string, 0, len(resolved)+2)
+	var activations []runtimeActivation
 	for _, id := range resolved {
 		op := background[id]
 		var toolResult ToolResult
@@ -5179,9 +5418,10 @@ func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, stat
 		if activityErr != nil {
 			detail := boundedFailureDetail(activityErr)
 			if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": id, "tool": "run_command", "error_type": "background_failed", "effect": "uncertain", "detail": detail}); err != nil {
-				return "", err
+				return "", nil, err
 			}
 			lines = append(lines, fmt.Sprintf("- %s FAILED after %s: %s", id, elapsed, detail))
+			activations = append(activations, runtimeActivation{Trigger: "tool.failed", Tool: "run_command", ToolResult: detail, ErrorClass: "background_failed", SourceID: id})
 		} else {
 			exit := 0
 			if toolResult.ExitCode != nil {
@@ -5192,7 +5432,13 @@ func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, stat
 				tail = tail[len(tail)-1500:]
 			}
 			if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": id, "tool": "run_command", "exit_code": exit, "background": true, "status": map[bool]string{true: "ok", false: "error"}[exit == 0], "output": compactJSON(toolResult.Content, 1000)}); err != nil {
-				return "", err
+				return "", nil, err
+			}
+			if exit != 0 {
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": id, "tool": "run_command", "error_type": "process_exit", "exit_code": exit, "effect": "uncertain"}); err != nil {
+					return "", nil, err
+				}
+				activations = append(activations, runtimeActivation{Trigger: "tool.failed", Tool: "run_command", ToolResult: redactProse(toolResult.Content), ErrorClass: "process_exit", SourceID: id})
 			}
 			lines = append(lines, fmt.Sprintf("- %s finished: exit_code=%d (%s)\n  output tail:\n  %s", id, exit, elapsed, strings.ReplaceAll(tail, "\n", "\n  ")))
 		}
@@ -5219,7 +5465,7 @@ func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, stat
 		message = "[Background operations] Still running:\n" + strings.Join(stillRunning, "\n")
 	}
 	*messages = append(*messages, llm.Message{Role: "user", Content: message})
-	return wakeReason, nil
+	return wakeReason, activations, nil
 }
 
 // runningPlanChildren lists the plan's still-running children: the awaited

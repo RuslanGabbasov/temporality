@@ -223,6 +223,74 @@ func TestPrimingBenchmarkCorpusQuality(t *testing.T) {
 		len(cases), precision, recall, redundancy, efficiency)
 }
 
+// RuntimeActivationBenchmark compares retrieval at task start with retrieval
+// after an observed failure. It is intentionally model-free: this isolates
+// whether the trigger provides relevant knowledge that task priming missed;
+// task-success experiments remain based on real run outcomes, not simulated
+// completions.
+func TestRuntimeActivationBenchmarkImprovesFailureKnowledgeCoverage(t *testing.T) {
+	cases := []struct {
+		name, task, failure string
+		knowledge           []Knowledge
+		useful              string
+	}{
+		{
+			name:      "github-rate-limit",
+			task:      "publish the release notes to the repository",
+			failure:   "mcp github create_release returned 429 rate limit; retry after Retry-After",
+			knowledge: []Knowledge{{ID: "github-retry-after", Proposition: "When the GitHub API returns 429 rate limit, wait for Retry-After before retrying", Kind: "claim", State: "confirmed"}},
+			useful:    "github-retry-after",
+		},
+		{
+			name:      "deployment-token-expiry",
+			task:      "deploy the application to production",
+			failure:   "deploy command failed: permission denied because deployment token expired",
+			knowledge: []Knowledge{{ID: "deployment-token-refresh", Proposition: "When deployment fails because the token expired, refresh the deployment token before retrying", Kind: "claim", State: "confirmed"}},
+			useful:    "deployment-token-refresh",
+		},
+		{
+			name:      "database-lock-timeout",
+			task:      "apply the database schema migration",
+			failure:   "migration tool failed with lock wait timeout; inspect the lock owner before rerunning",
+			knowledge: []Knowledge{{ID: "migration-lock-owner", Proposition: "When a schema migration hits a lock wait timeout, inspect the database lock owner before retrying", Kind: "claim", State: "confirmed"}},
+			useful:    "migration-lock-owner",
+		},
+	}
+	primingHits, runtimeHits, dynamicTokens := 0, 0, 0
+	for _, scenario := range cases {
+		taskHints := FindHints(scenario.knowledge, HintQuery{Text: scenario.task, Limit: 8})
+		if containsHint(taskHints, scenario.useful) {
+			primingHits++
+		}
+		runtimeHints := FindHints(scenario.knowledge, HintQuery{Text: scenario.task + " " + scenario.failure, Limit: 8})
+		if containsHint(runtimeHints, scenario.useful) {
+			runtimeHits++
+			rendered := RenderHintBlock(runtimeHints, RenderOptions{MaxTokens: 400, MaxCueTokens: 100, MaxHints: 4})
+			for _, id := range rendered.KeptIDs {
+				if id == scenario.useful {
+					dynamicTokens += rendered.Tokens
+				}
+			}
+		}
+	}
+	if runtimeHits <= primingHits {
+		t.Fatalf("runtime retrieval did not improve failure-knowledge coverage: priming %d/%d, runtime %d/%d", primingHits, len(cases), runtimeHits, len(cases))
+	}
+	if runtimeHits != len(cases) {
+		t.Fatalf("runtime failure knowledge coverage = %d/%d; improve the benchmark queries or matcher", runtimeHits, len(cases))
+	}
+	t.Logf("retrieval coverage: task priming %d/%d, runtime activation %d/%d; dynamic context %d tokens total", primingHits, len(cases), runtimeHits, len(cases), dynamicTokens)
+}
+
+func containsHint(hints []Hint, knowledgeID string) bool {
+	for _, hint := range hints {
+		if hint.KnowledgeID == knowledgeID {
+			return true
+		}
+	}
+	return false
+}
+
 func hintIDs(hints []Hint) []string {
 	ids := make([]string, 0, len(hints))
 	for _, hint := range hints {

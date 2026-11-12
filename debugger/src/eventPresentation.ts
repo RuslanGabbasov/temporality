@@ -87,6 +87,38 @@ const MINOR_PLAN_RE = /^plan\.task\.(skipped|invalidated|reopened|incomplete)$/
 /** Collapse whitespace so multi-line payloads stay one timeline line. */
 const squash = (value: unknown): string => String(value ?? '').replace(/\s+/g, ' ').trim()
 
+const hintTriggerLabel = (t: TranslateFn, value: unknown): string => {
+  const labels: Record<string, string> = {
+    'task.priming': t('runs.hint_trigger_task'),
+    'tool.failed': t('runs.hint_trigger_failure'),
+    'mcp.first_call': t('runs.hint_trigger_mcp'),
+  }
+  return labels[String(value ?? '')] ?? String(value ?? '')
+}
+
+const hintDeliveryLabel = (t: TranslateFn, value: unknown): string => {
+  const labels: Record<string, string> = {
+    injected: t('runs.hint_delivery_injected'),
+    empty: t('runs.hint_delivery_empty'),
+    skipped: t('runs.hint_delivery_skipped'),
+    error: t('runs.hint_delivery_error'),
+    timeout: t('runs.hint_delivery_timeout'),
+  }
+  return labels[String(value ?? '')] ?? String(value ?? '')
+}
+
+const hintDeliveryReason = (t: TranslateFn, value: unknown): string => {
+  const labels: Record<string, string> = {
+    duplicate_situation: t('runs.hint_reason_duplicate'),
+    activation_limit: t('runs.hint_reason_limit'),
+    retrieval_failed: t('runs.hint_reason_retrieval'),
+    retrieval_timeout: t('runs.hint_reason_timeout'),
+    no_candidates: t('runs.hint_reason_no_candidates'),
+    budget_exhausted: t('runs.hint_reason_budget'),
+  }
+  return labels[String(value ?? '')] ?? String(value ?? '')
+}
+
 /** Human string of a payload value: objects JSON-ify, strings pass through. */
 const textOf = (value: unknown): string => {
   if (value === undefined || value === null || value === '') return ''
@@ -438,7 +470,8 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
   'knowledge.extraction.started': (d, { t }) => ({ title: t('runs.event.extraction_started') }),
   'knowledge.extraction.completed': (d, { t }) => ({ title: t('runs.event.extraction_completed'), fact: t('runs.extraction_candidates', { count: squash(d.candidates_count ?? 0) }), status: 'ok' }),
   'knowledge.extraction.failed': (d, { t }) => ({ title: t('runs.event.extraction_failed'), fact: causeOf(d), status: 'error' }),
-  'hint.query': (d, { t }) => ({ title: t('runs.event.memory_lookup'), fact: t('runs.candidates', { count: squash(d.candidate_count ?? 0) }) }),
+  'hint.query': (d, { t }) => ({ title: t('runs.event.memory_lookup'), fact: [hintTriggerLabel(t, d.trigger), t('runs.candidates', { count: squash(d.candidate_count ?? 0) })].filter(Boolean).join(' · ') }),
+  'hint.delivery': (d, { t }) => ({ title: t('runs.event.hint_delivery'), fact: [hintTriggerLabel(t, d.trigger), hintDeliveryLabel(t, d.status), d.injected_count != null ? t('runs.hints_loaded', { count: squash(d.injected_count) }) : hintDeliveryReason(t, d.reason)].filter(Boolean).join(' · '), status: d.status === 'injected' ? 'ok' : d.status === 'error' || d.status === 'timeout' ? 'error' : undefined }),
   'memory.read': (d, { t }) => ({
     title: t('runs.event.memory_read'),
     fact: t('runs.event.memory_read_detail', {

@@ -116,6 +116,7 @@ export const EVENT_CATALOG: EventMeta[] = [
   E('knowledge', 'knowledge.extraction.completed', 'Извлечение знаний завершено', 'Экстракция вернула кандидатов.', 'Knowledge extraction completed', 'Extraction returned candidates.'),
   E('knowledge', 'knowledge.extraction.failed', 'Извлечение знаний упало', 'Экстракция не удалась (не влияет на итог рана).', 'Knowledge extraction failed', 'Extraction failed (never affects the run result).'),
   E('knowledge', 'hint.query', 'Запрос подсказок', 'Ран запросил подсказки у журнала наблюдений.', 'Hint query', 'The run asked the observation journal for hints.'),
+  E('knowledge', 'hint.delivery', 'Доставка подсказок', 'Показывает, какие знания реально попали в контекст модели и почему остальные не были доставлены.', 'Hint delivery', 'Shows which knowledge cues entered model context and why other candidates were not delivered.'),
   E('knowledge', 'hint.offered', 'Подсказка предложена', 'Знание отобрано в подсказки рана.', 'Hint offered', 'A knowledge item was selected as a run hint.'),
   E('knowledge', 'hint.used', 'Подсказка использована', 'Агент применил предложенную подсказку.', 'Hint used', 'The agent applied the offered hint.'),
   E('knowledge', 'hint.ignored', 'Подсказка проигнорирована', 'Агент не стал применять подсказку.', 'Hint ignored', 'The agent skipped the offered hint.'),

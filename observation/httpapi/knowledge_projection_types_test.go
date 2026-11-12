@@ -42,11 +42,14 @@ func TestKnowledgeProjectionTypesMatchConsumedVocabulary(t *testing.T) {
 	}
 	// Types the projection must not pay for — the reason the allow-list
 	// exists (a cold scan walked whole model.text_delta streams without it).
-	for _, eventType := range []string{"run.started", "tool.called", "model.text_delta", "hint.query", "knowledge.extraction.started", "knowledge.extraction.completed"} {
+	for _, eventType := range []string{"run.started", "tool.called", "model.text_delta", "hint.query", "hint.delivery", "knowledge.extraction.started", "knowledge.extraction.completed"} {
 		for _, typ := range knowledgeProjectionTypes {
 			if typ == eventType {
 				t.Fatalf("knowledgeProjectionTypes must not contain %q", eventType)
 			}
+		}
+		if affectsKnowledgeProjection(eventType) {
+			t.Fatalf("affectsKnowledgeProjection(%q) = true, want false", eventType)
 		}
 	}
 }

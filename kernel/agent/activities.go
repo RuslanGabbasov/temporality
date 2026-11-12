@@ -3299,7 +3299,36 @@ func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([
 	if len([]rune(query)) > 4000 {
 		query = string([]rune(query)[:4000])
 	}
-	payload := map[string]any{"project": request.Project, "run": request.RunID, "task": request.TaskID, "actor": map[string]string{"id": request.ActorID, "type": "agent"}, "query": query, "limit": 8}
+	trigger := request.Trigger
+	if trigger == "" {
+		trigger = "task.priming"
+	}
+	toolResult := redactProse(request.ToolResult)
+	if len([]rune(toolResult)) > 8000 {
+		toolResult = string([]rune(toolResult)[:8000])
+	}
+	payload := map[string]any{"project": request.Project, "run": request.RunID, "task": request.TaskID, "actor": map[string]string{"id": request.ActorID, "type": "agent"}, "query": query, "limit": 8, "trigger": trigger}
+	if request.ActivationID != "" {
+		payload["activation_id"] = request.ActivationID
+	}
+	if request.Tool != "" {
+		payload["tool"] = request.Tool
+	}
+	if request.MCPServer != "" {
+		payload["mcp_server"] = request.MCPServer
+	}
+	if toolResult != "" {
+		payload["tool_result"] = toolResult
+	}
+	if request.ErrorClass != "" {
+		payload["error_class"] = request.ErrorClass
+	}
+	if len(request.IssuedKnowledgeIDs) > 0 {
+		payload["issued_knowledge_ids"] = request.IssuedKnowledgeIDs
+	}
+	if request.ActivationSourceID != "" {
+		payload["activation_source_id"] = request.ActivationSourceID
+	}
 	// Semantic tier (docs/supervisor-model.md §6): embed the slot text with
 	// the supervisor embeddings model. A failure degrades to the lexical
 	// matcher — hints must never fail because semantics are misconfigured.
@@ -3342,10 +3371,14 @@ func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([
 		return nil, fmt.Errorf("Temporality hints returned HTTP %d", response.StatusCode)
 	}
 	var reply struct {
-		Hints []Hint `json:"hints"`
+		ActivationID string `json:"activation_id"`
+		Hints        []Hint `json:"hints"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&reply); err != nil {
 		return nil, err
+	}
+	for i := range reply.Hints {
+		reply.Hints[i].ActivationID = reply.ActivationID
 	}
 	return reply.Hints, nil
 }
@@ -3525,7 +3558,15 @@ type HintRequest struct {
 	// Skills are the run's resolved skills: their digests already sit in the
 	// agent prompt, so the journal demotes knowledge that only restates them
 	// (plan-priming-relevance.md §7) instead of spending hint budget on it.
-	Skills []SkillRef `json:"skills,omitempty"`
+	Skills             []SkillRef `json:"skills,omitempty"`
+	Trigger            string     `json:"trigger,omitempty"`
+	ActivationID       string     `json:"activation_id,omitempty"`
+	Tool               string     `json:"tool,omitempty"`
+	MCPServer          string     `json:"mcp_server,omitempty"`
+	ToolResult         string     `json:"tool_result,omitempty"`
+	ErrorClass         string     `json:"error_class,omitempty"`
+	IssuedKnowledgeIDs []string   `json:"issued_knowledge_ids,omitempty"`
+	ActivationSourceID string     `json:"activation_source_id,omitempty"`
 }
 
 // KnowledgeLookupResult reports the current projected state of one knowledge
@@ -3582,12 +3623,13 @@ type KnowledgeLookupQuery struct {
 }
 
 type Hint struct {
-	KnowledgeID string   `json:"knowledge_id"`
-	HintID      string   `json:"hint_id"`
-	Proposition string   `json:"proposition"`
-	State       string   `json:"state"`
-	MatchedBy   []string `json:"matched_by"`
-	Caution     string   `json:"caution,omitempty"`
+	ActivationID string   `json:"activation_id,omitempty"`
+	KnowledgeID  string   `json:"knowledge_id"`
+	HintID       string   `json:"hint_id"`
+	Proposition  string   `json:"proposition"`
+	State        string   `json:"state"`
+	MatchedBy    []string `json:"matched_by"`
+	Caution      string   `json:"caution,omitempty"`
 }
 
 // toObservationHints mirrors the wire hints into the observation type so the

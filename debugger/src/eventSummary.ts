@@ -2,6 +2,21 @@ import type { ObservationEvent } from './observationApi'
 import { eventInfo } from './eventCatalog'
 import type { Locale } from './locales'
 
+const hintTriggerKey: Record<string, string> = {
+  'task.priming': 'runs.hint_trigger_task',
+  'tool.failed': 'runs.hint_trigger_failure',
+  'mcp.first_call': 'runs.hint_trigger_mcp',
+}
+const hintStatusKey: Record<string, string> = {
+  injected: 'runs.hint_delivery_injected', empty: 'runs.hint_delivery_empty',
+  skipped: 'runs.hint_delivery_skipped', error: 'runs.hint_delivery_error', timeout: 'runs.hint_delivery_timeout',
+}
+const hintReasonKey: Record<string, string> = {
+  duplicate_situation: 'runs.hint_reason_duplicate', activation_limit: 'runs.hint_reason_limit',
+  retrieval_failed: 'runs.hint_reason_retrieval', retrieval_timeout: 'runs.hint_reason_timeout', no_candidates: 'runs.hint_reason_no_candidates',
+  budget_exhausted: 'runs.hint_reason_budget',
+}
+
 export type TranslateFn = (key: string, vars?: Record<string, string>) => string
 
 export interface EventSummaryInfo {
@@ -532,7 +547,9 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: entry.icon, label: t(entry.key), detail: String(d.detail ?? ''), color: kind === 'canary' || kind === 'secret_leak' ? '#f7768e' : 'var(--tm-text-3)' }
     }
     case 'hint.query':
-      return { icon: '🔍', label: t('runs.event.memory_lookup'), detail: t('runs.candidates', { count: String(d.candidate_count ?? 0) }), color: 'var(--tm-text-3)' }
+      return { icon: '🔍', label: t('runs.event.memory_lookup'), detail: [hintTriggerKey[String(d.trigger ?? '')] ? t(hintTriggerKey[String(d.trigger)]) : String(d.trigger ?? ''), t('runs.candidates', { count: String(d.candidate_count ?? 0) })].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
+    case 'hint.delivery':
+      return { icon: '📨', label: t('runs.event.hint_delivery'), detail: [hintTriggerKey[String(d.trigger ?? '')] ? t(hintTriggerKey[String(d.trigger)]) : String(d.trigger ?? ''), hintStatusKey[String(d.status ?? '')] ? t(hintStatusKey[String(d.status)]) : String(d.status ?? ''), d.injected_count != null ? `${d.injected_count} ${t('runs.event.hint_used').toLowerCase()}` : (hintReasonKey[String(d.reason ?? '')] ? t(hintReasonKey[String(d.reason)]) : String(d.reason ?? ''))].filter(Boolean).join(' · '), color: d.status === 'injected' ? '#9ece6a' : d.status === 'error' || d.status === 'timeout' ? '#f7768e' : 'var(--tm-text-3)' }
     case 'memory.read':
       return { icon: '📖', label: t('runs.event.memory_read'), detail: t('runs.hints_loaded', { count: String(d.hint_count ?? 0) }), color: 'var(--tm-text-3)' }
     case 'mcp.call.started':
