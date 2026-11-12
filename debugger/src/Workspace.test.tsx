@@ -89,6 +89,24 @@ describe('formatStreamEvent', () => {
     // The supervisor's verdict on an uncertain step carries the note.
     expect(formatStreamEvent('operation.reconciled', { data: { effect: 'occurred', note: 'go build ok' } }, ruT, 'ru'))
       .toBe('🔍 шаг: подтверждён супервизором — выполнялся — go build ok')
+
+  })
+
+  it('explains blocking agent waits and async collaboration mail', () => {
+    expect(formatStreamEvent('agent.asked', { data: { to_agent: 'reviewer', payload: 'check the diff please' } }, ruT, 'ru'))
+      .toBe('🤝 запрашивает reviewer — ждёт ответа: check the diff please')
+    expect(formatStreamEvent('agent.ask_expired', { data: { timeout_seconds: 300 } }, enT, 'en'))
+      .toBe('⏱ no answer — the ask expired (300s)')
+    expect(formatStreamEvent('agent.message.received', { data: { type: 'ask', from_agent: 'coder' } }, ruT, 'ru'))
+      .toBe('📨 запрос от coder')
+    expect(formatStreamEvent('agent.message.received', { data: { type: 'note', from_agent: 'lead' } }, enT, 'en'))
+      .toBe('📨 message from lead')
+    expect(formatStreamEvent('agent.answer.received', { data: { from_agent: 'reviewer' } }, enT, 'en'))
+      .toBe('📨 answer received from reviewer')
+    expect(formatStreamEvent('agent.replied', { data: {} }, ruT, 'ru'))
+      .toBe('↩ ответ отправлен')
+    expect(formatStreamEvent('agent.followup_started', { data: {} }, enT, 'en'))
+      .toBe('▶ follow-up run started to answer')
   })
 
   it('turn.completed and tool.completed are silent in the compact trace', () => {

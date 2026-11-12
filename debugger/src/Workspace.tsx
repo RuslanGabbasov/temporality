@@ -326,6 +326,27 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
 			const note = String(d.note ?? '').slice(0, 80)
 			return prefix + t('chat.stream.step_reconciled', { verdict: human }) + (note ? ` — ${note}` : '')
 		}
+
+		// agent-to-agent collaboration: the blocking waits and the async mail
+		// that explain a silent stall or a mid-run context jump.
+		case 'agent.asked': {
+			// ask_agent BLOCKS until the answer or the timeout: this line is
+			// why the chat goes quiet — the run is waiting on another agent.
+			const askText = typeof d.payload === 'string' && d.payload.trim() ? ': ' + d.payload.slice(0, 60) : ''
+			return t('chat.stream.agent_asked', { agent: String(d.to_agent ?? d.to_run ?? '?') }) + askText
+		}
+		case 'agent.ask_expired':
+			return t('chat.stream.agent_ask_expired', { seconds: String(d.timeout_seconds ?? '?') })
+		case 'agent.ask_undeliverable':
+			return t('chat.stream.agent_ask_undeliverable', { reason: String(d.reason ?? '').slice(0, 80) })
+		case 'agent.message.received':
+			return t(String(d.type) === 'ask' ? 'chat.stream.agent_incoming_ask' : 'chat.stream.agent_incoming_msg', { agent: String(d.from_agent ?? d.from_run ?? '?') })
+		case 'agent.answer.received':
+			return t('chat.stream.agent_answer_received', { agent: String(d.from_agent ?? d.from_run ?? '?') })
+		case 'agent.replied':
+			return t('chat.stream.agent_replied')
+		case 'agent.followup_started':
+			return t('chat.stream.agent_followup')
 		case 'run.completed':
 			return t('chat.stream.completed', { turns: pluralT(t, locale, 'chat.stream.turns_n', Number(d.turns ?? 0)) })
 		case 'run.user_note':
