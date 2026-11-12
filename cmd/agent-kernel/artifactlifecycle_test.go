@@ -88,6 +88,25 @@ func (f *fakeArtifactLifecycleStore) DelegateArtifactReview(_ context.Context, _
 	return f.review, nil
 }
 
+func (f *fakeArtifactLifecycleStore) CancelArtifactReview(_ context.Context, reviewID string, by string, moderator bool) (workspace.ArtifactReview, workspace.Artifact, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if reviewID != f.review.ID {
+		return workspace.ArtifactReview{}, workspace.Artifact{}, workspace.ErrNotFound
+	}
+	if f.review.Status != "open" {
+		return workspace.ArtifactReview{}, workspace.Artifact{}, workspace.ErrConflict
+	}
+	if !moderator && f.review.RequestedBy != by {
+		return workspace.ArtifactReview{}, workspace.Artifact{}, workspace.ErrConflict
+	}
+	now := time.Now().UTC()
+	f.review.Status = "cancelled"
+	f.review.ResolvedBy = by
+	f.review.ResolvedAt = &now
+	return f.review, workspace.Artifact{}, nil
+}
+
 func (f *fakeArtifactLifecycleStore) SetArtifactReviewMode(_ context.Context, reviewID string, mode string, _ string) (workspace.ArtifactReview, workspace.Artifact, error) {
 	if reviewID != f.review.ID {
 		return workspace.ArtifactReview{}, workspace.Artifact{}, workspace.ErrNotFound
@@ -588,6 +607,31 @@ func TestArtifactSubmitLockedIs409(t *testing.T) {
 	require.True(t, errors.Is(store.submitErr, workspace.ErrArtifactLocked))
 }
 
+// Cancel: the round's requester withdraws their own open round; another
+// non-operator writer is refused; kernel-internal never reaches it.
+func TestArtifactRoundCancel(t *testing.T) {
+	store := defaultArtifactFixture()
+	store.review = workspace.ArtifactReview{ID: "round-1", ArtifactID: "req-spec", ArtifactVersion: 2, Reviewers: []string{"user:ivanov"}, Mode: "all", Status: "open", RequestedBy: "requester"}
+	server := newArtifactLifecycleServer(t, store, &captureArtifactOutbox{})
+	defer server.Close()
+
+	// The fixture requester identity: the kernel-internal token submits with
+	// requested_by "kernel-internal", so cancel under that name would be
+	// refused — use the admin (operator) for the moderation path first.
+	status, _ := artifactPost(t, server, "internaltoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/cancel", `{}`)
+	require.Equal(t, http.StatusForbidden, status)
+
+	// Another writer without operator rights and without being the requester:
+	// refused.
+	store.review.RequestedBy = "writer"
+	status, _ = artifactPost(t, server, "internaltoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/cancel", `{}`)
+	require.Equal(t, http.StatusForbidden, status)
+
+	// The operator moderates.
+	status, body := artifactPost(t, server, "admintoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/cancel", `{}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"status":"cancelled"`)
+}
 // Round management: add-reviewers / delegate / mode — writer-only, humans
 // only, and the kernel-internal identity gets the same 403 as decisions.
 func TestArtifactRoundManagementRoutes(t *testing.T) {

@@ -373,6 +373,67 @@ func roundWouldClose(review ArtifactReview) (bool, string) {
 	return allApproved, "approved"
 }
 
+// CancelArtifactReview withdraws an OPEN round by hand: the draft returns
+// to draft, the requester (or an operator) fixes the document and submits a
+// fresh round. Deliberately NOT a reject — no rejecting decision is recorded
+// and the reviewers' partial approvals are archived with the round instead
+// of staining the history. Who may cancel: the round's requester (usually
+// the author or the agent run that submitted it) or an operator; a reviewer
+// votes approve/reject instead.
+func (s *Store) CancelArtifactReview(ctx context.Context, reviewID string, by string, moderator bool) (ArtifactReview, Artifact, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	defer tx.Rollback(ctx)
+	review, err := s.openArtifactReviewRound(ctx, tx, reviewID)
+	if err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	if !moderator && review.RequestedBy != by {
+		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: only the round's requester or an operator can cancel it", ErrConflict)
+	}
+	now := time.Now().UTC()
+	review.Status = "cancelled"
+	review.ResolvedBy = by
+	review.ResolvedAt = &now
+	encoded, _ := json.Marshal(review.Decisions)
+	if _, err := tx.Exec(ctx,
+		`UPDATE workspace_artifact_review SET decisions = $2, status = $3, resolved_by = $4, resolved_at = $5 WHERE id = $1`,
+		review.ID, encoded, review.Status, by, now); err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	// The reviewed draft resumes its editable life; the live-row flow (the
+	// row itself was in_review) lands back on draft the same way.
+	var draftStatus string
+	draftErr := tx.QueryRow(ctx,
+		`SELECT status FROM workspace_artifact_version WHERE artifact_id=$1 AND version=$2 FOR UPDATE`,
+		review.ArtifactID, review.ArtifactVersion).Scan(&draftStatus)
+	switch {
+	case draftErr == nil:
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact_version SET status = 'draft' WHERE artifact_id=$1 AND version=$2`,
+			review.ArtifactID, review.ArtifactVersion); err != nil {
+			return ArtifactReview{}, Artifact{}, err
+		}
+	case errors.Is(draftErr, pgx.ErrNoRows):
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1`, review.ArtifactID, ArtifactDraft); err != nil {
+			return ArtifactReview{}, Artifact{}, err
+		}
+	default:
+		return ArtifactReview{}, Artifact{}, draftErr
+	}
+	artifact, err := s.GetArtifactRange(ctx, review.ArtifactID, 0, 0)
+	if err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	return review, artifact, nil
+}
+
 // AddArtifactReviewers appends reviewer tokens to an OPEN round: «добавить
 // дополнительного согласующего». Deduped, validated by the same rules as
 // submit; already-cast decisions stay. Under mode=all the newcomers widen

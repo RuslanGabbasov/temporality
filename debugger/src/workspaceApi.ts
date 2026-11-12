@@ -1745,6 +1745,8 @@ export const workspaceApi = {
     request<ArtifactReview>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/reviewers`, { method: 'POST', body: JSON.stringify({ reviewers }) }),
   delegateArtifactReview: (id: string, reviewId: string, target: string) =>
     request<ArtifactReview>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/delegate`, { method: 'POST', body: JSON.stringify({ target }) }),
+  cancelArtifactReview: (id: string, reviewId: string) =>
+    request<{ review: ArtifactReview; artifact: Artifact }>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/cancel`, { method: 'POST', body: '{}' }),
   setArtifactReviewMode: (id: string, reviewId: string, mode: 'all' | 'any') =>
     request<{ review: ArtifactReview; artifact?: Artifact }>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/mode`, { method: 'POST', body: JSON.stringify({ mode }) }),
   artifactReferences: () =>

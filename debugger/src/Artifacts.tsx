@@ -944,6 +944,26 @@ export default function Artifacts({ project }: { project?: string }) {
     finally { setRoundBusy(false) }
   }
 
+  // Withdraw the round by hand: the draft returns to draft, the document is
+  // fixed and submitted afresh — no rejecting decision stains the history.
+  const cancelRound = async (r: ArtifactReview) => {
+    if (!selected) return
+    const ok = await confirmDialog({
+      title: t('artifacts.round_cancel_confirm') ?? 'Отменить согласование?',
+      body: t('artifacts.round_cancel_hint', { version: String(r.artifact_version) }) ?? `Черновик v${r.artifact_version} вернётся в работу; частичные голоса сохранятся в истории раунда.`,
+      danger: true,
+      confirmLabel: t('artifacts.round_cancel') ?? 'Отменить согласование',
+    })
+    if (!ok) return
+    setBusy(true)
+    try {
+      await workspaceApi.cancelArtifactReview(selected.id, r.id)
+      await reloadReviews(selected.id)
+      await load()
+    } catch (f) { setError(message(f)) }
+    finally { setBusy(false) }
+  }
+
   const decide = async (r: ArtifactReview, approve: boolean) => {
     if (!selected) return
     setBusy(true)
@@ -1527,6 +1547,7 @@ export default function Artifacts({ project }: { project?: string }) {
                                   <Button size="sm" kind="ghost" onClick={() => { setRoundManage({ reviewID: r.id, kind: 'delegate' }); setDelegateTarget(''); void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([])) }}>
                                     {t('artifacts.round_delegate') ?? 'Делегировать'}
                                   </Button>
+                                  <Button size="sm" kind="ghost" onClick={() => void cancelRound(r)}>{t('artifacts.round_cancel') ?? 'Отменить согласование'}</Button>
                                 </div>
                               )}
                             </div>

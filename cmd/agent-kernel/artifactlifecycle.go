@@ -38,6 +38,7 @@ type artifactLifecycleStore interface {
 	SubmitArtifactReview(ctx context.Context, artifactID string, reviewers []string, mode, note, requestedBy string) (workspace.ArtifactReview, error)
 	GetArtifactReview(ctx context.Context, reviewID string) (workspace.ArtifactReview, error)
 	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
+	CancelArtifactReview(ctx context.Context, reviewID string, by string, moderator bool) (workspace.ArtifactReview, workspace.Artifact, error)
 	AddArtifactReviewers(ctx context.Context, reviewID string, reviewers []string, by string) (workspace.ArtifactReview, error)
 	DelegateArtifactReview(ctx context.Context, reviewID string, target string, by string) (workspace.ArtifactReview, error)
 	SetArtifactReviewMode(ctx context.Context, reviewID string, mode string, by string) (workspace.ArtifactReview, workspace.Artifact, error)
@@ -533,6 +534,27 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			return
 		}
 		review, artifact, err := ws.SetArtifactReviewMode(r.Context(), r.PathValue("reviewID"), strings.TrimSpace(req.Mode), requestUserID(r))
+		if err != nil {
+			writeError(w, artifactReviewErrorStatus(err), err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"review": review, "artifact": artifact})
+	})
+
+	// Withdraw an open round by hand (§6): the requester (or an operator)
+	// stops the review to fix the document and submit a fresh round. NOT a
+	// reject — no rejecting decision lands in the history. Humans only.
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/reviews/{reviewID}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		if isKernelInternal(r) {
+			writeError(w, 403, errors.New("review rounds are managed by humans only"))
+			return
+		}
+		principal, ok := controlplane.FromContext(r.Context())
+		moderator := ok && principal.Role >= controlplane.RoleOperator
+		review, artifact, err := ws.CancelArtifactReview(r.Context(), r.PathValue("reviewID"), requestUserID(r), moderator)
 		if err != nil {
 			writeError(w, artifactReviewErrorStatus(err), err)
 			return
