@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://ruslangabbasov.github.io/temporality/sitemap.xml
