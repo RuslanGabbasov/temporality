@@ -1876,6 +1876,8 @@ export const ru: Record<string, string> = {
     'artifacts.status_draft': 'Черновик',
     'artifacts.status_rejected': 'Отклонён',
     'artifacts.status_deprecated': 'Устарел',
+    'artifacts.edit_attributes': 'Атрибуты артефакта',
+    'artifacts.settings_title': 'Атрибуты артефакта — {{name}}',
     'artifacts.deprecate': 'Перевести в «Устарел»',
     'artifacts.deprecate_confirm': 'Перевести «{{name}}» в «Устарел»?',
     'artifacts.deprecate_hint': 'Документ останется доступным по id, но исчезнет из списка по умолчанию. Если на него ссылается навык — перевод блокируется с именем навыка.',
