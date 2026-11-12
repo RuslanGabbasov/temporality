@@ -12,7 +12,7 @@ import {
   SelectItem,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download, Chat, Checkmark, WarningFilled, Restart } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download, Chat, Checkmark, Archive, Restart } from '@carbon/icons-react'
 import { workspaceApi, exportArtifactMarkdown, type Artifact, type ArtifactAnnotation, type ArtifactInboxEntry, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
 import { MarkdownWithPresentations } from './PresentationView'
 import { whoami, canReconcile } from './kernelApi'
@@ -1322,6 +1322,24 @@ export default function Artifacts({ project }: { project?: string }) {
                 								{t('artifacts.submit_review') ?? 'На согласование'}
                 							</Button>
                 						)}
+						{/* Artifact-global destructive pair, pushed apart from the
+						    everyday submit button: the archive box retires the
+						    WHOLE artifact (not a version), the trash deletes it. */}
+						<span style={{ width: '1px', height: '1.6rem', background: 'var(--tm-border)', margin: '0 0.5rem', alignSelf: 'center' }} />
+						{selected.status === 'approved' && (
+							<Button
+								size="sm"
+								kind="ghost"
+								hasIconOnly
+								renderIcon={Archive}
+								iconDescription={t('artifacts.deprecate') ?? 'В архив (устарел)'}
+								tooltipPosition="bottom"
+								onClick={() => void deprecate(selected)}
+							/>
+						)}
+						{selected.status === 'deprecated' && (
+							<Button size="sm" kind="ghost" renderIcon={Restart} onClick={() => void revive(selected)}>{t('artifacts.revive') ?? 'Вернуть в работу'}</Button>
+						)}
                 						<Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
                 					</Stack>
                 				</div>
@@ -1716,22 +1734,6 @@ export default function Artifacts({ project }: { project?: string }) {
                     							onClick={() => void startEdit(selected)}
 						>{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
 					)}
-					{/* Retirement rides the version toolbar: it is a statement
-					    about the current text. Deprecated flips back to draft. */}
-                    					{!bodyEditing && selected.status === 'approved' && (
-                    						<Button
-                    							size="sm"
-                    							kind="ghost"
-                    							hasIconOnly
-                    							renderIcon={WarningFilled}
-                    							iconDescription={t('artifacts.deprecate') ?? 'Устарел'}
-                    							tooltipPosition="bottom"
-                    							onClick={() => void deprecate(selected)}
-                    						/>
-                    					)}
-					                    {!bodyEditing && selected.status === 'deprecated' && (
-					                      <Button size="sm" kind="ghost" renderIcon={Restart} onClick={() => void revive(selected)}>{t('artifacts.revive') ?? 'Вернуть в работу'}</Button>
-					                    )}
 					                    {selected.provider !== 'url' && (
                     						<Button
                     							size="sm"

@@ -1845,7 +1845,7 @@ export const ru: Record<string, string> = {
     'artifacts.status_rejected': 'Отклонён',
     'artifacts.status_deprecated': 'Устарел',
     'artifacts.deprecate': 'Перевести в «Устарел»',
-    'artifacts.deprecate_confirm': 'Перевести «{name}» в «Устарел»?',
+    'artifacts.deprecate_confirm': 'Перевести «{{name}}» в «Устарел»?',
     'artifacts.deprecate_hint': 'Документ останется доступным по id, но исчезнет из списка по умолчанию. Если на него ссылается навык — перевод блокируется с именем навыка.',
     'artifacts.deprecated_locked': 'Устаревший документ — верните в работу, чтобы править',
     'artifacts.revive': 'Вернуть в работу',

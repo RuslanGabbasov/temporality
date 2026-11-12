@@ -1845,7 +1845,7 @@ export const en: Record<string, string> = {
     'artifacts.status_rejected': 'Rejected',
     'artifacts.status_deprecated': 'Deprecated',
     'artifacts.deprecate': 'Mark as deprecated',
-    'artifacts.deprecate_confirm': 'Mark «{name}» as deprecated?',
+    'artifacts.deprecate_confirm': 'Mark «{{name}}» as deprecated?',
     'artifacts.deprecate_hint': 'The document stays reachable by id but drops out of the default listing. A skill still referencing it blocks the move and is named in the error.',
     'artifacts.deprecated_locked': 'Deprecated document — revive it to edit',
     'artifacts.revive': 'Revive to draft',
