@@ -277,18 +277,46 @@ func (s *fakeInboundStore) SaveChannelWidgetState(_ context.Context, channel, ch
 }
 
 // ListRoutedInboundMessages backs the follow-up-as-note lookup: newest first
-// among the sender's rows that produced runs.
+// among the sender's rows that produced runs — routed or already answered
+// (the intake answer lands within minutes; the target run keeps working).
 func (s *fakeInboundStore) ListRoutedInboundMessages(_ context.Context, senderUserID string, limit int) ([]workspace.InboundMessage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var routed []workspace.InboundMessage
 	for i := len(s.inbound) - 1; i >= 0 && len(routed) < limit; i-- {
 		row := s.inbound[i]
-		if row.SenderUserID == senderUserID && row.TargetRunID != "" && row.Status == workspace.InboundStatusRouted {
+		if row.SenderUserID == senderUserID && row.TargetRunID != "" && (row.Status == workspace.InboundStatusRouted || row.Status == workspace.InboundStatusAnswered) {
 			routed = append(routed, row)
 		}
 	}
 	return routed, nil
+}
+
+// The «Отмена» incident (2026-11-11): the intake answer «задача создана»
+// marks the message answered within minutes, while the target run keeps
+// working for hours — and the answered row dropped out of this listing, so
+// the sender's own cancel_run failed with 403 «not started from this
+// sender's messages». Answered rows must stay visible here.
+func TestListRoutedInboundMessagesKeepsAnsweredRows(t *testing.T) {
+	store := &fakeInboundStore{}
+	store.inbound = []workspace.InboundMessage{
+		{ID: "m-routed", Channel: "matrix", SenderUserID: "u1", TargetRunID: "run-live", Status: workspace.InboundStatusRouted},
+		{ID: "m-answered", Channel: "matrix", SenderUserID: "u1", TargetRunID: "run-late", Status: workspace.InboundStatusAnswered},
+		{ID: "m-received", Channel: "matrix", SenderUserID: "u1", TargetRunID: "run-never", Status: workspace.InboundStatusReceived},
+		{ID: "m-foreign", Channel: "matrix", SenderUserID: "u2", TargetRunID: "run-other", Status: workspace.InboundStatusAnswered},
+	}
+	got, err := store.ListRoutedInboundMessages(context.Background(), "u1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, row := range got {
+		ids = append(ids, row.ID)
+	}
+	// Newest first: m-answered was inserted after m-routed.
+	if len(ids) != 2 || ids[0] != "m-answered" || ids[1] != "m-routed" {
+		t.Fatalf("want routed+answered for u1, got %v", ids)
+	}
 }
 
 func (s *fakeInboundStore) CountInboundMessagesSince(_ context.Context, sender string, since time.Time) (int, error) {

@@ -222,7 +222,12 @@ func itoa(n int) string {
 
 // ListRoutedInboundMessages returns the messages of one sender that produced
 // runs, newest first (docs/inbound-messages.md §4.2: run_status answers "what
-// happened to my tasks" — only routed rows have a target run to report).
+// happened to my tasks" — rows with a target run to report). The status
+// filter admits every row that reached its target run — routed AND answered
+// (the intake answer "задача создана" marks the row answered within minutes,
+// while the target run keeps working for hours; a cancel or follow-up must
+// still find it). received/classified never produced a run; rejected and
+// retired rows are gone.
 func (s *Store) ListRoutedInboundMessages(ctx context.Context, senderUserID string, limit int) ([]InboundMessage, error) {
 	if limit <= 0 {
 		limit = 20
@@ -232,7 +237,7 @@ func (s *Store) ListRoutedInboundMessages(ctx context.Context, senderUserID stri
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+inboundMessageColumns+` FROM workspace_inbound_message
-		 WHERE sender_user_id = $1 AND target_run_id <> '' AND status = 'routed'
+		 WHERE sender_user_id = $1 AND target_run_id <> '' AND status IN ('routed', 'answered')
 		 ORDER BY created_at DESC LIMIT $2`, senderUserID, limit)
 	if err != nil {
 		return nil, err
