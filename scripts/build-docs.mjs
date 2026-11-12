@@ -244,7 +244,7 @@ ${desc ? `<meta name="twitter:description" content="${desc}">` : ''}
 ${mirror}
 ${og}
 <link rel="icon" href="${rootPrefix}/assets/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="${rootPrefix}/styles.css"><link rel="stylesheet" href="${lang.cssHref}">
 </head>
