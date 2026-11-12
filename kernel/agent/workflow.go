@@ -31,6 +31,7 @@ const (
 	ActivityRunTool           = "kernel.run_tool"
 	ActivityKnowledgeHints    = "kernel.knowledge_hints"
 	ActivityKnowledgeLookup   = "kernel.knowledge_lookup"
+	ActivityResolveMentions   = "kernel.resolve_mentions"
 	ActivityResolveAgent      = "kernel.resolve_agent"
 	ActivityGenerateTitle     = "kernel.generate_run_title"
 	ActivityCompactContext    = "kernel.compact_context"
@@ -674,6 +675,19 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		messages = []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
 		if hintBlock != "" {
 			messages = append(messages, llm.Message{Role: "system", Content: hintBlock})
+		}
+		// Mentioned workspace entities (docs/chat-mentions.md): `@kind:id`, bare
+		// `@id` and plain pasted ids in the prompt resolve to one compact system
+		// block. Version-gated like every schedule change — histories recorded
+		// before the gate replay their original command sequence. Best effort:
+		// a lookup failure drops the block and the run proceeds as before
+		// mentions existed (the agent still resolves ids through its tools).
+		if workflow.GetVersion(ctx, "mention-block", workflow.DefaultVersion, 1) == 1 {
+			mentionCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+			var mentionBlock string
+			if err := workflow.ExecuteActivity(mentionCtx, ActivityResolveMentions, MentionRequest{Project: input.Project, Prompt: input.Prompt}).Get(ctx, &mentionBlock); err == nil && mentionBlock != "" {
+				messages = append(messages, llm.Message{Role: "system", Content: mentionBlock})
+			}
 		}
 		if input.PriorTail != "" {
 			messages = append(messages, llm.Message{Role: "system", Content: input.PriorTail})

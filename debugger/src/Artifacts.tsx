@@ -30,6 +30,7 @@ import { ArtifactEditor } from './ArtifactEditor'
 import type { User } from './workspaceApi'
 import Markdown from './Markdown'
 import { useFragmentNoteMenu } from './useFragmentNoteMenu'
+import { copyText } from './clipboard'
 import { projectBudget, type SagaRollup } from './kernelApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -118,6 +119,18 @@ export default function Artifacts({ project }: { project?: string }) {
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  // Quick-copy of the artifact id (the chat @-mention reference): the id in
+  // the detail header is a click target that flashes «copied» feedback.
+  const [copiedID, setCopiedID] = useState('')
+  const copyTimer = useRef<number | null>(null)
+  const copyArtifactID = (id: string) => {
+    void copyText(id).then((ok) => {
+      if (!ok) return
+      setCopiedID(id)
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current)
+      copyTimer.current = window.setTimeout(() => setCopiedID(''), 1500)
+    })
+  }
   const [references, setReferences] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -1324,7 +1337,18 @@ export default function Artifacts({ project }: { project?: string }) {
                 							<OrgBadge orgUnitID={selected.org_unit_id} org={org} />
                 						</div>
                 						<p style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.25rem', wordBreak: 'break-all' }}>
-                							{selected.id}{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
+                							{/* The identifier is a chat mention handle: one click copies it
+                							    for Telegram/Matrix/web chat (`… @artifact:<id>` or the bare id). */}
+                							<button
+                								type="button"
+                								onClick={() => copyArtifactID(selected.id)}
+                								title={copiedID === selected.id ? (t('artifacts.id_copied') ?? 'ID скопирован') : (t('artifacts.copy_id') ?? 'Клик — скопировать ID (упомянуть в чате)')}
+                								style={{
+                									background: 'none', border: 0, padding: 0, margin: 0, cursor: 'pointer',
+                									color: 'inherit', font: 'inherit', borderBottom: '1px dashed currentColor',
+                								}}
+                							>{selected.id}</button>
+                							{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
                 							{' · '}{t('artifacts.updated_prefix') ?? 'Изменён'}: {fullDateTime(selected.updated_at)}
                 							{' · '}{originLabel(selected)}
                 							{selected.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${selected.saga_id}` : ''}

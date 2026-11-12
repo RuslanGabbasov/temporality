@@ -692,6 +692,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeHints, activity.RegisterOptions{Name: agent.ActivityKnowledgeHints})
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeLookup, activity.RegisterOptions{Name: agent.ActivityKnowledgeLookup})
 	temporalWorker.RegisterActivityWithOptions(activities.ResolveAgent, activity.RegisterOptions{Name: agent.ActivityResolveAgent})
+	temporalWorker.RegisterActivityWithOptions(activities.ResolveMentions, activity.RegisterOptions{Name: agent.ActivityResolveMentions})
 	temporalWorker.RegisterActivityWithOptions(activities.ResolveCollaborator, activity.RegisterOptions{Name: agent.ActivityResolveCollaborator})
 	temporalWorker.RegisterActivityWithOptions(activities.ModelGateVerdict, activity.RegisterOptions{Name: agent.ActivityModelGateVerdict})
 	temporalWorker.RegisterActivityWithOptions(activities.ModelGateBudget, activity.RegisterOptions{Name: agent.ActivityModelGateBudget})

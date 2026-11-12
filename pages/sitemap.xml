@@ -327,6 +327,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://temporality.tech/docs/tech/chat-mentions.html</loc>
+    <lastmod>2026-11-12</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://temporality.tech/docs/tech/context-compaction.html</loc>
     <lastmod>2026-11-12</lastmod>
     <priority>0.7</priority>

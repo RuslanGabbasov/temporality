@@ -70,6 +70,7 @@ Documentation is available in Russian and English; every link below points at th
 - [Федеративная аутентификация и провижининг пользователей (Auth Federation)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/auth-federation.md)
 - [Предустановленные скилы: офисный пакет (builtin skills)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/builtin-skills.md)
 - [Каналы коммуникации: единая абстракция (Channel Drivers)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/channels.md)
+- [Упоминания сущностей в чате (@-mentions)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/chat-mentions.md)
 - [Компакция контекста: карточка состояния для длинных ранов](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/context-compaction.md)
 - [Dev-стек: живучесть ранов при пересборках](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/dev-stack-runs.md)
 - [Формирование системного промта агента](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/evaluable-agent.md)

@@ -54,6 +54,7 @@ import { useI18n, pluralT } from './i18n'
 import { pseudoToolLabel, formatDuration, friendlyRunFailure } from './eventSummary'
 import { TimeHint } from './timeHint'
 import { buildChatPrompt } from './chatPrompt'
+import { useMentionMenu, MentionMenu } from './MentionMenu'
 import { randomUUID } from './uuid'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -575,6 +576,18 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     window.addEventListener('resize', resizeChatInput)
     return () => window.removeEventListener('resize', resizeChatInput)
   }, [inputValue, resizeChatInput])
+  // @-mentions of workspace entities (docs/chat-mentions.md): typing `@` opens
+  // the registry menu above the composer and inserts a canonical `@kind:id`.
+  // The kernel resolves the same reference from Telegram/Matrix messages too.
+  const mention = useMentionMenu({
+    value: inputValue,
+    textareaRef: chatInputRef,
+    project,
+    setValue: (text, caret) => {
+      setInputValue(text)
+      requestAnimationFrame(() => chatInputRef.current?.setSelectionRange(caret, caret))
+    },
+  })
   // Auto-scroll stickiness: while the user reads near the bottom the chat
   // follows new content; once they scroll up into history it stops yanking
   // them down and counts unread messages on a floating jump button instead.
@@ -1818,6 +1831,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     const sentAttachments = attachments
     setAttachments([])
     setInputValue('')
+    mention.sync('', 0)
     setLoading(true)
     setError('')
 
@@ -2318,13 +2332,16 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                   disabled={loading || uploading}
                   style={{ marginBottom: '2px', flexShrink: 0 }}
                 />
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, position: 'relative' }}>
                   <TextArea
                     id="chat-input"
                     labelText=""
                     hideLabel
                     value={inputValue}
-                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputValue(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+                      setInputValue(e.target.value)
+                      mention.sync(e.target.value, e.target.selectionStart ?? e.target.value.length)
+                    }}
                     placeholder={
                       activeConv.messages.some((m) => m.role === 'assistant' && m.status === 'running' && m.runId)
                         ? (t('chat.placeholder_running') ?? 'Добавится к выполняющемуся запуску как дополнение к задаче…')
@@ -2333,10 +2350,22 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     rows={3}
                     ref={chatInputRef}
                     onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                      if (mention.onKeyDown(e)) return
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage() }
                     }}
+                    onKeyUp={() => mention.sync()}
+                    onMouseUp={() => mention.sync()}
                     style={{ resize: 'none', minHeight: '72px', maxHeight: '33vh', overflowY: 'auto' }}
                   />
+                  {mention.open && (
+                    <MentionMenu
+                      rows={mention.rows}
+                      activeIndex={mention.activeIndex}
+                      loading={mention.loading}
+                      onSelect={mention.selectRow}
+                      onHover={mention.setActiveIndex}
+                    />
+                  )}
                 </div>
                 {loading && <span className="spinner" title={t('chat.sending') ?? 'Sending…'} style={{ alignSelf: 'center', flexShrink: 0 }} />}
                 <Button renderIcon={Send} onClick={() => void sendMessage()} disabled={loading || uploading || (!inputValue.trim() && attachments.length === 0)} style={{ marginBottom: '2px' }}>{t('chat.send') ?? 'Send'}</Button>
