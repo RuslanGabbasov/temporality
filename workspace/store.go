@@ -578,6 +578,31 @@ func (s *Store) ListTasks(ctx context.Context, projectID string) ([]Task, error)
 	return result, rows.Err()
 }
 
+// ListTasksBrief lists task identity without the prompt bodies: chat
+// transcripts live in workspace_task.prompt (up to 1MB each), and pickers —
+// the @-mention menu, the kernel's mention resolver — need id/title only.
+// The lean SELECT keeps the big TOASTed rows out of the database roundtrip
+// entirely, not just out of the JSON payload.
+func (s *Store) ListTasksBrief(ctx context.Context, projectID string) ([]Task, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, project_id, agent_id, title, created_at, updated_at FROM workspace_task WHERE project_id = $1 ORDER BY created_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Task
+	for rows.Next() {
+		var t Task
+		var agentID *string
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Title, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		t.AgentID = derefPtr(agentID)
+		result = append(result, t)
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) UpdateTaskPrompt(ctx context.Context, id, prompt, title string) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_task SET prompt = $2, title = COALESCE(NULLIF($3, ''), title), updated_at = $4 WHERE id = $1`,

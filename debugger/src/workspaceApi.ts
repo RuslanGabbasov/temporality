@@ -1417,8 +1417,10 @@ export const workspaceApi = {
     request<AgentDraft>('/v1/workspace/agents/draft', { method: 'POST', body: JSON.stringify({ description, final: final ?? false }) }),
 
   // Tasks
-  listTasks: (projectId: string) =>
-    request<{ tasks: Task[] }>(`/v1/workspace/projects/${projectId}/tasks`),
+  // brief ships id/title only — prompts carry whole chat transcripts (up to
+  // 1MB each), and pickers like the @-mention menu never read them.
+  listTasks: (projectId: string, brief?: boolean) =>
+    request<{ tasks: Task[] }>(`/v1/workspace/projects/${projectId}/tasks${brief ? '?brief=1' : ''}`),
   getTask: (id: string) => request<Task>(`/v1/workspace/tasks/${id}`),
   createTask: (data: { id?: string; project_id: string; agent_id?: string; title: string; prompt: string }) =>
     request<Task>('/v1/workspace/tasks', { method: 'POST', body: JSON.stringify(data) }),

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Chat mentions (docs/chat-mentions.md): a task prompt may reference workspace
@@ -146,14 +147,25 @@ func (a *Activities) ResolveMentions(ctx context.Context, request MentionRequest
 		}
 	}
 	indexes := map[string]map[string]mentionEntity{}
+	// Sources are independent local roundtrips — fetch them concurrently so a
+	// run start never serializes six registry reads.
+	var indexMu sync.Mutex
+	var indexWG sync.WaitGroup
 	for _, kind := range mentionKinds {
 		if !need[kind] {
 			continue
 		}
-		if index := a.mentionIndex(ctx, request.Project, kind); len(index) > 0 {
-			indexes[kind] = index
-		}
+		indexWG.Add(1)
+		go func(kind string) {
+			defer indexWG.Done()
+			if index := a.mentionIndex(ctx, request.Project, kind); len(index) > 0 {
+				indexMu.Lock()
+				indexes[kind] = index
+				indexMu.Unlock()
+			}
+		}(kind)
 	}
+	indexWG.Wait()
 	var resolved []mentionEntity
 	var unresolved []string
 	seen := map[string]bool{}
@@ -254,7 +266,9 @@ func (a *Activities) mentionIndex(ctx context.Context, project, kind string) map
 			index[item.ID] = mentionEntity{Kind: kind, ID: item.ID, Title: item.Name, Detail: detail}
 		}
 	case "task":
-		endpoint := a.WorkspaceURL + "/v1/workspace/projects/" + url.PathEscape(project) + "/tasks"
+		// brief=1: prompts carry whole chat transcripts (up to 1MB each) — the
+		// block needs id/title only.
+		endpoint := a.WorkspaceURL + "/v1/workspace/projects/" + url.PathEscape(project) + "/tasks?brief=1"
 		body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
 		if err != nil || status >= 400 {
 			return nil

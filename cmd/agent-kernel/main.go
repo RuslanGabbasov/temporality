@@ -3355,7 +3355,15 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		tasks, err := ws.ListTasks(r.Context(), r.PathValue("projectID"))
+		// brief=1 ships task identity only: prompts carry whole chat transcripts
+		// (up to 1MB each) and pickers like the @-mention menu need id/title.
+		var tasks []workspace.Task
+		var err error
+		if r.URL.Query().Get("brief") == "1" {
+			tasks, err = ws.ListTasksBrief(r.Context(), r.PathValue("projectID"))
+		} else {
+			tasks, err = ws.ListTasks(r.Context(), r.PathValue("projectID"))
+		}
 		if err != nil {
 			writeError(w, 500, err)
 			return

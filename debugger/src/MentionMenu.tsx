@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react'
 import { workspaceApi } from './workspaceApi'
-import { projectBudget } from './kernelApi'
 import { observationApi } from './observationApi'
 import { useT } from './i18n'
 import {
@@ -18,29 +17,52 @@ import {
  *  kernel resolves any id regardless of whether the menu knew it. */
 const OPTIONS_PER_SOURCE = 200
 
-async function loadMentionOptions(project: string): Promise<MentionOption[]> {
-  const safe = <T,>(promise: Promise<T>, fallback: T): Promise<T> => promise.catch(() => fallback)
-  const [artifacts, skills, teams, agents, tasks, sagas, knowledge] = await Promise.all([
-    safe(workspaceApi.listArtifacts({ limit: OPTIONS_PER_SOURCE }), { artifacts: [], count: 0 }),
-    safe(workspaceApi.listSkills(), { skills: [], count: 0 }),
-    safe(workspaceApi.listTeams(), { teams: [], count: 0 }),
-    safe(workspaceApi.listAllAgents(), { agents: [], pending_proposals: {} }),
-    safe(workspaceApi.listTasks(project), { tasks: [] }),
-    safe(projectBudget(project).then((budget) => ({ sagas: budget.sagas ?? [] })), { sagas: [] }),
-    safe(observationApi.knowledge(project, undefined, undefined, { limit: OPTIONS_PER_SOURCE }), { knowledge: [], count: 0 }),
+const clip = (text: string, n = 120) => (text.length > n ? text.slice(0, n - 1) + '…' : text)
+
+// Sagas from the bounded journal query (registered + renamed, oldest first so
+// the latest rename wins): the project-budget rollup is the right endpoint for
+// cost accounting but rescans the whole project — a picker needs id/title.
+async function loadSagaOptions(project: string): Promise<MentionOption[]> {
+  const page = await observationApi.events(project, undefined, undefined, undefined, {
+    types: ['saga.registered', 'saga.renamed'], limit: 500, order: 'asc',
+  })
+  const titles = new Map<string, string>()
+  for (const event of page.events ?? []) {
+    const sagaID = typeof event.data?.saga_id === 'string' ? event.data.saga_id : ''
+    const title = typeof event.data?.title === 'string' ? event.data.title : ''
+    if (sagaID && title) titles.set(sagaID, title)
+  }
+  return [...titles].map(([id, title]) => ({ kind: 'saga' as const, id, title }))
+}
+
+/** Lazy, streaming registry load: every source emits its batch the moment it
+ *  lands, so the menu never waits for the slowest one — a slow source simply
+ *  shows up later. All sources are metadata-only and bounded (docs/chat-
+ *  mentions.md): tasks take brief rows (prompts carry whole chat transcripts),
+ *  sagas take a bounded journal query instead of the project cost rollup. */
+async function loadMentionOptions(project: string, onBatch: (options: MentionOption[]) => void): Promise<void> {
+  const emit = (options: MentionOption[]) => { if (options.length) onBatch(options) }
+  await Promise.allSettled([
+    workspaceApi.listArtifacts({ limit: OPTIONS_PER_SOURCE }).then((page) => emit((page.artifacts ?? []).map((a) => ({
+      kind: 'artifact' as const, id: a.id, title: a.title || a.id, detail: a.status,
+    })))),
+    workspaceApi.listSkills().then((page) => emit((page.skills ?? []).map((s) => ({
+      kind: 'skill' as const, id: s.id, title: s.name || s.id, detail: s.enabled === false ? 'disabled' : undefined,
+    })))),
+    workspaceApi.listTeams().then((page) => emit((page.teams ?? []).map((tm) => ({
+      kind: 'team' as const, id: tm.id, title: tm.name || tm.id, detail: tm.enabled === false ? 'disabled' : undefined,
+    })))),
+    workspaceApi.listAllAgents().then((page) => emit((page.agents ?? []).map((a) => ({
+      kind: 'agent' as const, id: a.id, title: a.name || a.id, detail: a.enabled === false ? 'disabled' : undefined,
+    })))),
+    workspaceApi.listTasks(project, true).then((page) => emit((page.tasks ?? []).map((task) => ({
+      kind: 'task' as const, id: task.id, title: task.title || task.id,
+    })))),
+    loadSagaOptions(project).then(emit),
+    observationApi.knowledge(project, undefined, undefined, { limit: OPTIONS_PER_SOURCE }).then((page) => emit((page.knowledge ?? []).map((k) => ({
+      kind: 'knowledge' as const, id: k.id, title: clip(k.proposition || k.id), detail: k.state,
+    })))),
   ])
-  const clip = (text: string, n = 120) => (text.length > n ? text.slice(0, n - 1) + '…' : text)
-  const options: MentionOption[] = [
-    ...(artifacts?.artifacts ?? []).map((a) => ({ kind: 'artifact' as const, id: a.id, title: a.title || a.id, detail: a.status })),
-    ...(skills?.skills ?? []).map((s) => ({ kind: 'skill' as const, id: s.id, title: s.name || s.id, detail: s.enabled === false ? 'disabled' : undefined })),
-    ...(teams?.teams ?? []).map((tm) => ({ kind: 'team' as const, id: tm.id, title: tm.name || tm.id, detail: tm.enabled === false ? 'disabled' : undefined })),
-    ...(agents?.agents ?? []).map((a) => ({ kind: 'agent' as const, id: a.id, title: a.name || a.id, detail: a.enabled === false ? 'disabled' : undefined })),
-    ...(tasks?.tasks ?? []).map((task) => ({ kind: 'task' as const, id: task.id, title: task.title || task.id })),
-    ...(sagas?.sagas ?? []).map((s) => ({ kind: 'saga' as const, id: s.saga_id, title: s.title || s.saga_id, detail: s.goal ? clip(s.goal, 80) : undefined })),
-    ...(knowledge?.knowledge ?? []).map((k) => ({ kind: 'knowledge' as const, id: k.id, title: clip(k.proposition || k.id), detail: k.state })),
-  ]
-  options.sort((a, b) => a.title.localeCompare(b.title))
-  return options
 }
 
 export interface MentionComposer {
@@ -74,8 +96,7 @@ export function useMentionMenu({ value, textareaRef, setValue, project }: {
 
   const valueRef = useRef(value)
   valueRef.current = value
-  const optionsRef = useRef<MentionOption[] | null>(null)
-  const loadingRef = useRef(false)
+  const startedRef = useRef(false)
   const dismissedRef = useRef('')
 
   const rows = useMemo(() => (token ? buildMentionRows(token.query, options ?? []) : []), [token, options])
@@ -91,12 +112,19 @@ export function useMentionMenu({ value, textareaRef, setValue, project }: {
       if (prev && usable && mentionTokenKey(prev) === mentionTokenKey(usable)) return prev
       return usable
     })
-    if (usable && optionsRef.current === null && !loadingRef.current) {
-      loadingRef.current = true
+    // The bare `@` shows kind scaffolds only and needs no registry data — the
+    // menu opens instantly. The load starts once the user narrows (any query
+    // text) and streams batches in as the sources land.
+    if (usable && usable.query !== '' && !startedRef.current) {
+      startedRef.current = true
       setLoading(true)
-      void loadMentionOptions(project)
-        .then((loaded) => { optionsRef.current = loaded; setOptions(loaded) })
-        .finally(() => { loadingRef.current = false; setLoading(false) })
+      void loadMentionOptions(project, (batch) => {
+        setOptions((prev) => {
+          const next = [...(prev ?? []), ...batch]
+          next.sort((a, b) => a.title.localeCompare(b.title))
+          return next
+        })
+      }).finally(() => setLoading(false))
     }
   }, [project, textareaRef])
 
