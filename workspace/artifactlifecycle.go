@@ -408,10 +408,12 @@ func (s *Store) AddArtifactReviewers(ctx context.Context, reviewID string, revie
 	if !changed {
 		return review, nil
 	}
-	encoded, _ := json.Marshal(review.Reviewers)
+	// reviewers is a text[] column: pass the slice directly (pgx encodes it;
+	// a json.Marshal'ed string lands as `"[\"a\",\"b\"]"` and Postgres
+	// rejects the literal — 22P02 malformed array literal).
 	if _, err := tx.Exec(ctx,
 		`UPDATE workspace_artifact_review SET reviewers = $2 WHERE id = $1`,
-		review.ID, encoded); err != nil {
+		review.ID, review.Reviewers); err != nil {
 		return ArtifactReview{}, err
 	}
 	// Best-effort contributor stamp (the same contract Resolve uses).
@@ -472,10 +474,9 @@ func (s *Store) DelegateArtifactReview(ctx context.Context, reviewID string, tar
 	if len(review.Reviewers) == 0 {
 		return ArtifactReview{}, fmt.Errorf("%w: delegating the last undecided personal seat would leave the round without reviewers", ErrConflict)
 	}
-	encoded, _ := json.Marshal(review.Reviewers)
 	if _, err := tx.Exec(ctx,
 		`UPDATE workspace_artifact_review SET reviewers = $2 WHERE id = $1`,
-		review.ID, encoded); err != nil {
+		review.ID, review.Reviewers); err != nil {
 		return ArtifactReview{}, err
 	}
 	_, _ = s.pool.Exec(ctx,
@@ -513,7 +514,6 @@ func (s *Store) SetArtifactReviewMode(ctx context.Context, reviewID string, mode
 	review.Mode = mode
 	closes, closedStatus := roundWouldClose(review)
 	encodedDecisions, _ := json.Marshal(review.Decisions)
-	encodedReviewers, _ := json.Marshal(review.Reviewers)
 	if closes {
 		now := time.Now().UTC()
 		review.Status = closedStatus
@@ -521,7 +521,7 @@ func (s *Store) SetArtifactReviewMode(ctx context.Context, reviewID string, mode
 		review.ResolvedAt = &now
 		if _, err := tx.Exec(ctx,
 			`UPDATE workspace_artifact_review SET reviewers = $2, mode = $3, decisions = $4, status = $5, resolved_by = $6, resolved_at = $7 WHERE id = $1`,
-			review.ID, encodedReviewers, review.Mode, encodedDecisions, review.Status, by, now); err != nil {
+			review.ID, review.Reviewers, review.Mode, encodedDecisions, review.Status, by, now); err != nil {
 			return ArtifactReview{}, Artifact{}, err
 		}
 		artifact, err := s.closeArtifactRound(ctx, tx, review, closedStatus, now)
@@ -535,7 +535,7 @@ func (s *Store) SetArtifactReviewMode(ctx context.Context, reviewID string, mode
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE workspace_artifact_review SET reviewers = $2, mode = $3 WHERE id = $1`,
-		review.ID, encodedReviewers, review.Mode); err != nil {
+		review.ID, review.Reviewers, review.Mode); err != nil {
 		return ArtifactReview{}, Artifact{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
