@@ -293,6 +293,39 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
 		}
 		case 'knowledge.proposed':
 			return t('chat.stream.learned', { proposition: String(d.proposition ?? '').slice(0, 60) })
+		// ── lasting value produced by the run (milestones an observer wants) ──
+		case 'artifact.authored':
+			return t('chat.stream.artifact_created', { name: String(d.title ?? d.artifact_id ?? '') })
+		case 'artifact.updated':
+			return prefix + t('chat.stream.artifact_updated', { id: String(d.artifact_id ?? ''), version: String(d.version ?? '') })
+		case 'artifact.submitted':
+			return t('chat.stream.artifact_submitted', { id: String(d.artifact_id ?? '') })
+		case 'artifact.review.approved':
+			return t('chat.stream.artifact_approved', { name: String(d.title ?? d.artifact_id ?? '') })
+		case 'artifact.review.rejected':
+			return t('chat.stream.artifact_rejected', { name: String(d.title ?? d.artifact_id ?? '') })
+		case 'skill.proposed':
+			return t('chat.stream.skill_proposed', { name: String(d.skill_name ?? d.skill_id ?? '') })
+		// A blocked tool is a failed attempt the observer must see: the ⚙ line
+		// above announced the call, the block explains why nothing happened.
+		case 'tool.blocked': {
+			const reason = String(d.reason ?? '')
+			const human = reason === 'approval_timeout' ? t('chat.stream.block_reason_timeout')
+				: reason === 'approval_rejected' ? t('chat.stream.block_reason_rejected')
+				: reason === 'approval_arguments_mismatch' ? t('chat.stream.block_reason_mismatch')
+				: reason
+			return prefix + t('chat.stream.tool_blocked', { reason: human })
+		}
+		// The supervisor's verdict on an uncertain step — oversight, not noise:
+		// it tells whether the run's actions actually happened.
+		case 'operation.reconciled': {
+			const effect = String(d.effect ?? '')
+			const human = effect === 'occurred' ? t('chat.stream.reconciled_happened')
+				: effect === 'none' ? t('chat.stream.reconciled_absent')
+				: t('chat.stream.reconciled_unclear')
+			const note = String(d.note ?? '').slice(0, 80)
+			return prefix + t('chat.stream.step_reconciled', { verdict: human }) + (note ? ` — ${note}` : '')
+		}
 		case 'run.completed':
 			return t('chat.stream.completed', { turns: pluralT(t, locale, 'chat.stream.turns_n', Number(d.turns ?? 0)) })
 		case 'run.user_note':

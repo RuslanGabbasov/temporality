@@ -69,6 +69,28 @@ describe('formatStreamEvent', () => {
       .toBe('Усвоено: ' + 'x'.repeat(60))
   })
 
+  it('shows lasting milestones and blocked attempts, not policy chatter', () => {
+    // A blocked tool is a failed attempt: the observer must see why nothing
+    // happened after the ⚙ line.
+    expect(formatStreamEvent('tool.blocked', { data: { reason: 'approval_timeout' } }, ruT, 'ru'))
+      .toBe('⚠ действие не выполнено: истекло одобрение')
+    expect(formatStreamEvent('tool.blocked', { data: { reason: 'approval_rejected' } }, enT, 'en'))
+      .toBe('⚠ action not run: rejected by a human')
+    // The run produced lasting documents: created, submitted, resolved.
+    expect(formatStreamEvent('artifact.authored', { data: { title: 'Смета' } }, ruT, 'ru'))
+      .toBe('📝 создан артефакт: Смета')
+    expect(formatStreamEvent('artifact.submitted', { data: { artifact_id: 'smeta' } }, enT, 'en'))
+      .toBe('📝 submitted for review: smeta')
+    expect(formatStreamEvent('artifact.review.approved', { data: { title: 'Смета' } }, ruT, 'ru'))
+      .toBe('✅ артефакт одобрен: Смета')
+    // A skill proposal is the reusable twin of knowledge.proposed.
+    expect(formatStreamEvent('skill.proposed', { data: { skill_name: 'deploy-check' } }, ruT, 'ru'))
+      .toBe('🧩 предложен навык: deploy-check')
+    // The supervisor's verdict on an uncertain step carries the note.
+    expect(formatStreamEvent('operation.reconciled', { data: { effect: 'occurred', note: 'go build ok' } }, ruT, 'ru'))
+      .toBe('🔍 шаг: подтверждён супервизором — выполнялся — go build ok')
+  })
+
   it('turn.completed and tool.completed are silent in the compact trace', () => {
     expect(formatStreamEvent('turn.completed', { data: { turn: 1, tool_calls: 3 } }, enT, 'en')).toBeNull()
     expect(formatStreamEvent('tool.completed', { data: { name: 'run_command' } }, enT, 'en')).toBeNull()
