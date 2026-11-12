@@ -245,7 +245,7 @@ export default function Artifacts({ project }: { project?: string }) {
   // mixed version-bound (body, mime) and version-free (title, tags, saga,
   // storage) attributes in one giant dialog, which made editing a large
   // document impossible.
-  type DetailTab = 'document' | 'versions' | 'review' | 'settings'
+  type DetailTab = 'document' | 'versions' | 'review'
   const [detailTab, setDetailTab] = useState<DetailTab>('document')
   // In-place editing state: enter loads the current text into the editor,
   // save lands it via the same endpoints as before (draft edits in place,
@@ -259,6 +259,7 @@ export default function Artifacts({ project }: { project?: string }) {
   // Dashboard sagas tab uses), loaded when the settings tab opens.
   const [sagas, setSagas] = useState<SagaRollup[]>([])
   const [settingsBusy, setSettingsBusy] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsDraft, setSettingsDraft] = useState<ArtifactForm>({})
   const [sagaTouched, setSagaTouched] = useState(false)
 
@@ -270,7 +271,6 @@ export default function Artifacts({ project }: { project?: string }) {
       provider: a.provider ?? 'builtin',
       external_ref: a.external_ref ?? '',
       mime_type: a.mime_type ?? '',
-      tags: [...(a.tags ?? [])],
       saga_id: a.saga_id ?? '',
     })
     setSagaTouched(false)
@@ -776,7 +776,6 @@ export default function Artifacts({ project }: { project?: string }) {
         provider: settingsDraft.provider ?? 'builtin',
         external_ref: settingsDraft.external_ref ?? '',
         kind: settingsDraft.kind ?? 'reference',
-        tags: settingsDraft.tags ?? [],
       }
       if (sagaTouched) payload.saga_id = settingsDraft.saga_id ?? ''
       if ((settingsDraft.provider ?? 'builtin') === 'builtin') payload.mime_type = settingsDraft.mime_type ?? ''
@@ -1322,6 +1321,10 @@ export default function Artifacts({ project }: { project?: string }) {
                 								{t('artifacts.submit_review') ?? 'На согласование'}
                 							</Button>
                 						)}
+						{/* The pencil edits the ATTRIBUTES (title, description, kind,
+						    storage, saga) in a dialog, like every other entity — the
+						    body has its own editor on the Document tab. */}
+						<Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('artifacts.edit_attributes') ?? 'Атрибуты'} tooltipPosition="bottom" onClick={() => { openSettings(selected); setSettingsOpen(true) }} />
 						{/* Artifact-global destructive pair, pushed apart from the
 						    everyday submit button: the archive box retires the
 						    WHOLE artifact (not a version), the trash deletes it. */}
@@ -1419,13 +1422,12 @@ export default function Artifacts({ project }: { project?: string }) {
                     ['document', t('artifacts.tab_document') ?? 'Документ'],
                     ['review', openReview ? `${t('artifacts.open_reviews') ?? 'Согласование'} (${(reviews.length > 0 ? reviews : [{ status: 'open' }]).filter((r) => r.status === 'open').length})` : (t('artifacts.review_history') ?? 'Согласование')],
                     ['versions', t('artifacts.versions_title') ?? 'Версии'],
-                    ['settings', t('artifacts.tab_settings') ?? 'Настройки'],
                   ] as Array<[DetailTab, string]>).map(([tab, label]) => (
                     <button
                       key={tab}
                       role="tab"
                       aria-selected={detailTab === tab}
-                      onClick={() => { setDetailTab(tab); if (tab === 'review' && reviews.length === 0) void openReviews(selected); if (tab === 'settings') openSettings(selected) }}
+                      onClick={() => { setDetailTab(tab); if (tab === 'review' && reviews.length === 0) void openReviews(selected) }}
                       style={{ background: detailTab === tab ? 'var(--tm-elevated)' : 'none', border: '1px solid var(--tm-border)', borderBottomColor: detailTab === tab ? 'var(--tm-elevated)' : 'var(--tm-border)', borderRadius: '6px 6px 0 0', padding: '0.3rem 0.75rem', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem' }}
                     >{label}</button>
                   ))}
@@ -1595,114 +1597,6 @@ export default function Artifacts({ project }: { project?: string }) {
                     ) : (
                       <VersionHistory artifactID={selected.id} project={project} />
                     )}
-                  </div>
-                )}
-
-                {detailTab === 'settings' && (
-                  <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem' }}>
-                    {/* Version-free attributes only: the body and its mime belong
-                        to the document tab (the editor owns the body). org_unit
-                        is create-time — shown read-only here. */}
-                    <Stack gap={3}>
-                      <TextInput
-                        id="artifact-settings-title"
-                        labelText={t('artifacts.title_label') ?? 'Title'}
-                        value={settingsDraft.title ?? ''}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, title: e.target.value })}
-                      />
-                      <TextArea
-                        id="artifact-settings-description"
-                        labelText={t('artifacts.description_label') ?? 'Applicability (when to read this)'}
-                        value={settingsDraft.description ?? ''}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSettingsDraft({ ...settingsDraft, description: e.target.value })}
-                        rows={2}
-                        helperText={t('artifacts.description_helper') ?? 'The agent matches the task against this condition — it decides whether artifact_read is worth the tokens'}
-                      />
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                        <Select
-                          id="artifact-settings-kind"
-                          labelText={t('artifacts.kind_label') ?? 'Kind'}
-                          value={settingsDraft.kind ?? 'reference'}
-                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettingsDraft({ ...settingsDraft, kind: e.target.value as Artifact['kind'] })}
-                        >
-                          <SelectItem value="reference" text={t('artifacts.kind_reference') ?? 'reference — regulation, instruction, checklist'} />
-                          <SelectItem value="work" text={t('artifacts.kind_work_option') ?? 'work — saga work product (requirement, spec, report)'} />
-                        </Select>
-                        <Select
-                          id="artifact-settings-provider"
-                          labelText={t('artifacts.provider_label') ?? 'Storage'}
-          
-                          value={settingsDraft.provider ?? 'builtin'}
-                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettingsDraft({ ...settingsDraft, provider: e.target.value as Artifact['provider'] })}
-                        >
-                          <SelectItem value="builtin" text={t('artifacts.provider_builtin') ?? 'builtin — body stored in the registry (≤ 2 MiB)'} />
-                          <SelectItem value="url" text={t('artifacts.provider_url') ?? 'url — body lives in an external system'} />
-                        </Select>
-                      </div>
-                      {(settingsDraft.provider ?? 'builtin') === 'url' && (
-                        <TextInput
-                          id="artifact-settings-external-ref"
-                          labelText={t('artifacts.external_ref_label') ?? 'External reference'}
-                          value={settingsDraft.external_ref ?? ''}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, external_ref: e.target.value })}
-                          placeholder="https://wiki.internal.example.com/deploy-runbook"
-                        />
-                      )}
-                      <div>
-                        <SagaComboBox
-                          id="artifact-settings-saga"
-                          labelText={t('artifacts.saga_label') ?? 'Saga'}
-                          sagas={sagas}
-                          value={settingsDraft.saga_id ?? ''}
-                          onChange={(sagaID) => { setSettingsDraft({ ...settingsDraft, saga_id: sagaID }); setSagaTouched(true) }}
-                        />
-                        <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
-                          {sagaTouched
-                            ? (t('artifacts.saga_helper_edit') ?? 'An empty field detaches the saga; the change lands on save')
-                            : (t('artifacts.saga_current', { saga: settingsDraft.saga_id ?? '' }) ?? `Linked saga: ${settingsDraft.saga_id || '—'}`)}
-                        </p>
-                      </div>
-                      {(settingsDraft.provider ?? 'builtin') === 'builtin' && (
-                        <TextInput
-                          id="artifact-settings-mime"
-                          labelText={t('artifacts.mime_label') ?? 'MIME type'}
-                          value={settingsDraft.mime_type ?? ''}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, mime_type: e.target.value })}
-                          placeholder="text/markdown"
-                          helperText={t('artifacts.mime_helper') ?? 'Leave empty for markdown (the default); change only when the body is not markdown'}
-                        />
-                      )}
-                      <div>
-                        <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('artifacts.tags_label') ?? 'Tags'}</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', alignItems: 'center', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.35rem 0.5rem', minHeight: '2.2rem' }}>
-                          {(settingsDraft.tags ?? []).map((tag) => (
-                            <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', padding: '0.1rem 0.3rem 0.1rem 0.45rem', borderRadius: 999, background: 'var(--tm-surface-3, rgba(127,127,127,.15))', fontSize: '0.78rem' }}>
-                              #{tag}
-                              <button type="button" aria-label={`remove ${tag}`} onClick={() => setSettingsDraft({ ...settingsDraft, tags: (settingsDraft.tags ?? []).filter((x) => x !== tag) })} style={{ background: 'none', border: 0, cursor: 'pointer', color: 'inherit', opacity: 0.7, display: 'inline-flex', padding: 0 }}>
-                                <Close size={12} />
-                              </button>
-                            </span>
-                          ))}
-                          <TagEditorInput
-                            draft={tagDraft}
-                            onDraft={setTagDraft}
-                            onCommit={(tag) => { setSettingsDraft({ ...settingsDraft, tags: [...new Set([...(settingsDraft.tags ?? []), tag.toLowerCase()])] }) }}
-                            options={tagOptions}
-                            exclude={settingsDraft.tags ?? []}
-                          />
-                        </div>
-                      </div>
-                      {selected.org_unit_id && (
-                        <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
-                          {t('artifacts.org_label') ?? 'Availability'}: <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
-                          {' · '}{t('artifacts.org_readonly_hint') ?? 'The org scope is set at creation and changes only through admins'}
-                        </p>
-                      )}
-                      <div className="form-actions">
-                        <Button disabled={settingsBusy || !(settingsDraft.title ?? '').trim()} onClick={() => void saveSettings()}>{t('action.save') ?? 'Save'}</Button>
-                        <Button kind="secondary" disabled={settingsBusy} onClick={() => { openSettings(selected); setTagDraft('') }}>{t('action.cancel') ?? 'Reset'}</Button>
-                      </div>
-                    </Stack>
                   </div>
                 )}
 
@@ -2065,6 +1959,94 @@ export default function Artifacts({ project }: { project?: string }) {
             <div className="form-actions">
               <Button onClick={() => void save()} disabled={busy || !form.title?.trim() || (!editing && !form.id?.trim()) || ((form.provider ?? 'builtin') === 'url' && !form.external_ref?.trim())}>{t('action.save') ?? 'Save'}</Button>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
+            </div>
+          </Stack>
+        </AppModal>
+      )}
+
+      {settingsOpen && selected && (
+        <AppModal onClose={() => { setSettingsOpen(false); setTagDraft('') }} panelStyle={{ width: '560px' }}>
+          <Heading>{t('artifacts.settings_title', { name: selected.title }) ?? `Атрибуты: ${selected.title}`}</Heading>
+          {/* Version-free attributes only: the body and its mime sibling live
+              on the Document tab; tags are edited right on the card. org_unit
+              is create-time — shown read-only. */}
+          <Stack gap={3}>
+            <TextInput
+              id="artifact-settings-title"
+              labelText={t('artifacts.title_label') ?? 'Title'}
+              value={settingsDraft.title ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, title: e.target.value })}
+            />
+            <TextArea
+              id="artifact-settings-description"
+              labelText={t('artifacts.description_label') ?? 'Applicability (when to read this)'}
+              value={settingsDraft.description ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSettingsDraft({ ...settingsDraft, description: e.target.value })}
+              rows={2}
+              helperText={t('artifacts.description_helper') ?? 'The agent matches the task against this condition — it decides whether artifact_read is worth the tokens'}
+            />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <Select
+                id="artifact-settings-kind"
+                labelText={t('artifacts.kind_label') ?? 'Kind'}
+                value={settingsDraft.kind ?? 'reference'}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettingsDraft({ ...settingsDraft, kind: e.target.value as Artifact['kind'] })}
+              >
+                <SelectItem value="reference" text={t('artifacts.kind_reference') ?? 'reference — regulation, instruction, checklist'} />
+                <SelectItem value="work" text={t('artifacts.kind_work_option') ?? 'work — saga work product (requirement, spec, report)'} />
+              </Select>
+              <Select
+                id="artifact-settings-provider"
+                labelText={t('artifacts.provider_label') ?? 'Storage'}
+                value={settingsDraft.provider ?? 'builtin'}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettingsDraft({ ...settingsDraft, provider: e.target.value as Artifact['provider'] })}
+              >
+                <SelectItem value="builtin" text={t('artifacts.provider_builtin') ?? 'builtin — body stored in the registry (≤ 2 MiB)'} />
+                <SelectItem value="url" text={t('artifacts.provider_url') ?? 'url — body lives in an external system'} />
+              </Select>
+            </div>
+            {(settingsDraft.provider ?? 'builtin') === 'url' && (
+              <TextInput
+                id="artifact-settings-external-ref"
+                labelText={t('artifacts.external_ref_label') ?? 'External reference'}
+                value={settingsDraft.external_ref ?? ''}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, external_ref: e.target.value })}
+                placeholder="https://wiki.internal.example.com/deploy-runbook"
+              />
+            )}
+            <div>
+              <SagaComboBox
+                id="artifact-settings-saga"
+                labelText={t('artifacts.saga_label') ?? 'Saga'}
+                sagas={sagas}
+                value={settingsDraft.saga_id ?? ''}
+                onChange={(sagaID) => { setSettingsDraft({ ...settingsDraft, saga_id: sagaID }); setSagaTouched(true) }}
+              />
+              <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
+                {sagaTouched
+                  ? (t('artifacts.saga_helper_edit') ?? 'An empty field detaches the saga; the change lands on save')
+                  : (t('artifacts.saga_current', { saga: settingsDraft.saga_id ?? '' }) ?? `Linked saga: ${settingsDraft.saga_id || '—'}`)}
+              </p>
+            </div>
+            {(settingsDraft.provider ?? 'builtin') === 'builtin' && (
+              <TextInput
+                id="artifact-settings-mime"
+                labelText={t('artifacts.mime_label') ?? 'MIME type'}
+                value={settingsDraft.mime_type ?? ''}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettingsDraft({ ...settingsDraft, mime_type: e.target.value })}
+                placeholder="text/markdown"
+                helperText={t('artifacts.mime_helper') ?? 'Leave empty for markdown (the default); change only when the body is not markdown'}
+              />
+            )}
+            {selected.org_unit_id && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
+                {t('artifacts.org_label') ?? 'Availability'}: <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
+                {' · '}{t('artifacts.org_readonly_hint') ?? 'The org scope is set at creation and changes only through admins'}
+              </p>
+            )}
+            <div className="form-actions">
+              <Button disabled={settingsBusy || !(settingsDraft.title ?? '').trim()} onClick={async () => { await saveSettings(); setSettingsOpen(false) }}>{t('action.save') ?? 'Save'}</Button>
+              <Button kind="secondary" disabled={settingsBusy} onClick={() => setSettingsOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>
           </Stack>
         </AppModal>
