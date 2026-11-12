@@ -642,7 +642,6 @@ export const en: Record<string, string> = {
     'chat.stream.approval_needed': '⚠ Approval needed: {{action}}',
     'chat.stream.approval_granted': '✓ Approval granted',
     'chat.stream.approval_rejected': '✗ Approval rejected',
-    'chat.stream.auto_approved': '✓ Auto-approved: {{tool}}',
     'chat.stream.question_reasked': '↻ Question re-asked ({{policy}})',
     'chat.stream.question_answered': '✓ Answered: {{response}}',
     'chat.stream.question_cancelled': '✗ Question cancelled',

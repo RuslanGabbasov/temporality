@@ -1363,15 +1363,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     es.addEventListener('approval.rejected', () => {
       pushLine(t('chat.stream.approval_rejected'))
     })
-    es.addEventListener('approval.auto_granted', (e) => {
-      try {
-        const outer = JSON.parse(e.data)
-        const d = outer.data ?? outer
-        const tool = d.operation?.tool ?? d.policy_id ?? 'tool'
-        pushLine(t('chat.stream.auto_approved', { tool: String(tool) }))
-      } catch { /* ignore */ }
-    })
-
+    // approval.auto_granted is deliberately NOT a stream line: a policy
+    // auto-approving every run_command is noise for an observer watching
+    // progress (the tool line right below it already says what is running).
+    // It stays in the journal, and the trace renders it with the
+    // «автосогласование» marker — the right place when investigating.
     // HITL questions (docs/interactive-HITL.md §5): human.requested attaches
     // the interactive card to this run's bubble; the terminal events close it.
     // All of them also land in the activity feed via formatStreamEvent. The

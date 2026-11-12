@@ -642,7 +642,6 @@ export const ru: Record<string, string> = {
     'chat.stream.approval_needed': '⚠ Требуется подтверждение: {{action}}',
     'chat.stream.approval_granted': '✓ Подтверждено',
     'chat.stream.approval_rejected': '✗ Отклонено',
-    'chat.stream.auto_approved': '✓ Автоматически подтверждено: {{tool}}',
     'chat.stream.question_reasked': '↻ Вопрос задан повторно ({{policy}})',
     'chat.stream.question_answered': '✓ Отвечено: {{response}}',
     'chat.stream.question_cancelled': '✗ Вопрос отменён',
