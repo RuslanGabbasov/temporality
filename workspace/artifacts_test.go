@@ -14,6 +14,35 @@ func TestHashArtifactContentStable(t *testing.T) {
 	require.Len(t, HashArtifactContent("x"), 64) // sha256 hex
 }
 
+// ArtifactMetaOnly is the version-lock bypass gate: metadata (title,
+// description, kind, saga, tags) is version-free, the body and its storage
+// (content, provider, external_ref, mime) are not (docs/artifact-lifecycle.md §5).
+func TestArtifactMetaOnly(t *testing.T) {
+	current := Artifact{
+		ID: "otchet", Title: "Отчёт", Description: "старое", Provider: "builtin",
+		Content: "тело", MimeType: "text/markdown", Kind: ArtifactKindReference,
+	}
+	renamed := current
+	renamed.Title = "Отчёт по продажам"
+	renamed.Description = "новое"
+	renamed.Kind = ArtifactKindWork
+	renamed.Tags = []string{"sales"}
+	require.True(t, ArtifactMetaOnly(renamed, current), "title/description/kind/tags are version-free")
+
+	retitled := renamed
+	retitled.Content = "тело v2"
+	require.False(t, ArtifactMetaOnly(retitled, current), "a body edit must keep the version lock")
+
+	remimed := renamed
+	remimed.MimeType = "text/html"
+	require.False(t, ArtifactMetaOnly(remimed, current), "mime is part of the body identity")
+
+	relinked := renamed
+	relinked.ExternalRef = "https://example.com/doc"
+	relinked.Provider = "url"
+	require.False(t, ArtifactMetaOnly(relinked, current), "relocating the body must keep the version lock")
+}
+
 // normalize is the derived-fields contract: builtin artifacts carry hash and
 // size, reference-only providers must not pretend they have a local body.
 func TestArtifactNormalizeByProvider(t *testing.T) {

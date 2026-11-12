@@ -472,6 +472,52 @@ func (s *Store) ArtifactsByIDs(ctx context.Context, ids []string) ([]Artifact, e
 	return ordered, nil
 }
 
+// ArtifactMetaOnly reports whether an update touches nothing but the
+// version-free metadata — title, description, kind, saga link, catalog tags.
+// The body and its storage (content, provider, external_ref, mime_type) are
+// the version's identity: the review round locks exactly those, never the
+// artifact's name and classification (docs/artifact-lifecycle.md §5).
+func ArtifactMetaOnly(next, current Artifact) bool {
+	return next.Content == current.Content &&
+		next.Provider == current.Provider &&
+		next.ExternalRef == current.ExternalRef &&
+		next.MimeType == current.MimeType
+}
+
+// UpdateArtifactMeta applies a metadata-only edit in ANY status — including
+// in_review and approved, where the version lock guards the body only. The
+// open revision draft (workspace_artifact_version) receives the same metadata:
+// promotion overwrites the live row wholesale, and without the sync a rename
+// would be clobbered by the revision's stale snapshot on approval.
+func (s *Store) UpdateArtifactMeta(ctx context.Context, artifact Artifact) error {
+	artifact.normalize()
+	artifact.UpdatedAt = time.Now().UTC()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx,
+		`UPDATE workspace_artifact
+		 SET title=$2, description=$3, kind=$4, saga_id=$5, tags=$6, updated_at=$7
+		 WHERE id=$1`,
+		artifact.ID, artifact.Title, artifact.Description, artifact.Kind, nullString(artifact.SagaID), textArray(artifact.Tags), artifact.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE workspace_artifact_version
+		 SET title=$2, description=$3, kind=$4, saga_id=$5
+		 WHERE artifact_id=$1 AND status IN ('draft','in_review','rejected')`,
+		artifact.ID, artifact.Title, artifact.Description, artifact.Kind, nullString(artifact.SagaID)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // SaveArtifactEdit applies an edit respecting the lifecycle (docs/artifact-lifecycle.md
 // §5, §9): draft/rejected rewrite in place (an edit of a rejected version reopens
 // it as draft), in_review refuses (the version is locked while a review is

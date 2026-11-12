@@ -138,7 +138,8 @@ docs/inbound-messages.md §7 (синтаксис получателей)</p>
 <h2 id="3-основные-понятия"><a class="anchor" href="#3-основные-понятия" aria-label="Section link">#</a>3. Основные понятия</h2><h3 id="31-статус-и-версии"><a class="anchor" href="#31-статус-и-версии" aria-label="Section link">#</a>3.1. Статус и версии</h3><p>Артефакт получает машину состояний на уровне <strong>версии</strong> (см. §5):</p>
 <ul>
 <li><code>draft</code> — черновик: создан человеком или агентом, редактируем, виден агентам;</li>
-<li><code>in_review</code> — стоит на согласовании, редактирование блокируется;</li>
+<li><code>in_review</code> — стоит на согласовании, редактирование тела блокируется;
+метаданные свободны от версии (см. ниже)</li>
 <li><code>approved</code> — утверждён человеком: иммутабелен, доступен для ссылок из навыков;</li>
 <li><code>rejected</code> — вернут с замечаниями: можно доработать и отправить снова;</li>
 <li><code>superseded</code> — версия заменена более новой утверждённой того же id.</li>
@@ -146,6 +147,13 @@ docs/inbound-messages.md §7 (синтаксис получателей)</p>
 <p>Правка утверждённой версии невозможна: любое изменение — это <strong>новая версия</strong>
 того же id, проходящая цикл заново. Навыки ссылаются на id и всегда резолвятся
 в последнюю утверждённую версию.</p>
+<p><strong>Метаданные свободны от версии.</strong> Название, описание, тип (reference/work),
+привязка к саге и каталожные теги — не то, что утверждает рецензия: они
+правятся на месте в любом статусе (в том числе под согласованием и у
+утверждённого), не открывая редакцию и не трогая замок. Версию несут тело и
+его хранение: <code>content</code>, <code>provider</code>, <code>external_ref</code>, <code>mime_type</code> — их правка
+подчиняется машине состояний ниже. Агентский <code>artifact_update</code> сохраняет
+прежние ограничения целиком: approved — отказ, in_review — замок.</p>
 <h3 id="32-происхождение-origin"><a class="anchor" href="#32-происхождение-origin" aria-label="Section link">#</a>3.2. Происхождение (origin)</h3><pre><code class="language-text">origin_type  human | agent
 origin_user  кто из людей (для human)
 origin_run   какой ран создал (для agent)
@@ -219,8 +227,8 @@ docs/sagas.md). Это не сужает видимость (орго-модел
 правом записи; каждое изменение — событие аудита);</li>
 <li><code>draft → in_review</code>: <code>submit</code>, создаёт review-строку; повторный <code>submit</code> той
 же версии идемпотентно возвращает открытый review;</li>
-<li><code>in_review → approved</code>: решение по правилу <code>mode</code> (all/any); тело и метаданные
-фиксируются, <code>version</code> становится указателем «утверждённая»;</li>
+<li><code>in_review → approved</code>: решение по правилу <code>mode</code> (all/any); тело
+фиксируется, <code>version</code> становится указателем «утверждённая»;</li>
 <li><code>in_review → rejected</code> / <code>rejected → draft</code>: возврат с комментарием и новый
 круг доработки — в том числе агентом (<code>artifact_update</code> + повторный <code>submit</code>);</li>
 <li><code>approved → superseded</code>: автоматический переход предыдущей утверждённой

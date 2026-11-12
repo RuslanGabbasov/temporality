@@ -6517,6 +6517,34 @@ func main() {
 			artifact.SagaID = current.SagaID
 		}
 		artifact.OrgUnitID = current.OrgUnitID
+		// A metadata-only edit is version-free (docs/artifact-lifecycle.md §5):
+		// the review round locks the BODY — title, description, kind, saga link
+		// and catalog tags are not what reviewers sign off, so a rename lands in
+		// place even mid-review and never opens a revision on its own. Draft and
+		// rejected keep the classic in-place edit below (any edit of a rejected
+		// version reopens it as draft); agents (kernel-internal) keep the strict
+		// tool contract entirely: approved stays refused, in_review stays locked.
+		if !isKernelInternal(r) && workspace.ArtifactMetaOnly(artifact, current) &&
+			(current.Status == workspace.ArtifactInReview || current.Status == workspace.ArtifactApproved || current.Status == workspace.ArtifactDeprecated) {
+			if err := ws.UpdateArtifactMeta(r.Context(), artifact); err != nil {
+				if errors.Is(err, workspace.ErrNotFound) {
+					writeError(w, 404, err)
+					return
+				}
+				writeError(w, 500, err)
+				return
+			}
+			_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactUpdated, "artifact", artifact.ID, map[string]any{
+				"title": artifact.Title, "meta_only": true,
+			})
+			emitArtifactLifecycleEvent(r.Context(), events, "artifact.updated", artifact.ID, map[string]any{
+				"artifact_id": artifact.ID, "meta_only": true, "actor": requestUserID(r),
+			})
+			updated, _ := ws.GetArtifactRange(r.Context(), artifact.ID, 0, 0)
+			updated.Content = ""
+			writeJSON(w, 200, updated)
+			return
+		}
 		// Editing an approved artifact is the documented «новая редакция» move
 		// (docs/artifact-lifecycle.md §5): the edit lands as a draft revision
 		// in the version table while the approved version stays live — agents,
