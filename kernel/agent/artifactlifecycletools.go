@@ -293,6 +293,30 @@ func (a *Activities) handleArtifactNewVersion(ctx context.Context, request ToolR
 // handleArtifactSubmit opens a review round for the artifact's current version
 // (202 + the round). Reviewer syntax follows ask_human recipients (docs/inbound-messages.md
 // §7): user:<id>, org:<unit>, role:<role>, project_owner, or a bare user id.
+
+// handleArtifactDeprecate retires an approved artifact: it drops out of the
+// default listing and stops being a sane reference. A skill manifest still
+// pointing at it blocks the transition (409 with the skill ids) — the model
+// is told to update the manifests or pick a replacement first.
+func (a *Activities) handleArtifactDeprecate(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	artifactID := artifactStringArg(request, "artifact_id")
+	if artifactID == "" {
+		return ToolResult{Content: "error: artifact_id is required"}, nil
+	}
+	body, status, err := a.workspaceDo(ctx, http.MethodPost,
+		fmt.Sprintf("%s/v1/workspace/artifacts/%s/deprecate", a.WorkspaceURL, url.PathEscape(artifactID)), map[string]any{})
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: artifact deprecate failed (HTTP %d): %s", status, truncate(body, 600))}, nil
+	}
+	a.emitArtifactLifecycleToolEvent(ctx, request, "artifact.deprecated", artifactID, map[string]any{
+		"artifact_id": artifactID,
+	})
+	return ToolResult{Content: fmt.Sprintf("Artifact %s is now deprecated: it dropped out of the default listing and must not be referenced by new work. Skills still listing it are blocked until their manifests change.", artifactID)}, nil
+}
+
 func (a *Activities) handleArtifactSubmit(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	artifactID := artifactStringArg(request, "artifact_id")
 	if artifactID == "" {

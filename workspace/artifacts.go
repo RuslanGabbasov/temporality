@@ -268,6 +268,12 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 	if f.Status != "" {
 		args = append(args, f.Status)
 		query += ` AND status = $` + strconv.Itoa(len(args))
+	} else {
+		// No status filter → the working catalog: deprecated artifacts drop
+		// out by default (they stay readable by id and appear when the
+		// operator explicitly asks for the deprecated status).
+		query += ` AND status <> $` + strconv.Itoa(len(args)+1)
+		args = append(args, ArtifactDeprecated)
 	}
 	if f.Kind != "" {
 		args = append(args, f.Kind)

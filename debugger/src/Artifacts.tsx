@@ -12,7 +12,7 @@ import {
   SelectItem,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download, Chat, Checkmark } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download, Chat, Checkmark, WarningFilled, Restart } from '@carbon/icons-react'
 import { workspaceApi, exportArtifactMarkdown, type Artifact, type ArtifactAnnotation, type ArtifactInboxEntry, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
 import { MarkdownWithPresentations } from './PresentationView'
 import { whoami, canReconcile } from './kernelApi'
@@ -101,13 +101,14 @@ function highlightAnnotationRange(root: HTMLElement, item: { id: string; kind: s
 
 type ArtifactForm = Partial<Artifact>
 
-const STATUS_ORDER: Record<string, number> = { in_review: 0, draft: 1, rejected: 2, approved: 3 }
+const STATUS_ORDER: Record<string, number> = { in_review: 0, draft: 1, rejected: 2, approved: 3, deprecated: 4 }
 
 function statusTagType(status?: string): 'red' | 'warm-gray' | 'green' | 'purple' {
   switch (status) {
     case 'in_review': return 'purple'
     case 'draft': return 'warm-gray'
     case 'rejected': return 'red'
+    case 'deprecated': return 'warm-gray'
     default: return 'green' // approved
   }
 }
@@ -606,7 +607,7 @@ export default function Artifacts({ project }: { project?: string }) {
     acc[s] = (acc[s] ?? 0) + 1
     return acc
   }, {})
-  const orderedStatuses = ['in_review', 'draft', 'rejected', 'approved'].filter((s) => statusCounts[s] > 0)
+  const orderedStatuses = ['in_review', 'draft', 'rejected', 'approved', 'deprecated'].filter((s) => statusCounts[s] > 0)
   // Filtering happens server-side (tens of thousands of rows); the page
   // only sorts the served page the way the registry reads: lifecycle first,
   // then title.
@@ -624,6 +625,7 @@ export default function Artifacts({ project }: { project?: string }) {
       case 'in_review': return t('artifacts.status_in_review') ?? 'In review'
       case 'draft': return t('artifacts.status_draft') ?? 'Draft'
       case 'rejected': return t('artifacts.status_rejected') ?? 'Rejected'
+      case 'deprecated': return t('artifacts.status_deprecated') ?? 'Устарел'
       default: return t('artifacts.status_approved') ?? 'Approved'
     }
   }
@@ -852,6 +854,32 @@ export default function Artifacts({ project }: { project?: string }) {
     } catch (f) { setError(message(f)) }
   }
 
+  // Soft retirement (§lifecycle): an approved artifact drops out of the
+  // default listing; skill manifests still referencing it block the move —
+  // the 409 names them and the error banner shows it verbatim.
+  const deprecate = async (a: Artifact) => {
+    const ok = await confirmDialog({
+      title: t('artifacts.deprecate_confirm', { name: a.title }) ?? `Устарел: ${a.title}?`,
+      body: t('artifacts.deprecate_hint') ?? 'Документ останется доступным по id, но исчезнет из списка по умолчанию. Если на него ссылается навык — перевод блокируется.',
+      danger: true,
+      confirmLabel: t('artifacts.status_deprecated') ?? 'Устарел',
+    })
+    if (!ok) return
+    setError('')
+    try {
+      const updated = await workspaceApi.deprecateArtifact(a.id)
+      setArtifacts((current) => current.map((x) => (x.id === a.id ? { ...updated, content: x.content } : x)))
+    } catch (f) { setError(message(f)) }
+  }
+
+  const revive = async (a: Artifact) => {
+    setError('')
+    try {
+      const updated = await workspaceApi.reviveArtifact(a.id)
+      setArtifacts((current) => current.map((x) => (x.id === a.id ? { ...updated, content: x.content } : x)))
+    } catch (f) { setError(message(f)) }
+  }
+
   const openReviews = async (a: Artifact) => {
     try {
       const page = await workspaceApi.listArtifactReviews(a.id)
@@ -1067,6 +1095,12 @@ export default function Artifacts({ project }: { project?: string }) {
                       {orderedStatuses.map((s) => (
                         <option key={s} value={s}>{statusLabel(s)} ({statusCounts[s] ?? 0})</option>
                       ))}
+                      {/* Deprecated drops out of the default listing server-side,
+                          so its count never shows up in statusCounts — the option
+                          stays reachable to un-hide the retired documents. */}
+                      {!orderedStatuses.includes('deprecated') && (
+                        <option value="deprecated">{statusLabel('deprecated')}</option>
+                      )}
                     </select>
                   </label>
                   <label className="toolbar-select" title={t('artifacts.filter_age_label') ?? 'Age'} style={{ flex: 1, minWidth: 0 }}>
@@ -1677,12 +1711,28 @@ export default function Artifacts({ project }: { project?: string }) {
                     							size="sm"
                     							kind="secondary"
                     							renderIcon={Edit}
-                    							disabled={selected.provider === 'url' || (selected.status ?? '') === 'in_review' || revisionInReview}
-                    							title={selected.provider === 'url' ? (t('artifacts.edit_locked_url') ?? 'The body lives in the external system') : ((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+                    							disabled={selected.provider === 'url' || (selected.status ?? '') === 'in_review' || revisionInReview || selected.status === 'deprecated'}
+                    							title={selected.provider === 'url' ? (t('artifacts.edit_locked_url') ?? 'The body lives in the external system') : ((selected.status ?? '') === 'in_review' || revisionInReview) ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : selected.status === 'deprecated' ? (t('artifacts.deprecated_locked') ?? 'Устаревший документ — верните в работу, чтобы править') : undefined}
                     							onClick={() => void startEdit(selected)}
-                    						>{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
+						>{editLabel(selected.status, revisionOpen && revisionEditable)}</Button>
+					)}
+					{/* Retirement rides the version toolbar: it is a statement
+					    about the current text. Deprecated flips back to draft. */}
+                    					{!bodyEditing && selected.status === 'approved' && (
+                    						<Button
+                    							size="sm"
+                    							kind="ghost"
+                    							hasIconOnly
+                    							renderIcon={WarningFilled}
+                    							iconDescription={t('artifacts.deprecate') ?? 'Устарел'}
+                    							tooltipPosition="bottom"
+                    							onClick={() => void deprecate(selected)}
+                    						/>
                     					)}
-                    					{selected.provider !== 'url' && (
+					                    {!bodyEditing && selected.status === 'deprecated' && (
+					                      <Button size="sm" kind="ghost" renderIcon={Restart} onClick={() => void revive(selected)}>{t('artifacts.revive') ?? 'Вернуть в работу'}</Button>
+					                    )}
+					                    {selected.provider !== 'url' && (
                     						<Button
                     							size="sm"
                     							kind="ghost"

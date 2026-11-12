@@ -6658,6 +6658,68 @@ func main() {
 		updated.Content = ""
 		writeJSON(w, 200, updated)
 	})
+	// Deprecate an approved artifact («устарел»): a soft retirement — the
+	// document stays readable but drops out of the default listing, and
+	// skill manifests referencing it block the transition with the skill
+	// ids named. Writer gate: both humans and the kernel's agent tools
+	// reach it (artifact_deprecate).
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/deprecate", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		id := r.PathValue("artifactID")
+		refs, err := ws.DeprecateArtifact(r.Context(), id, requestUserID(r))
+		if err != nil {
+			if len(refs) > 0 {
+				// The skill-manifest guard: 409 with the blocking skills.
+				writeError(w, 409, fmt.Errorf("artifact is referenced by skills %s; update the manifests first", strings.Join(refs, ", ")))
+				return
+			}
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		artifact, gErr := ws.GetArtifactRange(r.Context(), id, 0, 0)
+		if gErr != nil {
+			writeError(w, 500, gErr)
+			return
+		}
+		writeJSON(w, 200, artifact)
+	})
+
+	// Lift the retirement: deprecated → draft, the ordinary lifecycle.
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/revive", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		if isKernelInternal(r) {
+			writeError(w, 403, errors.New("artifacts are revived by humans only"))
+			return
+		}
+		id := r.PathValue("artifactID")
+		if err := ws.ReopenArtifact(r.Context(), id, requestUserID(r)); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		artifact, gErr := ws.GetArtifactRange(r.Context(), id, 0, 0)
+		if gErr != nil {
+			writeError(w, 500, gErr)
+			return
+		}
+		writeJSON(w, 200, artifact)
+	})
+
 	mux.HandleFunc("DELETE /v1/workspace/artifacts/{artifactID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
 			return

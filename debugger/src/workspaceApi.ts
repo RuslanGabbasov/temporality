@@ -775,7 +775,7 @@ export interface Artifact {
   /** Lifecycle (docs/artifact-lifecycle.md): draft → in_review →
    * approved/rejected; agent-created rows start as drafts, human creates land
    * approved. kind separates reference documents from saga work products. */
-  status?: 'draft' | 'in_review' | 'approved' | 'rejected'
+  status?: 'draft' | 'in_review' | 'approved' | 'rejected' | 'deprecated'
   kind?: 'reference' | 'work'
   version?: number
   origin_type?: 'human' | 'agent'
@@ -1723,6 +1723,10 @@ export const workspaceApi = {
     request<Artifact>(`/v1/workspace/artifacts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   startArtifactRevision: (id: string, content: string) =>
     request<Artifact>(`/v1/workspace/artifacts/${id}/revision`, { method: 'POST', body: JSON.stringify({ content }) }),
+  deprecateArtifact: (id: string) =>
+    request<Artifact>(`/v1/workspace/artifacts/${id}/deprecate`, { method: 'POST', body: '{}' }),
+  reviveArtifact: (id: string) =>
+    request<Artifact>(`/v1/workspace/artifacts/${id}/revive`, { method: 'POST', body: '{}' }),
   deleteArtifact: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/artifacts/${id}`, { method: 'DELETE' }),
   submitArtifact: (id: string, data: { reviewers: string[]; mode?: string; note?: string }) =>
