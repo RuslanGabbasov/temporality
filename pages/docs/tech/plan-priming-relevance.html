@@ -69,6 +69,7 @@
 <a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
 <a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
 <a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
 <a class="docs-nav-row active" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
 <a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
 <a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
@@ -113,7 +114,7 @@
 устранена: прототип удалён, единственный движок — <code>observation.FindHints</code>.</p>
 <h3 id="21-рабочий-контур-активации-observationhintsgo"><a class="anchor" href="#21-рабочий-контур-активации-observationhintsgo" aria-label="Section link">#</a>2.1. Рабочий контур активации (observation/hints.go)</h3><p>Путь, который реально исполняется в рантайме:</p>
 <ol>
-<li><code>AgentRun</code> (<code>kernel/agent/workflow.go</code>) перед циклом ходов вызывает activity <code>kernel.knowledge_hints</code> с <code>query = input.Prompt</code>; лимит зашит в activity — <strong>8 подсказок</strong>. Обращение best-effort: при недоступности пишется <code>memory.read.failed</code>, ран продолжается.</li>
+<li><code>AgentRun</code> (<code>kernel/agent/workflow.go</code>) перед циклом ходов вызывает activity <code>kernel.knowledge_hints</code> с <code>query = input.HintQuery</code> — намерением пользователя, а не всем промптом; для чата это последнее его сообщение (<code>StartRunRequest.hint_query</code> → <code>RunInput.HintQuery</code>), при пустом поле остаётся <code>input.Prompt</code>. Лимит зашит в activity — <strong>8 подсказок</strong>, сам query усекается до 4000 рун <strong>с обоих концов</strong> (шапка задачи + хвост транскрипта). Обращение best-effort: при недоступности пишется <code>memory.read.failed</code>, ран продолжается.</li>
 <li>Activity <code>KnowledgeHints</code> (<code>kernel/agent/activities.go</code>) делает POST <code>/v1/observations/hints</code>.</li>
 <li>Observation (<code>observation/httpapi/server.go</code>) пишет событие <code>hint.query</code>, вызывает <code>FindHints</code> (<code>observation/hints.go</code>) и пишет <code>hint.offered</code> на каждую отобранную подсказку (с proposition, state, matched_by).</li>
 <li><code>FindHints</code>:<ul>
@@ -247,6 +248,7 @@
 <li><strong>B3. Применимость к этапу работы</strong> — разведка / реализация / проверка (опционально, включается по мере появления метаданных этапа).</li>
 <li><strong>B4. Подтверждённая практическая полезность</strong> — производная от <code>hint.outcome=helpful</code>, а не факт автоматической выдачи.</li>
 <li><strong>B5. Новизна</strong> относительно уже подключённого контекста (Skills, системный промпт, ранее выданные cue) — штраф за дублирование, а не исключение (§7).</li>
+<li><strong>B6. Персональная свежесть</strong> — «работало именно у этого пользователя недавно» — <strong>техпроект, не начат</strong>: см. <code>plan-hint-personalization.md</code>.</li>
 </ul>
 <p>Веса факторов конфигурируются, детерминированы и версионируются вместе с алгоритмом (§8).</p>
 <hr>
@@ -394,6 +396,11 @@ knowledge_id=K123
 <li>Цель — <strong>максимум новой полезной информации при минимальном дополнительном контексте</strong>, а не минимальное число подсказок само по себе.</li>
 </ul>
 <p>Технически: HintRequest пополняется полем контекста (список skill-ids, digest уже выданного); ядро передаёт его при запросе <code>/v1/observations/hints</code>.</p>
+<p>Внедрено дополнительно (закрывает «сырой промпт» Р7 и повторы между ранами):</p>
+<ul>
+<li><strong>query намерения вместо транскрипта.</strong> Промпт чата — это шаблонная шапка + последние 12 сообщений + новое сообщение, и матчер не отличает новую просьбу от истории. Чат-клиент шлёт <code>hint_query</code> (последнее сообщение пользователя) в <code>POST /v1/workspace/tasks/{taskID}/runs</code>; ядро кладёт его в <code>RunInput.HintQuery</code> и использует и для priming, и для динамических активаций. Длинный query усекается с обоих концов — иначе обрезка с головы отрезала как раз новое сообщение, лежащее в хвосте.</li>
+<li><strong>Подавление на уровне задачи.</strong> Run-scoped список <code>issued_knowledge_ids</code> умирает вместе с раном, а чат-задача заводит новый ран на каждое сообщение — каждый из них переигрывал один и тот же верх выдачи. На <code>task.priming</code> Observation дополнительно исключает знания, уже предложенные в активациях этой же задачи (<code>hint.offered</code> с <code>context.task</code>, до 64 последних). Динамические активации внутри рана остаются на run-scoped списке — запрос к истории задачи выполняется один раз на старт рана.</li>
+</ul>
 <hr>
 <h2 id="8-детерминизм"><a class="anchor" href="#8-детерминизм" aria-label="Section link">#</a>8. Детерминизм</h2><p>Детерминизм — необходимое условие отладки и A/B-сравнения версий алгоритма.</p>
 <p>Единый порядок отбора:</p>
@@ -519,6 +526,7 @@ benchmark-корпус).</p>
 <li>п.13 — осознанно дескоупнуто: Experience Pattern как слой подачи (объединение отобранных знаний в один cue) не подтверждён потребностью — компактный cue-контракт уже держит бюджет, а группировка до отбора была исходным дефектом (§3.1); вернуть при появлении свидетельств от бенчмарка.</li>
 </ul>
 <p>Попутно исправлено: <code>RenderHintBlock</code> не учитывал руны-разделители <code>\n</code> при склейке блока — блок мог превысить бюджет на ~1 токен; теперь каждая строка несёт свой сепаратор (ceil субаддитивен, инвариант доказуем), <code>RenderResult.KeptIDs</code> открывает попозиционный учёт.</p>
+<p>Попутно исправлено (второй заход, чат): query priming собирался из сырого транскрипта и усекался с головы — подсказки матчились по шаблонной шапке и старым сообщениям, а новое сообщение пользователя (хвост транскрипта) в query не попадало; сверху повтор между ранами одной чат-задачи добавлял одни и те же знания, потому что run-scoped <code>issued_knowledge_ids</code> умирает вместе с раном. См. §7: <code>hint_query</code> последнего сообщения пользователя + подавление по истории задачи на <code>task.priming</code>.</p>
 <p>Не сделано: P2 целиком (семантика/LLM-оценка/адаптация весов — только если бенчмарк покажет потолок текущего движка).</p>
 <h3 id="p0-базовая-семантика-консолидация-и-контракт"><a class="anchor" href="#p0-базовая-семантика-консолидация-и-контракт" aria-label="Section link">#</a>P0 — базовая семантика (консолидация и контракт)</h3><ol>
 <li><strong>Консолидация</strong>: единственный движок отбора — <code>FindHints</code> v2 в observation; <code>kernel/priming</code> выводится из рантайма (эндпоинт — удалить или проксировать).</li>
@@ -575,6 +583,7 @@ benchmark-корпус).</p>
 <li>векторный семантический тир — вне скоупа этого плана, но реализован
 отдельно (см. §18);</li>
 <li>изменение модели доступа — используются существующие проверки видимости (<code>org-structure.md</code>).</li>
+<li>персонализация ранжирования по пользователю (B6) — вынесена в отдельный техпроект <code>plan-hint-personalization.md</code>.</li>
 </ul>
 <hr>
 <h2 id="17-открытые-вопросы"><a class="anchor" href="#17-открытые-вопросы" aria-label="Section link">#</a>17. Открытые вопросы</h2><ul>
@@ -616,7 +625,7 @@ proposal; <code>harmful</code> с причиной переводит в <code>c
 
 
   <nav class="docs-pager">
-    <a class="pager-prev" href="plan-evaluable-agent.html"><small>← Назад</small><strong>План работ: Evaluable Agent — определение агента и компиляция системного промта</strong></a>
+    <a class="pager-prev" href="plan-hint-personalization.html"><small>← Назад</small><strong>Персональные подсказки: фактор B6 «работало именно у этого пользователя»</strong></a>
     <a class="pager-next" href="presentation-engine.html"><small>Далее →</small><strong>Техническое задание: Presentation Engine для Temporality</strong></a>
   </nav>
 </article>

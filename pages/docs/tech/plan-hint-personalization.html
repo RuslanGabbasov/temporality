@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>Персональные подсказки: фактор B6 «работало именно у этого пользователя» — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/plan-hint-personalization.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/plan-hint-personalization.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="Персональные подсказки: фактор B6 «работало именно у этого пользователя» — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/plan-hint-personalization.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Персональные подсказки: фактор B6 «работало именно у этого пользователя» — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/plan-hint-personalization.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row active" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Персональные подсказки: фактор B6 «работало именно у этого пользователя»</h1>
+
+<p><strong>Статус:</strong> техпроект, не начат
+<strong>Компонент:</strong> Observation — <code>observation.FindHints</code> + <code>activateObservationHints</code>
+<strong>Зависит от:</strong> <code>docs/plan-priming-relevance.md</code> (§3.3 факторы, §8 детерминизм, §11 цикл полезности, §12 бенчмарк) и правок «вариант 1+2» (hint_query + подавление по истории задачи) — они уже в main
+<strong>Дата:</strong> 2026-11-14</p>
+<hr>
+<h2 id="1-проблема"><a class="anchor" href="#1-проблема" aria-label="Section link">#</a>1. Проблема</h2><p>Исходная жалоба: «при старте рана подсказки бестолковые каждый раз; возможно, стоит ранжировать знания по корреляции с конкретным пользователем и тем, чем он последние несколько ранов занимается».</p>
+<p>Два первых дефекта закрыты:</p>
+<ul>
+<li><strong>query</strong> теперь — последнее сообщение пользователя (<code>hint_query</code>), а не сырой транскрипт, и длинный query усекается с обоих концов;</li>
+<li><strong>повторы между ранами</strong> одной чат-задачи подавляются по истории <code>hint.offered</code> задачи на <code>task.priming</code>.</li>
+</ul>
+<p>Остаётся третий: <strong>ранжирование не знает, с кем говорит.</strong> Текущая сортировка отвечает на «что релевантно задаче» (matchTier) и «что доказано в целом» (stateTier / B4), но не на «что уже сработало у этого человека недавно и что ему уже вредило». Метрика полезности B4 (<code>usefulnessTier</code>) агрегирована по всем ранам проекта — для одного пользователя она обычно нейтрална (меньше 3 исходов), поэтому внутри массовых tier-3 совпадений решают kind/stale/tie-breaker по <code>KnowledgeID</code>, то есть фактически случайный порядок.</p>
+<p>Важно развести два тезиса:</p>
+<ul>
+<li>«пользователь редко меняет тему» — это уже покрыто лексическим и семантическим матчингом: тема совпадёт сама, отдельный фактор «о чём он думает» не нужен;</li>
+<li>недостающая ось — <strong>персональная история успеха/неудачи и её свежесть</strong>: не тема, а то, что у <em>этого</em> человека уже сработало (или сломалось) и когда.</li>
+</ul>
+<h2 id="2-что-уже-есть-в-коде-проверено"><a class="anchor" href="#2-что-уже-есть-в-коде-проверено" aria-label="Section link">#</a>2. Что уже есть в коде (проверено)</h2><table>
+<thead>
+<tr>
+<th>Факт</th>
+<th>Где</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>У чат-рана есть стабильный ключ пользователя: <code>input.ActorID</code> из principal (fallback <code>human-requester</code>)</td>
+<td><code>cmd/agent-kernel/main.go:3588-3594</code></td>
+</tr>
+<tr>
+<td>Ключ уходит в каждый запрос хинтов: <code>payload[&quot;actor&quot;] = {id, type:&quot;agent&quot;}</code></td>
+<td><code>kernel/agent/activities.go:3330</code></td>
+</tr>
+<tr>
+<td>Observation его <strong>принимает, но не использует в ранжировании</strong> — только пишет в <code>Context</code> телеметрии</td>
+<td><code>observation/httpapi/server.go:1857</code>, <code>:2060</code></td>
+</tr>
+<tr>
+<td><code>HintQuery</code> не содержит Actor вовсе</td>
+<td><code>observation/hints.go:14-40</code></td>
+</tr>
+<tr>
+<td>Обратная связь пер-актор уже пишется в журнал: <code>hint.used</code> / <code>hint.ignored</code> / <code>hint.outcome</code> несут <code>knowledge_id</code>, <code>context.actor.id</code> (= <code>RunInput.ActorID</code>), <code>context.task</code>, <code>occurred_at</code></td>
+<td><code>kernel/agent/workflow.go:5876-5909</code>, контекст <code>:5659</code></td>
+</tr>
+<tr>
+<td>Счётчики в проекции <code>Knowledge</code> (<code>HintOffers</code>, <code>HintUses</code>, <code>HelpfulOutcomes</code>, <code>LastUsedAt</code>) — <strong>глобальные</strong>, без разреза по актору</td>
+<td><code>observation/knowledge.go:46-59</code></td>
+</tr>
+<tr>
+<td>Порядок сортировки: <code>matchTier → kindTier → stateTier → staleTier → usefulTier → noveltyTier → KnowledgeID</code></td>
+<td><code>observation/hints.go:313-346</code></td>
+</tr>
+<tr>
+<td>B4 (<code>usefulnessTier</code>) — глобальный, порог <code>hintOutcomeMinSamples = 3</code></td>
+<td><code>observation/hints.go:400</code>, <code>:98</code></td>
+</tr>
+<tr>
+<td>Фильтры журнала уже умеют нужное: <code>Actor</code>, <code>Types</code> (any-of), <code>Since</code>, <code>Order</code>, <code>Limit</code></td>
+<td><code>observation/store.go:24-59</code></td>
+</tr>
+<tr>
+<td>Прецедент on-demand выборки из журнала в хинтах: <code>priorTaskIssued</code> (вариант 2)</td>
+<td><code>observation/httpapi/server.go:1897</code></td>
+</tr>
+<tr>
+<td>Corpus-ранер <strong>не передаёт <code>Now</code></strong> → любое окно по времени в бенчмарке не видно</td>
+<td><code>observation/priming_benchmark_test.go:95-98</code></td>
+</tr>
+<tr>
+<td><code>HintsAlgorithmVersion = &quot;lexical-entity-topic.v3&quot;</code>; тесты ссылаются на константу, не на литерал</td>
+<td><code>observation/hintrender.go:12</code></td>
+</tr>
+<tr>
+<td>Индексы журнала: <code>event_id</code>, <code>(run_id, occurred_at)</code>, курсорный tuple, <code>(project_id, occurred_at, …)</code> — <strong>индекса по актору/типу нет</strong></td>
+<td><code>observation/postgres/migrations/observation_events_indexes.up.sql</code></td>
+</tr>
+</tbody></table>
+<h2 id="3-гипотеза-и-метрики-успеха"><a class="anchor" href="#3-гипотеза-и-метрики-успеха" aria-label="Section link">#</a>3. Гипотеза и метрики успеха</h2><p><strong>H1.</strong> Знание, которое этому пользователю помогало недавно, должно обгонять равное по матчу знание, о котором о нём ничего не известно; знание, которое ему уже вредило, — не возвращаться в топ.</p>
+<p>Наблюдаемые следствия:</p>
+<ol>
+<li>В чате, где три рана подряд решалась одна задача, персонально проверенные знания не уступают случайному совпадению по двум токенам.</li>
+<li>Доля повторных выдач <code>hint.offered</code> с уже виденными этому actor <code>knowledge_id</code> за окно падает (считается из телеметрии, без новой инфраструктуры).</li>
+<li>Бенчмарк §12: полы не проседают, персональные кейсы переворачивают порядок в нужную сторону.</li>
+</ol>
+<p>Метрика «качество ≠ поведение» (§12.2) остаётся ручным пилотом: поведение агента с/без персонализации сравнивается отдельно, автоматически в CI не доказывается.</p>
+<h2 id="4-дизайн"><a class="anchor" href="#4-дизайн" aria-label="Section link">#</a>4. Дизайн</h2><h3 id="41-сигнал-b6-этап-1-только-свежесть"><a class="anchor" href="#41-сигнал-b6-этап-1-только-свежесть" aria-label="Section link">#</a>4.1 Сигнал B6 (этап 1 — только свежесть)</h3><p>Три уровня, целые числа, как у остальных факторов:</p>
+<table>
+<thead>
+<tr>
+<th>Значение</th>
+<th>Условие</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>0</code> (boost)</td>
+<td><code>hint.used</code> этого actor по знанию внутри окна</td>
+</tr>
+<tr>
+<td><code>1</code> (нейтрально)</td>
+<td>данных по этому actor нет — новый человек, extraction выключен, сигнал не собрался</td>
+</tr>
+<tr>
+<td><code>2</code> (demote)</td>
+<td><code>hint.outcome = harmful</code> этого actor по знанию внутри окна</td>
+</tr>
+</tbody></table>
+<p>Окно: <code>hintActorWindowDays = 14</code> — считается от <code>occurred_at</code> одним запросом (§4.3). Альтернатива «последние <code>hintActorWindowRuns = 8</code> ранов actor» семантичеснее для редких, но разбросанных во времени пользователей, однако требует агрегации по ранам вместо фильтра по времени — на этап 1 не берём. Обе величины подбираются бенчмарком и фиксируются константами рядом с <code>hintOutcomeMinSamples</code>.</p>
+<p>Почему не «игнорировал»: <code>hint.ignored</code> пишется на каждую невостребованную подсказку каждого рана — это шум, а не отрицательный опыт; demote только по явному <code>harmful</code>. Почему не <code>used</code> как полезность: <code>used ≠ helpful</code> (§11), поэтому <code>used</code> даёт лишь свежесть, а не доказательство пользы.</p>
+<p><strong>Этап 2 (опционально, после пилота):</strong> персональный B4 — доля <code>helpful</code>/<code>harmful</code> <em>этого</em> actor вместо глобальной, с тем же порогом по выборке. Отдельным этапом, потому что выборка на одного человека маленькая и шумная.</p>
+<h3 id="42-контракт-данных"><a class="anchor" href="#42-контракт-данных" aria-label="Section link">#</a>4.2 Контракт данных</h3><p><code>FindHints</code> остаётся чистой функцией над журналом — история приходит явно:</p>
+<pre><code class="language-go">// HintQuery
+// ActorHistory — сигналы этого актора по знаниям, посчитанные вызывающим
+// из журнала (hint.used / hint.outcome с context.actor.id). Nil = без
+// персонализации, фактор нейтрален для всех кандидатов.
+ActorHistory map[string]ActorSignal
+
+type ActorSignal struct {
+    LastUsedAt time.Time
+    Harmful    bool
+}
+</code></pre>
+<p>Так контракт тестируется без журнала, а корпус может подставлять историю напрямую.</p>
+<h3 id="43-источник-и-стоимость"><a class="anchor" href="#43-источник-и-стоимость" aria-label="Section link">#</a>4.3 Источник и стоимость</h3><p><strong>A. On-demand выборка из журнала (рекомендуется, этап 1).</strong>
+<code>ListObservationPage(Filter{Project, Actor, Types: [&quot;hint.used&quot;,&quot;hint.outcome&quot;], Order: &quot;desc&quot;, Since: &amp;window, Limit: 128})</code> → <code>map[knowledgeID]ActorSignal</code>. Тот же паттерн, что уже сделан в <code>priorTaskIssued</code> (<code>observation/httpapi/server.go:1897</code>).</p>
+<p><strong>B. Агрегация в проекцию <code>Knowledge</code></strong> (пер-акторные счётчики рядом с <code>HintOffers</code>). Плюс — O(1) на запросе; минус — <code>N акторов × M знаний</code> в памяти проекции, новый контур агрегации и отдельное хранилище. Слишком дорого для этапа 1.</p>
+<p><strong>C. Кэш TTL поверх A</strong> (ключ <code>project+actor</code>, ~60 с), по образцу <code>cachedKnowledge</code>. Нужен, если A включается и в динамические активации.</p>
+<p><strong>Выбор:</strong> A + C, на первом этапе — <strong>только <code>task.priming</code></strong> (один запрос на старт рана, как в варианте 2). Динамические активации подключаются после замера стоимости.</p>
+<p><strong>Обязательный пункт:</strong> индекс <code>observation_events (project_id, actor_id, type, occurred_at DESC)</code> — добавить в <code>observation/postgres/migrations/observation_events_indexes.up.sql</code> (файлы идемпотентны и гоняются на каждом буте, <code>journalMigrations</code> в <code>observation/postgres/store.go:36</code>) плюс соответствующий <code>.down.sql</code>. Без него выборка упирается в <code>(project_id, occurred_at, …)</code> и фильтрует actor/type на лету.</p>
+<h3 id="44-место-в-цепочке-сортировки"><a class="anchor" href="#44-место-в-цепочке-сортировки" aria-label="Section link">#</a>4.4 Место в цепочке сортировки</h3><p>Текущая цепочка (<code>observation/hints.go:313-346</code>):</p>
+<pre><code>matchTier → kindTier → stateTier → staleTier → usefulTier → noveltyTier → KnowledgeID
+</code></pre>
+<p><strong>Рекомендация: вставить B6 между <code>usefulTier</code> и <code>noveltyTier</code>.</strong></p>
+<ul>
+<li>Ниже <code>matchTier</code> — релевантность задаче всегда главнее личной истории.</li>
+<li>Ниже <code>stateTier</code> и <code>staleTier</code> — доверие и сомнение по §3.3: достоверность входит в допуск, а не слагается в рейтинг, поэтому <code>challenged</code> не всплывает над <code>confirmed</code> из-за того, что пользователю вчера помогло.</li>
+<li>Ниже глобального B4 — «доказано полезным» сильнее «недавно потрогано».</li>
+<li>Выше <code>noveltyTier</code> и tie-breaker по <code>KnowledgeID</code> — именно здесь решается массовая tier-3 равность, ради которой фактор и нужен.</li>
+</ul>
+<p>Альтернатива (поднять сразу после <code>stateTier</code>, чтобы личное обыгрывало kind/stale) — <strong>не на старте</strong>: она даёт фактору больше власти, чем обосновано, и любой подъём меняет порядок в корпусе. Если пилот покажет, что фактор не чувствуется — поднять осознанно отдельным решением с пересчётом бенчмарка.</p>
+<h3 id="45-версионирование-и-детерминизм-8"><a class="anchor" href="#45-версионирование-и-детерминизм-8" aria-label="Section link">#</a>4.5 Версионирование и детерминизм (§8)</h3><ul>
+<li><code>HintsAlgorithmVersion</code> → <code>lexical-entity-topic.v4</code> (<code>observation/hintrender.go:12</code>) + обновить комментарий о полах в <code>observation/priming_benchmark_test.go:42</code>.</li>
+<li>Детерминизм: вход детерминирован (история приходит явно, окно считается от <code>query.Now</code>, как уже делает <code>staleTier</code>). <code>Now == 0</code> → окно выключено → фактор нейтрален; это же правило для корпуса без <code>now</code>.</li>
+<li>Порядок кандидатов с одинаковыми признаками остаётся детерминированным: B6 — целое число, финальный tie-breaker — <code>KnowledgeID</code>.</li>
+</ul>
+<h2 id="5-этапы-работ"><a class="anchor" href="#5-этапы-работ" aria-label="Section link">#</a>5. Этапы работ</h2><ol>
+<li><strong>Контракт.</strong> <code>HintQuery.ActorHistory</code> + <code>ActorSignal</code>; <code>actorHistoryTier(item, history, now)</code> в <code>observation/hints.go</code>; вставка в цепочку сортировки (§4.4).</li>
+<li><strong>Источник.</strong> <code>actorHistory(...)</code> в <code>activateObservationHints</code> (по образцу <code>priorTaskIssued</code>), только <code>task.priming</code>; TTL-кэш; телеметрия <code>actor_history_count</code> в <code>hint.query</code>.</li>
+<li><strong>Индекс.</strong> Миграция <code>(project_id, actor_id, type, occurred_at DESC)</code> — до включения A в прод, иначе деградация на больших журналах.</li>
+<li><strong>Версия.</strong> <code>lexical-entity-topic.v4</code>, обновление хардкодов/комментариев.</li>
+<li><strong>Корпус.</strong> Расширить схему фикстур (§6) и добавить персональные кейсы; прогнать §12.3 — сравнение версий по всем метрикам.</li>
+<li><strong>Наблюдаемость.</strong> Счётчики + способ посмотреть «почему этот кандидат поднялся» (§13).</li>
+<li><strong>Пилот.</strong> Ручной behavioral impact (§12.2): один и тот же чат с фактором вкл/выкл.</li>
+</ol>
+<h2 id="6-тесты-и-бенчмарк"><a class="anchor" href="#6-тесты-и-бенчмарк" aria-label="Section link">#</a>6. Тесты и бенчмарк</h2><ul>
+<li><p><strong>Юнит:</strong> <code>actorHistoryTier</code> — boost / neutral / demote / окно истекло / <code>Now == 0</code>; <code>FindHints</code> с историей и без — порядок меняется только там, где должен.</p>
+</li>
+<li><p><strong>HTTP:</strong> <code>activateObservationHints</code> подставляет историю только для <code>task.priming</code>, при ошибке выборки деградирует в нейтральный фактор, не в 500.</p>
+</li>
+<li><p><strong>Схема корпуса</strong> (<code>observation/priming_benchmark_test.go:16-42</code>) — дополнить:</p>
+<pre><code class="language-json">&quot;query&quot;: { ..., &quot;now&quot;: &quot;2026-11-14T00:00:00Z&quot;,
+           &quot;actor_history&quot;: { &quot;K-1&quot;: {&quot;last_used_at&quot;: &quot;...&quot;, &quot;harmful&quot;: false} } }
+</code></pre>
+<p>без <code>now</code> персональные кейсы не воспроизводимы — окно считается от текущего времени.</p>
+</li>
+<li><p><strong>Новые кейсы:</strong> ≥5 — «личное поднимает равное», «harmful топит», «чужой актор не влияет», «история не переворачивает более сильный matchTier», «история не поднимает <code>challenged</code> над <code>confirmed</code>».</p>
+</li>
+<li><p><strong>Инварианты CI остаются:</strong> stale leakage = 0, детерминизм, бюджет блока, полы <code>precision ≥ 0.90</code>, <code>recall ≥ 0.85</code>, <code>redundancy ≤ 0.05</code>, <code>efficiency ≥ 5.0</code> (<code>observation/priming_benchmark_test.go:45-50</code>). По §12.3 изменение без улучшения на корпусе не принимается — для персонализации «улучшение» = пройденные персональные кейсы при неизменных полах.</p>
+</li>
+</ul>
+<h2 id="7-наблюдаемость"><a class="anchor" href="#7-наблюдаемость" aria-label="Section link">#</a>7. Наблюдаемость</h2><ul>
+<li><code>hint.query</code>: <code>actor_history_count</code> (сколько записей истории подано), <code>actor_id</code> уже есть в <code>Context</code>;</li>
+<li><code>hint.offered</code>: по желанию — признак «получил персональный буст», чтобы в трейсе было видно, <em>почему</em> кандидат поднялся (§13: <code>reason</code>);</li>
+<li>панель Knowledge: пер-акторная статистика <code>used/helpful</code> — отдельной строкой позже (этап 2), не блокирует.</li>
+</ul>
+<h2 id="8-риски-и-открытые-вопросы"><a class="anchor" href="#8-риски-и-открытые-вопросы" aria-label="Section link">#</a>8. Риски и открытые вопросы</h2><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Риск</th>
+<th>Что делать</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><strong>Окно по времени ломает воспроизводимость корпуса</strong> — ранер не передаёт <code>Now</code></td>
+<td>Обязательный пункт схемы: <code>now</code> в фикстурах (§6)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong><code>used</code> ≠ <code>helpful</code></strong> — механическое отражение терминов даёт свежесть без пользы</td>
+<td>Этап 1 — только свежесть; персональный B4 отдельным этапом</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Индекса по actor/type нет</strong> — выборка будет сканировать</td>
+<td>Миграция до включения (§4.3, этап 3)</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Пузырь персонализации</strong>: буст закрепляет пользователя в знакомом, противоречит разнообразию §9</td>
+<td><code>diversifyCandidates</code> идёт после ранжирования и частично страхует; смотреть redundancy в бенчмарке</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Пустая история</strong> (новый пользователь, extraction выключен, <code>SkipKnowledge</code>)</td>
+<td>Нейтральный уровень 1 — поведение не меняется, регрессии нет</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Склейка <code>human-requester</code></strong> — все неаутентифицированные раны делят один ключ (<code>main.go:3588</code>)</td>
+<td>Принять: это fallback, не продукт. Не класть в ключ ничего чувствительного</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Косметическая нестыковка</strong>: <code>context.actor.type</code> всегда <code>&quot;agent&quot;</code>, а <code>id</code> — человек (<code>activities.go:3330</code>)</td>
+<td>Ключом считать только <code>id</code>; править тип — отдельно, если понадобится UI</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>Стоимость на каждую активацию</strong></td>
+<td>Этап 1 — только priming + TTL-кэш; замерить до расширения</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Дрейф полос из-за изменения порядка в корпусе</td>
+<td>Отчёт §12.3 до/после, полы фиксируются комментарием в <code>priming_benchmark_test.go</code></td>
+</tr>
+</tbody></table>
+<h2 id="9-вне-скоупа"><a class="anchor" href="#9-вне-скоупа" aria-label="Section link">#</a>9. Вне скоупа</h2><ul>
+<li>Персонализация <strong>векторов/семантики</strong> (дообучение эмбеддингов на историю пользователя) — P2, только если бенчмарк упрётся в потолок лексики;</li>
+<li>Отдельное персистентное «личное пространство знаний» пользователя и выделенный индекс;</li>
+<li>Изменение lifecycle знаний, гейтинга и подавления (вариант 2 уже сделан);</li>
+<li>Автоматический подбор весов факторов на каждом ране (§11: адаптация допустима, самообучение — нет);</li>
+<li>Фактор «над какой темой пользователь работает последние N ранов» — это лексический/семантический матч, он уже есть.</li>
+</ul>
+<h2 id="10-критерии-готовности"><a class="anchor" href="#10-критерии-готовности" aria-label="Section link">#</a>10. Критерии готовности</h2><ul>
+<li><input disabled="" type="checkbox"> <code>HintQuery.ActorHistory</code> + B6 в цепочке сортировки на позиции §4.4;</li>
+<li><input disabled="" type="checkbox"> <code>HintsAlgorithmVersion = lexical-entity-topic.v4</code>, тесты зелёные;</li>
+<li><input disabled="" type="checkbox"> индекс <code>(project_id, actor_id, type, occurred_at DESC)</code> в миграции;</li>
+<li><input disabled="" type="checkbox"> корпус: схема <code>now</code>/<code>actor_history</code>, ≥5 персональных кейсов, полы §12.2 не просели, отчёт сравнения версий приложен (§12.3);</li>
+<li><input disabled="" type="checkbox"> <code>actor_history_count</code> в <code>hint.query</code>, пустая история деградирует в нейтральный фактор;</li>
+<li><input disabled="" type="checkbox"> <code>docs/plan-priming-relevance.md</code> обновлён: B6 в §3.3, пункт в §8 (детерминизм окна), строка в статусе реализации.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="plan-evaluable-agent.html"><small>← Назад</small><strong>План работ: Evaluable Agent — определение агента и компиляция системного промта</strong></a>
+    <a class="pager-next" href="plan-priming-relevance.html"><small>Далее →</small><strong>Priming v2: от каталога знаний к полезным рекомендациям</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
