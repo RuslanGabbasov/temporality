@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +117,49 @@ func TestCompleteParsedFailsAfterRetry(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when both attempts return prose")
+	}
+}
+
+// A gateway that accepts the streaming request and then goes silent must die
+// on the stream watchdog with a NAMED error — and must NOT fall back to the
+// blocking transport, which would hang on the very same parked connection
+// until the activity's StartToClose masks the cause (the production incident:
+// knowledge.extraction and skill_propose failing with bare StartToClose).
+func TestStreamOrCompleteWatchdogSkipsBlockingFallback(t *testing.T) {
+	var streamReqs, blockReqs int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := make([]byte, 4096)
+		n, _ := r.Body.Read(body)
+		if strings.Contains(string(body[:n]), `"stream":true`) {
+			streamReqs++
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			// Park: no bytes ever — the first-token watchdog must cut it.
+			<-r.Context().Done()
+			return
+		}
+		blockReqs++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	model := llm.New(llm.Config{
+		BaseURL: server.URL, Model: "m", Timeout: 30 * time.Second,
+		StreamFirstTokenTimeout: time.Second, StreamIdleTimeout: 500 * time.Millisecond,
+		MaxOutputTokens: 1024,
+	})
+	_, err := streamOrComplete(context.Background(), model, []llm.Message{{Role: "user", Content: "build a skill"}})
+	if err == nil {
+		t.Fatal("expected a watchdog error from the parked stream")
+	}
+	if !llm.StreamTimedOut(err) {
+		t.Fatalf("error must be the stream watchdog, got: %v", err)
+	}
+	if streamReqs < 1 {
+		t.Fatalf("stream request never arrived: %d", streamReqs)
+	}
+	if blockReqs != 0 {
+		t.Fatalf("a parked stream must not fall back to blocking (blocked calls: %d)", blockReqs)
 	}
 }

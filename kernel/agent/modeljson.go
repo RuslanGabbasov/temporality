@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/temporality-project/temporality/kernel/llm"
 )
@@ -18,6 +19,32 @@ import (
 // restores the format on the second attempt.
 const jsonRepairInstruction = `Your previous reply was not the requested JSON object. Respond again with the single JSON object matching the schema — JSON only, no prose, no markdown fences.`
 
+// streamOrComplete runs the structured call on the STREAMING transport
+// first. The background JSON calls (extraction, skill drafts, judge
+// verdicts) used to block on a gateway that accepts the request and then
+// never answers: the blocking client burns its whole timeout, Temporal's
+// StartToClose (started earlier, same budget) wins the race, and the failure
+// reports a bare «StartToClose timeout» naming nothing. The stream carries
+// three watchdogs instead — first token (~2min + payload prefill), idle
+// silence (90s) and no-progress — so a parked gateway dies fast with a
+// NAMED error, while a slow-but-alive generation runs to completion
+// instead of being killed at a total timeout. A rejected envelope or a
+// transport blip falls back to the blocking path, whose 400-ladder strips
+// the offending fields — the fallback is time-boxed so it cannot hang the
+// caller either.
+func streamOrComplete(ctx context.Context, model *llm.Client, messages []llm.Message) (llm.Completion, error) {
+	completion, err := model.StreamComplete(ctx, messages, nil, nil, llm.JSONMode())
+	if err == nil {
+		return completion, nil
+	}
+	if llm.StreamTimedOut(err) || ctx.Err() != nil {
+		return llm.Completion{}, err
+	}
+	bctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	return model.Complete(bctx, messages, nil, llm.JSONMode())
+}
+
 // completeParsed runs one model call and parses the reply as JSON. It asks
 // for JSON mode up front, repairs the common small-model breakage (raw
 // control characters inside strings, trailing commas) without a second call,
@@ -26,7 +53,7 @@ const jsonRepairInstruction = `Your previous reply was not the requested JSON ob
 // providers ignore response_format altogether).
 func completeParsed[T any](ctx context.Context, model *llm.Client, messages []llm.Message, parse func(string) (T, error)) (T, error) {
 	var zero T
-	completion, err := model.Complete(ctx, messages, nil, llm.JSONMode())
+	completion, err := streamOrComplete(ctx, model, messages)
 	if err != nil {
 		// Some providers answer json_object-mode requests with an EMPTY
 		// completion (sporadically, mostly under long prompts). The retry

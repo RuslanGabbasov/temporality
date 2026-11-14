@@ -485,6 +485,24 @@ func extractionProviderStub(t *testing.T, gotAuth *string, hits *int32) *httptes
 			*gotAuth = r.Header.Get("Authorization")
 		}
 		content, _ := json.Marshal(map[string]any{"candidates": []map[string]any{{"kind": "observation", "proposition": "The report command requires a pre-existing out directory and fails with exit 1 otherwise.", "evidence": []string{"r/event/000005"}}}})
+		var payload struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if payload.Stream {
+			// Background calls ride the streaming transport first: the stub
+			// answers SSE like the real providers do, so the call completes on
+			// the first request instead of paying the blocking fallback.
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher := w.(http.Flusher)
+			chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": string(content)}}}})
+			fmt.Fprintf(w, "data: %s\n\n", chunk)
+			final, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}})
+			fmt.Fprintf(w, "data: %s\n\n", final)
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			flusher.Flush()
+			return
+		}
 		reply, _ := json.Marshal(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": string(content)}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(reply)
