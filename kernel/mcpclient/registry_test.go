@@ -3,6 +3,8 @@ package mcpclient
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -108,6 +110,37 @@ func TestApplyChangedConfigFailureRemovesStale(t *testing.T) {
 	}
 	if got := r.ServerToolCount(cfg.ID); got != 0 {
 		t.Fatalf("changed-config failure must retire the stale tools, got %d", got)
+	}
+}
+
+// Discover answers «what does the server advertise»: the allowlist gates the
+// agent's calls, never the discovery. A filtered discovery could not show a
+// newly added tool that was not already allowed — the server gained tools,
+// discovery kept returning the old allowed subset, and only deleting and
+// recreating the server surfaced the full catalog (the Penpot case).
+func TestDiscoverIgnoresAllowlist(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "penpot-fake", Version: "1"}, nil)
+	for _, name := range []string{"open_file", "export_png", "inspect_page"} {
+		name := name
+		mcp.AddTool(server, &mcp.Tool{Name: name, Description: "demo " + name}, func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, struct{}, error) {
+			return &mcp.CallToolResult{}, struct{}{}, nil
+		})
+	}
+	handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server { return server }, nil)
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	r := NewRegistry()
+	tools, err := r.Discover(context.Background(), ServerConfig{
+		ID: "penpot", Name: "Penpot", Type: TypeHTTP, URL: ts.URL,
+		Allow:   []string{"open_file"}, // stored allowlist: one of three
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(tools) != 3 {
+		t.Fatalf("discover returned %d tools, want the full catalog of 3 — the allowlist must not filter discovery", len(tools))
 	}
 }
 

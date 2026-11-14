@@ -180,13 +180,20 @@ func (r *Registry) AdoptLegacy(client *Client) {
 	}
 }
 
-// Discover connects with the given config, lists tools and returns them
-// without registering the server. Used by the UI before saving a server; the
-// one-shot session is closed before returning.
+// Discover connects with the given config, lists the server's FULL tool
+// catalog and returns it without registering the server. The allowlist is
+// deliberately dropped before discovery: the allowlist gates what the AGENT
+// may call, while this call answers «what does the server advertise» —
+// filtered discovery could never show a tool that was not already allowed,
+// so a server that gained tools stayed at the old count until it was
+// deleted and recreated (the Penpot case: 10 tools, discovery kept
+// returning the 4 already allowed). Used by the UI before saving a server;
+// the one-shot session is closed before returning.
 func (r *Registry) Discover(ctx context.Context, cfg ServerConfig) ([]ToolInfo, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	cfg.Allow = nil
 	client := NewClient(cfg)
 	defer client.Close()
 	if err := client.Refresh(ctx); err != nil {
