@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace, runAttempt, buildRunRows, missingParents, attachParents, withParentRuns } from './AgentRuns'
+import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace, runAttempt, buildRunRows, attemptChain, missingParents, attachParents, withParentRuns } from './AgentRuns'
 import { runOrigin } from './runOrigin'
 import type { ObservationEvent } from './observationApi'
 
@@ -241,5 +241,108 @@ describe('runOrigin', () => {
       ['task/delegate/01', 'delegated'],
       ['task-r1', 'continuation'],
     ])
+  })
+})
+
+/** A restart is the same agent resuming the same task: the list folds the
+ *  chain into one row with an ⟳ N marker instead of N rows that read as
+ *  delegations to oneself (docs/agent-turn-limit-restarts.md). */
+describe('continuation folding', () => {
+  const started = (run: string, at: string, parent?: string): ObservationEvent => ({
+    type: 'run.started', occurred_at: at, source: { id: 's' }, context: { run },
+    data: parent ? { parent_run_id: parent } : {},
+  } as unknown as ObservationEvent)
+  const at = (minute: number) => `2026-11-05T10:${String(minute).padStart(2, '0')}:00Z`
+  const row = (rows: ReturnType<typeof buildRunRows>, id: string) => {
+    const found = rows.find((item) => item.id === id)
+    if (!found) throw new Error(`no row ${id}`)
+    return found
+  }
+
+  it('folds the whole attempt chain into its head', () => {
+    const rows = buildRunRows([
+      started('task', at(0)),
+      started('task-r1', at(10), 'task'),
+      started('task-r1-r2', at(20), 'task-r1'),
+      started('task/delegate/01', at(30), 'task'),
+    ], new Map())
+    expect(row(rows, 'task').continuations).toBe(2)
+    expect(row(rows, 'task').folded).toBe(false)
+    expect(row(rows, 'task-r1').folded).toBe(true)
+    expect(row(rows, 'task-r1-r2').folded).toBe(true)
+    // Delegations are work items, not attempts: they stay their own rows.
+    expect(row(rows, 'task/delegate/01').folded).toBe(false)
+    expect(row(rows, 'task/delegate/01').depth).toBe(1)
+  })
+
+  it('re-parents a folded attempt\u2019s delegations to the head', () => {
+    const rows = buildRunRows([
+      started('task', at(0)),
+      started('task-r1', at(10), 'task'),
+      started('task-r1/delegate/01', at(20), 'task-r1'),
+    ], new Map())
+    const child = row(rows, 'task-r1/delegate/01')
+    expect(child.folded).toBe(false)
+    expect(child.parent).toBe('task')
+    expect(child.depth).toBe(1)
+  })
+
+  it('folds a loaded segment into its topmost attempt when the head is gone', () => {
+    const rows = buildRunRows([
+      started('task-r1', at(10), 'task'),
+      started('task-r1-r2', at(20), 'task-r1'),
+    ], new Map())
+    expect(row(rows, 'task-r1').folded).toBe(false)
+    expect(row(rows, 'task-r1').depth).toBe(0)
+    expect(row(rows, 'task-r1').continuations).toBe(1)
+    expect(row(rows, 'task-r1-r2').folded).toBe(true)
+  })
+
+  it('leaves a lone attempt with no loaded ancestor as it was', () => {
+    const rows = buildRunRows([
+      started('task-r2', at(10), 'task'),
+      started('task-r2/delegate/01', at(20), 'task-r2'),
+    ], new Map())
+    expect(row(rows, 'task-r2').folded).toBe(false)
+    expect(row(rows, 'task-r2').depth).toBe(0)
+    expect(row(rows, 'task-r2').continuations).toBe(0)
+    expect(row(rows, 'task-r2/delegate/01').depth).toBe(1)
+  })
+})
+
+/** The run card's attempt switcher: one control for the chain the list
+ *  folded into a single row. */
+describe('attemptChain', () => {
+  const started = (run: string, at: string, parent?: string): ObservationEvent => ({
+    type: 'run.started', occurred_at: at, source: { id: 's' }, context: { run },
+    data: parent ? { parent_run_id: parent } : {},
+  } as unknown as ObservationEvent)
+  const at = (minute: number) => `2026-11-05T10:${String(minute).padStart(2, '0')}:00Z`
+  const chain = (rows: ReturnType<typeof buildRunRows>, id: string) => attemptChain(rows, id).map((item) => item.id)
+
+  it('walks head \u2192 attempts, oldest first, without delegations', () => {
+    const rows = buildRunRows([
+      started('task', at(0)),
+      started('task-r1', at(10), 'task'),
+      started('task-r1-r2', at(20), 'task-r1'),
+      started('task/delegate/01', at(30), 'task'),
+    ], new Map())
+    expect(chain(rows, 'task')).toEqual(['task', 'task-r1', 'task-r1-r2'])
+    expect(chain(rows, 'task-r1-r2')).toEqual(['task', 'task-r1', 'task-r1-r2'])
+    expect(chain(rows, 'task/delegate/01')).toEqual(['task/delegate/01'])
+    expect(chain(rows, 'missing')).toEqual([])
+  })
+
+  it('keeps the loaded segment when the head is not in the list', () => {
+    const rows = buildRunRows([
+      started('task-r1', at(10), 'task'),
+      started('task-r1-r2', at(20), 'task-r1'),
+    ], new Map())
+    expect(chain(rows, 'task-r1-r2')).toEqual(['task-r1', 'task-r1-r2'])
+  })
+
+  it('is a single-entry chain for a run with no continuations', () => {
+    const rows = buildRunRows([started('task', at(0))], new Map())
+    expect(chain(rows, 'task')).toEqual(['task'])
   })
 })

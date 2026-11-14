@@ -28,7 +28,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
+import { Time, Play, ChevronDown, ChevronLeft, ChevronRight } from '@carbon/icons-react'
 import { runOrigin, type RunOrigin } from './runOrigin'
 import { matchesFilter } from './ListFilter'
 import {
@@ -224,6 +224,13 @@ interface RunRow {
   attempt: number
   /** Continuation or delegation — see RunOrigin. */
   origin: RunOrigin
+  /** Auto-continuations folded into this row (the ⟳ N marker): a restart is
+   *  the same agent resuming the same task, so the list counts them on the
+   *  head instead of listing them as sibling runs. */
+  continuations: number
+  /** A folded attempt: kept in the array with its parent link intact (the
+   *  ops/cost subtree walks still need it) but never rendered as a row. */
+  folded: boolean
   /** Project attribution of the run (docs/activity-scoping.md §4): global
    * listings span projects, so every row carries its own project — detail
    * calls (result, cost, nudge) must use it, not the header filter. */
@@ -288,6 +295,8 @@ export function buildRunRows(started: ObservationEvent[], statuses: Map<string, 
       agentId: typeof event.data?.agent_id === 'string' && event.data.agent_id ? event.data.agent_id : undefined,
       attempt: runAttempt(event),
       origin: runOrigin(event),
+      continuations: 0,
+      folded: false,
       project: event.context?.project || undefined,
       actor: event.context?.actor?.id || undefined,
     })
@@ -302,7 +311,109 @@ export function buildRunRows(started: ObservationEvent[], statuses: Map<string, 
   // buildRunRows keeps the incoming order (the list loads desc = newest
   // first) and only folds children under their parents.
   for (const root of roots) walk(root, 0)
+  foldContinuations(rows)
   return rows
+}
+
+/** Collapse auto-continuations into their chain head. A restart is the same
+ *  agent resuming the same task, not a sibling piece of work: the list shows
+ *  ONE row with an ⟳ N marker instead of N rows that read as delegations to
+ *  oneself (docs/agent-turn-limit-restarts.md).
+ *
+ *  Folded rows stay in the array with their parent link untouched — the ops
+ *  and cost subtree walks must still reach them — and only the render skips
+ *  them. Their non-attempt children are re-parented to the head, so expanding
+ *  the head shows the delegations the continuations made. Depth is recomputed
+ *  over the surviving tree; folded rows keep theirs (they are never roots,
+ *  which is what auto-select keys on). */
+function foldContinuations(rows: RunRow[]): void {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  // The chain head of an attempt: the nearest ancestor that is not itself a
+  // continuation. When no such ancestor is loaded (the head fell out of the
+  // window) the segment folds into its topmost loaded attempt; a lone attempt
+  // has nowhere to fold and keeps rendering as it did before.
+  const targetOf = (row: RunRow): RunRow | null => {
+    let current = row
+    const seen = new Set<string>([row.id])
+    while (current.parent) {
+      const parent = byId.get(current.parent)
+      if (!parent || seen.has(parent.id)) break
+      seen.add(parent.id)
+      if (parent.origin !== 'continuation') return parent
+      current = parent
+    }
+    // The head is outside the loaded window: fold the segment into its
+    // topmost loaded attempt rather than listing it as sibling rows.
+    return current.id === row.id ? null : current
+  }
+  const targetById = new Map<string, string>()
+  for (const row of rows) {
+    if (row.origin !== 'continuation') continue
+    const target = targetOf(row)
+    if (!target) continue
+    row.folded = true
+    target.continuations += 1
+    targetById.set(row.id, target.id)
+  }
+  for (const row of rows) {
+    if (!row.folded) continue
+    const headId = targetById.get(row.id)
+    if (!headId) continue
+    for (const child of rows) {
+      if (child.parent === row.id && !child.folded) child.parent = headId
+    }
+  }
+  const surviving = new Map(rows.filter((row) => !row.folded).map((row) => [row.id, row]))
+  const depthOf = (row: RunRow): number => {
+    let depth = 0
+    let current = row
+    const seen = new Set<string>([row.id])
+    while (current.parent) {
+      const parent = surviving.get(current.parent)
+      if (!parent || seen.has(parent.id)) break
+      seen.add(parent.id)
+      current = parent
+      depth += 1
+    }
+    return depth
+  }
+  for (const row of rows) {
+    if (row.folded) continue
+    row.depth = depthOf(row)
+  }
+}
+
+/** The attempt chain a run belongs to, oldest first: its head plus every
+ *  auto-continuation under it. Delegations hanging off an attempt are not
+ *  attempts and stay out. Feeds the run card's switcher; exported for tests. */
+export function attemptChain(rows: RunRow[], run: string): RunRow[] {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const start = byId.get(run)
+  if (!start) return []
+  // Only an attempt climbs to its chain head: a delegation is its own run —
+  // it may carry continuations of its own, but it never joins its parent's.
+  let top = start
+  if (start.origin === 'continuation') {
+    const seen = new Set<string>([top.id])
+    while (top.parent) {
+      const parent = byId.get(top.parent)
+      if (!parent || seen.has(parent.id)) break
+      seen.add(parent.id)
+      top = parent
+    }
+  }
+  const chain: RunRow[] = [top]
+  const collect = (parentID: string) => {
+    for (const row of rows) {
+      if (row.parent !== parentID || row.origin !== 'continuation') continue
+      chain.push(row)
+      collect(row.id)
+    }
+  }
+  collect(top.id)
+  // Attempts are chronological; a stable sort keeps the head first when two
+  // shares a timestamp.
+  return chain.sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
 }
 
 // ── Delegation parents outside the loaded window ──────────────────────────────
@@ -658,14 +769,17 @@ export default function AgentRuns({ project }: { project: string }) {
       }
       return false
     }
-    return rows.filter((row) => subtreeMatch(row.id)
+    return rows.filter((row) => !row.folded && subtreeMatch(row.id)
       // Selected or live rows stay reachable through any collapse depth.
       && (row.id === selected || row.status === 'running' || !collapsedUnder(row)))
   }, [rows, filter, initiatorPick, statusFilter, ageFilter, questionRuns, opsOnly, opRunIds, userNameOf, users, org.units, expandedRuns, selected])
   const childCount = useMemo(() => {
     const counts = new Map<string, number>()
     for (const row of rows) {
-      if (row.parent) counts.set(row.parent, (counts.get(row.parent) ?? 0) + 1)
+      // Folded attempts are counted by the ⟳ marker on their head, not by the
+      // expand control — expanding must reveal real delegations only.
+      if (!row.parent || row.folded) continue
+      counts.set(row.parent, (counts.get(row.parent) ?? 0) + 1)
     }
     return counts
   }, [rows])
@@ -676,6 +790,14 @@ export default function AgentRuns({ project }: { project: string }) {
       else next.add(id)
       return next
     })
+  }
+  // Continuations are folded into one row in the list, so the run card is
+  // where a reader steps through the attempts of a chain.
+  const attempts = useMemo(() => (selected ? attemptChain(rows, selected) : []), [rows, selected])
+  const attemptIndex = attempts.findIndex((row) => row.id === selected)
+  const gotoAttempt = (index: number) => {
+    const target = attempts[index]
+    if (target && target.id !== selected) setSelected(target.id)
   }
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
@@ -1454,29 +1576,19 @@ export default function AgentRuns({ project }: { project: string }) {
                         >{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{kids}</button>
                       )
                     })()}
-                    {row.depth > 0 && (
-                      <span
-                        title={row.origin === 'continuation'
-                          ? undefined
-                          : (t('runs.origin_delegated_hint') ?? 'Child run started by delegation')}
-                        style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}
-                      >↳</span>
-                    )}
+                    {row.depth > 0 && <span style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}>↳</span>}
                     {label}
-                    {/* An auto-continuation inherits the parent's title and
-                     * nests exactly like a delegation — the badge is what says
-                     * these are two attempts of ONE task by ONE agent. It shows
-                     * at any depth, so a continuation whose parent is not in the
-                     * list still does not read as an independent run. */}
-                    {row.origin === 'continuation' && (
-                      <span
-                        title={t('runs.origin_continuation_hint') ?? 'The same agent continues this task in a new run — not a delegation'}
-                        style={childBadgeStyle}
-                      >{t('runs.origin_continuation') ?? 'Continuation'}</span>
+                    {/* ⟳ N — how many times this chain restarted. Delegations
+                     * stay out of it: they are counted by the expand control
+                     * below the same way they always were. */}
+                    {row.continuations > 0 && (
+                      <span title={t('runs.chain_hint')} style={childBadgeStyle}>⟳ {row.continuations}</span>
                     )}
                     {/* Rerun attempt of the same task (× 2, × 3 …): a restarted or
                      * re-delegated run is indistinguishable by title — the badge
-                     * is the only at-a-glance marker of which attempt this is. */}
+                     * is the only at-a-glance marker of which attempt this is.
+                     * Only shows on an attempt the chain could not fold (its head
+                     * is outside the loaded window). */}
                     {row.attempt > 1 && (
                       <span
                         title={t('runs.attempt_title') ?? 'Which attempt of the original task this run is'}
@@ -1545,6 +1657,27 @@ export default function AgentRuns({ project }: { project: string }) {
                   <Heading style={{ fontSize: '1.1rem' }}>{runTitle || selected}</Heading>
                   {runTitle && (
                     <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', fontFamily: 'monospace', marginTop: '0.25rem', overflowWrap: 'anywhere' }}>{selected}</div>
+                  )}
+                  {/* Attempt switcher of a continuation chain: the list shows
+                      one row per chain, the card steps through its runs. */}
+                  {attempts.length > 1 && attemptIndex >= 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.45rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => gotoAttempt(attemptIndex - 1)}
+                        disabled={attemptIndex <= 0}
+                        aria-label={t('runs.attempt_prev') ?? 'Previous attempt'}
+                        style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-2)', cursor: attemptIndex > 0 ? 'pointer' : 'default', opacity: attemptIndex > 0 ? 1 : 0.4, padding: '0.1rem', display: 'inline-flex' }}
+                      ><ChevronLeft size={14} /></button>
+                      <span title={t('runs.chain_hint')} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', fontFamily: 'monospace' }}>⟳ {attemptIndex + 1}/{attempts.length}</span>
+                      <button
+                        type="button"
+                        onClick={() => gotoAttempt(attemptIndex + 1)}
+                        disabled={attemptIndex >= attempts.length - 1}
+                        aria-label={t('runs.attempt_next') ?? 'Next attempt'}
+                        style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-2)', cursor: attemptIndex < attempts.length - 1 ? 'pointer' : 'default', opacity: attemptIndex < attempts.length - 1 ? 1 : 0.4, padding: '0.1rem', display: 'inline-flex' }}
+                      ><ChevronRight size={14} /></button>
+                    </div>
                   )}
                   {(() => {
                     const root = timeline.find((item) => item.type === 'run.started' && runID(item) === selected)
