@@ -733,26 +733,30 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   const tool = typeof d.tool === 'string' && d.tool ? d.tool : (typeof operation?.tool === 'string' ? operation.tool : '')
   const argumentLines: Array<{ key: string; value: string }> = []
   if (event.type === 'hint.delivery' || event.type === 'hint.query') {
-    // The activation's unfoldable layer: what was asked, what came back and
-    // what actually entered the context — the row's whole point (docs/
-    // runtime-knowledge-activation.md §13). Without these lines the row had
-    // nothing to expand.
+    // The human layer of an activation: WHO asked (tool · mcp), HOW MUCH came
+    // back — and nothing more. Activation/source ids are engineering detail:
+    // they live in the raw {} envelope and in the event payload, not here.
     const push = (key: string, value: unknown) => {
       const text = textOf(value)
       if (text) argumentLines.push({ key, value: text.length > 300 ? `${text.slice(0, 299)}…` : text })
     }
-    push('activation', d.activation_id)
-    push('trigger', hintTriggerLabel(t, d.trigger))
-    push('source', d.activation_source_id)
-    push('tool', d.tool)
-    push('mcp', d.mcp_server)
+    push('tool', [textOf(d.tool), textOf(d.mcp_server)].filter(Boolean).join(' · '))
     push('error', d.error_class)
-    push('candidates', d.candidate_count)
-    push('selected', d.selected_count)
-    push('injected', d.injected_count)
-    push('tokens', d.tokens)
-    if (d.retrieval_ms !== undefined && d.retrieval_ms !== null && d.retrieval_ms !== '') push('retrieval', `${d.retrieval_ms} ms`)
-    if (Array.isArray(d.knowledge_ids)) push('knowledge', (d.knowledge_ids as unknown[]).map(textOf).filter(Boolean).join(', '))
+    const counts: string[] = []
+    const asNumber = (value: unknown): number => (typeof value === 'number' ? value : Number(value))
+    if (d.candidate_count !== undefined && Number.isFinite(asNumber(d.candidate_count))) {
+      counts.push(t('runs.hint_found', { count: squash(d.candidate_count) }) ?? `найдено: ${d.candidate_count}`)
+    }
+    if (d.injected_count !== undefined && Number.isFinite(asNumber(d.injected_count))) {
+      counts.push(t('runs.hint_injected', { count: squash(d.injected_count) }) ?? `в контекст: ${d.injected_count}`)
+    }
+    if (d.tokens !== undefined && Number.isFinite(asNumber(d.tokens))) {
+      counts.push(t('runs.hint_tokens', { count: squash(d.tokens) }) ?? `токенов: ${d.tokens}`)
+    }
+    if (d.retrieval_ms !== undefined && Number.isFinite(asNumber(d.retrieval_ms))) {
+      counts.push(t('runs.hint_search_ms', { ms: squash(d.retrieval_ms) }) ?? `поиск: ${d.retrieval_ms} мс`)
+    }
+    if (counts.length > 0) argumentLines.push({ key: '', value: counts.join(' · ') })
     if (d.reason) push('reason', hintDeliveryReason(t, d.reason))
   } else if (args && tool === 'remember_many') {
     // Memory writes are the reader's «what did it decide to keep?» moment: a
@@ -841,11 +845,24 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   }
   // A delivery injects a SET: each delivered knowledge id becomes a jump to
   // its dossier — the trace's «что реально вошло в контекст» in one click.
-  if (event.type === 'hint.delivery' && Array.isArray(d.knowledge_ids)) {
-    for (const raw of d.knowledge_ids as unknown[]) {
-      const id = textOf(raw)
+  // knowledge_items (new) carries the proposition for a readable label; the
+  // bare id list stays as the fallback for events journaled before it.
+  if (event.type === 'hint.delivery') {
+    const items = Array.isArray(d.knowledge_items) ? (d.knowledge_items as unknown[]) : []
+    for (const raw of items) {
+      const item = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+      const id = textOf(item?.id)
       if (id && links.filter((l) => l.kind === 'knowledge').length < 4) {
-        links.push({ kind: 'knowledge', label: id, url: `/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(id)}` })
+        const statement = squash(item?.proposition).slice(0, 110)
+        links.push({ kind: 'knowledge', label: statement || id, url: `/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(id)}` })
+      }
+    }
+    if (items.length === 0 && Array.isArray(d.knowledge_ids)) {
+      for (const raw of d.knowledge_ids as unknown[]) {
+        const id = textOf(raw)
+        if (id && links.filter((l) => l.kind === 'knowledge').length < 4) {
+          links.push({ kind: 'knowledge', label: id, url: `/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(id)}` })
+        }
       }
     }
   }

@@ -200,6 +200,13 @@ const REASON_KEYS: Record<string, string> = {
   failed_uncertain: 'operations.reason.failed_uncertain',
 }
 
+/** The shared shape of the small inline badges on a row's title line. */
+const childBadgeStyle = {
+  fontSize: '0.62rem', color: 'var(--tm-text-2)', border: '1px solid var(--tm-border)',
+  borderRadius: '3px', padding: '0 0.25rem', verticalAlign: 'middle', whiteSpace: 'nowrap',
+  marginLeft: '0.35rem',
+}
+
 interface RunRow {
   id: string
   title: string
@@ -214,6 +221,8 @@ interface RunRow {
   /** Rerun attempt number (× N badge): turn-limit continuation `…-r2`,
    * same-task delegation `…/delegate/02`, or run.started restart_attempt. */
   attempt: number
+  /** Continuation or delegation — see RunOrigin. */
+  origin: RunOrigin
   /** Project attribution of the run (docs/activity-scoping.md §4): global
    * listings span projects, so every row carries its own project — detail
    * calls (result, cost, nudge) must use it, not the header filter. */
@@ -237,6 +246,29 @@ export function runAttempt(event: ObservationEvent): number {
   const delegate = /\/delegate\/(\d+)$/.exec(id)
   if (delegate) return Number(delegate[1])
   return 0
+}
+
+/** What a row is relative to its parent. An auto-continuation (a turn-limit
+ *  restart `-r2`, or a `/continue/NN` spawned for an undelivered ask) runs the
+ *  SAME agent on the SAME task — it is not a delegation, yet it carries
+ *  parent_run_id, nests identically and inherits the parent's title, so
+ *  without this the row reads as «the developer delegating to itself». */
+export type RunOrigin = 'root' | 'continuation' | 'delegated'
+
+/** Classify a run.started event. The explicit restart_attempt the kernel
+ *  journals is the primary signal; the id suffixes are the history fallback
+ *  for journals written before it existed — the same rules runAttempt reads
+ *  for the «× N» badge. Classification is independent of the parent being
+ *  loaded: a continuation whose parent fell out of the window still must not
+ *  read as an independent run. */
+export function runOrigin(event: ObservationEvent): RunOrigin {
+  const explicit = event.data?.restart_attempt
+  if (typeof explicit === 'number' && explicit > 0) return 'continuation'
+  if (typeof explicit === 'string' && Number(explicit) > 0) return 'continuation'
+  const id = runID(event)
+  if (/-r\d+$/.test(id) || /\/continue\/\d+$/.test(id)) return 'continuation'
+  const parent = event.data?.parent_run_id ? String(event.data.parent_run_id) : ''
+  return parent ? 'delegated' : 'root'
 }
 
 /** Build the run call tree: roots are runs without a known parent, children
@@ -277,6 +309,7 @@ export function buildRunRows(started: ObservationEvent[], statuses: Map<string, 
       workflow: typeof event.data?.workflow === 'string' ? event.data.workflow : undefined,
       agentId: typeof event.data?.agent_id === 'string' && event.data.agent_id ? event.data.agent_id : undefined,
       attempt: runAttempt(event),
+      origin: runOrigin(event),
       project: event.context?.project || undefined,
       actor: event.context?.actor?.id || undefined,
     })
@@ -972,8 +1005,12 @@ export default function AgentRuns({ project }: { project: string }) {
         const fresh = [...(tailPage.events ?? [])].reverse()
         if (fresh.length > 0) {
           setTimeline((prev) => {
-            const seen = new Set(prev.map((e) => `${e.source.id}:${e.event_id}`))
-            const extra = fresh.filter((e) => !seen.has(`${e.source.id}:${e.event_id}`))
+            // Dedupe by event_id ALONE: SSE-normalized rows stamp the run's
+            // root source, but observation events (hint.query/hint.offered)
+            // carry the activation source — a source+id key saw them as
+            // different events and every hint row arrived twice after a poll.
+            const seen = new Set(prev.map((e) => e.event_id))
+            const extra = fresh.filter((e) => !seen.has(e.event_id))
             if (extra.length === 0) return prev
             return [...prev, ...extra].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
           })
@@ -1005,9 +1042,10 @@ export default function AgentRuns({ project }: { project: string }) {
       setTimeline((prev) => {
         if (!silent) return allEvents
         // The live SSE tail may have appended events the poll snapshot lacks
-        // (frames raced the DB snapshot) — merge, never drop.
-        const seen = new Set(allEvents.map((e) => `${e.source.id}:${e.event_id}`))
-        const extra = prev.filter((e) => !seen.has(`${e.source.id}:${e.event_id}`))
+        // (frames raced the DB snapshot) — merge, never drop. Keys are
+        // event_id-only for the same source-mismatch reason as the tail pass.
+        const seen = new Set(allEvents.map((e) => e.event_id))
+        const extra = prev.filter((e) => !seen.has(e.event_id))
         return [...allEvents, ...extra].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       })
       // Human factors (§7): what this session cost its humans — from the same
@@ -1438,15 +1476,33 @@ export default function AgentRuns({ project }: { project: string }) {
                         >{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{kids}</button>
                       )
                     })()}
-                    {row.depth > 0 && <span style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}>↳</span>}
+                    {row.depth > 0 && (
+                      <span
+                        title={row.origin === 'continuation'
+                          ? undefined
+                          : (t('runs.origin_delegated_hint') ?? 'Child run started by delegation')}
+                        style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}
+                      >↳</span>
+                    )}
                     {label}
+                    {/* An auto-continuation inherits the parent's title and
+                     * nests exactly like a delegation — the badge is what says
+                     * these are two attempts of ONE task by ONE agent. It shows
+                     * at any depth, so a continuation whose parent is not in the
+                     * list still does not read as an independent run. */}
+                    {row.origin === 'continuation' && (
+                      <span
+                        title={t('runs.origin_continuation_hint') ?? 'The same agent continues this task in a new run — not a delegation'}
+                        style={childBadgeStyle}
+                      >{t('runs.origin_continuation') ?? 'Continuation'}</span>
+                    )}
                     {/* Rerun attempt of the same task (× 2, × 3 …): a restarted or
                      * re-delegated run is indistinguishable by title — the badge
                      * is the only at-a-glance marker of which attempt this is. */}
                     {row.attempt > 1 && (
                       <span
                         title={t('runs.attempt_title') ?? 'Which attempt of the original task this run is'}
-                        style={{ marginLeft: '0.35rem', fontSize: '0.62rem', color: 'var(--tm-text-2)', border: '1px solid var(--tm-border)', borderRadius: '3px', padding: '0 0.25rem', verticalAlign: 'middle', whiteSpace: 'nowrap' }}
+                        style={{ ...childBadgeStyle, marginLeft: '0.35rem' }}
                       >× {row.attempt}</span>
                     )}
                   </div>

@@ -885,7 +885,22 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				issuedKnowledge[id] = true
 			}
 			dynamicTokensUsed += rendered.Tokens
-			if eventErr := emit(activityCtx, state, "hint.delivery", map[string]any{"activation_id": activationID, "trigger": candidate.Trigger, "activation_source_id": candidate.SourceID, "tool": candidate.Tool, "mcp_server": candidate.MCPServer, "status": "injected", "candidate_count": len(hints), "selected_count": rendered.Kept, "injected_count": rendered.Kept, "knowledge_ids": rendered.KeptIDs, "tokens": rendered.Tokens, "dropped_count": rendered.Dropped, "retrieval_ms": elapsed}); eventErr != nil {
+			// The propositions ride the event: the trace must read as «what
+			// actually entered the context» — readable statements, not a wall
+			// of knowledge ids (ids stay for the dossier links).
+			delivery := map[string]any{"activation_id": activationID, "trigger": candidate.Trigger, "activation_source_id": candidate.SourceID, "tool": candidate.Tool, "mcp_server": candidate.MCPServer, "status": "injected", "candidate_count": len(hints), "selected_count": rendered.Kept, "injected_count": rendered.Kept, "knowledge_ids": rendered.KeptIDs, "tokens": rendered.Tokens, "dropped_count": rendered.Dropped, "retrieval_ms": elapsed}
+			if len(rendered.KeptIDs) > 0 {
+				byID := make(map[string]string, len(hints))
+				for _, hint := range hints {
+					byID[hint.KnowledgeID] = hint.Proposition
+				}
+				items := make([]map[string]string, 0, len(rendered.KeptIDs))
+				for _, id := range rendered.KeptIDs {
+					items = append(items, map[string]string{"id": id, "proposition": truncateRunes(byID[id], 140)})
+				}
+				delivery["knowledge_items"] = items
+			}
+			if eventErr := emit(activityCtx, state, "hint.delivery", delivery); eventErr != nil {
 				return eventErr
 			}
 		}

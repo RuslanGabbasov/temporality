@@ -57,9 +57,9 @@ describe('foldTrace (§5)', () => {
     expect(group).toBeTruthy()
     expect((group as { events: ObservationEvent[] }).events).toHaveLength(6)
     const summary = groupSummary(group as Parameters<typeof groupSummary>[0], t)
-    expect(summary.detail).toContain('подсказок 6 (использовано 2)')
+    expect(summary.detail).toContain('подсказок 3 (использовано 2)')
     const agg = hintAggregate((group as { events: ObservationEvent[] }).events)
-    expect(agg).toEqual({ total: 6, used: 2, offered: 3 })
+    expect(agg).toEqual({ total: 3, used: 2, offered: 3 })
   })
 
   it('drops the always-zero «использовано» from the run-start knowledge block', () => {
@@ -72,7 +72,8 @@ describe('foldTrace (§5)', () => {
     const group = items.find((item) => item.kind === 'group' && item.group === 'knowledge')
     expect(group).toBeTruthy()
     const summary = groupSummary(group as Parameters<typeof groupSummary>[0], t)
-    expect(summary.detail).toContain('подсказок 1')
+    expect(summary.detail).toContain('поисков знаний: 1')
+    expect(summary.detail).not.toContain('подсказок')
     expect(summary.detail).not.toContain('использовано')
   })
 

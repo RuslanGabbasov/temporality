@@ -81,7 +81,8 @@ describe('TraceLayers (three layers, §4)', () => {
       ev('hint.used', { hint_id: 'h1' }, 3),
     ])
     expect(html).toContain('Знания и подсказки')
-    expect(html).toContain('подсказок 3 (использовано 1)')
+    // «подсказки» = предложения (offered): два предложения, одно взято в работу
+    expect(html).toContain('подсказок 2 (использовано 1)')
   })
 
   it('the knowledge node merges learning, extraction and hints into one aggregate (§5.6 reworked)', () => {

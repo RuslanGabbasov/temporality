@@ -211,32 +211,41 @@ export function groupSummary(group: Extract<TraceItem, { kind: 'group' }>, t: Tr
       return { label: t('runs.layers.group.ops_noise'), detail: t('runs.layers.group.ops_noise_hint', { count: String(group.events.length) }) }
     case 'knowledge': {
       const learned = group.events.filter((e) => e.type === 'knowledge.proposed').length
-      const hints = group.events.filter((e) => isHintTraffic(e.type))
-      const used = hints.filter((e) => e.type === 'hint.used').length
+      const traffic = group.events.filter((e) => isHintTraffic(e.type))
+      const lookups = traffic.filter((e) => e.type === 'hint.query').length
+      const used = traffic.filter((e) => e.type === 'hint.used').length
+      const offered = traffic.filter((e) => e.type === 'hint.offered').length
       const completed = group.events.find((e) => e.type === 'knowledge.extraction.completed')
       const candidates = completed?.data?.candidates_count
       const parts: string[] = []
       if (learned > 0) parts.push(t('runs.layers.group.knowledge_learned', { count: String(learned) }))
       if (candidates !== undefined) parts.push(t('runs.layers.group.knowledge_extracted', { count: String(candidates) }))
-      if (hints.length > 0) {
+      // «Подсказки» = предложенные подсказки (hint.offered); поисковые запросы
+      // считаются поисками — иначе счётчик удваивает реальную выдачу. used>
+      // offered happens when the offer row sits outside the folded window —
+      // never undercount what the agent actually used.
+      if (lookups > 0) parts.push(t('runs.layers.group.hint_lookups', { count: String(lookups) }))
+      const hintCount = Math.max(offered, used)
+      if (hintCount > 0) {
         // «использовано 0» says nothing: hints are used during the run, so the
         // run-start block (primed hints, hint.query) would always show zero.
-        const offered = hints.filter((e) => e.type === 'hint.offered').length
         parts.push(used > 0
-          ? t('runs.layers.group.hints_aggregate', { total: String(hints.length), used: String(used), offered: String(offered) })
-          : t('runs.layers.group.hints_total', { count: String(hints.length) }))
+          ? t('runs.layers.group.hints_aggregate', { total: String(hintCount), used: String(used), offered: String(offered) })
+          : t('runs.layers.group.hints_total', { count: String(hintCount) }))
       }
       return { label: t('runs.layers.group.hints'), detail: parts.length > 0 ? parts.join(' · ') : t('runs.layers.group.hints_zero') }
     }
   }
 }
 
-/** Hint-aggregate counter «N подсказок, M использовано» (§5.6). */
+/** Hint-aggregate counter «N подсказок, M использовано» (§5.6): "hints" are
+ *  the OFFERS — lookups are traffic, not suggestions. */
 export function hintAggregate(events: ObservationEvent[]): { total: number; used: number; offered: number } {
+  const offered = events.filter((e) => e.type === 'hint.offered').length
   return {
-    total: events.filter((e) => isHintTraffic(e.type)).length,
+    total: offered,
     used: events.filter((e) => e.type === 'hint.used').length,
-    offered: events.filter((e) => e.type === 'hint.offered').length,
+    offered,
   }
 }
 
