@@ -181,7 +181,12 @@ export function foldTrace(events: ObservationEvent[], locale: Locale, t: Transla
       group.hasError = group.hasError || row.status === 'error'
       continue
     }
-    if (isHint(type) || isKnowledge(type) || type === 'memory.read' || type === 'hint.query') {
+    // hint.delivery is NOT folded: it is the reader's «what actually entered
+    // the context» row (status, injected knowledge) — hiding it in the
+    // aggregate made the delivery invisible inside the turn, and the group
+    // summary even read «агент не обращался к подсказкам» while deliveries
+    // were happening. The lookup/offer traffic stays aggregated (§5.6).
+    if ((isHint(type) && type !== 'hint.delivery') || isKnowledge(type) || type === 'memory.read' || type === 'hint.query') {
       const group = groupOf('knowledge')
       group.events.push(event)
       group.hasError = group.hasError || row.status === 'error'

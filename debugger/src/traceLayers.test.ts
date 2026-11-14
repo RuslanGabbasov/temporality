@@ -76,6 +76,20 @@ describe('foldTrace (§5)', () => {
     expect(summary.detail).not.toContain('использовано')
   })
 
+  it('keeps hint.delivery as a standalone row inside the window (the reader sees what entered the context)', () => {
+    const items = foldTrace([
+      ev('turn.started', { turn: 1 }, 1),
+      ev('hint.delivery', { status: 'injected', injected_count: 3, trigger: 'task.priming' }, 2),
+      ev('hint.query', { candidate_count: 8 }, 3),
+      ev('turn.completed', { turn: 1 }, 4),
+    ], RU, t)
+    const row = items.find((item) => item.kind === 'event' && item.event.type === 'hint.delivery')
+    expect(row).toBeTruthy()
+    // the lookup traffic still folds into the knowledge group
+    const group = items.find((item) => item.kind === 'group' && item.group === 'knowledge')
+    expect((group as { events: ObservationEvent[] }).events.map((e) => e.type)).toEqual(['hint.query'])
+  })
+
   it('folds minor plan transitions into «изменения плана», keeps rejected visible (§5.4)', () => {
     const items = foldTrace([
       ev('plan.task.skipped', { task_id: 'a' }),
