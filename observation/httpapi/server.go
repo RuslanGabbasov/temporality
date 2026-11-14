@@ -1886,6 +1886,35 @@ type observationHintRequest struct {
 	TeamRunRoot string `json:"team_root,omitempty"`
 }
 
+// priorTaskIssued lists knowledge already offered to this task by earlier
+// activations (docs/plan-priming-relevance.md §7): a chat task keeps one
+// conversation across runs, and without this the same block is offered again
+// at every run start — the run-scoped issued list dies with its run. Best
+// effort: a listing failure costs the suppression, never the hints.
+//
+// Offers are read newest-first and capped: the API accepts at most 64 issued
+// ids, and a long-lived conversation must not grow an unbounded deny list.
+func (s *Server) priorTaskIssued(ctx context.Context, project, task string) []string {
+	page, err := s.store.ListObservationPage(ctx, observation.Filter{
+		Project: project, Task: task, Type: "hint.offered", Order: "desc", Limit: 64,
+	}, "")
+	if err != nil {
+		s.log.Warn("load prior task hints", "error", err, "project", project, "task", task)
+		return nil
+	}
+	seen := make(map[string]bool, len(page.Events))
+	ids := make([]string, 0, len(page.Events))
+	for _, event := range page.Events {
+		id, _ := event.Data["knowledge_id"].(string)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request) {
 	var input observationHintRequest
 	if err := decodeJSON(r, &input); err != nil {
@@ -2014,7 +2043,16 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
-	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs, Embedding: input.Embedding, KnowledgeEmbeddings: knowledgeEmbeddings, Now: time.Now()})
+	// Cross-run suppression on priming: the issued ids the kernel passes cover
+	// only what THIS run already saw, but a chat task starts a new run per
+	// message — every one of them re-asked for the same top of the ranking.
+	// The task's own offer history closes that hole at the run start; dynamic
+	// activations keep relying on the in-run list.
+	issuedIDs := input.IssuedKnowledgeIDs
+	if input.Trigger == "task.priming" && input.Task != "" {
+		issuedIDs = append(issuedIDs, s.priorTaskIssued(r.Context(), input.Project, input.Task)...)
+	}
+	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: issuedIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs, Embedding: input.Embedding, KnowledgeEmbeddings: knowledgeEmbeddings, Now: time.Now()})
 	activationID := input.ActivationID
 	if activationID == "" {
 		activationID = newUUID()
@@ -2029,7 +2067,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		Schema: observation.Schema, EventID: activationID, OccurredAt: s.now().UTC(), ReceivedAt: s.now().UTC(),
 		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 		Context: context, Type: "hint.query",
-		Data: map[string]any{"activation_id": activationID, "trigger": input.Trigger, "activation_source_id": input.ActivationSourceID, "tool": input.Tool, "mcp_server": input.MCPServer, "error_class": input.ErrorClass, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs), "team_root": input.TeamRunRoot, "team_run_knowledge_count": len(teamRunKnowledgeIDs), "semantic_tier": embeddingUsed},
+		Data: map[string]any{"activation_id": activationID, "trigger": input.Trigger, "activation_source_id": input.ActivationSourceID, "tool": input.Tool, "mcp_server": input.MCPServer, "error_class": input.ErrorClass, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(issuedIDs), "team_root": input.TeamRunRoot, "team_run_knowledge_count": len(teamRunKnowledgeIDs), "semantic_tier": embeddingUsed},
 	})
 	for i := range hints {
 		offerID := newUUID()

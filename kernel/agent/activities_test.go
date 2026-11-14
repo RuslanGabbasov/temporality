@@ -66,6 +66,54 @@ func TestKnowledgeHintsRuntimeRequestIsBoundedAndCarriesActivation(t *testing.T)
 	}
 }
 
+// The hint query is bounded to what the journal accepts, and both ends carry
+// signal: a task brief states the assignment at the head, a chat transcript
+// appends the NEW request at the tail. A head-only trim dropped the request a
+// chat run actually starts from, so the hints matched the history instead.
+func TestBoundedHintQueryKeepsHeadAndTail(t *testing.T) {
+	newest := "the newest request names gatekeeper tokens"
+	long := strings.Repeat("earlier dialogue line\n", 400) + newest
+
+	bounded := boundedHintQuery(long, 4000)
+	if runes := len([]rune(bounded)); runes > 4000 {
+		t.Fatalf("bounded query = %d runes, want <= 4000", runes)
+	}
+	if !strings.HasPrefix(bounded, "earlier dialogue line") {
+		t.Errorf("head lost: %q", bounded)
+	}
+	if !strings.HasSuffix(bounded, newest) {
+		t.Errorf("tail lost: %q", bounded)
+	}
+	if short := "the task"; boundedHintQuery(short, 4000) != short {
+		t.Errorf("short query was rewritten: %q", boundedHintQuery(short, 4000))
+	}
+}
+
+// The bound is applied to the outgoing request, not just to a local variable.
+func TestKnowledgeHintsBoundsLongQueryKeepingTail(t *testing.T) {
+	var got map[string]any
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&got); err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"hints":[]}`)), Header: make(http.Header)}, nil
+	})}
+	activities := &Activities{HTTP: client, TemporalityURL: "http://observation.invalid"}
+	newest := "the newest request names gatekeeper tokens"
+	if _, err := activities.KnowledgeHints(context.Background(), HintRequest{
+		Project: "demo", RunID: "run-1", Query: strings.Repeat("earlier dialogue line\n", 400) + newest,
+	}); err != nil {
+		t.Fatalf("KnowledgeHints: %v", err)
+	}
+	query, _ := got["query"].(string)
+	if runes := len([]rune(query)); runes > 4000 {
+		t.Fatalf("payload query = %d runes, want <= 4000", runes)
+	}
+	if !strings.HasSuffix(query, newest) {
+		t.Errorf("payload query lost the tail: %q", query)
+	}
+}
+
 type recordingSandbox struct {
 	mu       sync.Mutex
 	commands [][]string

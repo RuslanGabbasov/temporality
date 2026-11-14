@@ -3292,15 +3292,33 @@ func resetFaultDrilledForTest() {
 	faultDrilled = map[string]bool{}
 }
 
+// boundedHintQuery trims an over-long hint query to limit runes while keeping
+// both ends: the head for the task statement, the tail for the newest message,
+// joined by an ellipsis. A head-only trim silently drops the request a chat
+// transcript ends with, which is exactly the text the hints must match.
+func boundedHintQuery(query string, limit int) string {
+	runes := []rune(query)
+	if len(runes) <= limit {
+		return query
+	}
+	const sep = " … "
+	head := limit / 2
+	tail := limit - head - len([]rune(sep))
+	if tail <= 0 {
+		return string(runes[:limit])
+	}
+	return string(runes[:head]) + sep + string(runes[len(runes)-tail:])
+}
+
 func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([]Hint, error) {
 	// The journal caps query at 4096 runes; long prompts (a pasted document,
-	// a big task brief) are truncated — the head of the task carries the
-	// matching signal, and an unhandled 422 would silently strip the whole
-	// run of hints.
-	query := request.Query
-	if len([]rune(query)) > 4000 {
-		query = string([]rune(query)[:4000])
-	}
+	// a big task brief, a whole chat transcript) are truncated — and an
+	// unhandled 422 would silently strip the run of hints. Both ends carry
+	// matching signal and they disagree about where it lives: a task brief
+	// states the assignment at the head, a chat transcript appends the NEW
+	// request at the tail (buildChatPrompt), so the budget is split between
+	// them instead of being spent on the head alone.
+	query := boundedHintQuery(request.Query, 4000)
 	trigger := request.Trigger
 	if trigger == "" {
 		trigger = "task.priming"

@@ -868,8 +868,8 @@ type StartRunRequest struct {
 	// HintQuery is the user-intent text for prior-knowledge hint selection.
 	// A chat run's task prompt is the whole transcript, and the hint matcher
 	// cannot tell the new request from the history it rides in — the caller
-	// (docs/chat-hints.md) sends the newest user message instead. Empty keeps
-	// the old behaviour: the prompt itself is the query.
+	// (docs/plan-priming-relevance.md §7) sends the newest user message
+	// instead. Empty keeps the old behaviour: the prompt itself is the query.
 	HintQuery string `json:"hint_query,omitempty"`
 }
 

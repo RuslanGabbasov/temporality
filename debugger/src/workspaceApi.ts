@@ -1449,7 +1449,7 @@ export const workspaceApi = {
     request<{ id: string; updated_at: string }>(`/v1/workspace/chats/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteServerChat: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/chats/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  startRun: (taskId: string, data?: { agent_id?: string; model?: string }) =>
+  startRun: (taskId: string, data?: { agent_id?: string; model?: string; hint_query?: string }) =>
     request<{ run_id: string; task_id: string; project: string; status: string }>(
       `/v1/workspace/tasks/${taskId}/runs`, { method: 'POST', body: JSON.stringify(data ?? {}) }),
   getRun: (runId: string) => request<Run>(`/v1/workspace/runs/${runId}`),

@@ -414,6 +414,18 @@ function squashQuestion(text: string, cap = 100): string {
   return squashed.length > cap ? squashed.slice(0, cap - 3) + '…' : squashed
 }
 
+/** The newest user message of a dialogue — the intent a run starts from.
+ *  Hint selection (docs/plan-priming-relevance.md §7) matches against this
+ *  text: the stored task prompt is the whole transcript, whose header and
+ *  oldest messages say nothing about what the user asks now. */
+function lastUserText(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role === 'user' && message.content.trim()) return message.content
+  }
+  return ''
+}
+
 /** The activity-feed line for an intermediate model answer: elapsed prefix
  * plus the turn's text, clamped to two lines in CSS with an ellipsis — the
  * JS cap only bounds pathological cases before the string enters state. */
@@ -2003,7 +2015,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         await workspaceApi.updateTask(taskId, { prompt: fullPrompt })
       }
 
-      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined })
+      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: lastUserText(updatedConv.messages) })
       const runId = result.run_id
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
@@ -2036,7 +2048,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         setError(t('chat.continue_no_task') ?? 'Cannot resume: this run has no task to continue.')
         return
       }
-      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined })
+      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: lastUserText(conv.messages) })
       const runId2 = result.run_id
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId: runId2, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
       setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, taskId, messages: [...c.messages, assistantMsg] } : c))
