@@ -714,7 +714,62 @@ func (a *Activities) visionModelFor(ctx context.Context) string {
 	return vision
 }
 
+// CallModel runs one model call for the run's turn and carries the
+// provider-risk recovery: a guardrail refusal gets ONE corrective retry —
+// the model is told to rephrase around the filter and the call is re-asked
+// with the changed context — before the failure propagates to the Temporal
+// ladder, which would otherwise re-send the very payload that tripped the
+// filter and stop the run after three identical refusals (the recurring
+// «provider risk filter rejected the request» run failure).
 func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.Completion, error) {
+	completion, err := a.callModelOnce(ctx, request)
+	if err == nil {
+		return completion, nil
+	}
+	var risk *riskFilterError
+	if !errors.As(err, &risk) || ctx.Err() != nil {
+		return completion, err
+	}
+	if hasRiskRetryInstruction(request.Messages) {
+		// The corrective turn is already in the conversation — never loop it.
+		return completion, err
+	}
+	retryRequest := request
+	retryRequest.Messages = append(append(make([]llm.Message, 0, len(request.Messages)+1), request.Messages...), llm.Message{Role: "user", Content: riskRetryInstruction})
+	attempt, activityID := modelAttemptInfo(ctx)
+	// The marker rides the trace: the reader sees WHY the turn re-asked —
+	// a guardrail refusal — instead of a bare «повтор вызова модели».
+	a.emitModelAttempt(ctx, request, attempt, activityID, "provider_risk", 0, risk.Error())
+	if activity.IsActivity(ctx) {
+		if logger := activity.GetLogger(ctx); logger != nil {
+			logger.Warn("provider risk filter refused the call, retrying with a corrective turn",
+				"run_id", request.RunID, "turn", request.Turn, "refusal", risk.refusal)
+		}
+	}
+	retryCompletion, retryErr := a.callModelOnce(ctx, retryRequest)
+	if retryErr == nil {
+		return retryCompletion, nil
+	}
+	// Both attempts refused: the failure stays honest — the run fails with
+	// the risk-filter message, not with a mystery from the second ask.
+	return llm.Completion{}, retryErr
+}
+
+// modelAttemptInfo reads the Temporal attempt/ActivityID where
+// emitModelAttempt needs them outside a real activity (tests): the event id
+// is keyed on the pair to stay occurrence-unique across activity retries.
+func modelAttemptInfo(ctx context.Context) (int, string) {
+	if activity.IsActivity(ctx) {
+		info := activity.GetInfo(ctx)
+		return int(info.Attempt), info.ActivityID
+	}
+	return 1, ""
+}
+
+// callModelOnce is the single-shot model call: routing, the streaming path
+// with its watchdog salvage and the blocking fallback. CallModel wraps it
+// with the provider-risk corrective retry.
+func (a *Activities) callModelOnce(ctx context.Context, request ModelRequest) (llm.Completion, error) {
 	// A retried attempt is the frozen-host recovery path (see the workflow
 	attempt := 1
 	activityID := ""
@@ -1020,19 +1075,50 @@ func providerRejection(content string) string {
 	return ""
 }
 
+// riskFilterError marks a refusal the provider's risk filter returned AS
+// the completion content: the payload tripped the guardrail. Typed so the
+// call path can react — one corrective retry with a rephrasing turn —
+// instead of burning the Temporal ladder on the identical payload.
+type riskFilterError struct {
+	refusal string
+}
+
+func (e *riskFilterError) Error() string {
+	return "provider risk filter rejected the request: " + e.refusal
+}
+
 // guardCompletion turns a risk-filter refusal masquerading as a successful
-// answer into a retryable model error: the activity retry ladder re-runs the
-// call (a fresh attempt may pass — these filters are flaky on context), and
-// an exhausted ladder fails the turn honestly (model.failed) instead of
-// delivering the refusal text as the agent's answer.
+// answer into a retryable model error: the corrective retry re-asks with a
+// rephrasing turn (these filters are flaky on context), and an exhausted
+// ladder fails the turn honestly (model.failed) instead of delivering the
+// refusal text as the agent's answer.
 func guardCompletion(completion llm.Completion) error {
 	if len(completion.ToolCalls) > 0 {
 		return nil
 	}
 	if refusal := providerRejection(completion.Content); refusal != "" {
-		return fmt.Errorf("provider risk filter rejected the request: %s", refusal)
+		return &riskFilterError{refusal: refusal}
 	}
 	return nil
+}
+
+// riskRetryInstruction is the corrective turn appended when the provider's
+// risk filter refused the call: the identical payload would trip the same
+// filter (the Temporal ladder re-sends payloads verbatim), so the model is
+// told to regenerate around the guardrail — the constructions guardrails
+// flag (sensationalism, aggression, credential/PII exposure) named in one
+// place — and the request is re-asked with the changed context.
+const riskRetryInstruction = `The provider's safety filter rejected the previous request as high risk. Regenerate your reply from scratch in neutral, plain wording: avoid sensational or aggressive phrasing, threats, credentials or personal-data exposure, and policy-provoking constructions; keep the same facts and tool calls. Do not mention or quote the rejection.`
+
+// hasRiskRetryInstruction reports whether the corrective turn is already in
+// the conversation — the retry must never loop its own instruction.
+func hasRiskRetryInstruction(messages []llm.Message) bool {
+	for _, message := range messages {
+		if message.Content == riskRetryInstruction {
+			return true
+		}
+	}
+	return false
 }
 
 // routeFailure journals a failed model call together with the routing

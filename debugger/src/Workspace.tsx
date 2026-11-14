@@ -293,6 +293,7 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
 			const attempt = String(d.attempt ?? '?')
 			if (d.reason === 'stream_timeout') return t('chat.stream.model_attempt_timeout', { attempt })
 			if (d.reason === 'stream_fallback') return t('chat.stream.model_attempt_fallback', { attempt })
+			if (d.reason === 'provider_risk') return t('chat.stream.model_attempt_risk', { attempt })
 			return t('chat.stream.model_attempt_retry', { attempt })
 		}
 		case 'knowledge.proposed':

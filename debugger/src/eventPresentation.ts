@@ -340,9 +340,10 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
     return {
       title: t('runs.event.model_attempt'),
       fact: [
-        d.reason === 'stream_fallback' ? t('runs.event.model_attempt_fallback')
-          : d.reason === 'stream_timeout' ? t('runs.event.model_attempt_timeout')
-            : t('runs.event.model_attempt_retry'),
+        d.reason === 'provider_risk' ? t('runs.event.model_attempt_risk')
+          : d.reason === 'stream_fallback' ? t('runs.event.model_attempt_fallback')
+            : d.reason === 'stream_timeout' ? t('runs.event.model_attempt_timeout')
+              : t('runs.event.model_attempt_retry'),
         t('runs.event.model_attempt_n', { n: squash(d.attempt ?? '?') }),
       ].filter(Boolean).join(' · '),
       status: 'error',

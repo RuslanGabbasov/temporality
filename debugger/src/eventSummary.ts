@@ -375,15 +375,18 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
         const route = String(d.route ?? '')
         return { icon: '⇒', label: t('runs.event.model_route'), detail: route, color: 'var(--tm-teal)' }
       }
-      const reasonKey = d.reason === 'stream_fallback'
-        ? 'runs.event.model_attempt_fallback'
-        : d.reason === 'stream_timeout'
-          ? 'runs.event.model_attempt_timeout'
-          : 'runs.event.model_attempt_retry'
+      const reasonKey = d.reason === 'provider_risk'
+        ? 'runs.event.model_attempt_risk'
+        : d.reason === 'stream_fallback'
+          ? 'runs.event.model_attempt_fallback'
+          : d.reason === 'stream_timeout'
+            ? 'runs.event.model_attempt_timeout'
+            : 'runs.event.model_attempt_retry'
       const attempt = t('runs.event.model_attempt_n', { n: String(d.attempt ?? '?') })
       const ms = d.stream_ms ? `${(Number(d.stream_ms) / 1000).toFixed(1)}s` : ''
       const err = d.error ? String(d.error).slice(0, 60) : ''
-      return { icon: '↻', label: t('runs.event.model_attempt'), detail: [t(reasonKey), attempt, ms, err].filter(Boolean).join(' · '), color: '#e0af68' }
+      const icon = d.reason === 'provider_risk' ? '🛡' : '↻'
+      return { icon, label: t('runs.event.model_attempt'), detail: [t(reasonKey), attempt, ms, err].filter(Boolean).join(' · '), color: '#e0af68' }
     }
     case 'tool.started': {
       const args = d.arguments

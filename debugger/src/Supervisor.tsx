@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { Button, Tag } from '@carbon/react'
+import { Button, Tag, InlineNotification } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { workspaceApi, type SupervisorQueue, type SreRollup } from './workspaceApi'
+import { workspaceApi, type SupervisorQueue, type SreRollup, type JudgeConfig } from './workspaceApi'
 import { useT } from './i18n'
 
 const navigate = (path: string) => { window.history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
@@ -264,6 +264,10 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   const [facets, setFacets] = useState<SupervisorQueue['facets'] | null>(null)
   const [sre, setSre] = useState<SreRollup[] | null>(null)
   const [insights, setInsights] = useState<ObservationEvent[]>([])
+  // The judge model gates every model-backed check (failed-run triage, skill
+  // mining, knowledge conflicts…); only health anomalies run model-free.
+  // Fetched so the tab can SAY why the queue is empty instead of shrugging.
+  const [judge, setJudge] = useState<JudgeConfig | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   // Queue filters (docs/supervisor-model.md §7): case family, project and
   // acknowledged visibility — the queue becomes navigable once waves B/C
@@ -301,7 +305,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     if (!silent) setLoading(true)
     setError('')
     try {
-      const [queue, insightPage, ackPage, settings, effect] = await Promise.all([
+      const [queue, insightPage, ackPage, settings, effect, judgeConfig] = await Promise.all([
         // The queue is a table now (docs/supervisor-model.md §3): cases
         // server-side with facets. The old journal page fetched the OLDEST
         // 500 verdicts — every one of them decided weeks earlier — and the
@@ -314,9 +318,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
         workspaceApi.getSupervisorSettings().catch(() => null),
         observationApi.hintEffectiveness().catch(() => null),
+        workspaceApi.getJudgeConfig().catch(() => null),
       ])
       setRows((queue.cases ?? []).map(supervisorCaseRow))
       setFacets(queue.facets ?? null)
+      setJudge(judgeConfig)
       setInsights((insightPage.events ?? []).filter((event) => event.data?.kind !== 'reconciliation'))
       // The ack set now serves INSIGHTS only (cases carry their own status):
       // MERGE, never replace — acknowledgements ride the async outbox (the POST
@@ -658,6 +664,20 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   return (
     <>
       {error && <p style={{ color: 'var(--tm-danger)', fontSize: '0.8rem' }}>{error}</p>}
+
+      {/* A silent queue is usually a silent judge: every model-backed check
+          needs the judge model; only the health anomalies run without it —
+          so the tab says so instead of showing an empty queue as «nothing
+          useful found». */}
+      {judge && !judge.configured && (
+        <InlineNotification
+          kind="warning"
+          lowContrast
+          title={t('supervisor.judge_off_title') ?? 'Модель-судья не настроена — большинство проверок молчит'}
+          subtitle={t('supervisor.judge_off_subtitle') ?? 'Диагностика упавших ранов, навыки, противоречия знаний и прочие кейсы генерируются судьёй — без него очередь пустует. Аномалии здоровья считаются без модели и потому видны. Настройте судью: Агенты → Настройки качества.'}
+          style={{ marginBottom: '1rem' }}
+        />
+      )}
 
       {loading ? <PageLoading /> : (
         <>
