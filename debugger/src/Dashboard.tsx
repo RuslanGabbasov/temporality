@@ -211,7 +211,7 @@ export default function Dashboard({ project, setProject }: Props) {
     // Fast skeleton first: project rollup, titles, users, agents.
     jobs.push(land('overview', setOverview, projectsOverview(window_.go), null))
     jobs.push(land('runTitles', (titles: Map<string, string>) => setRunTitles(titles),
-      observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200 }).then((page) => {
+      observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200, order: 'desc' }).then((page) => {
         const titles = new Map<string, string>()
         for (const event of page.events) {
           const run = event.context?.run ?? ''

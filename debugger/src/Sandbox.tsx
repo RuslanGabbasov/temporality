@@ -131,7 +131,7 @@ export default function Sandbox({ project }: { project?: string }) {
     if (historyFor === p.id) { setHistoryFor(''); return }
     setHistoryFor(p.id); setHistory([])
     try {
-      const page = await observationApi.events(undefined, undefined, undefined, undefined, { type: 'sandbox.profile.built', limit: 100 })
+      const page = await observationApi.events(undefined, undefined, undefined, undefined, { type: 'sandbox.profile.built', limit: 100, order: 'desc' })
       const rows = (page.events ?? [])
         .filter((e) => String(e.data?.profile ?? '') === p.id)
         .slice(0, 8)

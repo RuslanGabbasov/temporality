@@ -292,10 +292,10 @@ export default function Teams({ project }: { project: string }) {
     try {
       const [versionData, startedPage, completedPage, failedPage, cancelledPage, metricsData] = await Promise.all([
         workspaceApi.listTeamVersions(team.id).catch(() => ({ versions: [] as TeamVersion[] })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.started', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[] })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.completed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[] })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.failed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[] })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.cancelled', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[] })),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.started', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.completed', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.failed', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.cancelled', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
         // Telemetry is project-scoped; the current project selection is the
         // honest default (teams usually run where you work with them).
         project.trim() ? workspaceApi.teamMetrics(team.id, project).catch(() => null) : Promise.resolve(null),

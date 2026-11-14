@@ -51,7 +51,7 @@ func CompileAgentPrompt(in AgentPromptInput) string {
 
 	// Prior knowledge policy (§10): knowledge is offered, never mandated.
 	if caps.Cap(caps.Knowledge) {
-		b.WriteString(" Use provided prior knowledge when it is relevant, but prefer current evidence when the two conflict.")
+		b.WriteString(" Use provided prior knowledge when it is relevant, but prefer current evidence when the two conflict. When the task touches a subject the project knowledge base may already cover — or a priming cue carries a knowledge_id — research it proactively: knowledge_explore searches and orients the base, knowledge_lookup expands one item to its grounds and history.")
 	}
 
 	// Constraints (§5: what the agent must never do).

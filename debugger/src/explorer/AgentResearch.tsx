@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, InlineNotification, Tag, TextInput } from '@carbon/react'
 import { observationApi, runEvents, type ExploreResult } from '../observationApi'
-import { extractExploreCalls, extractCallResult, extractRunHintOutcome, parseExploreArguments, type AgentExploreCall, type ExploreCallResult, type RunHintOutcome } from './agentExploreCalls'
+import { extractExploreCalls, extractCallResult, extractRunHintOutcome, parseExploreArguments, parseKnowledgeLookupCall, type AgentExploreCall, type ExploreCallResult, type RunHintOutcome } from './agentExploreCalls'
 import { stateLabel } from './shared'
 import { useT } from '../i18n'
 
@@ -34,12 +34,18 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
     if (!project.trim()) { setResearchRuns([]); return }
     setScanLoading(true)
     try {
-      const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'tool.started', limit: 500 })
+      // order=desc: the journal's default window is ASC (oldest first) —
+      // without it the scan showed the same ancient October run forever.
+      const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'tool.started', limit: 500, order: 'desc' })
       const byRun = new Map<string, { id: string; at: string; calls: AgentExploreCall[] }>()
       for (const event of page.events ?? []) {
         const data = event.data as Record<string, unknown> | undefined
-        if (!data || data.tool !== 'knowledge_explore') continue
-        const call = parseExploreArguments(data)
+        if (!data) continue
+        // Both knowledge tools count as research: explore ORIENTS/SEARCHES,
+        // lookup FETCHES one item by its handle — the tab shows either.
+        const tool = data.tool
+        if (tool !== 'knowledge_explore' && tool !== 'knowledge_lookup') continue
+        const call = tool === 'knowledge_lookup' ? parseKnowledgeLookupCall(data) : parseExploreArguments(data)
         if (!call) continue
         call.eventID = event.event_id
         call.at = event.occurred_at
@@ -288,9 +294,13 @@ function CallCard({ call, result, replays, replayBusy, replayErrors, onReplay, o
         </div>
       )}
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.4rem' }}>
-        <Button size="sm" kind="secondary" onClick={() => onReplay(call)} disabled={replayBusy === call.eventID}>
-          {replayBusy === call.eventID ? '…' : (t('explorer.agent_replay') ?? 'Replay now')}
-        </Button>
+        {/* Replay re-runs the EXPLORE query against the current projection —
+            a lookup has no query to replay (its result panel above covers it). */}
+        {call.operation !== 'lookup' && (
+          <Button size="sm" kind="secondary" onClick={() => onReplay(call)} disabled={replayBusy === call.eventID}>
+            {replayBusy === call.eventID ? '…' : (t('explorer.agent_replay') ?? 'Replay now')}
+          </Button>
+        )}
         {replayResult && (
           <small style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }}>
             {t('explorer.agent_replayed') ?? 'replayed'} · {new Date().toLocaleTimeString()} · {replayResult.completeness}

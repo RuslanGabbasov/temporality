@@ -21,7 +21,7 @@ func TestCompileAgentPromptFullDefinition(t *testing.T) {
 
 	want := `You are Coder. Responsibility: Implements code changes, fixes bugs and verifies the result.
 
-Do not claim a result is achieved unless it is confirmed by available evidence. Distinguish what is done and verified, done but unverified, assumed, and impossible to verify; state which one applies when you report outcomes. Use provided prior knowledge when it is relevant, but prefer current evidence when the two conflict.
+Do not claim a result is achieved unless it is confirmed by available evidence. Distinguish what is done and verified, done but unverified, assumed, and impossible to verify; state which one applies when you report outcomes. Use provided prior knowledge when it is relevant, but prefer current evidence when the two conflict. When the task touches a subject the project knowledge base may already cover — or a priming cue carries a knowledge_id — research it proactively: knowledge_explore searches and orients the base, knowledge_lookup expands one item to its grounds and history.
 Never: Never touch infrastructure configuration.
 Never: Never delete files.
 Before declaring the work done, verify:

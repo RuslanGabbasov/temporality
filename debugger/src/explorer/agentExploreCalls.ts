@@ -64,14 +64,45 @@ export function extractExploreCalls(events: ObservationEvent[]): AgentExploreCal
   for (const event of events) {
     if (event.type !== 'tool.started') continue
     const data = event.data
-    if (!data || typeof data !== 'object' || (data as Record<string, unknown>).tool !== 'knowledge_explore') continue
-    const call = parseExploreArguments(data)
+    if (!data || typeof data !== 'object') continue
+    const tool = (data as Record<string, unknown>).tool
+    if (tool !== 'knowledge_explore' && tool !== 'knowledge_lookup') continue
+    const call = tool === 'knowledge_lookup' ? parseKnowledgeLookupCall(data) : parseExploreArguments(data)
     if (!call) continue
     call.eventID = event.event_id
     call.at = event.occurred_at
     calls.push(call)
   }
   return calls.sort((a, b) => a.at.localeCompare(b.at))
+}
+
+/** knowledge_lookup rides the research tab too: the agent fetching one item
+ *  by its knowledge_id handle — shaped as an explore call with operation
+ *  «lookup» (question = the handle, targets = the id) so the shared card
+ *  renders it without a second component. */
+export function parseKnowledgeLookupCall(data: unknown): AgentExploreCall | null {
+  if (!data || typeof data !== 'object') return null
+  const raw = data as Record<string, unknown>
+  let args: unknown = raw.arguments
+  if (typeof args === 'string') {
+    try { args = JSON.parse(args) } catch { return null }
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return null
+  const id = (args as Record<string, unknown>).knowledge_id
+  if (typeof id !== 'string' || !id.trim()) return null
+  return {
+    eventID: '',
+    at: '',
+    turn: intOrZero(raw.turn),
+    operation: 'lookup',
+    question: `knowledge_id: ${id.trim()}`,
+    targets: [id.trim()],
+    relations: [],
+    maxDepth: 0,
+    maxItems: 0,
+    includeCandidates: false,
+    operationID: '',
+  }
 }
 
 /** What the agent got back from one call: the tool.completed output is the
