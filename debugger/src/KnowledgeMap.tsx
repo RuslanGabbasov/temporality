@@ -498,6 +498,19 @@ export default function KnowledgeMap({ project, onOpenDossier, focus }: {
     level1Ref.current[p.cluster]?.color
     ?? topicColor(itemTopic(p.item.topics) || p.item.proposition), [])
 
+  /** Region hues are tuned for the dark canvas; on the light theme the pale
+   *  members of the palette (sand, light cyan, green) wash out against white
+   *  even behind the halo — darken the hue for ink so the label keeps its
+   *  region identity and its contrast. */
+  const legibleInk = useCallback((hex: string): string => {
+    if (theme === 'dark' || !/^#[0-9a-f]{6}$/i.test(hex)) return hex
+    const n = parseInt(hex.slice(1), 16)
+    const r = Math.round(((n >> 16) & 255) * 0.55)
+    const g = Math.round(((n >> 8) & 255) * 0.55)
+    const b = Math.round((n & 255) * 0.55)
+    return 'rgb(' + r + ', ' + g + ', ' + b + ')'
+  }, [theme])
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     const wrap = wrapRef.current
@@ -843,13 +856,13 @@ export default function KnowledgeMap({ project, onOpenDossier, focus }: {
         const label = p.item.proposition.length > 44 ? `${p.item.proposition.slice(0, 43)}…` : p.item.proposition
         ctx.globalAlpha = highlight ? 1 : active ? 1 : 0.55
         for (let pass = 0; pass < 2; pass++) {
-          ctx.fillStyle = pass === 0 ? halo : regionColorOf(p)
+          ctx.fillStyle = pass === 0 ? halo : legibleInk(regionColorOf(p))
           ctx.fillText(label, sx + (pass === 0 ? 1 : 0), sy - dotR - 4 + (pass === 0 ? 1 : 0))
         }
         ctx.globalAlpha = 1
       }
     }
-  }, [points, matches, viewScale, regionColorOf])
+  }, [points, matches, viewScale, regionColorOf, legibleInk, theme])
 
   useEffect(() => {
     frameRef.current = requestAnimationFrame(draw)

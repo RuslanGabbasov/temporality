@@ -5855,7 +5855,7 @@ func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, 
 	// restart and flaky providers are both transient conditions. Three attempts
 	// with 10s initial backoff ride them out; ScheduleToClose is raised so the
 	// last attempt still gets a full StartToClose window.
-	extractCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 3 * time.Minute, ScheduleToCloseTimeout: 10 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 3, InitialInterval: 10 * time.Second, BackoffCoefficient: 2.0}})
+	extractCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 7 * time.Minute, ScheduleToCloseTimeout: 15 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 2, InitialInterval: 10 * time.Second, BackoffCoefficient: 2.0}})
 	var extraction KnowledgeExtractResult
 	if err := workflow.ExecuteActivity(extractCtx, ActivityExtractKnowledge, KnowledgeExtractRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Prompt: input.Prompt, ExtractionID: extractionID, Model: input.Model}).Get(ctx, &extraction); err != nil {
 		_ = emit(activityCtx, state, extractionFailedEvent, map[string]any{"extraction_id": extractionID, "extractor_version": ExtractorVersion, "error": boundedFailureDetail(err)})

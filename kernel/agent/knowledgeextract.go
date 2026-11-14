@@ -268,10 +268,12 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 	existing, states := extractionContext(request, trajectory, knowledge)
 	offered := offeredHints(events)
 	user := renderExtractionContext(request, trajectory, existing, offered)
-	completion, err := completeParsed(ctx, model, []llm.Message{
+	mctx, cancelModel := context.WithTimeout(ctx, 4*time.Minute)
+	completion, err := completeParsed(mctx, model, []llm.Message{
 		{Role: "system", Content: extractionSystemPrompt},
 		{Role: "user", Content: user},
 	}, parseExtractionCandidates)
+	cancelModel()
 	if err != nil {
 		return result, err
 	}
@@ -313,6 +315,10 @@ func extractionContext(request KnowledgeExtractRequest, trajectory Trajectory, k
 // the hints endpoint it records no hint events, so extraction does not pollute
 // hint telemetry.
 func (a *Activities) projectKnowledge(ctx context.Context, project string) ([]observation.Knowledge, error) {
+	// Best-effort context load: bounded so a stalled projection endpoint
+	// costs a minute of nil context, not the whole activity window.
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	target := fmt.Sprintf("%s/v1/observations/knowledge?project=%s", a.TemporalityURL, url.QueryEscape(project))
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
@@ -341,6 +347,13 @@ func (a *Activities) projectKnowledge(ctx context.Context, project string) ([]ob
 
 // fetchRunEvents loads the complete event stream of one run from the journal.
 func (a *Activities) fetchRunEvents(ctx context.Context, project, runID string) ([]observation.Event, error) {
+	// The activity window is shared with the model call: an unbounded
+	// pagination (a run with thousands of journaled deltas) used to eat the
+	// whole StartToClose and the failure named no leg. 90s is generous for
+	// the normal few pages and fails fast, with a named error, when the
+	// journal is the slow one.
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
 	var events []observation.Event
 	cursor := ""
 	for {
