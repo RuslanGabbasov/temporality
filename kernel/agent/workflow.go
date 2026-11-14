@@ -856,7 +856,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if input.HintQuery != "" {
 				query = input.HintQuery
 			}
-			hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 8 * time.Second, ScheduleToCloseTimeout: 9 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+			hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 			request := HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: query, Skills: input.Skills, TeamRoot: input.TeamRootRunID, Trigger: candidate.Trigger, ActivationID: activationID, Tool: candidate.Tool, MCPServer: candidate.MCPServer, ToolResult: candidate.ToolResult, ErrorClass: candidate.ErrorClass, IssuedKnowledgeIDs: sortedTrueKeys(issuedKnowledge), ActivationSourceID: candidate.SourceID}
 			startedAt := workflow.Now(ctx)
 			var hints []Hint

@@ -731,7 +731,29 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   const args = parseArguments(d.arguments) ?? parseArguments(operation?.arguments)
   const tool = typeof d.tool === 'string' && d.tool ? d.tool : (typeof operation?.tool === 'string' ? operation.tool : '')
   const argumentLines: Array<{ key: string; value: string }> = []
-  if (args && tool === 'remember_many') {
+  if (event.type === 'hint.delivery' || event.type === 'hint.query') {
+    // The activation's unfoldable layer: what was asked, what came back and
+    // what actually entered the context — the row's whole point (docs/
+    // runtime-knowledge-activation.md §13). Without these lines the row had
+    // nothing to expand.
+    const push = (key: string, value: unknown) => {
+      const text = textOf(value)
+      if (text) argumentLines.push({ key, value: text.length > 300 ? `${text.slice(0, 299)}…` : text })
+    }
+    push('activation', d.activation_id)
+    push('trigger', hintTriggerLabel(t, d.trigger))
+    push('source', d.activation_source_id)
+    push('tool', d.tool)
+    push('mcp', d.mcp_server)
+    push('error', d.error_class)
+    push('candidates', d.candidate_count)
+    push('selected', d.selected_count)
+    push('injected', d.injected_count)
+    push('tokens', d.tokens)
+    if (d.retrieval_ms !== undefined && d.retrieval_ms !== null && d.retrieval_ms !== '') push('retrieval', `${d.retrieval_ms} ms`)
+    if (Array.isArray(d.knowledge_ids)) push('knowledge', (d.knowledge_ids as unknown[]).map(textOf).filter(Boolean).join(', '))
+    if (d.reason) push('reason', hintDeliveryReason(t, d.reason))
+  } else if (args && tool === 'remember_many') {
     // Memory writes are the reader's «what did it decide to keep?» moment: a
     // raw JSON fragment of the items array says nothing — one line per
     // proposition instead (the kernel fragment carries up to ~500 chars, so
@@ -815,6 +837,16 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
     // tells the reader nothing. The id stays in the dossier header.
     const statement = squash(d.proposition ?? d.reason).slice(0, 70)
     links.push({ kind: 'knowledge', label: statement || knowledgeID, url: `/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(knowledgeID)}` })
+  }
+  // A delivery injects a SET: each delivered knowledge id becomes a jump to
+  // its dossier — the trace's «что реально вошло в контекст» in one click.
+  if (event.type === 'hint.delivery' && Array.isArray(d.knowledge_ids)) {
+    for (const raw of d.knowledge_ids as unknown[]) {
+      const id = textOf(raw)
+      if (id && links.filter((l) => l.kind === 'knowledge').length < 4) {
+        links.push({ kind: 'knowledge', label: id, url: `/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(id)}` })
+      }
+    }
   }
   const exitCode = d.exit_code
   const exitFailed = typeof exitCode === 'number' && exitCode !== 0

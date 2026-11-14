@@ -3522,6 +3522,13 @@ func main() {
 			Prompt:  task.Prompt,
 			Title:   task.Title,
 		}
+		// Hints for a chat run match against the whole transcript when the
+		// caller names the message that actually starts this run: the matcher
+		// then ranks by the new request instead of the boilerplate header and
+		// the oldest messages the transcript happens to lead with.
+		if query := strings.TrimSpace(req.HintQuery); query != "" {
+			input.HintQuery = query
+		}
 		// «Давай продолжим» after a broken run: the new attempt gets the tail
 		// of the interrupted run's journal as a system block, so it continues
 		// from where the previous one stopped instead of starting blind.
