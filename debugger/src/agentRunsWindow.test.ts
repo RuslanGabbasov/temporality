@@ -345,4 +345,19 @@ describe('attemptChain', () => {
     const rows = buildRunRows([started('task', at(0))], new Map())
     expect(chain(rows, 'task')).toEqual(['task'])
   })
+
+  it('keeps a delegated run and its continuations in their own chain', () => {
+    const rows = buildRunRows([
+      started('task', at(0)),
+      started('task/delegate/01', at(10), 'task'),
+      started('task/delegate/01-r1', at(20), 'task/delegate/01'),
+      started('task-r1', at(30), 'task'),
+    ], new Map())
+    // A delegation never joins its parent's chain, and its continuation never
+    // climbs past it: otherwise the selected run falls out of its own chain
+    // and the switcher vanishes the moment you step onto it.
+    expect(chain(rows, 'task/delegate/01')).toEqual(['task/delegate/01', 'task/delegate/01-r1'])
+    expect(chain(rows, 'task/delegate/01-r1')).toEqual(['task/delegate/01', 'task/delegate/01-r1'])
+    expect(chain(rows, 'task')).toEqual(['task', 'task-r1'])
+  })
 })

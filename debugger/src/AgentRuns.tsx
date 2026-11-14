@@ -208,6 +208,12 @@ const childBadgeStyle = {
   marginLeft: '0.35rem',
 }
 
+/** The ⟳ N marker carries the row's «this restarted» signal on its own, so
+ *  it reads a size above the × N attempt badge. */
+const chainBadgeStyle = {
+  ...childBadgeStyle, fontSize: '0.78rem', fontWeight: 600, padding: '0 0.3rem',
+}
+
 interface RunRow {
   id: string
   title: string
@@ -392,10 +398,14 @@ export function attemptChain(rows: RunRow[], run: string): RunRow[] {
   if (!start) return []
   // Only an attempt climbs to its chain head: a delegation is its own run —
   // it may carry continuations of its own, but it never joins its parent's.
+  // The climb stops at the first ancestor that is not itself a continuation:
+  // going all the way to the root put a delegated run's continuation in its
+  // PARENT's chain, where it is not a member — the switcher then could not
+  // place the selected run and vanished.
   let top = start
   if (start.origin === 'continuation') {
     const seen = new Set<string>([top.id])
-    while (top.parent) {
+    while (top.origin === 'continuation' && top.parent) {
       const parent = byId.get(top.parent)
       if (!parent || seen.has(parent.id)) break
       seen.add(parent.id)
@@ -1582,7 +1592,7 @@ export default function AgentRuns({ project }: { project: string }) {
                      * stay out of it: they are counted by the expand control
                      * below the same way they always were. */}
                     {row.continuations > 0 && (
-                      <span title={t('runs.chain_hint')} style={childBadgeStyle}>⟳ {row.continuations}</span>
+                      <span title={t('runs.chain_hint')} style={chainBadgeStyle}>⟳ {row.continuations}</span>
                     )}
                     {/* Rerun attempt of the same task (× 2, × 3 …): a restarted or
                      * re-delegated run is indistinguishable by title — the badge
@@ -1669,7 +1679,7 @@ export default function AgentRuns({ project }: { project: string }) {
                         aria-label={t('runs.attempt_prev') ?? 'Previous attempt'}
                         style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text-2)', cursor: attemptIndex > 0 ? 'pointer' : 'default', opacity: attemptIndex > 0 ? 1 : 0.4, padding: '0.1rem', display: 'inline-flex' }}
                       ><ChevronLeft size={14} /></button>
-                      <span title={t('runs.chain_hint')} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', fontFamily: 'monospace' }}>⟳ {attemptIndex + 1}/{attempts.length}</span>
+                      <span title={t('runs.chain_hint')} style={{ fontSize: '0.85rem', color: 'var(--tm-text-2)', fontFamily: 'monospace', fontWeight: 600 }}>⟳ {attemptIndex + 1}/{attempts.length}</span>
                       <button
                         type="button"
                         onClick={() => gotoAttempt(attemptIndex + 1)}
