@@ -8,7 +8,10 @@ import { filterTraceItems, isTraceStateEmpty, searchItems, type TraceUrlState } 
 import TraceFiltersPanel, { consoleSearchIndex, type ConsoleStateLike } from './TraceFiltersPanel'
 import type { ConsoleState } from './consoleStream'
 import type { Locale } from './locales'
-import Markdown from './Markdown'
+import Markdown, { linkifyWorkspacePaths } from './Markdown'
+import MediaViewer, { type MediaViewerPayload } from './MediaViewer'
+import { loadWorkspaceFilePreview } from './filePreview'
+import { workspaceApi } from './workspaceApi'
 import ConsoleOutput from './ConsoleOutput'
 import TracePreview, { tracePreviewOf } from './TracePreview'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
@@ -64,6 +67,13 @@ export interface EventRowVisualProps {
  *  toggled by the {} icon in the row header — the raw envelope. */
 function EventLayeredDetails({ event, t, project, response, reasoning, knowledgeDoubt, live, onConsoleState, rawOpen, onRawToggle, hideConsole }: Omit<EventRowVisualProps, 'locale'> & { rawOpen: boolean; onRawToggle: () => void; hideConsole?: boolean }) {
   const d = event.data ?? {}
+  // Inline preview for workspace documents the answer references — the
+  // fullscreen viewer is a fixed overlay, so it can live inside this row.
+  const [fileViewer, setFileViewer] = useState<MediaViewerPayload | null>(null)
+  const closeFileViewer = () => setFileViewer((current) => {
+    if (current?.kind === 'image') URL.revokeObjectURL(current.src)
+    return null
+  })
   const details = eventDetails(event, t)
   const knowledgeID = typeof d.knowledge_id === 'string' && d.knowledge_id
     && (event.type.startsWith('knowledge.') || event.type.startsWith('hint.')) ? d.knowledge_id : ''
@@ -119,9 +129,23 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
       })()}
       {response && (
         <div className="run-model-response">
-          <Markdown content={response} />
+          {/* Workspace documents in the answer open as an inline preview
+              (image/text-like) or download — the same affordance the chat
+              gives its /workspace/... links. */}
+          <Markdown
+            content={linkifyWorkspacePaths(response, project)}
+            onFile={(path) => {
+              void loadWorkspaceFilePreview(project, path)
+                .then((preview) => {
+                  if (preview) { setFileViewer(preview); return }
+                  return workspaceApi.downloadFile(project, path)
+                })
+                .catch((err) => console.error(err))
+            }}
+          />
         </div>
       )}
+      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} />}
       {reasoning && (
         <details className="run-model-reasoning">
           <summary>💭 {t('runs.reasoning')}</summary>

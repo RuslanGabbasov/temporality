@@ -1674,6 +1674,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (result T
 		return a.handleArtifactSubmit(ctx, request)
 	case "artifact_deprecate":
 		return a.handleArtifactDeprecate(ctx, request)
+	case "artifact_return_to_draft":
+		return a.handleArtifactReturnToDraft(ctx, request)
 	case "secret_list":
 		return a.handleSecretList(ctx, request)
 	case "knowledge_lookup":

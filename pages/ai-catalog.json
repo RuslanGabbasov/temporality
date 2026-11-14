@@ -32,7 +32,7 @@
         "Где посмотреть историю действий агента?"
       ],
       "version": "1",
-      "updatedAt": "2026-11-12T00:00:00Z"
+      "updatedAt": "2026-11-14T00:00:00Z"
     },
     {
       "identifier": "urn:air:temporality.tech:temporality:llms-txt",
@@ -50,7 +50,7 @@
         "Clean markdown sources of Temporality docs"
       ],
       "version": "1",
-      "updatedAt": "2026-11-12T00:00:00Z"
+      "updatedAt": "2026-11-14T00:00:00Z"
     }
   ]
 }

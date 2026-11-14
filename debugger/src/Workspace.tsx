@@ -54,6 +54,9 @@ import { useI18n, pluralT } from './i18n'
 import { pseudoToolLabel, formatDuration, friendlyRunFailure } from './eventSummary'
 import { TimeHint } from './timeHint'
 import { buildChatPrompt } from './chatPrompt'
+import { copyText } from './clipboard'
+import MediaViewer, { type MediaViewerPayload } from './MediaViewer'
+import { loadWorkspaceFilePreview } from './filePreview'
 import { useMentionMenu, MentionMenu } from './MentionMenu'
 import { randomUUID } from './uuid'
 
@@ -563,19 +566,63 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   // then scrolls internally. The composer sits at the column's bottom edge,
   // so the extra height eats into the message pane: the field grows upward.
   const chatInputRef = useRef<HTMLTextAreaElement | null>(null)
+  // Manual composer height (drag the splitter above the textarea): persisted
+  // so a comfortable writing window survives reloads; null = auto-grow.
+  const [inputHeight, setInputHeight] = useState<number | null>(() => {
+    try {
+      const stored = Number(localStorage.getItem('temporality_chat_input_height'))
+      return Number.isFinite(stored) && stored >= 72 ? stored : null
+    } catch {
+      return null
+    }
+  })
   const resizeChatInput = useCallback(() => {
     const el = chatInputRef.current
     if (!el) return
+    if (inputHeight !== null) {
+      el.style.height = `${inputHeight}px`
+      el.style.overflowY = 'auto'
+      return
+    }
     const cap = Math.floor(window.innerHeight / 3)
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, cap)}px`
     el.style.overflowY = el.scrollHeight > cap ? 'auto' : 'hidden'
-  }, [])
+  }, [inputHeight])
   useEffect(() => {
     resizeChatInput()
     window.addEventListener('resize', resizeChatInput)
     return () => window.removeEventListener('resize', resizeChatInput)
-  }, [inputValue, resizeChatInput])
+  }, [inputValue, resizeChatInput, inputHeight])
+  // The splitter above the textarea: drag to set a fixed composer height,
+  // double-click returns to auto-grow.
+  const startInputResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const el = chatInputRef.current
+    const startY = e.clientY
+    const startHeight = el?.getBoundingClientRect().height ?? 96
+    const move = (ev: MouseEvent) => {
+      const next = Math.min(Math.max(72, startHeight + (startY - ev.clientY)), Math.floor(window.innerHeight * 0.6))
+      setInputHeight(next)
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      setInputHeight((current) => {
+        try {
+          if (current !== null) localStorage.setItem('temporality_chat_input_height', String(current))
+          else localStorage.removeItem('temporality_chat_input_height')
+        } catch { /* private mode */ }
+        return current
+      })
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }, [])
+  const resetInputHeight = useCallback(() => {
+    setInputHeight(null)
+    try { localStorage.removeItem('temporality_chat_input_height') } catch { /* private mode */ }
+  }, [])
   // @-mentions of workspace entities (docs/chat-mentions.md): typing `@` opens
   // the registry menu above the composer and inserts a canonical `@kind:id`.
   // The kernel resolves the same reference from Telegram/Matrix messages too.
@@ -598,6 +645,27 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const prevLenRef = useRef(0)
   const [atBottom, setAtBottom] = useState(true)
   const [unread, setUnread] = useState(0)
+  // Share-answer menu on an assistant bubble: copy the text as Markdown or
+  // copy the run's deep link for colleagues with access (docs/chat-mentions.md
+  // is unrelated — this is plain sharing of one answer).
+  const [shareMenu, setShareMenu] = useState<number | null>(null)
+  const [shareFlash, setShareFlash] = useState<'md' | 'link' | null>(null)
+  const shareFlashTimer = useRef<number | null>(null)
+  // Inline preview for /workspace/... documents the answer points at: images
+  // and text-like files open in the fullscreen viewer, the rest downloads.
+  const [mediaViewer, setMediaViewer] = useState<MediaViewerPayload | null>(null)
+  const closeMediaViewer = useCallback(() => {
+    setMediaViewer((current) => {
+      if (current?.kind === 'image') URL.revokeObjectURL(current.src)
+      return null
+    })
+  }, [])
+  const flashShare = (kind: 'md' | 'link') => {
+    setShareMenu(null)
+    setShareFlash(kind)
+    if (shareFlashTimer.current !== null) window.clearTimeout(shareFlashTimer.current)
+    shareFlashTimer.current = window.setTimeout(() => setShareFlash(null), 1600)
+  }
   const streamRef = useRef<Map<string, EventSource>>(new Map())
   // Parallel-send guard (see sendMessage): settles atomically across renders,
   // unlike the `loading` state which two rapid Enters can both pass.
@@ -684,25 +752,38 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     setUploading(true)
     setError('')
     try {
+      // Parallel with partial success: one bad file in the batch must not
+      // discard the rest — attach what landed, name what failed.
+      const results = await Promise.allSettled(files.map((f) => workspaceApi.uploadFile(project, f)))
       const uploaded: UploadedFile[] = []
-      for (const f of files) {
-        uploaded.push(await workspaceApi.uploadFile(project, f))
-      }
-      setAttachments((prev) => [...prev, ...uploaded])
-    } catch (f) {
-      setError(message(f))
+      const failed: string[] = []
+      results.forEach((result, i) => {
+        if (result.status === 'fulfilled') uploaded.push(result.value)
+        else failed.push(files[i]?.name ?? String(i))
+      })
+      if (uploaded.length) setAttachments((prev) => [...prev, ...uploaded])
+      if (failed.length) setError(t('chat.upload_failed_batch', { files: failed.join(', ') }) ?? `Failed to upload: ${failed.join(', ')}`)
     } finally {
       setUploading(false)
     }
   }
 
   // Assistant messages reference agent-produced files by /workspace/... path;
-  // clicking such a link downloads the file from the project sandbox.
+  // clicking such a link previews it inline when the browser can show it
+  // (image/text-like) and downloads the rest.
   // Stable identity (useCallback): it rides into memoized Markdown as onFile —
   // an inline arrow would remount the memo on every render and re-parse every
   // bubble's markdown.
   const onFileLink = useCallback(async (path: string) => {
     try {
+      const preview = await loadWorkspaceFilePreview(project, path)
+      if (preview) {
+        setMediaViewer((current) => {
+          if (current?.kind === 'image') URL.revokeObjectURL(current.src)
+          return preview
+        })
+        return
+      }
       await workspaceApi.downloadFile(project, path)
     } catch (f) {
       setError(t('chat.download_failed') ?? 'Failed to download file')
@@ -2144,6 +2225,40 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       </div>
                     )}
 
+                    {/* Share the finished answer: copy as Markdown for any
+                        messenger/doc, or copy the run's deep link — colleagues
+                        with access open the full trajectory. */}
+                    {msg.role === 'assistant' && msg.content && msg.status !== 'running' && (
+                      <div style={{ position: 'relative', marginTop: '0.4rem', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={() => setShareMenu(shareMenu === i ? null : i)}
+                          title={t('chat.share') ?? 'Поделиться ответом'}
+                          style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: shareFlash ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.68rem', padding: '0.1rem 0.45rem' }}
+                        >
+                          {shareFlash === 'md' ? `✓ ${t('chat.share_copied') ?? 'Скопировано'}`
+                            : shareFlash === 'link' ? `✓ ${t('chat.share_copied') ?? 'Скопировано'}`
+                            : `↗ ${t('chat.share') ?? 'Поделиться'}`}
+                        </button>
+                        {shareMenu === i && (
+                          <div style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, zIndex: 30, background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,.3)', padding: '0.3rem', display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: '13rem', textAlign: 'left' }}>
+                            <button
+                              type="button"
+                              onClick={() => { void copyText(msg.content).then((ok) => { if (ok) flashShare('md') }) }}
+                              style={{ background: 'none', border: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.25rem 0.4rem', textAlign: 'left' }}
+                            >📋 {t('chat.share_copy_md') ?? 'Копировать текст (Markdown)'}</button>
+                            {msg.runId && (
+                              <button
+                                type="button"
+                                onClick={() => { void copyText(window.location.origin + runTraceUrl(project, msg.runId!)).then((ok) => { if (ok) flashShare('link') }) }}
+                                style={{ background: 'none', border: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.25rem 0.4rem', textAlign: 'left' }}
+                              >🔗 {t('chat.share_copy_link') ?? 'Скопировать ссылку на запуск'}</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Mid-run addenda trail the original message (reply-style):
                         the first line is the text, everything amended later
                         stacks below with its timestamp. */}
@@ -2319,6 +2434,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
               )}
               {/* Mid-run messages route into the running run as addenda — the
                * input's placeholder says so (was a separate notice line). */}
+              {/* The resize splitter: drag up for a taller writing window
+               * (persisted), double-click returns to auto-grow. */}
+              <div
+                onMouseDown={startInputResize}
+                onDoubleClick={resetInputHeight}
+                title={t('chat.resize_input') ?? 'Потяните, чтобы растянуть поле ввода; двойной клик — автовысота'}
+                style={{ height: '5px', width: '3.5rem', margin: '0 auto 0.35rem', borderRadius: '3px', cursor: 'ns-resize', background: 'var(--tm-border)', opacity: 0.75 }}
+              />
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end' }}>
                 <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => void onFilesPicked(e)} />
                 <Button
@@ -2355,7 +2478,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     }}
                     onKeyUp={() => mention.sync()}
                     onMouseUp={() => mention.sync()}
-                    style={{ resize: 'none', minHeight: '72px', maxHeight: '33vh', overflowY: 'auto' }}
+                    style={{ resize: 'none', minHeight: '72px', maxHeight: inputHeight !== null ? `${inputHeight}px` : '33vh', overflowY: 'auto' }}
                   />
                   {mention.open && (
                     <MentionMenu
@@ -2382,6 +2505,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           </div>
         )}
       </div>
+
+      {/* Inline document preview (workspace file links in answers) */}
+      {mediaViewer && <MediaViewer payload={mediaViewer} onClose={closeMediaViewer} />}
 
       {/* New chat modal */}
       {showNewChat && (

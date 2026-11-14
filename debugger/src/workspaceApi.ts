@@ -1263,6 +1263,14 @@ export const workspaceApi = {
   // File download from the project sandbox: chat messages carry /workspace/...
   // paths produced by agents; this fetches them with auth and hands the blob
   // to the browser as a download.
+  // Raw authenticated fetch of the same endpoint — the preview path needs the
+  // Response (blob for images, text for documents) instead of a forced save.
+  fetchFile: async (projectId: string, path: string): Promise<Response> => {
+    const query = new URLSearchParams({ path })
+    return fetch(`${KERNEL_API}/v1/workspace/projects/${projectId}/files?${query}`, {
+      headers: authHeaders(),
+    })
+  },
   downloadFile: async (projectId: string, path: string): Promise<void> => {
     const query = new URLSearchParams({ path })
     const response = await fetch(`${KERNEL_API}/v1/workspace/projects/${projectId}/files?${query}`, {
@@ -1776,6 +1784,8 @@ export const workspaceApi = {
     request<{ facts: UserFact[] }>(`/v1/workspace/users/${encodeURIComponent(userId)}/facts`),
   addUserFact: (userId: string, fact: string) =>
     request<UserFact>(`/v1/workspace/users/${encodeURIComponent(userId)}/facts`, { method: 'POST', body: JSON.stringify({ fact }) }),
+  updateUserFact: (userId: string, factId: number, fact: string) =>
+    request<UserFact>(`/v1/workspace/users/${encodeURIComponent(userId)}/facts/${factId}`, { method: 'PUT', body: JSON.stringify({ fact }) }),
   deleteUserFact: (userId: string, factId: number) =>
     request<{ deleted: boolean }>(`/v1/workspace/users/${encodeURIComponent(userId)}/facts/${factId}`, { method: 'DELETE' }),
   getUser: (id: string) => request<User>(`/v1/workspace/users/${id}`),

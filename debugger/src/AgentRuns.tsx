@@ -241,7 +241,7 @@ export function runAttempt(event: ObservationEvent): number {
 
 /** Build the run call tree: roots are runs without a known parent, children
  * (delegated runs carry parent_run_id) are nested under their parent. */
-function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStatus>): RunRow[] {
+export function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStatus>): RunRow[] {
   const byId = new Map<string, ObservationEvent>()
   for (const event of started) {
     const id = runID(event)
@@ -282,6 +282,11 @@ function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStat
     })
     for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1)
   }
+  // Children read chronologically — the delegation story oldest first — while
+  // roots keep the caller's newest-first page order.
+  for (const list of childrenOf.values()) {
+    list.sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at))
+  }
   // Show newest runs first. The caller's page order decides the direction:
   // buildRunRows keeps the incoming order (the list loads desc = newest
   // first) and only folds children under their parents.
@@ -298,6 +303,11 @@ export default function AgentRuns({ project }: { project: string }) {
   // and the list shows its skeleton until the first fetch lands (see the
   // runsLoaded gate on the empty state).
   const [rows, setRows] = useState<RunRow[]>(() => cacheGet<RunRow[]>(runsCacheKey(scopeKey)) ?? [])
+  // Child runs collapse under their parents — delegation trees multiplied into
+  // the list. The set holds EXPANDED parents: empty by default, so the list
+  // opens with the top-level runs and a delegation tree on demand (a running
+  // child stays visible even under a collapsed parent — liveness wins).
+  const [expandedRuns, setExpandedRuns] = useState<Set<string>>(() => new Set())
   // Whether at least one real fetch of this scope finished: only then does an
   // empty list mean «no runs» — before that it is «not yet», i.e. skeleton.
   const [runsLoaded, setRunsLoaded] = useState(() => (cacheGet<RunRow[]>(runsCacheKey(scopeKey))?.length ?? 0) > 0)
@@ -508,8 +518,37 @@ export default function AgentRuns({ project }: { project: string }) {
       if (match) return true
       return (childrenOf.get(id) ?? []).some((child) => subtreeMatch(child))
     }
-    return rows.filter((row) => subtreeMatch(row.id))
-  }, [rows, filter, initiatorPick, statusFilter, ageFilter, questionRuns, opsOnly, opRunIds, userNameOf, users, org.units])
+    const parentOf = new Map<string, string>()
+    for (const row of rows) {
+      if (row.parent) parentOf.set(row.id, row.parent)
+    }
+    const collapsedUnder = (row: RunRow): boolean => {
+      let parent = parentOf.get(row.id)
+      while (parent) {
+        if (!expandedRuns.has(parent)) return true
+        parent = parentOf.get(parent)
+      }
+      return false
+    }
+    return rows.filter((row) => subtreeMatch(row.id)
+      // Selected or live rows stay reachable through any collapse depth.
+      && (row.id === selected || row.status === 'running' || !collapsedUnder(row)))
+  }, [rows, filter, initiatorPick, statusFilter, ageFilter, questionRuns, opsOnly, opRunIds, userNameOf, users, org.units, expandedRuns, selected])
+  const childCount = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+      if (row.parent) counts.set(row.parent, (counts.get(row.parent) ?? 0) + 1)
+    }
+    return counts
+  }, [rows])
+  const toggleChildren = (id: string) => {
+    setExpandedRuns((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
@@ -1263,6 +1302,19 @@ export default function AgentRuns({ project }: { project: string }) {
                   style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', minWidth: 0, overflow: 'hidden', marginLeft: row.depth > 0 ? `${row.depth * 0.75}rem` : undefined }}
                 >
                   <div style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {(() => {
+                      const kids = childCount.get(row.id) ?? 0
+                      if (!kids) return null
+                      const open = expandedRuns.has(row.id)
+                      return (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); toggleChildren(row.id) }}
+                          title={open ? (t('runs.collapse_children') ?? 'Свернуть дочерние раны') : (t('runs.expand_children', { count: String(kids) }) ?? `Показать дочерние раны (${kids})`)}
+                          style={{ background: 'none', border: 0, color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0 0.3rem 0 0', verticalAlign: 'middle' }}
+                        >{open ? '▾' : '▸'} {kids}</button>
+                      )
+                    })()}
                     {row.depth > 0 && <span style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}>↳</span>}
                     {label}
                     {/* Rerun attempt of the same task (× 2, × 3 …): a restarted or

@@ -605,6 +605,22 @@ export const ru: Record<string, string> = {
     'chat.attach_file': 'Прикрепить файлы',
     'chat.uploading': 'Загрузка…',
     'chat.remove_attachment': 'Убрать вложение',
+    'chat.upload_failed_batch': 'Не удалось загрузить: {{files}}',
+    'chat.resize_input': 'Потяните, чтобы растянуть поле ввода; двойной клик — автовысота',
+    'chat.share': 'Поделиться',
+    'chat.share_copy_md': 'Копировать текст (Markdown)',
+    'chat.share_copy_link': 'Скопировать ссылку на запуск',
+    'chat.share_copied': 'Скопировано',
+
+    // Self-service profile facts (user menu → «Мои факты и предпочтения»)
+    'facts.menu': 'Мои факты и предпочтения',
+    'facts.title': 'Мои факты и предпочтения',
+    'facts.hint': 'Что агенты знают о вас и используют в диалогах: стиль ответов, чем вы руководите, рабочие договорённости. Агенты добавляют факты с валидацией на дубликаты; здесь вы можете их редактировать, дополнять и удалять.',
+    'facts.add_placeholder': 'Новый факт, например: предпочитает краткие ответы',
+    'facts.loading': 'Загрузка…',
+    'facts.empty': 'Пока нет фактов — агенты начнут наполнять профиль по мере диалогов.',
+    'facts.origin_agent': 'от агента',
+    'facts.origin_manual': 'вами',
 
     // @-mention menu in the chat composer (docs/chat-mentions.md)
     'mentions.loading': 'Загрузка…',
@@ -840,6 +856,8 @@ export const ru: Record<string, string> = {
     'runs.stop': 'Остановить',
     'runs.stop_hint': 'Принудительно остановить воркфлоу рана — для зависших без признаков жизни',
     'runs.stop_confirm': 'Точно остановить?',
+    'runs.expand_children': 'Показать дочерние раны ({{count}})',
+    'runs.collapse_children': 'Свернуть дочерние раны',
     'runs.knowledge_dossier': 'досье',
     'knowledge.evidence_open': 'Открыть ран-источник',
     'runs.show_details': 'показать детали',

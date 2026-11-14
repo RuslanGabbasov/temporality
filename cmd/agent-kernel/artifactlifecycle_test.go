@@ -632,6 +632,7 @@ func TestArtifactRoundCancel(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, `"status":"cancelled"`)
 }
+
 // Round management: add-reviewers / delegate / mode — writer-only, humans
 // only, and the kernel-internal identity gets the same 403 as decisions.
 func TestArtifactRoundManagementRoutes(t *testing.T) {

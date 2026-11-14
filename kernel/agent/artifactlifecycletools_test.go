@@ -307,3 +307,38 @@ func TestArtifactUpdatePatchRefusesUnsafeEdits(t *testing.T) {
 		t.Fatalf("a refused patch must not write, got %v", gotPut)
 	}
 }
+
+func TestArtifactReturnToDraftCancelsOpenRound(t *testing.T) {
+	var gotPath string
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"review":   map[string]any{"id": "rev-1", "status": "cancelled"},
+			"artifact": map[string]any{"id": "otchet", "status": "draft"},
+		})
+	}))
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		Project: "demo", RunID: "run-9", ActorID: "user:ivanov", Name: "artifact_return_to_draft",
+		Arguments: map[string]any{"artifact_id": "otchet", "reason": "human asked for rework"},
+	})
+	if err != nil {
+		t.Fatalf("artifact_return_to_draft: %v", err)
+	}
+	if gotPath != "/v1/workspace/artifacts/otchet/return-to-draft" {
+		t.Fatalf("want POST …/otchet/return-to-draft, got %s", gotPath)
+	}
+	if gotPayload["actor"] != "user:ivanov" || gotPayload["reason"] != "human asked for rework" {
+		t.Fatalf("actor/reason must ride the call: %#v", gotPayload)
+	}
+	if !strings.Contains(result.Content, `"status":"draft"`) || !strings.Contains(result.Content, "artifact_submit") {
+		t.Fatalf("result must report the draft state and the re-submit path, got %s", result.Content)
+	}
+}

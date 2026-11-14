@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1005,6 +1006,7 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 				return
 			}
 			l.deliverRunPresentations(watchCtx, settings, address, runID)
+			l.deliverRunFileLinks(watchCtx, settings, address, project, answerBody)
 			if markAnswered {
 				_ = l.store.UpdateInboundMessage(watchCtx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusAnswered})
 			}
@@ -1030,6 +1032,70 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 // progressEvery paces the chat progress lines: a fast tool loop must not
 // spam the dialog, so at most one line lands per interval.
 const progressEvery = 10 * time.Second
+
+// workspaceRefRe finds agent-produced file references in an answer — the
+// same /workspace/... convention the web chat linkifies
+// (debugger/src/Markdown.tsx linkifyWorkspacePaths).
+var workspaceRefRe = regexp.MustCompile(`(^|[\s(\[<"'])(/?workspace/[A-Za-z0-9][A-Za-z0-9._/-]*)`)
+
+// deliverRunFileLinks attaches the documents the answer points at: an agent
+// referencing /workspace/out/report.pdf sends the report with the message
+// instead of only naming it (docs/channels.md §13). Same sandbox resolution
+// as the file download endpoint; bounded (≤3 files, ≤20MiB each) and
+// best-effort — a missing or oversized file costs a log line, never the
+// answer. Transport-less channels (no FilesOut capability) skip silently:
+// the web inbox still opens the path links.
+func (l *channelInboundLoop) deliverRunFileLinks(ctx context.Context, settings agent.ChannelSettings, address, project, answerBody string) {
+	if !l.driver.Spec().Capabilities.FilesOut {
+		return
+	}
+	root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+	if root == "" || project == "" {
+		return
+	}
+	projectRoot := filepath.Join(root, "projects", project)
+	const maxFiles, maxBytes = 3, 20 << 20
+	seen := map[string]bool{}
+	delivered := 0
+	for _, match := range workspaceRefRe.FindAllStringSubmatch(answerBody, -1) {
+		if delivered >= maxFiles {
+			break
+		}
+		ref := match[2]
+		ref = strings.TrimSuffix(ref, ".") // prose punctuation glued to the path
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		rel := strings.TrimPrefix(strings.TrimPrefix(ref, "/workspace"), "/")
+		clean := filepath.Clean(rel)
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			continue
+		}
+		abs := filepath.Join(projectRoot, clean)
+		if abs != projectRoot && !strings.HasPrefix(abs, projectRoot+string(filepath.Separator)) {
+			continue
+		}
+		info, err := os.Stat(abs)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxBytes {
+			continue
+		}
+		payload, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		sendCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		sendErr := l.driver.SendFile(sendCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundFile{
+			Name: info.Name(), Note: "mentioned in the answer", Payload: payload,
+		})
+		cancel()
+		if sendErr != nil {
+			l.log.Warn("answer file attachment", "channel", l.driver.Type(), "file", ref, "error", sendErr)
+			continue
+		}
+		delivered++
+	}
+}
 
 // deliverRunPresentations pushes the run's published presentations into the
 // channel as adapted static renders (docs/presentation-engine.md §9.3): the

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace, runAttempt } from './AgentRuns'
+import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace, runAttempt, buildRunRows } from './AgentRuns'
 import type { ObservationEvent } from './observationApi'
 
 const startedAt = (run: string, data?: Record<string, unknown>): ObservationEvent =>
@@ -63,5 +63,27 @@ describe('NFR-5 trace window', () => {
       expect(windowedTrace(rows, limit).length).toBe(limit)
       expect(limit).toBeLessThanOrEqual(300)
     }
+  })
+})
+
+/** Child runs read chronologically under their parent (the delegation story,
+ *  oldest first) while roots keep the list's newest-first order. */
+describe('buildRunRows', () => {
+  const started = (run: string, at: string, parent?: string): ObservationEvent => ({
+    type: 'run.started', occurred_at: at, source: { id: 's' }, context: { run },
+    data: parent ? { parent_run_id: parent } : {},
+  } as unknown as ObservationEvent)
+
+  it('orders children chronologically, newest roots first', () => {
+    const rows = buildRunRows([
+      started('root-2', '2026-11-05T10:00:00Z'),
+      started('root-1', '2026-11-05T09:00:00Z'),
+      started('root-1/delegate/02', '2026-11-05T09:40:00Z', 'root-1'),
+      started('root-1/delegate/01', '2026-11-05T09:20:00Z', 'root-1'),
+    ], new Map())
+    expect(rows.map((r) => r.id)).toEqual(['root-2', 'root-1', 'root-1/delegate/01', 'root-1/delegate/02'])
+    expect(rows[0].depth).toBe(0)
+    expect(rows[2].depth).toBe(1)
+    expect(rows[2].parent).toBe('root-1')
   })
 })

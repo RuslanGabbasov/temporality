@@ -371,6 +371,36 @@ func (a *Activities) handleArtifactSubmit(ctx context.Context, request ToolReque
 	return ToolResult{Content: string(encoded)}, nil
 }
 
+// handleArtifactReturnToDraft sends the agent's OWN submitted work back to
+// draft when the human asks for rework: the open round closes (cancelled) and
+// the artifact becomes editable with artifact_update again. It never approves
+// anything — the human decision stays with humans (docs/artifact-lifecycle.md
+// §6). Mirrors the human's «отменить согласование» for the rework loop.
+func (a *Activities) handleArtifactReturnToDraft(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	artifactID := artifactStringArg(request, "artifact_id")
+	if artifactID == "" {
+		return ToolResult{Content: "error: artifact_id is required"}, nil
+	}
+	reason := artifactStringArg(request, "reason")
+	payload := map[string]any{"reason": reason, "actor": request.ActorID}
+	body, status, err := a.workspaceDo(ctx, http.MethodPost,
+		fmt.Sprintf("%s/v1/workspace/artifacts/%s/return-to-draft", a.WorkspaceURL, url.PathEscape(artifactID)), payload)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: artifact return to draft failed (HTTP %d): %s", status, truncate(body, 600))}, nil
+	}
+	a.emitArtifactLifecycleToolEvent(ctx, request, "artifact.returned_to_draft", artifactID, map[string]any{
+		"artifact_id": artifactID, "reason": reason,
+	})
+	encoded, _ := json.Marshal(map[string]any{
+		"artifact_id": artifactID, "status": "draft",
+		"note": "the open review round was cancelled; edit the artifact with artifact_update and re-submit with artifact_submit when the rework is ready",
+	})
+	return ToolResult{Content: string(encoded)}, nil
+}
+
 // emitArtifactLifecycleToolEvent records the authoring act in the run scope so
 // the trajectory shows which run produced or submitted which work product.
 func (a *Activities) emitArtifactLifecycleToolEvent(ctx context.Context, request ToolRequest, eventType, artifactID string, data map[string]any) {

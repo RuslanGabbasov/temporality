@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -85,6 +86,34 @@ func (s *Store) AddUserFact(ctx context.Context, userID, fact, origin string) (U
 		userID, fact, origin).
 		Scan(&f.ID, &f.UserID, &f.Fact, &f.Origin, &f.CreatedAt)
 	return f, err
+}
+
+// UpdateUserFact rewrites one fact (the settings screen's edit): the row
+// identity is the id, but the (user_id, fact) uniqueness still holds — an edit
+// that collides with another fact of the same user is ErrConflict.
+func (s *Store) UpdateUserFact(ctx context.Context, userID string, id int64, fact string) (UserFact, error) {
+	fact = strings.TrimSpace(fact)
+	if fact == "" {
+		return UserFact{}, ErrNotFound
+	}
+	var f UserFact
+	err := s.pool.QueryRow(ctx,
+		`UPDATE workspace_user_fact SET fact = $3 WHERE id = $1 AND user_id = $2
+		 RETURNING id, user_id, fact, origin, created_at`, id, userID, fact).
+		Scan(&f.ID, &f.UserID, &f.Fact, &f.Origin, &f.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UserFact{}, ErrNotFound
+	}
+	if err != nil {
+		// The unique index (user_id, fact) is the store's exact-text dedup —
+		// an edit that lands on an existing fact must surface as a conflict,
+		// not a raw driver error.
+		if strings.Contains(err.Error(), "duplicate key") {
+			return UserFact{}, ErrConflict
+		}
+		return UserFact{}, err
+	}
+	return f, nil
 }
 
 // DeleteUserFact removes one fact by id; unknown ids are ErrNotFound.

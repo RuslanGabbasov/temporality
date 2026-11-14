@@ -2580,8 +2580,22 @@ func main() {
 			return
 		}
 		target := filepath.Join(dir, final)
+		// Same-second collisions: a batch upload can deliver several files with
+		// one name (two "IMG_1234.jpg"s) inside a single second — the timestamp
+		// prefix alone still collides, and O_EXCL then 500s the whole batch.
+		// Loop suffixes until the slot is free.
 		if _, err := os.Stat(target); err == nil {
-			final = time.Now().UTC().Format("20060102-150405") + "-" + final
+			stamp := time.Now().UTC().Format("20060102-150405")
+			for i := 1; ; i++ {
+				candidate := stamp + "-" + final
+				if i > 1 {
+					candidate = fmt.Sprintf("%s-%d-%s", stamp, i, final)
+				}
+				if _, err := os.Stat(filepath.Join(dir, candidate)); err != nil {
+					final = candidate
+					break
+				}
+			}
 			target = filepath.Join(dir, final)
 		}
 		dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
@@ -7642,6 +7656,43 @@ func main() {
 		}
 		fact, err := ws.AddUserFact(r.Context(), r.PathValue("userID"), req.Fact, req.Origin)
 		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, fact)
+	})
+	// The settings screen's edit: rewrite the fact text in place (the human is
+	// the authority for their own profile — no agent validation here).
+	mux.HandleFunc("PUT /v1/workspace/users/{userID}/facts/{factID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("factID"), 10, 64)
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		var req struct {
+			Fact string `json:"fact"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Fact) == "" {
+			writeError(w, 422, fmt.Errorf("fact is required"))
+			return
+		}
+		fact, err := ws.UpdateUserFact(r.Context(), r.PathValue("userID"), id, req.Fact)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
 			writeError(w, 500, err)
 			return
 		}

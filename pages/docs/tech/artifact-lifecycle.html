@@ -309,6 +309,12 @@ artifact_update  { artifact_id, title?, description?, content?, … }
                                                → только draft/rejected версии
 artifact_submit  { artifact_id, reviewers[], mode=all, note? }
                                                → in_review + уведомления
+artifact_return_to_draft { artifact_id, reason? }
+                                               → draft: закрывает открытый круг
+                                                 согласования (cancelled),
+                                                 никогда не утверждает — путь
+                                                 «переделать то, что на
+                                                 согласовании» (§6)
 </code></pre>
 <p>Изменения существующих:</p>
 <ul>
@@ -317,9 +323,11 @@ artifact_submit  { artifact_id, reviewers[], mode=all, note? }
 <li><code>artifact_read</code> — в ответе <code>status</code> и <code>version</code>; чтение черновика разрешено
 (переиспользование), тело помечено статусом в метаданных ответа.</li>
 </ul>
-<p>Политика безопасности: три новых тула добавляются в <code>policySafeTools</code> — они не
+<p>Политика безопасности: новые тулы добавляются в <code>policySafeTools</code> — они не
 имеют внешних эффектов (черновик внутри реестра, submit — запрос к людям, не
-действие), ровно как <code>ask_human</code> и <code>skill_propose</code>.</p>
+действие), ровно как <code>ask_human</code> и <code>skill_propose</code>. <code>artifact_return_to_draft</code>
+закрывает только свой открытый круг согласования и никогда не утверждает
+(утверждение — только человек).</p>
 <p>Системная секция промпта (рядом со Skills) дополняется: «рабочие продукты
 создавай как артефакты (kind=work), указывай saga_id; draft — не утверждён:
 не выдавай его за опору и не ссылайся на него в навыках».</p>

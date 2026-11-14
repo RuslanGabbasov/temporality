@@ -605,6 +605,22 @@ export const en: Record<string, string> = {
     'chat.attach_file': 'Attach files',
     'chat.uploading': 'Uploading…',
     'chat.remove_attachment': 'Remove attachment',
+    'chat.upload_failed_batch': 'Failed to upload: {{files}}',
+    'chat.resize_input': 'Drag to stretch the input; double-click resets to auto-grow',
+    'chat.share': 'Share',
+    'chat.share_copy_md': 'Copy text (Markdown)',
+    'chat.share_copy_link': 'Copy run link',
+    'chat.share_copied': 'Copied',
+
+    // Self-service profile facts (user menu → «My facts & preferences»)
+    'facts.menu': 'My facts & preferences',
+    'facts.title': 'My facts & preferences',
+    'facts.hint': 'What the agents know about you and use in dialogs: answer style, what you own or lead, working agreements. Agents add facts with duplicate validation; edit, extend and delete them here.',
+    'facts.add_placeholder': 'A new fact, e.g. prefers short answers',
+    'facts.loading': 'Loading…',
+    'facts.empty': 'No facts yet — agents fill the profile as dialogs go.',
+    'facts.origin_agent': 'from an agent',
+    'facts.origin_manual': 'by you',
 
     // @-mention menu in the chat composer (docs/chat-mentions.md)
     'mentions.loading': 'Loading…',
@@ -840,6 +856,8 @@ export const en: Record<string, string> = {
     'runs.stop': 'Stop',
     'runs.stop_hint': 'Force-stop the run workflow — for runs stuck without signs of life',
     'runs.stop_confirm': 'Stop for sure?',
+    'runs.expand_children': 'Show child runs ({{count}})',
+    'runs.collapse_children': 'Collapse child runs',
     'runs.knowledge_dossier': 'dossier',
     'knowledge.evidence_open': 'Open the source run',
     'runs.show_details': 'show details',

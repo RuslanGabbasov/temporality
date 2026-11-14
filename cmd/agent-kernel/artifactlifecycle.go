@@ -561,6 +561,64 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 		}
 		writeJSON(w, 200, map[string]any{"review": review, "artifact": artifact})
 	})
+
+	// The agent's rework path (docs/artifact-lifecycle.md §6): when a human
+	// asks the agent to redo work it already submitted, the agent returns its
+	// own artifact to draft — the open round closes atomically and the body
+	// becomes editable again. Kernel-internal only: humans cancel rounds
+	// through the endpoint above, agents through this one; both are audited
+	// and neither path ever approves anything — the decision stays human.
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/return-to-draft", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		if !isKernelInternal(r) {
+			writeError(w, 403, errors.New("agents return artifacts to draft; humans cancel review rounds"))
+			return
+		}
+		var req struct {
+			Reason string `json:"reason"`
+			Actor  string `json:"actor"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		artifactID := r.PathValue("artifactID")
+		reviews, err := ws.ListArtifactReviews(r.Context(), artifactID)
+		if err != nil {
+			writeError(w, artifactReviewErrorStatus(err), err)
+			return
+		}
+		var open *workspace.ArtifactReview
+		for i := range reviews {
+			if reviews[i].Status == "open" {
+				open = &reviews[i]
+				break
+			}
+		}
+		if open == nil {
+			writeError(w, 409, errors.New("artifact has no open review round to return"))
+			return
+		}
+		by := req.Actor
+		if by == "" {
+			by = requestUserID(r)
+		}
+		review, artifact, err := ws.CancelArtifactReview(r.Context(), open.ID, by, true)
+		if err != nil {
+			writeError(w, artifactReviewErrorStatus(err), err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), by, workspace.AuditArtifactUpdated, "artifact", artifactID, map[string]any{
+			"title": artifact.Title, "returned_to_draft": true, "review_id": open.ID, "reason": req.Reason,
+		})
+		emitArtifactLifecycleEvent(r.Context(), events, "artifact.returned_to_draft", artifactID, map[string]any{
+			"artifact_id": artifactID, "review_id": open.ID, "version": artifact.Version,
+			"actor": by, "reason": req.Reason,
+		})
+		writeJSON(w, 200, map[string]any{"review": review, "artifact": artifact})
+	})
 }
 
 // artifactSubmitErrorStatus maps store errors to submit responses: validation
