@@ -163,3 +163,46 @@ func TestStreamOrCompleteWatchdogSkipsBlockingFallback(t *testing.T) {
 		t.Fatalf("a parked stream must not fall back to blocking (blocked calls: %d)", blockReqs)
 	}
 }
+
+// A quota-exhausted provider (429 «Weekly/Monthly Limit Exhausted») must fail
+// fast with the provider's own message: the blocking fallback cannot strip a
+// quota and would only hammer the gateway for its whole 90s budget while the
+// caller waits for a nameless timeout.
+func TestStreamOrCompleteRateLimitFailsFast(t *testing.T) {
+	var streamReqs, blockReqs int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := make([]byte, 4096)
+		n, _ := r.Body.Read(body)
+		if strings.Contains(string(body[:n]), `"stream":true`) {
+			streamReqs++
+		} else {
+			blockReqs++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"error":{"code":"1310","message":"Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-11-16 21:04:32"}}`)
+	}))
+	defer server.Close()
+
+	model := llm.New(llm.Config{BaseURL: server.URL, Model: "m", Timeout: 30 * time.Second, MaxOutputTokens: 1024})
+	started := time.Now()
+	_, err := streamOrComplete(context.Background(), model, []llm.Message{{Role: "user", Content: "build a skill"}})
+	if err == nil {
+		t.Fatal("expected the provider's 429 error")
+	}
+	if code, ok := llm.StatusOf(err); !ok || code != http.StatusTooManyRequests {
+		t.Fatalf("error must carry the 429 status, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Limit Exhausted") {
+		t.Fatalf("error must keep the provider's message, got: %v", err)
+	}
+	if blockReqs != 0 {
+		t.Fatalf("a 429 must not fall back to blocking (blocked calls: %d)", blockReqs)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("429 must fail fast, took %s", elapsed)
+	}
+	if streamReqs != 1 {
+		t.Fatalf("stream requests = %d, want 1", streamReqs)
+	}
+}

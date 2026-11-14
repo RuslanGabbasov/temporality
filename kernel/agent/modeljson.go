@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -38,6 +39,15 @@ func streamOrComplete(ctx context.Context, model *llm.Client, messages []llm.Mes
 		return completion, nil
 	}
 	if llm.StreamTimedOut(err) || ctx.Err() != nil {
+		return llm.Completion{}, err
+	}
+	// A rate-limited gateway answers the blocking path exactly the same way:
+	// the 400-ladder cannot strip a quota, and its retry ladder would hammer
+	// the provider for the whole budget (the z.ai «Weekly/Monthly Limit
+	// Exhausted» incident: every background call burned 180s on 429 retries
+	// and surfaced as a nameless StartToClose). Fail fast with the provider's
+	// own message — the retry policy above (Temporal) owns the backoff.
+	if code, ok := llm.StatusOf(err); ok && code == http.StatusTooManyRequests {
 		return llm.Completion{}, err
 	}
 	bctx, cancel := context.WithTimeout(ctx, 90*time.Second)
