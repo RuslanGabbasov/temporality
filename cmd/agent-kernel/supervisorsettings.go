@@ -319,6 +319,11 @@ var budgetCeilings = map[string]int{
 	"continue_as_new_bytes":      512 << 20,
 	"compaction_keep_groups_min": 64,
 	"compaction_keep_groups_max": 64,
+	// Runtime knowledge activation (docs/runtime-knowledge-activation.md §11):
+	// counts and TOKENS, not bytes — ceilings that stop a typo, not a policy.
+	"dynamic_hints_per_run":    1000,
+	"dynamic_hint_tokens_run":  200000,
+	"dynamic_hint_tokens_each": 100000,
 }
 
 const budgetCeilingDefault = 64 << 20

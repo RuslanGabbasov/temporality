@@ -31,6 +31,9 @@ describe('validateBudgetDrafts', () => {
     tool_output_max_bytes: 65536,
     tool_output_tail_bytes: 4096,
     continue_as_new_bytes: 268435456,
+    dynamic_hints_per_run: 16,
+    dynamic_hint_tokens_run: 6000,
+    dynamic_hint_tokens_each: 400,
   }
   const drafts = (overrides: Record<string, string>) => {
     const out: Record<string, string> = {}

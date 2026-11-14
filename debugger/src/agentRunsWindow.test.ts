@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace, runAttempt, buildRunRows, missingParents, attachParents, withParentRuns } from './AgentRuns'
+import { runOrigin } from './runOrigin'
 import type { ObservationEvent } from './observationApi'
 
 const startedAt = (run: string, data?: Record<string, unknown>): ObservationEvent =>
@@ -196,5 +197,49 @@ describe('delegation parents outside the loaded window', () => {
     expect(first.events).toBe(page)
     expect(second.events).toBe(page)
     expect(second.statuses.size).toBe(0)
+  })
+})
+
+/** An auto-continuation runs the SAME agent on the SAME task and inherits the
+ *  parent's title, so it nests and reads exactly like a delegation unless the
+ *  row says what it is. */
+describe('runOrigin', () => {
+  const started = (run: string, data?: Record<string, unknown>, parent?: string): ObservationEvent => ({
+    type: 'run.started', occurred_at: '2026-11-05T06:21:10Z', source: { id: 's' }, context: { run },
+    data: { ...(data ?? {}), ...(parent ? { parent_run_id: parent } : {}) },
+  } as unknown as ObservationEvent)
+
+  it('reads the kernel-published restart_attempt first', () => {
+    expect(runOrigin(started('task', { restart_attempt: 1 }, 'task'))).toBe('continuation')
+    expect(runOrigin(started('task', { restart_attempt: '2' }, 'task'))).toBe('continuation')
+  })
+
+  it('falls back to the id suffixes for journals written before it', () => {
+    expect(runOrigin(started('task-r2', {}, 'task'))).toBe('continuation')
+    expect(runOrigin(started('task/continue/01', {}, 'task'))).toBe('continuation')
+  })
+
+  it('treats every other child as a delegation and a parentless run as a root', () => {
+    expect(runOrigin(started('task/delegate/02', {}, 'task'))).toBe('delegated')
+    expect(runOrigin(started('task/coder', {}, 'task'))).toBe('delegated')
+    expect(runOrigin(started('task'))).toBe('root')
+  })
+
+  it('still marks a continuation whose parent is not in the list', () => {
+    // No parent_run_id row to nest under — the badge must carry the origin.
+    expect(runOrigin(started('task-r2'))).toBe('continuation')
+  })
+
+  it('lands on the rows buildRunRows emits', () => {
+    const rows = buildRunRows([
+      started('task', undefined, undefined),
+      started('task/delegate/01', undefined, 'task'),
+      started('task-r1', undefined, 'task'),
+    ], new Map())
+    expect(rows.map((row) => [row.id, row.origin])).toEqual([
+      ['task', 'root'],
+      ['task/delegate/01', 'delegated'],
+      ['task-r1', 'continuation'],
+    ])
   })
 })

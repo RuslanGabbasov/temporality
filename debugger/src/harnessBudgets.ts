@@ -39,6 +39,11 @@ export const HARNESS_KNOBS: HarnessKnob[] = [
   { key: 'compaction_digest_head_bytes', kind: 'bytes', ceiling: BYTES_CEILING, advanced: true },
   { key: 'compaction_digest_tail_bytes', kind: 'bytes', ceiling: BYTES_CEILING, advanced: true },
   { key: 'tool_output_tail_bytes', kind: 'bytes', ceiling: BYTES_CEILING, advanced: true },
+  // Runtime knowledge activation (docs/runtime-knowledge-activation.md §11):
+  // how many dynamic hints a run may get and how many tokens they may spend.
+  { key: 'dynamic_hints_per_run', kind: 'count', ceiling: 1000 },
+  { key: 'dynamic_hint_tokens_run', kind: 'count', ceiling: 200000 },
+  { key: 'dynamic_hint_tokens_each', kind: 'count', ceiling: 100000, advanced: true },
 ]
 
 /** Rough human readout for byte knobs: 512 → «512 Б», 16384 → «16 КиБ»,

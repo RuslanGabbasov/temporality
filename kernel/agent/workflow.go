@@ -147,13 +147,24 @@ func sortedTrueKeys(values map[string]bool) []string {
 	return keys
 }
 
-func renderRuntimeHints(hints []Hint, tokensUsed int) observation.RenderResult {
-	remaining := maxDynamicActivationTokens - tokensUsed
+func renderRuntimeHints(hints []Hint, tokensUsed, runCap, eachCap int) observation.RenderResult {
+	remaining := runCap - tokensUsed
 	if remaining <= 0 {
 		return observation.RenderHintBlock(nil, observation.RenderOptions{})
 	}
-	budget := min(maxDynamicActivationTokensEach, remaining)
+	budget := min(eachCap, remaining)
 	return observation.RenderHintBlock(toObservationHints(hints), observation.RenderOptions{MaxTokens: budget, MaxCueTokens: 100, MaxHints: maxDynamicHintsEach})
+}
+
+// effectiveBudget prefers the run's pinned value and falls back to the
+// compile-time default when the snapshot carries zero — runs recorded before
+// the knobs existed unmarshal the new fields as zero, and a zero cap would
+// silently disable activation for them.
+func effectiveBudget(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 func boundedActivationText(value string) string {
@@ -388,9 +399,12 @@ type RunState struct {
 }
 
 const (
-	maxDynamicActivationsPerRun    = 5
+	// The fallbacks below are the compile-time defaults behind the harness
+	// budgets (harness.Budgets: dynamic_hints_per_run / dynamic_hint_tokens_*)
+	// — the experimental 5/1800 start choked 100-step runs.
+	maxDynamicActivationsPerRun    = 16
 	maxDynamicActivationsPerTurn   = 2
-	maxDynamicActivationTokens     = 1800
+	maxDynamicActivationTokens     = 6000
 	maxDynamicActivationTokensEach = 400
 	maxDynamicHintsEach            = 4
 )
@@ -833,6 +847,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if input.SkipKnowledge || input.Project == "" || len(candidates) == 0 {
 			return nil
 		}
+		// Budgets are pinned per run; effectiveBudget covers snapshots recorded
+		// before the knobs existed (their JSON decodes the new fields as zero).
+		budget := state.budget()
+		runActivationLimit := effectiveBudget(budget.DynamicHintsPerRun, maxDynamicActivationsPerRun)
+		runTokenCap := effectiveBudget(budget.DynamicHintTokensRun, maxDynamicActivationTokens)
+		eachTokenCap := effectiveBudget(budget.DynamicHintTokensEach, maxDynamicActivationTokensEach)
 		attemptedThisTurn := 0
 		for _, candidate := range candidates {
 			key := runtimeActivationKey(candidate)
@@ -843,7 +863,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				continue
 			}
-			if attemptedThisTurn >= maxDynamicActivationsPerTurn || activationCount >= maxDynamicActivationsPerRun {
+			if attemptedThisTurn >= maxDynamicActivationsPerTurn || activationCount >= runActivationLimit {
 				if err := emit(activityCtx, state, "hint.delivery", map[string]any{"activation_id": activationID, "trigger": candidate.Trigger, "activation_source_id": candidate.SourceID, "tool": candidate.Tool, "mcp_server": candidate.MCPServer, "status": "skipped", "reason": "activation_limit"}); err != nil {
 					return err
 				}
@@ -869,7 +889,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				continue
 			}
-			rendered := renderRuntimeHints(hints, dynamicTokensUsed)
+			rendered := renderRuntimeHints(hints, dynamicTokensUsed, runTokenCap, eachTokenCap)
 			if rendered.Block == "" {
 				reason := "no_candidates"
 				if len(hints) > 0 {
@@ -3867,7 +3887,7 @@ func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state 
 			rendered := observation.RenderHintBlock(toObservationHints(priorHints), observation.DefaultRenderOptions())
 			hintBlock = rendered.Block
 			issuedIDs = rendered.KeptIDs
-			if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints), "primed_hints": rendered.Kept, "primed_tokens": rendered.Tokens, "dropped_hints": rendered.Dropped}); err != nil {
+			if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints), "primed_hints": rendered.Kept, "primed_tokens": rendered.Tokens, "dropped_hints": rendered.Dropped, "knowledge_ids": rendered.KeptIDs}); err != nil {
 				return "", nil, err
 			}
 		}

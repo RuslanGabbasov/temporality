@@ -235,18 +235,18 @@ func TestRuntimeActivationSeparatesRetrievalTimeoutFromFailure(t *testing.T) {
 func TestRuntimeHintBudgetIsStrictAndTracksInjectedHintsOnly(t *testing.T) {
 	hints := []Hint{{KnowledgeID: "k1", Proposition: "The deployment token expires every hour and requires refresh", State: "confirmed", MatchedBy: []string{"term:deployment"}}}
 	for _, used := range []int{maxDynamicActivationTokens, maxDynamicActivationTokens + 1} {
-		if got := renderRuntimeHints(hints, used); got.Block != "" || got.Tokens != 0 || len(got.KeptIDs) != 0 {
+		if got := renderRuntimeHints(hints, used, maxDynamicActivationTokens, maxDynamicActivationTokensEach); got.Block != "" || got.Tokens != 0 || len(got.KeptIDs) != 0 {
 			t.Errorf("tokens already used %d: unexpected render %#v", used, got)
 		}
 	}
-	first := renderRuntimeHints(hints, maxDynamicActivationTokens-maxDynamicActivationTokensEach)
+	first := renderRuntimeHints(hints, maxDynamicActivationTokens-maxDynamicActivationTokensEach, maxDynamicActivationTokens, maxDynamicActivationTokensEach)
 	if first.Block == "" || first.Tokens > maxDynamicActivationTokensEach || len(first.KeptIDs) != 1 {
 		t.Fatalf("first hint should fit the remaining per-activation budget: %#v", first)
 	}
 	remaining := 150
-	last := renderRuntimeHints(hints, maxDynamicActivationTokens-remaining)
+	last := renderRuntimeHints(hints, maxDynamicActivationTokens-remaining, maxDynamicActivationTokens, maxDynamicActivationTokensEach)
 	if last.Tokens > remaining {
-		t.Fatalf("last hint exceeded remaining run budget: %#v", last)
+		t.Fatalf("last hint exceeded remaining run budget: %d > %d", last.Tokens, remaining)
 	}
 }
 

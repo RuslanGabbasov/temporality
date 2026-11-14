@@ -264,3 +264,25 @@ describe('turnAlignedWindow — the window never cuts a turn in half', () => {
     expect(windowed.some((e) => e.data?.turn === 1)).toBe(false)
   })
 })
+
+it('marks which offers actually entered the model (§10.3 — offered ≠ injected)', () => {
+  const items = foldTrace([
+    ev('hint.query', { activation_id: 'run-a/activation/1', trigger: 'tool.failed' }),
+    ev('hint.offered', { activation_id: 'run-a/activation/1', knowledge_id: 'k-in', trigger: 'tool.failed', proposition: 'взято' }),
+    ev('hint.offered', { activation_id: 'run-a/activation/1', knowledge_id: 'k-out', trigger: 'tool.failed', proposition: 'отброшено' }),
+    ev('hint.delivery', { activation_id: 'run-a/activation/1', status: 'injected', knowledge_ids: ['k-in'] }),
+    ev('hint.offered', { activation_id: 'run-b/activation/2', knowledge_id: 'k-old', trigger: 'mcp.first_call', proposition: 'доставка вне окна' }),
+    ev('hint.offered', { activation_id: 'run-c/activation/3', knowledge_id: 'k-primed', trigger: 'task.priming', proposition: 'прайминг' }),
+    ev('memory.read', { hint_count: 5, primed_hints: 1, knowledge_ids: ['k-primed'] }),
+  ], RU, t)
+  const group = items.find((item) => item.kind === 'group' && item.group === 'knowledge')
+  expect(group).toBeTruthy()
+  const events = (group as { events: ObservationEvent[] }).events
+  const injectedOf = (id: string): unknown => events.find((e) => e.type === 'hint.offered' && e.data?.knowledge_id === id)?.data?.injected
+  expect(injectedOf('k-in')).toBe(true)
+  expect(injectedOf('k-out')).toBe(false)
+  // Доставки для активации нет в окне — без ярлыка (не врать «не вошло»)
+  expect(injectedOf('k-old')).toBeUndefined()
+  // Прайминг сверяется с набором memory.read
+  expect(injectedOf('k-primed')).toBe(true)
+})

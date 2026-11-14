@@ -1,6 +1,7 @@
 import type { Locale } from './locales'
 import { eventInfo, type EventMeta } from './eventCatalog'
 import { explainKernelError, unwrapJsonString } from './eventSummary'
+import { runOrigin } from './runOrigin'
 import type { ObservationEvent } from './observationApi'
 
 /**
@@ -297,6 +298,9 @@ const gateFact = (d: Record<string, unknown>): string => {
 interface OverrideContext {
   t: TranslateFn
   locale: Locale
+  /** The run this event belongs to: the id suffixes are the history fallback
+   *  for spotting an auto-continuation when restart_attempt is absent. */
+  run?: string
 }
 
 /** Localized human title of an event type (§4 principle: meaning, not type). */
@@ -311,8 +315,16 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
   // ── §5.1 runs ──
   // The run's birth marker: a non-expandable row — the initiating request
   // renders as its own overview tile, and the payload has nothing else a
-  // reader would act on.
-  'run.started': (d, { t }) => ({ title: t('runs.event.run_started'), fact: squash(d.request ?? d.model), status: 'running', hasDetails: false }),
+  // reader would act on. A continuation's own trace opens with this row too:
+  // naming it is what stops the reader asking why the developer delegated
+  // to itself (docs/agent-turn-limit-restarts.md).
+  'run.started': (d, { t, run }) => {
+    const continuation = runOrigin({ data: d, context: { run } }) === 'continuation'
+    return {
+      title: continuation ? t('runs.event.run_continuation') : t('runs.event.run_started'),
+      fact: squash(d.request ?? d.model), status: 'running', hasDetails: false,
+    }
+  },
   'run.completed': (d, { t }) => ({ title: t('runs.event.run_completed'), fact: `${squash(d.turns ?? '?')} ${t('runs.turns')}`, status: 'ok' }),
   'run.failed': (d, { t }) => ({ title: t('runs.event.run_failed'), status: 'error', fact: causeOf(d) }),
   'run.cancelled': () => ({ status: 'cancelled' }),
@@ -481,7 +493,13 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
     }),
     hasDetails: false,
   }),
-  'hint.offered': (d, { t }) => ({ title: t('runs.event.hint_offered'), fact: squash(d.proposition).slice(0, 90) }),
+  'hint.offered': (d, { t }) => ({
+    title: t('runs.event.hint_offered'),
+    // The suffix answers the reader's only real question about an offer:
+    // did this reach the model (injected), or was it dropped (budget/dedup)?
+    // Unknown (delivery outside the loaded window) stays unlabeled.
+    fact: [squash(d.proposition).slice(0, 90), d.injected === true ? t('runs.hint_offer_in') : d.injected === false ? t('runs.hint_offer_out') : ''].filter(Boolean).join(' · '),
+  }),
   'hint.used': (d, { t }) => ({ title: t('runs.event.hint_used'), fact: squash(d.proposition).slice(0, 90) }),
   'hint.ignored': (d, { t }) => ({ title: t('runs.event.hint_ignored'), fact: squash(d.proposition).slice(0, 90) }),
   'hint.outcome': (d, { t }) => ({
@@ -632,7 +650,7 @@ export function timelineRow(event: ObservationEvent, locale: Locale, t: Translat
   const meta = eventInfo(type)
   const category = (meta?.group ?? 'ops') as EventCategory
   const override = OVERRIDES[type]
-  const overrideRow = override ? override(d, { t, locale }) : {}
+  const overrideRow = override ? override(d, { t, locale, run: event.context?.run }) : {}
   const look = categoryLook(category)
   const failure = failureOf(d)
   const status: TimelineRow['status'] = overrideRow.status ?? (failure ? 'error' : 'none')

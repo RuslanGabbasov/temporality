@@ -415,3 +415,24 @@ describe('plan tool call details', () => {
     expect(row.fact).toContain('penpot-mcp')
   })
 })
+
+/** A continuation's own trace opens with the same run.started row as any
+ *  other run — without the name it reads as a run the developer delegated
+ *  to itself (docs/agent-turn-limit-restarts.md). */
+describe('auto-continuation rows', () => {
+  const startedEvent = (run: string, data: Record<string, unknown> = {}) =>
+    ({ ...modelEvent('run.started', data), context: { run, project: 'p' } })
+
+  it('names a continuation from the journal-published restart_attempt', () => {
+    expect(timelineRow(startedEvent('task', { restart_attempt: 2 }), RU, t).title).toBe('Автопродолжение')
+  })
+
+  it('falls back to the id suffix for journals written before it', () => {
+    expect(timelineRow(startedEvent('task-r2'), RU, t).title).toBe('Автопродолжение')
+  })
+
+  it('keeps the plain title for an ordinary run and a delegation', () => {
+    expect(timelineRow(startedEvent('task'), RU, t).title).toBe('Запуск начат')
+    expect(timelineRow(startedEvent('task/delegate/01', { parent_run_id: 'task' }), RU, t).title).toBe('Запуск начат')
+  })
+})

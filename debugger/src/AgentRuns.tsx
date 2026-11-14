@@ -29,6 +29,7 @@ import {
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
+import { runOrigin, type RunOrigin } from './runOrigin'
 import { matchesFilter } from './ListFilter'
 import {
   runCost, taskCost, type RunCost, type TaskCost,
@@ -246,29 +247,6 @@ export function runAttempt(event: ObservationEvent): number {
   const delegate = /\/delegate\/(\d+)$/.exec(id)
   if (delegate) return Number(delegate[1])
   return 0
-}
-
-/** What a row is relative to its parent. An auto-continuation (a turn-limit
- *  restart `-r2`, or a `/continue/NN` spawned for an undelivered ask) runs the
- *  SAME agent on the SAME task — it is not a delegation, yet it carries
- *  parent_run_id, nests identically and inherits the parent's title, so
- *  without this the row reads as «the developer delegating to itself». */
-export type RunOrigin = 'root' | 'continuation' | 'delegated'
-
-/** Classify a run.started event. The explicit restart_attempt the kernel
- *  journals is the primary signal; the id suffixes are the history fallback
- *  for journals written before it existed — the same rules runAttempt reads
- *  for the «× N» badge. Classification is independent of the parent being
- *  loaded: a continuation whose parent fell out of the window still must not
- *  read as an independent run. */
-export function runOrigin(event: ObservationEvent): RunOrigin {
-  const explicit = event.data?.restart_attempt
-  if (typeof explicit === 'number' && explicit > 0) return 'continuation'
-  if (typeof explicit === 'string' && Number(explicit) > 0) return 'continuation'
-  const id = runID(event)
-  if (/-r\d+$/.test(id) || /\/continue\/\d+$/.test(id)) return 'continuation'
-  const parent = event.data?.parent_run_id ? String(event.data.parent_run_id) : ''
-  return parent ? 'delegated' : 'root'
 }
 
 /** Build the run call tree: roots are runs without a known parent, children

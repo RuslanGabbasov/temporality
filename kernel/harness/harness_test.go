@@ -10,7 +10,7 @@ func TestBudgetKeysMatchStruct(t *testing.T) {
 	// Every knob the UI can edit must be applied by ApplyBudgetOverrides:
 	// a key missing from either side would silently no-op.
 	keys := BudgetKeys()
-	require.Len(t, keys, 11)
+	require.Len(t, keys, 14)
 	seen := map[string]bool{}
 	for _, key := range keys {
 		require.False(t, seen[key], "duplicate key %s", key)
@@ -18,7 +18,7 @@ func TestBudgetKeysMatchStruct(t *testing.T) {
 	}
 	s := ApplyBudgetOverrides(Defaults(), map[string]int{keys[0]: 1, keys[len(keys)-1]: 2})
 	require.Equal(t, 1, s.Budgets.MaxModelRequestBytes)
-	require.Equal(t, 2, s.Budgets.ContinueAsNewBytes)
+	require.Equal(t, 2, s.Budgets.DynamicHintTokensEach)
 }
 
 func TestApplyBudgetOverrides(t *testing.T) {

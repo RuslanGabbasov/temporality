@@ -71,6 +71,16 @@ type Budgets struct {
 	// request bytes reach this budget at a clean turn boundary, AgentRun hands
 	// the carried state to a fresh execution (the history resets).
 	ContinueAsNewBytes int `json:"continue_as_new_bytes"`
+	// DynamicHintsPerRun bounds runtime knowledge activations (tool.failed /
+	// mcp.first_call) per run — a long run meets more distinct situations than
+	// a short one and must not lose experience to a small fixed cap
+	// (docs/runtime-knowledge-activation.md §11).
+	DynamicHintsPerRun int `json:"dynamic_hints_per_run"`
+	// DynamicHintTokensRun is the run-wide token budget of INJECTED dynamic
+	// hints (measured on the rendered blocks, not on candidates).
+	DynamicHintTokensRun int `json:"dynamic_hint_tokens_run"`
+	// DynamicHintTokensEach bounds ONE activation's injected block.
+	DynamicHintTokensEach int `json:"dynamic_hint_tokens_each"`
 }
 
 // Settings is the whole harness surface: budgets plus the activity ceilings
@@ -109,6 +119,13 @@ func DefaultBudgets() Budgets {
 		ToolOutputMaxBytes:        512 << 10,
 		ToolOutputTailBytes:       16 << 10,
 		ContinueAsNewBytes:        128 << 20,
+		// Runtime activation (docs/runtime-knowledge-activation.md §11): the
+		// experimental 5/1800 start was too tight for 100-step runs — a run
+		// met more distinct failure/MCP situations than the cap allowed. The
+		// knobs are env-overridable per installation.
+		DynamicHintsPerRun:    16,
+		DynamicHintTokensRun:  6000,
+		DynamicHintTokensEach: 400,
 	}
 }
 
@@ -141,6 +158,9 @@ func FromEnv() Settings {
 	intEnv("TEMPORALITY_TOOL_OUTPUT_MAX_BYTES", &b.ToolOutputMaxBytes)
 	intEnv("TEMPORALITY_TOOL_OUTPUT_TAIL_BYTES", &b.ToolOutputTailBytes)
 	intEnv("TEMPORALITY_CONTINUE_AS_NEW_BYTES", &b.ContinueAsNewBytes)
+	intEnv("TEMPORALITY_DYNAMIC_HINTS_PER_RUN", &b.DynamicHintsPerRun)
+	intEnv("TEMPORALITY_DYNAMIC_HINT_TOKENS_RUN", &b.DynamicHintTokensRun)
+	intEnv("TEMPORALITY_DYNAMIC_HINT_TOKENS_EACH", &b.DynamicHintTokensEach)
 	durationEnv("TEMPORALITY_MODEL_ACTIVITY_TIMEOUT", &s.ModelCallActivityTimeout)
 	durationEnv("TEMPORALITY_TOOL_ACTIVITY_TIMEOUT", &s.ToolActivityTimeout)
 	intEnv("TEMPORALITY_IMAGE_MAX_SIDE", &s.ImageMaxSide)
@@ -165,6 +185,9 @@ func BudgetKeys() []string {
 		"tool_output_max_bytes",
 		"tool_output_tail_bytes",
 		"continue_as_new_bytes",
+		"dynamic_hints_per_run",
+		"dynamic_hint_tokens_run",
+		"dynamic_hint_tokens_each",
 	}
 }
 
@@ -198,6 +221,12 @@ func ApplyBudgetOverrides(s Settings, overrides map[string]int) Settings {
 			b.ToolOutputTailBytes = value
 		case "continue_as_new_bytes":
 			b.ContinueAsNewBytes = value
+		case "dynamic_hints_per_run":
+			b.DynamicHintsPerRun = value
+		case "dynamic_hint_tokens_run":
+			b.DynamicHintTokensRun = value
+		case "dynamic_hint_tokens_each":
+			b.DynamicHintTokensEach = value
 		}
 	}
 	return s

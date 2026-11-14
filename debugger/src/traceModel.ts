@@ -62,6 +62,41 @@ const isHintTraffic = (type: string): boolean => ['hint.query', 'hint.offered', 
 const isKnowledge = (type: string): boolean =>
   type === 'knowledge.proposed' || type === 'knowledge.extraction.started' || type === 'knowledge.extraction.completed'
 
+/** The injected knowledge ids of a delivery: knowledge_items (id +
+ *  proposition) when journaled, the bare id list for older events. */
+function deliveredKnowledgeIDs(data: Record<string, unknown>): string[] {
+  const items = Array.isArray(data.knowledge_items) ? data.knowledge_items : []
+  const fromItems = items
+    .map((raw) => (raw && typeof raw === 'object' ? String((raw as Record<string, unknown>).id ?? '') : ''))
+    .filter(Boolean)
+  if (fromItems.length > 0) return fromItems
+  const ids = Array.isArray(data.knowledge_ids) ? data.knowledge_ids : []
+  return ids.map(String).filter(Boolean)
+}
+
+/** Whether the offer's knowledge entered the model: false when the delivery
+ *  of the same activation exists WITHOUT it (budget or issued-dedup dropped
+ *  it), undefined when no delivery is in the loaded window — unknown stays
+ *  unlabeled instead of lying. Priming offers are matched against the
+ *  run-start memory.read set. */
+function annotateOffered(
+  event: ObservationEvent,
+  delivered: Map<string, Set<string>>,
+  primed: Set<string> | null,
+): ObservationEvent {
+  const data = event.data ?? {}
+  const knowledgeID = String(data.knowledge_id ?? '')
+  let injected: boolean | undefined
+  if (String(data.trigger ?? '') === 'task.priming') {
+    if (primed) injected = primed.has(knowledgeID)
+  } else {
+    const set = delivered.get(String(data.activation_id ?? ''))
+    if (set) injected = knowledgeID !== '' && set.has(knowledgeID)
+  }
+  if (injected === undefined) return event
+  return { ...event, data: { ...data, injected } }
+}
+
 /** The pair key of an approval/question event: the operation id carries both
  *  the flat (`operation_id`) and the nested (`operation.id`) shapes the
  *  kernel emits; otherwise the event's own id (never pairs across). */
@@ -103,6 +138,21 @@ export function foldTrace(events: ObservationEvent[], locale: Locale, t: Transla
   const openPairs = new Map<string, Extract<TraceItem, { kind: 'approvalPair' }>>()
   // event_id of an outcome already folded into a pair (its row disappears).
   const paired = new Set<string>()
+  // Which offers actually entered the model: hint.delivery carries the
+  // injected set per activation, memory.read the priming set. Without this
+  // the fold cannot tell «предложено» from «дано модели» — exactly the
+  // question every hint row raises (docs/runtime-knowledge-activation.md §10.3).
+  const deliveredByActivation = new Map<string, Set<string>>()
+  let primedIDs: Set<string> | null = null
+  for (const event of events) {
+    const data = event.data
+    if (!data) continue
+    if (event.type === 'hint.delivery') {
+      deliveredByActivation.set(String(data.activation_id ?? ''), new Set(deliveredKnowledgeIDs(data)))
+    } else if (event.type === 'memory.read' && Array.isArray(data.knowledge_ids)) {
+      primedIDs = new Set(data.knowledge_ids.map(String).filter(Boolean))
+    }
+  }
 
   const groupOf = (key: TraceGroupKey): Extract<TraceItem, { kind: 'group' }> => {
     let group = groups.get(key)
@@ -188,7 +238,7 @@ export function foldTrace(events: ObservationEvent[], locale: Locale, t: Transla
     // were happening. The lookup/offer traffic stays aggregated (§5.6).
     if ((isHint(type) && type !== 'hint.delivery') || isKnowledge(type) || type === 'memory.read' || type === 'hint.query') {
       const group = groupOf('knowledge')
-      group.events.push(event)
+      group.events.push(type === 'hint.offered' ? annotateOffered(event, deliveredByActivation, primedIDs) : event)
       group.hasError = group.hasError || row.status === 'error'
       continue
     }
