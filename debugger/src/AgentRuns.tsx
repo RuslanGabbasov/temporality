@@ -28,7 +28,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Time, Play } from '@carbon/icons-react'
+import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
 import { matchesFilter } from './ListFilter'
 import {
   runCost, taskCost, type RunCost, type TaskCost,
@@ -292,6 +292,123 @@ export function buildRunRows(started: ObservationEvent[], statuses: Map<string, 
   // first) and only folds children under their parents.
   for (const root of roots) walk(root, 0)
   return rows
+}
+
+// ── Delegation parents outside the loaded window ──────────────────────────────
+// The list loads only the newest RUNS_LIMIT run.started events, so a
+// delegation parent older than that window is missing from the page:
+// buildRunRows then promotes its children to roots and a run launched by
+// delegation reads as an independent one. Those parents are resolved by id —
+// an indexed point lookup, one request each, cached per scope — and spliced
+// into the page right before their newest child.
+
+/** One parent's own lifecycle: its run.started plus at most one terminal event. */
+interface ParentLifecycle { started?: ObservationEvent; status?: RunStatus }
+type ParentLifecycleLoader = (run: string, project: string) => Promise<ParentLifecycle>
+
+const parentCacheKey = (scope: string | undefined) => `runs.parents:${scope ?? 'all'}`
+
+/** Newest-first over the run's lifecycle types: a limit of 4 covers the
+ *  started event and the single terminal event a run can have, so one request
+ *  answers both the row and its status tag. */
+const loadParentLifecycle: ParentLifecycleLoader = async (run, project) => {
+  const page = await observationApi.events(project || undefined, undefined, undefined, undefined, {
+    run, types: ['run.started', 'run.completed', 'run.failed', 'run.cancelled'], order: 'desc', limit: 4,
+  })
+  const started = page.events.find((event) => event.type === 'run.started')
+  const terminal = page.events.find((event) => event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled')
+  let status: RunStatus | undefined
+  if (terminal) status = terminal.type === 'run.failed' ? 'failed' : terminal.type === 'run.cancelled' ? 'cancelled' : 'completed'
+  return { started, status }
+}
+
+/** Parent ids the page points at but does not contain, in page order and
+ *  deduplicated. Exported for tests. */
+export function missingParents(page: ObservationEvent[]): string[] {
+  const loaded = new Set(page.map(runID).filter(Boolean))
+  const missing: string[] = []
+  const seen = new Set<string>()
+  for (const event of page) {
+    const parent = event.data?.parent_run_id ? String(event.data.parent_run_id) : ''
+    if (!parent || loaded.has(parent) || seen.has(parent)) continue
+    seen.add(parent)
+    missing.push(parent)
+  }
+  return missing
+}
+
+/** Splice resolved parents into the page immediately before their newest
+ *  child. The list is newest-first while the parent is older than the window:
+ *  appending it at the bottom would drag a fresh subtree down with it, and
+ *  leaving it out tears the tree — splicing keeps the child where the reader
+ *  found it and gives the group its header. A parent already in the page, or
+ *  one with no child left in it, is skipped rather than duplicated. Exported
+ *  for tests. */
+export function attachParents(page: ObservationEvent[], parents: ObservationEvent[]): ObservationEvent[] {
+  if (parents.length === 0) return page
+  const out = [...page]
+  const placements: { index: number; event: ObservationEvent }[] = []
+  for (const parent of parents) {
+    const parentRun = runID(parent)
+    if (!parentRun || out.some((event) => runID(event) === parentRun)) continue
+    let newest = -1
+    for (let index = 0; index < out.length; index++) {
+      if (String(out[index].data?.parent_run_id ?? '') === parentRun) { newest = index; break }
+    }
+    placements.push({ index: newest, event: parent })
+  }
+  // Descending target: one splice never shifts the slots still to come, and a
+  // parent nobody points at (-1) lands at the end instead of mid-list.
+  placements.sort((left, right) => right.index - left.index)
+  for (const placement of placements) {
+    if (placement.index < 0) out.push(placement.event)
+    else out.splice(placement.index, 0, placement.event)
+  }
+  return out
+}
+
+/** Resolve the missing parents of a page: fetch only what the cache lacks
+ *  (bounded by `cap` per load, so a poll never fans out), keep the started
+ *  events (immutable — cached for the scope) and their statuses. A status the
+ *  fresh terminal window also carries wins at the call site; the cached one
+ *  covers the parents that fell out of it. A failed lookup leaves the child a
+ *  root, exactly as before. */
+export async function withParentRuns(
+  page: ObservationEvent[],
+  project: string | undefined,
+  load: ParentLifecycleLoader = loadParentLifecycle,
+  cap = 24,
+): Promise<{ events: ObservationEvent[]; statuses: Map<string, RunStatus> }> {
+  const missing = missingParents(page)
+  const statuses = new Map<string, RunStatus>()
+  if (missing.length === 0) return { events: page, statuses }
+
+  const key = parentCacheKey(project)
+  const cached = cacheGet<Record<string, ParentLifecycle>>(key) ?? {}
+  const resolved: Record<string, ParentLifecycle> = { ...cached }
+  let changed = false
+  // `in`, not `?.started`: an authoritative miss (the parent's journal is
+  // gone or not visible) is cached too, so an unresolvable parent is not
+  // re-requested on every 30s poll. A thrown lookup stays uncached — a
+  // network blip must retry on the next pass.
+  const toFetch = missing.filter((id) => !(id in resolved)).slice(0, cap)
+  await Promise.all(toFetch.map(async (id) => {
+    try {
+      const lifecycle = await load(id, project ?? '')
+      resolved[id] = lifecycle.started ? lifecycle : {}
+      changed = true
+    } catch { /* transient: retried on the next poll, the row stays a root */ }
+  }))
+  if (changed) cacheSet(key, resolved)
+
+  const parents: ObservationEvent[] = []
+  for (const id of missing) {
+    const lifecycle = resolved[id]
+    if (!lifecycle?.started) continue
+    parents.push(lifecycle.started)
+    if (lifecycle.status) statuses.set(id, lifecycle.status)
+  }
+  return { events: attachParents(page, parents), statuses }
 }
 
 export default function AgentRuns({ project }: { project: string }) {
@@ -757,16 +874,22 @@ export default function AgentRuns({ project }: { project: string }) {
         const pageData = await observationApi.events(scope, undefined, undefined, undefined, { type, limit: RUNS_LIMIT * 3, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] }))
         return pageData.events ?? []
       }
-      const [completedEvents, failedEvents, cancelledEvents] = await Promise.all([
+      const [completedEvents, failedEvents, cancelledEvents, parents] = await Promise.all([
         newestTypedEvents('run.completed'),
         newestTypedEvents('run.failed'),
         newestTypedEvents('run.cancelled'),
+        // Runs in parallel: a torn tree is only repaired when a delegation
+        // parent fell out of the window, and the common case is zero requests.
+        withParentRuns(startedPage.events, scope),
       ])
       const statuses = new Map<string, RunStatus>()
       for (const event of failedEvents) statuses.set(runID(event), 'failed')
       for (const event of cancelledEvents) statuses.set(runID(event), 'cancelled')
       for (const event of completedEvents) statuses.set(runID(event), 'completed')
-      const allRows = buildRunRows(startedPage.events, statuses)
+      // Fresh terminal window first: a parent cached as running must not stay
+      // «running» after its own completion lands in the newest slice.
+      for (const [id, status] of parents.statuses) if (!statuses.has(id)) statuses.set(id, status)
+      const allRows = buildRunRows(parents.events, statuses)
       setRows(allRows)
       setRunsLoaded(true)
       cacheSet(runsCacheKey(scope), allRows)
@@ -1311,8 +1434,8 @@ export default function AgentRuns({ project }: { project: string }) {
                           type="button"
                           onClick={(e) => { e.stopPropagation(); toggleChildren(row.id) }}
                           title={open ? (t('runs.collapse_children') ?? 'Свернуть дочерние раны') : (t('runs.expand_children', { count: String(kids) }) ?? `Показать дочерние раны (${kids})`)}
-                          style={{ background: 'none', border: 0, color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0 0.3rem 0 0', verticalAlign: 'middle' }}
-                        >{open ? '▾' : '▸'} {kids}</button>
+                          style={{ background: 'none', border: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.7rem', padding: '0 0.35rem 0 0', verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center', gap: '0.15rem' }}
+                        >{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{kids}</button>
                       )
                     })()}
                     {row.depth > 0 && <span style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}>↳</span>}
