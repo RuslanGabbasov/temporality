@@ -261,6 +261,11 @@ mtimes до глубины N, топ файлов по размеру. Reader.</
 <p>Поиск: <code>GET /v1/workspace/storage/projects/{id}/search?q=&amp;area=&amp;sort=&amp;limit=</code>
 (reader) — подстрока по имени/пути, сортировка recent/size/name,
 бюджет ~1.5s с <code>truncated</code> при исчерпании (реализовано).</p>
+<p>Атрибуция: <code>GET /v1/workspace/storage/projects/{id}/file/history?area=&amp;path=&amp;limit=</code>
+и <code>GET /v1/workspace/storage/projects/{id}/file/run-files?run=</code> (reader) —
+события <code>file.changed</code> одного файла / одного рана (реализовано; журнал
+фильтрует по <code>data.path</code> через одноимённый query-параметр и partial-индекс
+<code>observation_events_file_changed_path_idx</code>).</p>
 <p>Файловый API (фаза 1): <code>GET dir/file</code>, <code>POST files</code>, <code>DELETE file</code> —
 на <code>/v1/workspace/storage/...</code>.</p>
 <h3 id="54-здоровье-сервера"><a class="anchor" href="#54-здоровье-сервера" aria-label="Section link">#</a>5.4. Здоровье сервера</h3><p><code>GET /v1/system/health</code> (reader):</p>
@@ -276,6 +281,7 @@ mtimes до глубины N, топ файлов по размеру. Reader.</
 существующему docker-бинарному пути ядра.</p>
 <h3 id="55-события-журнала"><a class="anchor" href="#55-события-журнала" aria-label="Section link">#</a>5.5. События журнала</h3><ul>
 <li><code>storage.snapshot</code> — итоги планового обхода (по проектам, свободное место) — <strong>реализовано</strong>;</li>
+<li><code>file.changed</code> — атрибуция файла: <code>{area, path, op: write|edit|upload|delete, bytes, operation}</code> + run в контексте — <strong>реализовано</strong> (пишут write_file/edit_file и файловый API);</li>
 <li><code>storage.evicted</code> — каждое удаление (путь, байты, политика) — <strong>реализовано</strong> (cap 100 на запуск + <code>evicted_suppressed</code> в сводке);</li>
 <li><code>storage.quota_exceeded</code> — проект вышел за квоту — <strong>реализовано</strong> (при <code>quota_bytes&gt;0</code> в политике);</li>
 <li><code>storage.swept</code> — сводка цикла уборки (освобождено байт, длительность) — <strong>реализовано</strong>.</li>
@@ -309,6 +315,12 @@ docker-образов. Красные пороги — как у health-поло
 dry-run-план → запуск → итог); политики retention за шестерёнкой;
 превью/загрузка/скачивание/удаление — как раньше. Для reader —
 read-only.</p>
+<p>Атрибуция (stage 2): карточка файла показывает «Историю изменений» —
+последние <code>file.changed</code> (дата, op, размер, бейдж рана); клик по бейджу
+переключает левую панель в «Файлы рана» (все пути, которые ран трогал,
+с числом изменений) с кликом-открытием в превью. Журналируют write_file/
+edit_file (ядро) и upload/delete (файловый API); панель деградирует в
+ничего, если журнал ещё без эндпоинта истории.</p>
 <h3 id="73-карточка-проекта"><a class="anchor" href="#73-карточка-проекта" aria-label="Section link">#</a>7.3. Карточка проекта</h3><p>Строка «хранилище: 41 GiB / 50 GiB» со ссылкой на страницу хранилища.</p>
 <h2 id="8-дисциплина-артефактов"><a class="anchor" href="#8-дисциплина-артефактов" aria-label="Section link">#</a>8. Дисциплина артефактов</h2><p>Файл в воркспейсе агент создаёт законно (это транспорт); проблема —
 подмена понятий в отчёте. Решение из двух частей:</p>
