@@ -246,6 +246,7 @@ func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleP
 	})
 
 	registerStorageFileRoutes(mux, gate, visibleProjects, root, ws)
+	registerStorageSearch(mux, gate, visibleProjects, root)
 
 	mux.HandleFunc("GET /v1/system/health", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {

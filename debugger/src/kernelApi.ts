@@ -535,6 +535,94 @@ export async function storageUploadFile(project: string, area: 'workspace' | 'ca
   return response.json()
 }
 
+// ── Storage search / sweep / policies / project tree (stage 1–3) ──────────
+
+/** One flat-search hit; `path` is relative to the area root. */
+export interface StorageSearchHit {
+  path: string
+  area: 'workspace' | 'cache'
+  bytes: number
+  mod_at: string
+  dir: boolean
+}
+
+export interface StorageSearchResponse {
+  results: StorageSearchHit[]
+  truncated: boolean
+  elapsed_ms: number
+}
+
+/** Case-insensitive substring search (≥2 chars) over names and paths. */
+export function storageSearch(project: string, query: string, opts?: { area?: 'workspace' | 'cache'; sort?: 'recent' | 'size' | 'name'; limit?: number }): Promise<StorageSearchResponse> {
+  const params = new URLSearchParams({ q: query })
+  if (opts?.area) params.set('area', opts.area)
+  if (opts?.sort) params.set('sort', opts.sort)
+  if (opts?.limit) params.set('limit', String(opts.limit))
+  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}/search?${params.toString()}`)
+}
+
+export interface StorageSweepBody {
+  dry_run: boolean
+  areas: ('cache' | 'workspace')[]
+  older_than_hours?: number
+  paths?: string[]
+}
+
+export interface StorageSweepResult {
+  removed: number
+  freed_bytes: number
+  plan?: { path: string; bytes: number }[]
+  dry_run: boolean
+}
+
+/** Dry-run first, then the real sweep; operator rights are enforced
+ *  server-side — permission errors come back as plain HTTP errors here. */
+export function storageSweep(project: string, body: StorageSweepBody): Promise<StorageSweepResult> {
+  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}/sweep`, { method: 'POST', body: JSON.stringify(body) })
+}
+
+export interface StoragePolicies {
+  enabled: boolean
+  cache_ttl_hours: number
+  workspace_stale_hours: number
+  quota_bytes: number
+}
+
+export function storageGetPolicies(): Promise<StoragePolicies> {
+  return request('/v1/workspace/storage/policies')
+}
+
+export function storagePutPolicies(body: StoragePolicies): Promise<StoragePolicies> {
+  return request('/v1/workspace/storage/policies', { method: 'PUT', body: JSON.stringify(body) })
+}
+
+/** Node of the project drill-down tree (kernel `storage.TreeNode`): sizes,
+ *  file counts, mtimes and children preloaded up to the requested depth. */
+export interface StorageTreeNode {
+  name: string
+  path: string
+  bytes: number
+  files: number
+  mod_at?: string
+  children?: StorageTreeNode[]
+}
+
+export interface StorageProjectDetails {
+  project: string
+  root: string
+  depth: number
+  truncated: boolean
+  workspace: StorageTreeNode | null
+  cache: StorageTreeNode | null
+  top_files: StorageTopPath[]
+}
+
+/** `GET /v1/workspace/storage/projects/{id}?depth=N` — the whole tree with
+ *  sizes/mtimes plus the largest files (used by the overview panel). */
+export function storageProjectDetails(project: string, depth = 4): Promise<StorageProjectDetails> {
+  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}?depth=${depth}`)
+}
+
 export interface SandboxContainerInfo {
   name: string
   image: string

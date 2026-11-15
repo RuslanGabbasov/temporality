@@ -3233,6 +3233,12 @@ func main() {
 	RegisterStorageRoutes(mux, gate, func(r *http.Request) (map[string][]string, error) {
 		return overviewVisibleProjects(r, ws)
 	}, storageRoot, sandboxDockerBinary(), storageSnapshots, ws)
+	// Manual sweep + retention policies (docs/sandbox-storage.md §5.3, phase 2):
+	// dry-run/real cleanup of a project's areas, retention settings in
+	// workspace_setting, hourly sweeper behind the policy flag.
+	registerStorageSweep(mux, gate, func(r *http.Request) (map[string][]string, error) {
+		return overviewVisibleProjects(r, ws)
+	}, storageRoot, ws, events)
 	// Sandbox profile wizard (docs/sandbox-profiles.md): plain-language task
 	// description → profile draft via the supervisor-scope wizard client.
 	RegisterSandboxBuilderRoutes(mux, gate, wizardModelClient)
@@ -7062,6 +7068,10 @@ func main() {
 	// hourly walk of the sandbox root refreshing the API cache and journaling
 	// the footprint. KERNEL_STORAGE_SWEEPER=off disables it; no deletions yet.
 	startStorageSnapshotLoop(storageRoot, storageSnapshots, events)
+	// Retention sweeper (docs/sandbox-storage.md §6, phase 2): hourly,
+	// enabled only by the storage.policy setting — deletions always journal
+	// storage.evicted/storage.swept, never happen silently.
+	startStorageSweeper(storageRoot, storageSnapshots, ws, events)
 
 	// Schedule trigger loop: polls all enabled schedule triggers every minute.
 	go func() {
