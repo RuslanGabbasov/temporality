@@ -13,19 +13,15 @@ import {
   storageDownloadFile,
   storageDeleteFile,
   storageUploadFile,
-  storageOverview,
   storageSearch,
   storageSweep,
   storageGetPolicies,
   storagePutPolicies,
-  storageProjectDetails,
   storageFileHistory,
   storageRunFiles,
   type StorageFileEntry,
   type StorageFileChange,
   type StorageRunFile,
-  type StorageSnapshot,
-  type StorageProjectDetails,
   type StorageSearchHit,
   type StorageSearchResponse,
   type StorageSweepBody,
@@ -223,12 +219,9 @@ export default function Storage({ project }: { project: string }) {
   const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null)
   const [batchNote, setBatchNote] = useState('')
 
-  // ── Overview ──
-  const [snapshot, setSnapshot] = useState<StorageSnapshot | null>(null)
-  const [details, setDetails] = useState<StorageProjectDetails | null>(null)
-  const [overviewError, setOverviewError] = useState('')
+  // Shared refresh trigger: refreshAll bumps it and the debounced search
+  // re-fetches its current query.
   const [refreshTick, setRefreshTick] = useState(0)
-  const overviewSeq = useRef(0)
 
   // ── Dialogs ──
   const [sweep, setSweep] = useState<SweepState | null>(null)
@@ -273,31 +266,6 @@ export default function Storage({ project }: { project: string }) {
     await load()
     setRefreshTick((n) => n + 1)
   }, [load])
-
-  // ── Overview: snapshot (disk, quota, top paths) + the project tree with
-  // sizes. Both endpoints are fetched together; a missing detail endpoint
-  // degrades to snapshot numbers instead of failing the whole panel. ──
-  useEffect(() => {
-    const pid = project.trim()
-    if (!pid) { setSnapshot(null); setDetails(null); setOverviewError(''); return }
-    const seq = ++overviewSeq.current
-    let alive = true
-    void Promise.allSettled([storageOverview(), storageProjectDetails(pid, 4)]).then(([snap, det]) => {
-      if (!alive || seq !== overviewSeq.current) return
-      const nextSnapshot = snap.status === 'fulfilled' ? snap.value : null
-      const nextDetails = det.status === 'fulfilled' ? det.value : null
-      setSnapshot(nextSnapshot)
-      setDetails(nextDetails)
-      if (nextSnapshot || nextDetails) {
-        setOverviewError('')
-      } else if (snap.status === 'rejected') {
-        setOverviewError(message(snap.reason))
-      } else if (det.status === 'rejected') {
-        setOverviewError(message(det.reason))
-      }
-    })
-    return () => { alive = false }
-  }, [project, refreshTick])
 
   // ── Search: debounced (300 ms) flat query; only the latest request wins. ──
   useEffect(() => {
@@ -706,7 +674,7 @@ export default function Storage({ project }: { project: string }) {
           </span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{entry.name}</span>
           <span style={{ color: 'var(--tm-text-3)', fontSize: '0.66rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
-            {entry.dir ? `${entry.entries ?? 0}` : fmtBytes(entry.bytes)}
+            {entry.dir ? (entry.bytes > 0 ? fmtBytes(entry.bytes) : `${entry.entries ?? 0}`) : fmtBytes(entry.bytes)}
           </span>
         </div>
         {entry.dir && open && sortEntries(children[k] ?? [], treeSort).map((child) => row(area, child, depth + 1))}
@@ -924,91 +892,6 @@ export default function Storage({ project }: { project: string }) {
     )
   })()
 
-  const overviewPanel = (() => {
-    const pid = project.trim()
-    const projRow = snapshot?.projects.find((p) => p.project === pid)
-    const wsBytes = details?.workspace?.bytes ?? projRow?.workspace_bytes
-    const cacheBytes = details?.cache?.bytes ?? projRow?.cache_bytes
-    const hasData = Boolean(snapshot || details || projRow)
-    if (!hasData) {
-      return (
-        <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', marginBottom: '0.75rem' }}>
-          {overviewError ? `${t('storage.overview_unavailable')} ${overviewError}` : '…'}
-        </div>
-      )
-    }
-    const disk = snapshot?.disk
-    const freeRatio = disk && disk.total_bytes > 0 ? disk.free_bytes / disk.total_bytes : null
-    const quotaRatio = projRow && projRow.quota_bytes > 0 ? projRow.quota_used : null
-    const topPaths = (projRow?.top_paths ?? []).slice(0, 6)
-    const block: CSSProperties = { border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.7rem', flex: '1 1 200px', minWidth: '180px', boxSizing: 'border-box' }
-    const label: CSSProperties = { fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }
-    return (
-      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem', flexShrink: 0 }}>
-        <div style={block}>
-          <div style={label}>{t('storage.overview_disk')}</div>
-          {disk ? (
-            <>
-              <div style={{ fontSize: '0.78rem' }}>
-                {t('storage.overview_free', { free: fmtBytes(disk.free_bytes), total: fmtBytes(disk.total_bytes) })}
-              </div>
-              <div style={{ ...meterTrackStyle, marginTop: '0.35rem' }}>
-                <div style={{ ...meterFillStyle, width: `${((1 - (freeRatio ?? 0)) * 100).toFixed(1)}%`, background: diskColor(freeRatio ?? 0) }} />
-              </div>
-            </>
-          ) : <div style={{ fontSize: '0.78rem', color: 'var(--tm-muted)' }}>—</div>}
-        </div>
-        <div style={{ ...block, flex: '1 1 260px' }}>
-          <div style={label}>{t('storage.overview_quota')}</div>
-          <div style={{ display: 'flex', gap: '1rem', fontSize: '0.78rem', flexWrap: 'wrap' }}>
-            <span>{t('storage.area_workspace')}: {wsBytes !== undefined ? fmtBytes(wsBytes) : '—'}</span>
-            <span>{t('storage.area_cache')}: {cacheBytes !== undefined ? fmtBytes(cacheBytes) : '—'}</span>
-          </div>
-          {projRow && quotaRatio !== null ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.35rem' }}>
-              <div style={meterTrackStyle}>
-                <div style={{ ...meterFillStyle, width: `${Math.min(100, quotaRatio * 100).toFixed(1)}%`, background: quotaColor(quotaRatio) }} />
-              </div>
-              <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>
-                {Math.round(quotaRatio * 100)}% · {fmtBytes(projRow.workspace_bytes + projRow.cache_bytes)} / {fmtBytes(projRow.quota_bytes)}
-              </span>
-            </div>
-          ) : (
-            <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.3rem' }}>—</div>
-          )}
-        </div>
-        <div style={{ ...block, flex: '1 1 220px' }}>
-          <div style={label}>{t('storage.overview_top')}</div>
-          {topPaths.length === 0 ? (
-            <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)' }}>—</div>
-          ) : (
-            topPaths.map((p) => (
-              <div key={p.path} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem' }}>
-                <button
-                  onClick={() => revealFrom('workspace', p.path, true)}
-                  title={p.path}
-                  style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'var(--tm-text-2)', cursor: 'pointer', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}
-                >{p.path}</button>
-                <span style={{ color: 'var(--tm-text-3)', flexShrink: 0 }}>{fmtBytes(p.bytes)}</span>
-              </div>
-            ))
-          )}
-        </div>
-        <div style={{ ...block, flex: '0 1 200px' }}>
-          <div style={label}>{t('storage.overview_activity')}</div>
-          <div style={{ fontSize: '0.78rem' }}>
-            {projRow?.last_activity_at ? new Date(projRow.last_activity_at).toLocaleString() : '—'}
-          </div>
-          {snapshot && (
-            <div style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', marginTop: '0.25rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={snapshot.root}>
-              {snapshot.root}
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  })()
-
   const selectBar = selectMode && (
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.5rem', padding: '0.4rem 0.6rem', border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-elevated)', flexShrink: 0 }}>
       <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>{t('storage.select_hint')}</span>
@@ -1209,9 +1092,6 @@ export default function Storage({ project }: { project: string }) {
           <Button size="sm" kind="ghost" renderIcon={Renew} disabled={loadingDir !== null || busy} onClick={() => void refreshAll()}>
             {t('common.refresh')}
           </Button>
-          <Button size="sm" kind={selectMode ? 'secondary' : 'ghost'} onClick={() => (selectMode ? exitSelect() : enterSelect())}>
-            {selectMode ? t('storage.select_exit') : t('storage.select_mode')}
-          </Button>
           <Button size="sm" kind="ghost" renderIcon={TrashCan} disabled={busy} onClick={() => setSweep(initialSweep())}>
             {t('storage.sweep_open')}
           </Button>
@@ -1222,24 +1102,31 @@ export default function Storage({ project }: { project: string }) {
           />
         </div>
       </div>
-      <div style={{ marginBottom: '0.75rem', flexShrink: 0, maxWidth: '560px' }}>
-        <Search
-          size="sm"
-          labelText=""
-          placeholder={t('storage.search_placeholder')}
-          value={query}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
-          onClear={() => setQuery('')}
-        />
-      </div>
       <input ref={uploadInput} type="file" multiple hidden onChange={(e) => void onUploadPicked(e)} />
       {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} onCloseButtonClick={() => setError('')} style={{ marginBottom: '0.75rem' }} />}
-      {overviewPanel}
       {breadcrumb}
       {selectBar}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 380px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
-        {/* Left: search results or the lazy tree */}
+        {/* Left: search input + «select» toggle, then results or the lazy tree */}
         <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', overflowY: 'auto', minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Search
+                size="sm"
+                labelText=""
+                placeholder={t('storage.search_placeholder')}
+                value={query}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+                onClear={() => setQuery('')}
+              />
+            </div>
+            <Button
+              size="sm" kind={selectMode ? 'secondary' : 'ghost'} style={{ flexShrink: 0 }}
+              onClick={() => (selectMode ? exitSelect() : enterSelect())}
+            >
+              {selectMode ? t('storage.select_exit') : t('storage.select_mode')}
+            </Button>
+          </div>
           {runFiles ? runFilesPane() : searchMode ? searchPane() : (
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: '0.3rem' }}>
@@ -1274,58 +1161,44 @@ export default function Storage({ project }: { project: string }) {
                   : <Tag type="gray" size="sm">{fmtBytes(selected.entry.bytes)}</Tag>}
                 {selected.entry.mod_at && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>{new Date(selected.entry.mod_at).toLocaleString()}</span>}
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                  <Button size="sm" kind="ghost" renderIcon={Upload} onClick={() => startUpload(selected.area, selected.entry.dir ? selected.entry.path : parentOf(selected.entry.path))}>{t('storage.files_upload')}</Button>
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Upload} iconDescription={t('storage.files_upload')} title={t('storage.files_upload')} onClick={() => startUpload(selected.area, selected.entry.dir ? selected.entry.path : parentOf(selected.entry.path))} />
                   {!selected.entry.dir && (
-                    <Button size="sm" kind="ghost" renderIcon={Download} onClick={() => void download(selected.area, selected.entry)}>{t('storage.files_download')}</Button>
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Download} iconDescription={t('storage.files_download')} title={t('storage.files_download')} onClick={() => void download(selected.area, selected.entry)} />
                   )}
-                  <Button size="sm" kind="ghost" renderIcon={Copy} disabled={busy} onClick={() => void copyPath()}>
-                    {copied ? t('storage.copied') : t('storage.copy_path')}
-                  </Button>
-                  <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} disabled={busy} onClick={() => void remove(selected.area, selected.entry)}>{t('action.delete')}</Button>
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={copied ? t('storage.copied') : t('storage.copy_path')} title={copied ? t('storage.copied') : t('storage.copy_path')} disabled={busy} onClick={() => void copyPath()} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete')} title={t('action.delete')} disabled={busy} onClick={() => void remove(selected.area, selected.entry)} />
                 </span>
               </div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginBottom: '0.5rem', overflowWrap: 'anywhere' }}>
-                {selected.area}/{selected.entry.path}
-              </div>
-              {!selected.entry.dir && (
+              {!selected.entry.dir && history.status === 'ready' && history.changes.length > 0 && (
                 <div style={{ marginBottom: '0.6rem' }}>
-                  <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>
-                    {t('storage.history_title')}
-                  </div>
-                  {history.status === 'loading' ? (
-                    <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)' }}>…</div>
-                  ) : history.status === 'error' ? null : history.changes.length === 0 ? (
-                    <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)' }}>{t('storage.history_empty')}</div>
-                  ) : (
-                    history.changes.map((change, i) => (
-                      <div
-                        key={`${change.occurred_at}-${i}`}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', padding: '0.15rem 0', minWidth: 0,
-                          borderBottom: i < history.changes.length - 1 ? '1px solid var(--tm-border)' : 'none',
-                        }}
-                      >
-                        <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{new Date(change.occurred_at).toLocaleString()}</span>
-                        <Tag type={opTagType(change.op)} size="sm">
-                          {change.op === 'write' || change.op === 'edit' || change.op === 'upload' || change.op === 'delete'
-                            ? t(`storage.op_${change.op}`) : change.op}
-                        </Tag>
-                        {change.bytes > 0 && <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{fmtBytes(change.bytes)}</span>}
-                        {change.run && (
-                          <button
-                            type="button"
-                            onClick={() => void openRunFiles(change.run)}
-                            title={t('storage.history_run_hint', { run: change.run })}
-                            style={{
-                              marginLeft: 'auto', background: 'none', border: 'none', padding: 0, font: 'inherit',
-                              color: 'var(--tm-chart-3)', cursor: 'pointer', fontSize: '0.72rem',
-                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '9rem', flexShrink: 1,
-                            }}
-                          >{t('storage.history_run', { id: change.run.slice(-8) })}</button>
-                        )}
-                      </div>
-                    ))
-                  )}
+                  {history.changes.map((change, i) => (
+                    <div
+                      key={`${change.occurred_at}-${i}`}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', padding: '0.15rem 0', minWidth: 0,
+                        borderBottom: i < history.changes.length - 1 ? '1px solid var(--tm-border)' : 'none',
+                      }}
+                    >
+                      <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{new Date(change.occurred_at).toLocaleString()}</span>
+                      <Tag type={opTagType(change.op)} size="sm">
+                        {change.op === 'write' || change.op === 'edit' || change.op === 'upload' || change.op === 'delete'
+                          ? t(`storage.op_${change.op}`) : change.op}
+                      </Tag>
+                      {change.bytes > 0 && <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{fmtBytes(change.bytes)}</span>}
+                      {change.run && (
+                        <button
+                          type="button"
+                          onClick={() => void openRunFiles(change.run)}
+                          title={t('storage.history_run_hint', { run: change.run })}
+                          style={{
+                            marginLeft: 'auto', background: 'none', border: 'none', padding: 0, font: 'inherit',
+                            color: 'var(--tm-chart-3)', cursor: 'pointer', fontSize: '0.72rem',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '9rem', flexShrink: 1,
+                          }}
+                        >{t('storage.history_run', { id: change.run.slice(-8) })}</button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
               {selected.entry.dir ? (

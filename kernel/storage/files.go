@@ -2,11 +2,13 @@ package storage
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -99,6 +101,10 @@ func ListDir(root, project, area, rel string) ([]FileEntry, error) {
 			if children, err := os.ReadDir(filepath.Join(dir, name)); err == nil {
 				item.Entries = len(children)
 			}
+			// The tree shows directory sizes next to file sizes: an unmeasured
+			// directory reads as an empty box, and «43 items» says nothing about
+			// what actually weighs on the disk.
+			item.Bytes = DirSize(filepath.Join(dir, name))
 		} else {
 			item.Bytes = info.Size()
 		}
@@ -141,7 +147,11 @@ func DeletePath(root, project, area, rel string) error {
 	if abs == filepath.Clean(root) {
 		return fmt.Errorf("refusing to delete the storage root")
 	}
-	return os.RemoveAll(abs)
+	if err := os.RemoveAll(abs); err != nil {
+		return err
+	}
+	invalidateDirSizes(abs, root)
+	return nil
 }
 
 // MaxPreviewBytes caps inline text preview reads; bigger files must be
@@ -186,7 +196,72 @@ func StoreFile(root, project, area, rel string, data []byte, overwrite bool) err
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(abs, data, 0o644)
+	if err := os.WriteFile(abs, data, 0o644); err != nil {
+		return err
+	}
+	invalidateDirSizes(abs, root)
+	return nil
+}
+
+// dirSizeCache memoizes recursive directory sizes for the lazy tree: the
+// browser re-asks on every expand, and the first walk over a multi-million-
+// file workspace must not repeat for each click. Entries expire after
+// dirSizeTTL and are dropped eagerly when a write or delete touches the
+// directory (invalidateDirSizes) — a browse session sees fresh numbers
+// without re-walking gigabytes on every expand.
+const dirSizeTTL = 5 * time.Minute
+
+type dirSizeEntry struct {
+	bytes int64
+	at    time.Time
+}
+
+var dirSizeCache sync.Map // abs dir → dirSizeEntry
+
+// DirSize returns the recursive size of a directory tree. Unreadable entries
+// (permissions, races with the sweeper) contribute nothing instead of
+// failing the whole listing.
+func DirSize(abs string) int64 {
+	if cached, ok := dirSizeCache.Load(abs); ok {
+		entry := cached.(dirSizeEntry)
+		if time.Since(entry.at) < dirSizeTTL {
+			return entry.bytes
+		}
+	}
+	var total int64
+	_ = filepath.WalkDir(abs, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, infoErr := d.Info(); infoErr == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	dirSizeCache.Store(abs, dirSizeEntry{bytes: total, at: time.Now()})
+	return total
+}
+
+// invalidateDirSizes drops the cached sizes of the mutated directory and its
+// ancestors up to the storage root: an upload or delete shows up in the tree
+// immediately, while unrelated branches keep their cached numbers.
+func invalidateDirSizes(abs, root string) {
+	root = filepath.Clean(root)
+	current := filepath.Dir(abs)
+	for {
+		dirSizeCache.Delete(current)
+		if current == root {
+			return
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return
+		}
+		if parent != root && !strings.HasPrefix(parent, root+string(filepath.Separator)) {
+			return
+		}
+		current = parent
+	}
 }
 
 func cleanRel(rel string) string {

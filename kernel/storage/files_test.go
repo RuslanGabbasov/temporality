@@ -94,6 +94,52 @@ func TestListDirDeletesAndUploads(t *testing.T) {
 	}
 }
 
+// The tree shows what a directory weighs: ListDir measures child subtrees,
+// and the number updates after mutations — the size cache must serve repeat
+// expands without re-walking, yet an upload or delete must show up
+// immediately instead of waiting for the TTL.
+func TestListDirReportsDirectorySizes(t *testing.T) {
+	root := t.TempDir()
+	area := filepath.Join(root, "projects", "omni")
+	if err := os.MkdirAll(filepath.Join(area, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(area, "docs/a.md"), make([]byte, 100), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := ListDir(root, "omni", "workspace", "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Bytes != 100 {
+		t.Fatalf("directory size = %+v, want 100 bytes", entries)
+	}
+	// Repeat listing answers from the cache with the same number.
+	again, err := ListDir(root, "omni", "workspace", "")
+	if err != nil || again[0].Bytes != 100 {
+		t.Fatalf("cached listing = %+v (err %v), want 100 bytes", again, err)
+	}
+
+	// An upload invalidates the ancestors: the new size is immediate.
+	if err := StoreFile(root, "omni", "workspace", "docs/b.md", make([]byte, 25), false); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	after, err := ListDir(root, "omni", "workspace", "")
+	if err != nil || after[0].Bytes != 125 {
+		t.Fatalf("after upload = %+v (err %v), want 125 bytes", after, err)
+	}
+
+	// So does a delete.
+	if err := DeletePath(root, "omni", "workspace", "docs/a.md"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	final, err := ListDir(root, "omni", "workspace", "")
+	if err != nil || final[0].Bytes != 25 {
+		t.Fatalf("after delete = %+v (err %v), want 25 bytes", final, err)
+	}
+}
+
 func TestStatFileMissingIsClean(t *testing.T) {
 	root := t.TempDir()
 	_, _, _, _, err := StatFile(root, "omni", "workspace", "nope.txt")
