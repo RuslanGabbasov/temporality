@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, useCallback, useRef, type ChangeEvent, type CSSProperties, type ReactNode } from 'react'
 import { Button, Checkbox, Heading, InlineNotification, Tag } from '@carbon/react'
-import { Copy, Download, Renew, Settings, TrashCan, Upload, ChevronRight, ChevronDown, Checkbox as CheckboxIcon } from '@carbon/icons-react'
+import { Copy, Download, Renew, Settings, TrashCan, Upload, ChevronRight, ChevronDown, Checkbox as CheckboxIcon, ArrowsVertical } from '@carbon/icons-react'
 import ProjectRequired from './ProjectRequired'
 import Markdown from './Markdown'
 import { useConfirm } from './ConfirmDialog'
@@ -1140,6 +1140,14 @@ export default function Storage({ project }: { project: string }) {
         {/* Left: search input + «select» toggle, then results or the lazy tree */}
         <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', overflowY: 'auto', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+            <Button
+              size="sm" kind={selectMode ? 'secondary' : 'ghost'} hasIconOnly
+              renderIcon={CheckboxIcon}
+              iconDescription={selectMode ? t('storage.select_exit') : t('storage.select_mode')}
+              tooltipPosition="bottom"
+              style={{ flexShrink: 0 }}
+              onClick={() => (selectMode ? exitSelect() : enterSelect())}
+            />
             <div style={{ minWidth: 0, flex: 1 }}>
               <input
                 className="toolbar-search"
@@ -1151,31 +1159,24 @@ export default function Storage({ project }: { project: string }) {
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
               />
             </div>
-            <Button
-              size="sm" kind={selectMode ? 'secondary' : 'ghost'} hasIconOnly
-              renderIcon={CheckboxIcon}
-              iconDescription={selectMode ? t('storage.select_exit') : t('storage.select_mode')}
-              tooltipPosition="bottom"
-              style={{ flexShrink: 0 }}
-              onClick={() => (selectMode ? exitSelect() : enterSelect())}
-            />
+            {!runFiles && !searchMode && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+                <ArrowsVertical size={14} aria-label={t('storage.sort_label')} style={{ color: 'var(--tm-text-3)', flexShrink: 0 }} />
+                <select
+                  aria-label={t('storage.sort_label')}
+                  value={treeSort}
+                  onChange={(e) => setTreeSort(e.target.value as TreeSort)}
+                  style={{ ...inputStyle, width: 'auto', padding: '0.15rem 0.3rem', fontSize: '0.72rem' }}
+                >
+                  <option value="name">{t('storage.sort_name')}</option>
+                  <option value="size">{t('storage.sort_size')}</option>
+                  <option value="date">{t('storage.sort_date')}</option>
+                </select>
+              </span>
+            )}
           </div>
           {runFiles ? runFilesPane() : searchMode ? searchPane() : (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: '0.3rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
-                  {t('storage.sort_label')}
-                  <select
-                    value={treeSort}
-                    onChange={(e) => setTreeSort(e.target.value as TreeSort)}
-                    style={{ ...inputStyle, width: 'auto', padding: '0.15rem 0.3rem', fontSize: '0.72rem' }}
-                  >
-                    <option value="name">{t('storage.sort_name')}</option>
-                    <option value="size">{t('storage.sort_size')}</option>
-                    <option value="date">{t('storage.sort_date')}</option>
-                  </select>
-                </label>
-              </div>
               {areaSection('workspace')}
               {areaSection('cache')}
             </>
