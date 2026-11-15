@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   Button,
   TextInput,
@@ -21,6 +21,14 @@ import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
+import {
+  modelPrices,
+  saveModelPrices,
+  priceRows,
+  buildPricePayload,
+  type ModelPrice,
+  type PriceDraft,
+} from './modelPrices'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -49,6 +57,10 @@ function formatModelLimits(limits?: Record<string, { max_output_tokens?: number 
     .join(', ')
 }
 
+// The price editor's four-column row: the model, the providers listing it,
+// and the two $/1k inputs.
+const PRICE_COLUMNS = 'minmax(0, 1.4fr) minmax(0, 1fr) 6.5rem 6.5rem'
+
 export default function Providers() {
   const t = useT()
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
@@ -72,6 +84,22 @@ export default function Providers() {
   const [fetchNote, setFetchNote] = useState('')
   const [syncingId, setSyncingId] = useState('')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  // Token prices (docs/plan-cost-accounting.md): the editor for what
+  // KERNEL_MODEL_PRICES used to be the only way to say. The env value is the
+  // seed; a saved list replaces it until it is cleared, and a save reaches
+  // the running kernel — no restart.
+  const [pricesOpen, setPricesOpen] = useState(false)
+  const [prices, setPrices] = useState<ModelPrice[]>([])
+  const [priceSource, setPriceSource] = useState<'env' | 'db'>('env')
+  const [priceDraft, setPriceDraft] = useState<Record<string, PriceDraft>>({})
+  const [priceFilter, setPriceFilter] = useState('')
+  const [pricesBusy, setPricesBusy] = useState(false)
+  const [pricesSaved, setPricesSaved] = useState(false)
+  const [pricesError, setPricesError] = useState('')
+  // Rows come from the providers' catalogs plus whatever is already priced —
+  // a price can outlive the provider that produced it.
+  const priceRowList = useMemo(() => priceRows(providers, prices), [providers, prices])
+  const visiblePriceRows = priceRowList.filter((row) => matchesFilter(priceFilter, row.model, ...row.providers))
 
   const visibleProviders = providers.filter((p) => matchesFilter(filter, p.name, p.base_url, p.id, ...(p.models ?? [])))
 
@@ -217,6 +245,40 @@ export default function Providers() {
     finally { setSyncingId('') }
   }
 
+  // The price editor opens with the EFFECTIVE list (saved, else the env seed)
+  // and one draft row per model; nothing is written until Save.
+  const openPrices = async () => {
+    setPricesOpen(true)
+    setPricesError(''); setPricesSaved(false); setPriceFilter('')
+    try {
+      const data = await modelPrices()
+      setPrices(data.prices)
+      setPriceSource(data.source)
+      const draft: Record<string, PriceDraft> = {}
+      for (const price of data.prices) {
+        draft[price.model] = { prompt: String(price.prompt_per_1m), completion: String(price.completion_per_1m) }
+      }
+      setPriceDraft(draft)
+    } catch (f) { setPricesError(message(f)) }
+  }
+
+  const savePrices = async () => {
+    const { prices: payload, invalid } = buildPricePayload(priceRowList, priceDraft)
+    if (invalid.length > 0) {
+      setPricesError(t('providers.prices_invalid', { models: invalid.join(', ') }) ?? `Not a number: ${invalid.join(', ')}`)
+      return
+    }
+    setPricesBusy(true); setPricesError(''); setPricesSaved(false)
+    try {
+      const data = await saveModelPrices(payload)
+      setPrices(data.prices)
+      setPriceSource(data.source)
+      setPricesSaved(true)
+      window.setTimeout(() => setPricesSaved(false), 2000)
+    } catch (f) { setPricesError(message(f)) }
+    finally { setPricesBusy(false) }
+  }
+
   return (
     <div style={{ padding: '1rem' }}>
       {confirmDialogNode}
@@ -224,7 +286,10 @@ export default function Providers() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
         <Heading>{t('providers.title') ?? 'Model Providers'}</Heading>
-        <Button renderIcon={Add} onClick={startCreate}>{t('providers.new_provider') ?? 'New Provider'}</Button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <Button kind="secondary" onClick={() => void openPrices()}>{t('providers.prices_button') ?? 'Token prices'}</Button>
+          <Button renderIcon={Add} onClick={startCreate}>{t('providers.new_provider') ?? 'New Provider'}</Button>
+        </div>
       </div>
       <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem', maxWidth: '420px' }}>
         <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_providers') ?? 'Filter providers…'} />
@@ -323,6 +388,70 @@ export default function Providers() {
               </Button>
             </div>
           </Stack>
+        </AppModal>
+      )}
+
+      {/* Token prices: dollars per million tokens — the unit a price page
+          quotes — one row per model. The list
+          is the effective one — a saved list replaces KERNEL_MODEL_PRICES —
+          and rows come from the providers' catalogs plus whatever is already
+          priced. */}
+      {pricesOpen && (
+        <AppModal onClose={() => setPricesOpen(false)} panelStyle={{ width: '700px', maxHeight: '82vh' }}>
+          <Heading>{t('providers.prices_title') ?? 'Token prices'}</Heading>
+          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: '0.25rem 0 0.75rem' }}>
+            {t('providers.prices_hint') ?? 'Dollars per 1,000,000 tokens — as a vendor price page quotes. An empty row means the cost is not counted. A saved list replaces KERNEL_MODEL_PRICES until it is cleared.'}
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <Tag type={priceSource === 'db' ? 'green' : 'gray'} size="sm">
+              {priceSource === 'db' ? (t('providers.prices_source_db') ?? 'saved in the UI') : (t('providers.prices_source_env') ?? 'from KERNEL_MODEL_PRICES')}
+            </Tag>
+            {pricesSaved && <Tag type="green" size="sm">✓ {t('providers.prices_saved') ?? 'Saved'}</Tag>}
+            <span style={{ marginLeft: 'auto', minWidth: '14rem' }}>
+              <ListFilter value={priceFilter} onChange={setPriceFilter} placeholder={t('providers.prices_filter') ?? 'Filter models…'} />
+            </span>
+          </div>
+          {pricesError && (
+            <InlineNotification kind="error" lowContrast hideCloseButton title={t('action.error') ?? 'Error'} subtitle={pricesError} style={{ marginBottom: '0.5rem' }} />
+          )}
+          <div style={{ overflowY: 'auto', maxHeight: '48vh', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: PRICE_COLUMNS, gap: '0.4rem', padding: '0.45rem 0.6rem', fontSize: '0.68rem', color: 'var(--tm-text-3)', position: 'sticky', top: 0, background: 'var(--tm-bg)', borderBottom: '1px solid var(--tm-border)' }}>
+              <span>{t('providers.prices_col_model') ?? 'Model'}</span>
+              <span>{t('providers.prices_col_provider') ?? 'Provider'}</span>
+              <span>{t('providers.prices_col_prompt') ?? 'Prompt $ / 1M'}</span>
+              <span>{t('providers.prices_col_completion') ?? 'Completion $ / 1M'}</span>
+            </div>
+            {visiblePriceRows.length === 0 ? (
+              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', padding: '0.6rem' }}>
+                {t('providers.prices_empty') ?? 'No models — list one on a provider first.'}
+              </p>
+            ) : visiblePriceRows.map((row) => (
+              <div key={row.model} style={{ display: 'grid', gridTemplateColumns: PRICE_COLUMNS, gap: '0.4rem', padding: '0.3rem 0.6rem', alignItems: 'center', borderBottom: '1px solid var(--tm-border)' }}>
+                <span style={{ fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.model}>{row.model}</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.providers.join(', ')}>
+                  {row.providers.length > 0 ? row.providers.join(', ') : '—'}
+                </span>
+                <TextInput
+                  id={`price-prompt-${row.model}`}
+                  type="number" min={0} step="0.01"
+                  labelText={t('providers.prices_col_prompt') ?? 'Prompt $ / 1M'} hideLabel
+                  value={priceDraft[row.model]?.prompt ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPriceDraft((current) => ({ ...current, [row.model]: { prompt: e.target.value, completion: current[row.model]?.completion ?? '' } }))}
+                />
+                <TextInput
+                  id={`price-completion-${row.model}`}
+                  type="number" min={0} step="0.01"
+                  labelText={t('providers.prices_col_completion') ?? 'Completion $ / 1M'} hideLabel
+                  value={priceDraft[row.model]?.completion ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPriceDraft((current) => ({ ...current, [row.model]: { prompt: current[row.model]?.prompt ?? '', completion: e.target.value } }))}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="form-actions">
+            <Button kind="secondary" onClick={() => setPricesOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+            <Button onClick={() => void savePrices()} disabled={pricesBusy}>{t('action.save') ?? 'Save'}</Button>
+          </div>
         </AppModal>
       )}
 

@@ -2,12 +2,23 @@ package cost
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/temporality-project/temporality/observation"
 )
+
+// wantCost asserts a dollar total with room for float sums: prices are per
+// million tokens now, so the arithmetic works in fractions of a cent and a
+// sum of rounded doubles rarely lands on the literal.
+func wantCost(t *testing.T, what string, got, want float64) {
+	t.Helper()
+	if math.Abs(got-want) > 1e-12 {
+		t.Fatalf("%s: expected $%v, got %f", what, want, got)
+	}
+}
 
 func TestParsePrices(t *testing.T) {
 	cfg, err := ParsePrices("gpt-4o:2.50:10.00,claude-3-sonnet:3.00:15.00")
@@ -32,10 +43,10 @@ func TestParsePricesEmpty(t *testing.T) {
 
 func TestModelCost(t *testing.T) {
 	cfg, _ := ParsePrices("gpt-4o:2.50:10.00")
-	// 1000 prompt tokens * $2.50/1k = $2.50
-	// 500 completion tokens * $10.00/1k = $5.00
+	// 1M prompt tokens * $2.50/1M = $2.50
+	// 500k completion tokens * $10.00/1M = $5.00
 	// Total: $7.50
-	cost := cfg.ModelCost("gpt-4o", 1000, 0, 500)
+	cost := cfg.ModelCost("gpt-4o", 1_000_000, 0, 500_000)
 	if cost != 7.5 {
 		t.Fatalf("expected 7.50, got %f", cost)
 	}
@@ -43,9 +54,9 @@ func TestModelCost(t *testing.T) {
 
 func TestModelCostCachedHalfPrice(t *testing.T) {
 	cfg, _ := ParsePrices("gpt-4o:2.50:10.00")
-	// 800 cached of 1000 prompt: 200 fresh * $2.50/1k + 800 * $1.25/1k
-	// = $0.50 + $1.00; 500 completion * $10.00/1k = $5.00 → $6.50
-	cost := cfg.ModelCost("gpt-4o", 1000, 800, 500)
+	// 800k cached of 1M prompt: 200k fresh * $2.50/1M + 800k * $1.25/1M
+	// = $0.50 + $1.00; 500k completion * $10.00/1M = $5.00 → $6.50
+	cost := cfg.ModelCost("gpt-4o", 1_000_000, 800_000, 500_000)
 	if cost != 6.5 {
 		t.Fatalf("expected 6.50, got %f", cost)
 	}
@@ -65,9 +76,9 @@ func TestModelCostUnknown(t *testing.T) {
 
 func TestModelCostPartialTokens(t *testing.T) {
 	cfg, _ := ParsePrices("gpt-4o:2.50:10.00")
-	// 100 prompt tokens * $2.50/1k = $0.25
-	// 100 completion tokens * $10.00/1k = $1.00
-	cost := cfg.ModelCost("gpt-4o", 100, 0, 100)
+	// 100k prompt * $2.50/1M = $0.25
+	// 100k completion * $10.00/1M = $1.00
+	cost := cfg.ModelCost("gpt-4o", 100_000, 0, 100_000)
 	if cost != 1.25 {
 		t.Fatalf("expected 1.25, got %f", cost)
 	}
@@ -118,10 +129,9 @@ func TestAggregateTask(t *testing.T) {
 	if got.TotalPromptTokens != 1700 || got.TotalCompletionTokens != 550 || got.TotalTokens != 2250 {
 		t.Fatalf("unexpected token totals: %+v", got)
 	}
-	// 1500 fresh + 200 cached(half) prompt, 550 completion: (1.5*1) + (0.2*0.5) + (0.55*2) = $2.70
-	if got.TotalCostUSD != 2.70 {
-		t.Fatalf("expected $2.45, got %f", got.TotalCostUSD)
-	}
+	// Per million tokens: 1500 fresh + 200 cached(half) prompt at $1/1M and
+	// 550 completion at $2/1M → (0.0015) + (0.0001) + (0.0011) = $0.0027
+	wantCost(t, "task total", got.TotalCostUSD, 0.0027)
 	// r1 5m + child 2m + r2 running 90m → active 97m
 	if got.ActiveMS != 97*time.Minute.Milliseconds() {
 		t.Fatalf("expected active 97m, got %dms", got.ActiveMS)
@@ -251,9 +261,10 @@ func TestAggregateProjectBudget(t *testing.T) {
 	if got.SagaCount != 0 || got.TaskCount != 2 || got.RunCount != 3 || got.ModelCalls != 3 {
 		t.Fatalf("unexpected top-level counts: %+v", got)
 	}
-	if got.TotalTokens != 2250 || got.TotalCostUSD != 2.80 {
-		t.Fatalf("unexpected totals: tokens=%d cost=%f", got.TotalTokens, got.TotalCostUSD)
+	if got.TotalTokens != 2250 {
+		t.Fatalf("unexpected token totals: tokens=%d", got.TotalTokens)
 	}
+	wantCost(t, "project totals", got.TotalCostUSD, 0.0028)
 	if got.Approvals.Requested != 2 || got.Approvals.Granted != 1 || got.Approvals.Pending != 1 {
 		t.Fatalf("unexpected approval totals: %+v", got.Approvals)
 	}
@@ -706,4 +717,87 @@ func TestSagaDeleteMergedSourceKeepsTargetAccounting(t *testing.T) {
 	if got.Sagas[0].TotalTokens != 110 {
 		t.Fatalf("target must keep the merged task's spend: %+v", got.Sagas[0])
 	}
+}
+
+// The settings route writes prices while an aggregation reads them: the table
+// is shared by every Config value handed out at boot (run policy, cost API,
+// settings route) and guarded, and one write is the complete truth.
+func TestSetPricesReplacesTheSharedTable(t *testing.T) {
+	cfg, err := ParsePrices("seed-model:1.00:2.00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every holder gets its own Config VALUE — copies must still see the save.
+	other := cfg
+	if err := cfg.SetPrices([]Price{{Model: "saved-model", PromptPer1M: 3.5, CompPer1M: 7}}); err != nil {
+		t.Fatalf("SetPrices: %v", err)
+	}
+	if _, ok := other.Price("saved-model"); !ok {
+		t.Fatal("the save must reach every copy of the config")
+	}
+	if _, ok := other.Price("seed-model"); ok {
+		t.Fatal("one write is the complete truth — the seed row must be gone")
+	}
+	if got := other.ModelCost("saved-model", 1_000_000, 0, 1_000_000); got != 10.5 {
+		t.Fatalf("ModelCost = %v, want 10.5", got)
+	}
+	// Prices() is ordered — the settings API renders it.
+	prices := other.Prices()
+	if len(prices) != 1 || prices[0].Model != "saved-model" {
+		t.Fatalf("Prices() = %+v, want the saved row only", prices)
+	}
+}
+
+func TestSetPricesValidates(t *testing.T) {
+	cfg, err := ParsePrices("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string][]Price{
+		"empty model":        {{Model: "   ", PromptPer1M: 1}},
+		"negative":           {{Model: "m", PromptPer1M: -1}},
+		"absurdly expensive": {{Model: "m", CompPer1M: maxPricePer1M + 1}},
+		"NaN":                {{Model: "m", PromptPer1M: math.NaN()}},
+	}
+	for name, list := range cases {
+		if err := cfg.SetPrices(list); err == nil {
+			t.Errorf("%s: SetPrices must reject %v", name, list)
+		}
+	}
+	// A zero Config never came from ParsePrices — there is no table to share.
+	var zero Config
+	if err := zero.SetPrices([]Price{{Model: "m", PromptPer1M: 1}}); err == nil {
+		t.Fatal("a zero Config must refuse a save instead of silently dropping it")
+	}
+	// Rejections leave the previous list in place.
+	if err := cfg.SetPrices([]Price{{Model: "kept", PromptPer1M: 1, CompPer1M: 2}}); err != nil {
+		t.Fatalf("SetPrices: %v", err)
+	}
+	if err := cfg.SetPrices([]Price{{Model: "bad", PromptPer1M: -1}}); err == nil {
+		t.Fatal("the bad list must be rejected")
+	}
+	if _, ok := cfg.Price("kept"); !ok {
+		t.Fatal("a rejected list must not touch the stored one")
+	}
+}
+
+// A save lands while an aggregation walks the same table — the mutex is what
+// keeps the race detector (and the accounting) quiet.
+func TestSetPricesConcurrentReads(t *testing.T) {
+	cfg, err := ParsePrices("m:1.00:2.00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			_ = cfg.SetPrices([]Price{{Model: "m", PromptPer1M: float64(i%9) + 1, CompPer1M: 2}})
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		_ = cfg.Prices()
+		_ = cfg.ModelCost("m", 10, 0, 10)
+	}
+	<-done
 }

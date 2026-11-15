@@ -48,10 +48,9 @@ func TestAggregateProjectsOverview(t *testing.T) {
 	if omni.ModelCalls != 1 || omni.TotalTokens != 1500 {
 		t.Fatalf("unexpected model counters: %+v", omni)
 	}
-	// 800 fresh + 200 cached(half) prompt, 500 completion: 0.8 + 0.1 + 1.0 = $1.90
-	if omni.TotalCostUSD != 1.90 {
-		t.Fatalf("expected $1.90, got %f", omni.TotalCostUSD)
-	}
+	// 800 fresh + 200 cached(half) prompt, 500 completion at $1/$2 per million:
+	// 0.0008 + 0.0001 + 0.001 = $0.0019
+	wantCost(t, "omni cost", omni.TotalCostUSD, 0.0019)
 	if omni.PendingApprovals != 1 {
 		t.Fatalf("expected 1 pending approval older than the window, got %d", omni.PendingApprovals)
 	}

@@ -306,6 +306,9 @@ func main() {
 	if len(costPrices.Prices()) > 0 {
 		log.Info("model cost accounting enabled", "models", len(costPrices.Prices()))
 	}
+	// The env list stays the seed on its own: whatever the settings UI saves
+	// replaces it, and clearing the saved list hands the runs back to this.
+	modelPriceSeed := costPrices.Prices()
 	ws, err := workspace.Open(ctx, databaseURL)
 	if err != nil {
 		log.Error("open workspace store", "error", err)
@@ -333,6 +336,18 @@ func main() {
 		harness.SetCurrent(harness.ApplyBudgetOverrides(harness.FromEnv(), overrides))
 		if len(overrides) > 0 {
 			log.Info("harness budget overrides applied", "count", len(overrides))
+		}
+	}
+	// UI-saved model prices (the KERNEL_MODEL_PRICES editor) layer over the
+	// env seed the same way; the settings route applies later saves live
+	// through the same shared table, so no restart is needed after editing.
+	if storedPrices, pErr := ws.ModelPrices(ctx); pErr != nil {
+		log.Error("load model prices", "error", pErr)
+	} else if list, source := activeModelPrices(storedPrices, modelPriceSeed); source == "db" {
+		if sErr := costPrices.SetPrices(list); sErr != nil {
+			log.Error("apply model prices", "error", sErr)
+		} else {
+			log.Info("model prices loaded from settings", "models", len(list))
 		}
 	}
 	// Curated builtin agents are templates, not auto-created agents
@@ -1725,9 +1740,7 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"project": project, "used": verdict.Used, "limit": verdict.Limit, "reset_at": verdict.ResetAt})
 	})
-	mux.HandleFunc("GET /v1/agent/cost/prices", func(w http.ResponseWriter, r *http.Request) {
-		costAPI.PricesHandler(w, r)
-	})
+	RegisterModelPriceRoutes(mux, gate, ws, modelPriceSeed, costPrices)
 	mux.HandleFunc("GET /v1/agent/cost/run", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		if !gate.Allow(w, r, controlplane.RoleReader, project) {
@@ -9935,8 +9948,8 @@ func applyRunPolicy(ctx context.Context, ws *workspace.Store, prices cost.Config
 	if effective.MaxBudgetUSD != nil {
 		input.MaxBudgetUSD = *effective.MaxBudgetUSD
 		if price, ok := prices.Price(model); ok {
-			input.ModelPromptPricePer1k = price.PromptPer1k
-			input.ModelCompPricePer1k = price.CompPer1k
+			input.ModelPromptPricePer1M = price.PromptPer1M
+			input.ModelCompPricePer1M = price.CompPer1M
 		}
 	}
 	if effective.TimeoutSeconds != nil {

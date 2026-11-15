@@ -261,11 +261,13 @@ func TestAgentRunPolicyBudgetLimitStopsRun(t *testing.T) {
 			return llm.Completion{Content: "stopped"}, nil
 		}
 		return llm.Completion{
-			Usage:     llm.Usage{PromptTokens: 1000, CompletionTokens: 1000, TotalTokens: 2000},
+			// $1 per million on both sides: 10k + 10k tokens = $0.02, twice
+			// the $0.01 budget the run is pinned to.
+			Usage:     llm.Usage{PromptTokens: 10_000, CompletionTokens: 10_000, TotalTokens: 20_000},
 			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_command", Args: map[string]any{"command": []any{"ls"}}}},
 		}, nil
 	})
-	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "policy-budget", Project: "repo-a", Prompt: "work", MaxTurns: 6, MaxBudgetUSD: 0.01, ModelPromptPricePer1k: 1, ModelCompPricePer1k: 1})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "policy-budget", Project: "repo-a", Prompt: "work", MaxTurns: 6, MaxBudgetUSD: 0.01, ModelPromptPricePer1M: 1, ModelCompPricePer1M: 1})
 	require.NoError(t, env.GetWorkflowError())
 	var result RunResult
 	require.NoError(t, env.GetWorkflowResult(&result))

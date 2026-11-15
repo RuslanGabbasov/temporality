@@ -313,9 +313,11 @@ type RunInput struct {
 	TimeoutSeconds  int     `json:"timeout_seconds,omitempty"` // 0 = uncapped; checked at turn boundaries
 	// Model prices resolved once at run-config time so the workflow can score
 	// the budget without carrying the price table. Zero = no price configured;
-	// a USD budget then degrades to the token cap.
-	ModelPromptPricePer1k float64 `json:"model_prompt_price_per_1k,omitempty"`
-	ModelCompPricePer1k   float64 `json:"model_comp_price_per_1k,omitempty"`
+	// a USD budget then degrades to the token cap. The unit is dollars per
+	// million tokens — what a vendor price page says — so budget scoring and
+	// the cost reports read from one number.
+	ModelPromptPricePer1M float64 `json:"model_prompt_price_per_1m,omitempty"`
+	ModelCompPricePer1M   float64 `json:"model_comp_price_per_1m,omitempty"`
 	// Team, when set, turns the run into a team program run (docs/agent-teams.md
 	// §9): the root makes no model calls; the compiled protocol drives child
 	// AgentRuns through the regular plan/delegate machinery instead.
@@ -4867,9 +4869,9 @@ func policyStopReason(input RunInput, usedTokens int, usedCostUSD float64) strin
 func modelCallCostUSD(input RunInput, usage llm.Usage) float64 {
 	cached := min(usage.CachedTokens, usage.PromptTokens)
 	fresh := usage.PromptTokens - cached
-	return (float64(fresh)/1000)*input.ModelPromptPricePer1k +
-		(float64(cached)/1000)*input.ModelPromptPricePer1k*cachedPriceFactor +
-		(float64(usage.CompletionTokens)/1000)*input.ModelCompPricePer1k
+	return float64(fresh)/1e6*input.ModelPromptPricePer1M +
+		float64(cached)/1e6*input.ModelPromptPricePer1M*cachedPriceFactor +
+		float64(usage.CompletionTokens)/1e6*input.ModelCompPricePer1M
 }
 
 // cachedPriceFactor is the billing factor applied to cached prompt tokens.

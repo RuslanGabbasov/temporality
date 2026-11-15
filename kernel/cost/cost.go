@@ -1,7 +1,8 @@
 // Package cost provides model-call cost accounting. Prices are configured
-// via KERNEL_MODEL_PRICES as "model:prompt_per_1k:completion_per_1k" comma
-// entries. Costs are derived from token counts in model.completed events;
-// no new persistent storage is needed.
+// via KERNEL_MODEL_PRICES as "model:prompt_per_1m:completion_per_1m" comma
+// entries — per million tokens, the unit every vendor quotes, so a price is
+// copied off a price page without conversion. Costs are derived from token
+// counts in model.completed events; no new persistent storage is needed.
 package cost
 
 import (
@@ -9,32 +10,52 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	neturl "net/url"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/temporality-project/temporality/observation"
 )
 
-// Price is the cost per 1000 tokens for a model.
+// Price is the cost per 1 000 000 tokens for a model: the unit OpenAI,
+// Anthropic and the rest publish, so "gpt-4o:2.50:10.00" is gpt-4o verbatim
+// from its price page. Per-1k would have made the same copy 1000× dearer.
 type Price struct {
 	Model       string  `json:"model"`
-	PromptPer1k float64 `json:"prompt_per_1k"`
-	CompPer1k   float64 `json:"completion_per_1k"`
+	PromptPer1M float64 `json:"prompt_per_1m"`
+	CompPer1M   float64 `json:"completion_per_1m"`
 }
 
-// Config maps model names to their prices.
+// Config maps model names to their prices. The table sits behind a pointer so
+// every copy shares it: the run policy, the cost API and the settings route
+// each receive their own Config value, and a price saved at runtime has to
+// reach all of them without a restart. Access is guarded — a save from the
+// settings API runs while an aggregation walks the same table.
 type Config struct {
-	prices map[string]Price
+	table *priceTable
 }
 
-// ParsePrices parses KERNEL_MODEL_PRICES format: "model:p1k:c1k,model2:p1k:c1k"
+type priceTable struct {
+	mu      sync.RWMutex
+	byModel map[string]Price
+}
+
+// maxPricePer1M bounds a saved price: dollars per million tokens, where the
+// dearest frontier models sit far below $150 — anything past this is a typo
+// (most often a per-token figure with the decimal in the wrong place).
+const maxPricePer1M = 10000
+
+// ParsePrices parses KERNEL_MODEL_PRICES format: "model:prompt_per_1m:completion_per_1m" comma
+// entries. The env value is the seed — a list saved from the settings UI
+// replaces it wholesale (see SetPrices).
 func ParsePrices(raw string) (Config, error) {
-	cfg := Config{prices: map[string]Price{}}
+	cfg := Config{table: &priceTable{byModel: map[string]Price{}}}
 	if raw == "" {
 		return cfg, nil
 	}
@@ -45,7 +66,7 @@ func ParsePrices(raw string) (Config, error) {
 		}
 		parts := strings.Split(entry, ":")
 		if len(parts) != 3 {
-			return cfg, fmt.Errorf("price entry %q must be model:prompt_per_1k:completion_per_1k", entry)
+			return cfg, fmt.Errorf("price entry %q must be model:prompt_per_1m:completion_per_1m", entry)
 		}
 		prompt, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
 		if err != nil {
@@ -56,38 +77,91 @@ func ParsePrices(raw string) (Config, error) {
 			return cfg, fmt.Errorf("invalid completion price in %q: %w", entry, err)
 		}
 		model := strings.TrimSpace(parts[0])
-		cfg.prices[model] = Price{Model: model, PromptPer1k: prompt, CompPer1k: comp}
+		cfg.table.byModel[model] = Price{Model: model, PromptPer1M: prompt, CompPer1M: comp}
 	}
 	return cfg, nil
+}
+
+// ValidatePrices decides what a price list may contain — the single source
+// of the rules, shared by the settings route (422 before anything is
+// written) and SetPrices.
+func ValidatePrices(list []Price) error {
+	for _, price := range list {
+		if strings.TrimSpace(price.Model) == "" {
+			return errors.New("every price needs a model")
+		}
+		if len(price.Model) > 200 {
+			return fmt.Errorf("model name %q is too long", price.Model)
+		}
+		for name, value := range map[string]float64{"prompt_per_1m": price.PromptPer1M, "completion_per_1m": price.CompPer1M} {
+			if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > maxPricePer1M {
+				return fmt.Errorf("invalid %s for %q: %v", name, price.Model, value)
+			}
+		}
+	}
+	return nil
+}
+
+// SetPrices replaces the whole table: the settings API saves the list it
+// rendered, so one write is the complete truth. Every holder of this Config
+// sees the change, because they share the table.
+func (c Config) SetPrices(list []Price) error {
+	if c.table == nil {
+		return errors.New("cost config is not initialized")
+	}
+	if err := ValidatePrices(list); err != nil {
+		return err
+	}
+	next := make(map[string]Price, len(list))
+	for _, price := range list {
+		price.Model = strings.TrimSpace(price.Model)
+		next[price.Model] = price
+	}
+	c.table.mu.Lock()
+	defer c.table.mu.Unlock()
+	c.table.byModel = next
+	return nil
 }
 
 // ModelCost returns the cost in dollars for a model call. Cached prompt tokens
 // are billed at half the prompt price (see kernel/agent cachedPriceFactor for
 // the same rule in budget accounting).
 func (c Config) ModelCost(model string, promptTokens, cachedTokens, completionTokens int) float64 {
-	price, ok := c.prices[model]
+	price, ok := c.Price(model)
 	if !ok {
 		return 0
 	}
 	cached := min(cachedTokens, promptTokens)
 	fresh := promptTokens - cached
-	return (float64(fresh)/1000)*price.PromptPer1k +
-		(float64(cached)/1000)*price.PromptPer1k*0.5 +
-		(float64(completionTokens)/1000)*price.CompPer1k
+	return (float64(fresh) / 1e6 * price.PromptPer1M) +
+		(float64(cached) / 1e6 * price.PromptPer1M * 0.5) +
+		(float64(completionTokens) / 1e6 * price.CompPer1M)
 }
 
 // Price returns the configured price for a model and whether one exists.
 func (c Config) Price(model string) (Price, bool) {
-	price, ok := c.prices[model]
+	if c.table == nil {
+		return Price{}, false
+	}
+	c.table.mu.RLock()
+	defer c.table.mu.RUnlock()
+	price, ok := c.table.byModel[model]
 	return price, ok
 }
 
-// Prices returns all configured prices.
+// Prices returns all configured prices, ordered by model: the settings API
+// renders them, and a stable order keeps the payload diffable.
 func (c Config) Prices() []Price {
-	result := make([]Price, 0, len(c.prices))
-	for _, p := range c.prices {
-		result = append(result, p)
+	if c.table == nil {
+		return []Price{}
 	}
+	c.table.mu.RLock()
+	defer c.table.mu.RUnlock()
+	result := make([]Price, 0, len(c.table.byModel))
+	for _, price := range c.table.byModel {
+		result = append(result, price)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Model < result[j].Model })
 	return result
 }
 
@@ -345,11 +419,6 @@ func (a *CostAPI) SetHumanFactors(f HumanFactors) {
 // unknownAgentID labels runs whose start event carried no agent identity
 // (legacy or externally started runs).
 const unknownAgentID = "-"
-
-// PricesHandler returns configured model prices.
-func (a *CostAPI) PricesHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"prices": a.config.Prices()})
-}
 
 // RunCostHandler returns cost for a specific run.
 func (a *CostAPI) RunCostHandler(w http.ResponseWriter, r *http.Request) {
