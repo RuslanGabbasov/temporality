@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, useCallback, useRef, type ChangeEvent, type CSSProperties, type ReactNode } from 'react'
-import { Button, Checkbox, Heading, InlineNotification, Search, Tag } from '@carbon/react'
+import { Button, Checkbox, Heading, InlineNotification, Tag } from '@carbon/react'
 import { Copy, Download, Renew, Settings, TrashCan, Upload, ChevronRight, ChevronDown } from '@carbon/icons-react'
 import ProjectRequired from './ProjectRequired'
 import Markdown from './Markdown'
@@ -1110,14 +1110,15 @@ export default function Storage({ project }: { project: string }) {
         {/* Left: search input + «select» toggle, then results or the lazy tree */}
         <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', overflowY: 'auto', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Search
-                size="sm"
-                labelText=""
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <input
+                className="toolbar-search"
+                type="search"
+                style={{ width: '100%' }}
                 placeholder={t('storage.search_placeholder')}
+                aria-label={t('storage.search_placeholder')}
                 value={query}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
-                onClear={() => setQuery('')}
               />
             </div>
             <Button
