@@ -101,10 +101,10 @@ func ListDir(root, project, area, rel string) ([]FileEntry, error) {
 			if children, err := os.ReadDir(filepath.Join(dir, name)); err == nil {
 				item.Entries = len(children)
 			}
-			// The tree shows directory sizes next to file sizes: an unmeasured
-			// directory reads as an empty box, and «43 items» says nothing about
-			// what actually weighs on the disk.
-			item.Bytes = DirSize(filepath.Join(dir, name))
+			// Deliberately NOT measured here: walking a multi-million-file
+			// workspace synchronously turned the first paint into a 30s
+			// spinner. Sizes arrive through DirSizesFor (dir-sizes route),
+			// rendered in the background over the already-visible tree.
 		} else {
 			item.Bytes = info.Size()
 		}
@@ -240,6 +240,39 @@ func DirSize(abs string) int64 {
 	})
 	dirSizeCache.Store(abs, dirSizeEntry{bytes: total, at: time.Now()})
 	return total
+}
+
+// DirSizeResult is one measured child directory of a level.
+type DirSizeResult struct {
+	Path  string `json:"path"` // slash-separated, relative to the area root
+	Bytes int64  `json:"bytes"`
+}
+
+// DirSizesFor measures the child directories of one level — the async
+// companion of ListDir: the tree paints immediately from the cheap listing
+// and fills sizes in afterwards (each DirSize is cached, so a repeat walk of
+// the same level is free).
+func DirSizesFor(root, project, area, rel string) ([]DirSizeResult, error) {
+	dir, err := ResolveAreaPath(root, project, area, rel)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []DirSizeResult{}, nil
+		}
+		return nil, err
+	}
+	sizes := make([]DirSizeResult, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		childRel := strings.TrimPrefix(path.Join(cleanRel(rel), entry.Name()), "/")
+		sizes = append(sizes, DirSizeResult{Path: childRel, Bytes: DirSize(filepath.Join(dir, entry.Name()))})
+	}
+	return sizes, nil
 }
 
 // invalidateDirSizes drops the cached sizes of the mutated directory and its

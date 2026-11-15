@@ -20,6 +20,7 @@ import {
   storagePutPolicies,
   storageFileHistory,
   storageRunFiles,
+  storageDirSizes,
   type StorageFileEntry,
   type StorageFileChange,
   type StorageRunFile,
@@ -245,6 +246,25 @@ export default function Storage({ project }: { project: string }) {
     return { workspace: ws.entries, cache: cache.entries }
   }, [project])
 
+  // loadSizes fills directory sizes AFTER the cheap listing painted: the
+  // first walk over a multi-million-file workspace runs in this background
+  // request (its result is cached server-side), never in front of the tree.
+  const loadSizes = useCallback(async (area: AreaName, dirPath: string) => {
+    try {
+      const res = await storageDirSizes(project.trim(), area, dirPath)
+      const byPath = new Map((res.sizes ?? []).map((s) => [s.path, s.bytes]))
+      if (byPath.size === 0) return
+      const patch = (entries: StorageFileEntry[]): StorageFileEntry[] =>
+        entries.map((entry) => (entry.dir && byPath.has(entry.path) ? { ...entry, bytes: byPath.get(entry.path) as number } : entry))
+      if (dirPath === '') {
+        setAreas((prev) => (prev[area] ? { ...prev, [area]: patch(prev[area]) } : prev))
+      } else {
+        const k = `${area}:${dirPath}`
+        setChildren((prev) => (prev[k] ? { ...prev, [k]: patch(prev[k]) } : prev))
+      }
+    } catch { /* background fill — a missing sizes answer keeps the count fallback */ }
+  }, [project])
+
   const load = useCallback(async () => {
     if (!project.trim()) return
     setError('')
@@ -258,8 +278,10 @@ export default function Storage({ project }: { project: string }) {
       setPreviewError('')
       setBatch({})
       setBatchNote('')
+      void loadSizes('workspace', '')
+      void loadSizes('cache', '')
     } catch (f) { setError(message(f)) }
-  }, [project, fetchRoots])
+  }, [project, fetchRoots, loadSizes])
 
   useEffect(() => {
     setQuery('')
@@ -309,6 +331,7 @@ export default function Storage({ project }: { project: string }) {
     try {
       const page = await storageListDir(project.trim(), area, dirPath)
       setChildren((current) => ({ ...current, [k]: page.entries }))
+      void loadSizes(area, dirPath)
     } catch (f) { setError(message(f)) }
     finally { setLoadingDir(null) }
   }

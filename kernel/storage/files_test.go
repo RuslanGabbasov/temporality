@@ -94,11 +94,12 @@ func TestListDirDeletesAndUploads(t *testing.T) {
 	}
 }
 
-// The tree shows what a directory weighs: ListDir measures child subtrees,
-// and the number updates after mutations — the size cache must serve repeat
-// expands without re-walking, yet an upload or delete must show up
-// immediately instead of waiting for the TTL.
-func TestListDirReportsDirectorySizes(t *testing.T) {
+// Sizes arrive separately from the listing: ListDir stays cheap enough to
+// paint the tree immediately (walking a multi-million-file workspace
+// synchronously was a 30s spinner), DirSizesFor measures the level in the
+// background — and an upload or delete shows up in the measured numbers
+// right away through the size-cache invalidation.
+func TestListDirThenDirSizesForMeasuresChildren(t *testing.T) {
 	root := t.TempDir()
 	area := filepath.Join(root, "projects", "omni")
 	if err := os.MkdirAll(filepath.Join(area, "docs"), 0o755); err != nil {
@@ -108,35 +109,44 @@ func TestListDirReportsDirectorySizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The listing itself never measures directories — that is the point.
 	entries, err := ListDir(root, "omni", "workspace", "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Bytes != 100 {
-		t.Fatalf("directory size = %+v, want 100 bytes", entries)
+	if len(entries) != 1 || !entries[0].Dir || entries[0].Bytes != 0 {
+		t.Fatalf("listing must stay unmeasured, got %+v", entries)
 	}
-	// Repeat listing answers from the cache with the same number.
-	again, err := ListDir(root, "omni", "workspace", "")
-	if err != nil || again[0].Bytes != 100 {
-		t.Fatalf("cached listing = %+v (err %v), want 100 bytes", again, err)
+
+	sizes, err := DirSizesFor(root, "omni", "workspace", "")
+	if err != nil {
+		t.Fatalf("sizes: %v", err)
+	}
+	if len(sizes) != 1 || sizes[0].Path != "docs" || sizes[0].Bytes != 100 {
+		t.Fatalf("sizes = %+v, want docs=100", sizes)
+	}
+	// Repeat measurement answers from the cache with the same number.
+	again, err := DirSizesFor(root, "omni", "workspace", "")
+	if err != nil || len(again) != 1 || again[0].Bytes != 100 {
+		t.Fatalf("cached sizes = %+v (err %v), want docs=100", again, err)
 	}
 
 	// An upload invalidates the ancestors: the new size is immediate.
 	if err := StoreFile(root, "omni", "workspace", "docs/b.md", make([]byte, 25), false); err != nil {
 		t.Fatalf("store: %v", err)
 	}
-	after, err := ListDir(root, "omni", "workspace", "")
-	if err != nil || after[0].Bytes != 125 {
-		t.Fatalf("after upload = %+v (err %v), want 125 bytes", after, err)
+	after, err := DirSizesFor(root, "omni", "workspace", "")
+	if err != nil || len(after) != 1 || after[0].Bytes != 125 {
+		t.Fatalf("after upload = %+v (err %v), want docs=125", after, err)
 	}
 
 	// So does a delete.
 	if err := DeletePath(root, "omni", "workspace", "docs/a.md"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	final, err := ListDir(root, "omni", "workspace", "")
-	if err != nil || final[0].Bytes != 25 {
-		t.Fatalf("after delete = %+v (err %v), want 25 bytes", final, err)
+	final, err := DirSizesFor(root, "omni", "workspace", "")
+	if err != nil || len(final) != 1 || final[0].Bytes != 25 {
+		t.Fatalf("after delete = %+v (err %v), want docs=25", final, err)
 	}
 }
 

@@ -81,6 +81,22 @@ func registerStorageFileRoutes(mux *http.ServeMux, gate *controlplane.Gate, visi
 		writeJSON(w, 200, map[string]any{"entries": entries})
 	})
 
+	// Child directory sizes, fetched in the background after the (cheap)
+	// listing painted: measuring a multi-million-file workspace synchronously
+	// turned the first load into a 30s spinner (docs/sandbox-storage.md §7.2).
+	mux.HandleFunc("GET /v1/workspace/storage/projects/{projectID}/dir-sizes", func(w http.ResponseWriter, r *http.Request) {
+		project, area, rel, ok := authorize(w, r, false)
+		if !ok {
+			return
+		}
+		sizes, err := storage.DirSizesFor(root, project, area, rel)
+		if err != nil {
+			writeError(w, httpStatusFor(err), err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"sizes": sizes})
+	})
+
 	// File content: inline preview by default, attachment with ?download=1.
 	// Directory requests redirect the caller to the listing route.
 	mux.HandleFunc("GET /v1/workspace/storage/projects/{projectID}/file", func(w http.ResponseWriter, r *http.Request) {

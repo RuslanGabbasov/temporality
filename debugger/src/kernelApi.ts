@@ -591,6 +591,15 @@ export function storageRunFiles(project: string, run: string, limit = 100): Prom
   return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}/file/run-files?${params.toString()}`)
 }
 
+/**
+ * Child directory sizes for one level — the async companion of the listing:
+ * the tree paints from the cheap dir response and fills sizes in afterwards.
+ */
+export function storageDirSizes(project: string, area: string, path: string): Promise<{ sizes: Array<{ path: string; bytes: number }> }> {
+  const params = new URLSearchParams({ area, path })
+  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}/dir-sizes?${params.toString()}`)
+}
+
 export interface StorageSweepBody {
   dry_run: boolean
   areas: ('cache' | 'workspace')[]
