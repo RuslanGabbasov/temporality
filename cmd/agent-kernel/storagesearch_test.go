@@ -394,3 +394,35 @@ func TestStorageSearchDepthBound(t *testing.T) {
 	require.Equal(t, []string{"deep.txt"}, storageSearchPaths(view))
 	require.False(t, view.Truncated)
 }
+
+// The 2026-11-15 incident: a lexical DFS walked into the capital-letter
+// subtree first (node_modules under SuperApp), burned the whole budget
+// inside it, and the root-level file the operator saw as the tree's first
+// row was never reached — search answered «nothing found». Breadth-first
+// ordering pins the fix: every level-N match lands before anything deeper.
+func TestStorageSearchVisitsShallowLevelsBeforeDeepSubtrees(t *testing.T) {
+	root := t.TempDir()
+	area := filepath.Join(root, "projects", "alpha")
+	// «A-huge» sorts before «z-root-match.txt» — the order a DFS would visit
+	// and get stuck in.
+	huge := filepath.Join(area, "A-huge")
+	require.NoError(t, os.MkdirAll(filepath.Join(huge, "nested"), 0o755))
+	for i := 0; i < 50; i++ {
+		require.NoError(t, os.WriteFile(filepath.Join(huge, fmt.Sprintf("file-%02d.txt", i)), []byte("x"), 0o644))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(huge, "nested", "deep-match.txt"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(area, "z-root-match.txt"), []byte("x"), 0o644))
+
+	walk := &storageSearchWalk{query: "match", queryLower: "match", hits: make([]storageSearchResult, 0, 4)}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if !walk.area(ctx, area, "workspace") {
+		t.Fatal("walk must complete inside the budget")
+	}
+	paths := make([]string, 0, len(walk.hits))
+	for _, hit := range walk.hits {
+		paths = append(paths, hit.Path)
+	}
+	require.Equal(t, []string{"z-root-match.txt", "A-huge/nested/deep-match.txt"}, paths,
+		"the shallow match must land before the deep one — BFS order, not lexical DFS")
+}

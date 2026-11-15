@@ -12,8 +12,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -201,67 +201,79 @@ type storageSearchWalk struct {
 	scanned    int
 }
 
-// area walks one area's tree and appends matching rows in walk order (the
-// caller walks workspace first, so cross-area ties stay stable). It reports
+// area walks one area's tree BREADTH-FIRST and appends matching rows in
+// walk order (the caller walks workspace first, so cross-area ties stay
+// stable). DFS was the wrong shape here: filepath.WalkDir descends
+// lexically, so a capital-letter directory holding a million node_modules
+// files sorts before most root files — the budget expired inside the first
+// giant subtree and the operator's file, visible in the tree's first row,
+// was never reached («search finds nothing» incident, 2026-11-15). Levels
+// instead: every file of depth N is matched before anything at N+1, so the
+// shallow, human-visible files are always inside the budget. It reports
 // false when the shared budget or the entry/match caps stopped the walk —
-// the caller then reports truncated and skips the remaining area, whose rows
-// under an exhausted budget would be arbitrary. Unreadable entries are
+// the caller then reports truncated and skips the remaining area, whose
+// rows under an exhausted budget would be arbitrary. Unreadable entries are
 // skipped instead of failing the query: races with the sweeper must not 500
 // a search.
 func (w *storageSearchWalk) area(ctx context.Context, base, area string) bool {
 	deadline, _ := ctx.Deadline() // the WithTimeout budget above always sets one
-	complete := true
-	_ = filepath.WalkDir(base, func(abs string, d fs.DirEntry, err error) error {
+	type pending struct {
+		abs   string
+		rel   string // slash-separated, relative to the area root ("" = root)
+		depth int
+	}
+	queue := []pending{{abs: base, rel: "", depth: 0}}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		entries, err := os.ReadDir(current.abs)
 		if err != nil {
-			// A missing area (the project never ran) or an entry that
+			// A missing area (the project never ran) or a directory that
 			// vanished mid-walk is a normal empty state, not a failure.
-			return nil
+			continue
 		}
-		if ctx.Err() != nil || time.Now().After(deadline) ||
-			w.scanned >= storageSearchMaxScanned || len(w.hits) >= storageSearchMaxMatches {
-			complete = false
-			return fs.SkipAll
+		for _, entry := range entries {
+			if ctx.Err() != nil || time.Now().After(deadline) ||
+				w.scanned >= storageSearchMaxScanned || len(w.hits) >= storageSearchMaxMatches {
+				return false
+			}
+			w.scanned++
+			rel := entry.Name()
+			if current.rel != "" {
+				rel = current.rel + "/" + entry.Name()
+			}
+			// The relative path contains the file name, so one check satisfies
+			// both contract clauses (name match and path match). The exact-case
+			// pass first spares the lowering allocation for verbatim hits.
+			if !strings.Contains(rel, w.query) && !strings.Contains(strings.ToLower(rel), w.queryLower) {
+				if entry.IsDir() && current.depth+1 < storageSearchMaxDepth {
+					queue = append(queue, pending{abs: filepath.Join(current.abs, entry.Name()), rel: rel, depth: current.depth + 1})
+				}
+				continue
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				continue
+			}
+			var bytes int64
+			if !entry.IsDir() {
+				// Directories report no size — dir-listing rows show none
+				// either, and search rows render through the same components.
+				bytes = info.Size()
+			}
+			w.hits = append(w.hits, storageSearchResult{
+				Path:  rel,
+				Area:  area,
+				Bytes: bytes,
+				ModAt: info.ModTime().UTC(),
+				Dir:   entry.IsDir(),
+			})
+			if entry.IsDir() && current.depth+1 < storageSearchMaxDepth {
+				queue = append(queue, pending{abs: filepath.Join(current.abs, entry.Name()), rel: rel, depth: current.depth + 1})
+			}
 		}
-		w.scanned++
-		rel, relErr := filepath.Rel(base, abs)
-		if relErr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if rel == "." {
-			return nil // the area root itself is not a searchable row
-		}
-		// §11's depth bound: subtrees past it are outside the search scope,
-		// the same way the tree route's depth parameter cuts rendering.
-		if d.IsDir() && strings.Count(rel, "/")+1 >= storageSearchMaxDepth {
-			return fs.SkipDir
-		}
-		// The relative path contains the file name, so one check satisfies
-		// both contract clauses (name match and path match). The exact-case
-		// pass first spares the lowering allocation for verbatim hits.
-		if !strings.Contains(rel, w.query) && !strings.Contains(strings.ToLower(rel), w.queryLower) {
-			return nil
-		}
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return nil
-		}
-		var bytes int64
-		if !d.IsDir() {
-			// Directories report no size — dir-listing rows show none
-			// either, and search rows render through the same components.
-			bytes = info.Size()
-		}
-		w.hits = append(w.hits, storageSearchResult{
-			Path:  rel,
-			Area:  area,
-			Bytes: bytes,
-			ModAt: info.ModTime().UTC(),
-			Dir:   d.IsDir(),
-		})
-		return nil
-	})
-	return complete
+	}
+	return true
 }
 
 // sortStorageSearchResults orders rows per the contract: recent by mtime
