@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, useCallback, useRef, type ChangeEvent, type CSSProperties, type ReactNode } from 'react'
 import { Button, Checkbox, Heading, InlineNotification, Tag } from '@carbon/react'
-import { Copy, Download, Renew, Settings, TrashCan, Upload, ChevronRight, ChevronDown, Checkbox as CheckboxIcon, ArrowsVertical } from '@carbon/icons-react'
+import { Copy, Download, Renew, Settings, TrashCan, Upload, ChevronRight, ChevronDown, Checkbox as CheckboxIcon, ArrowsVertical, Close } from '@carbon/icons-react'
 import ProjectRequired from './ProjectRequired'
 import Markdown from './Markdown'
 import { useConfirm } from './ConfirmDialog'
@@ -923,29 +923,34 @@ export default function Storage({ project }: { project: string }) {
   })()
 
   const selectBar = selectMode && (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.5rem', padding: '0.4rem 0.6rem', border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-elevated)', flexShrink: 0 }}>
-      <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>{t('storage.select_hint')}</span>
-      <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-1)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+      <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {t('storage.select_count', { n: String(batchItems.length) })} · {fmtBytes(batchBytes)}
       </span>
       {deleteProgress && (
-        <span style={{ fontSize: '0.72rem', color: 'var(--tm-warning)' }}>
+        <span style={{ fontSize: '0.7rem', color: 'var(--tm-warning)', whiteSpace: 'nowrap' }}>
           {t('storage.bulk_progress', { done: String(deleteProgress.done), total: String(deleteProgress.total) })}
         </span>
       )}
-      {batchNote && <span style={{ fontSize: '0.72rem', color: 'var(--tm-success)' }}>{batchNote}</span>}
-      <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+      {batchNote && <span style={{ fontSize: '0.7rem', color: 'var(--tm-success)', whiteSpace: 'nowrap' }}>{batchNote}</span>}
+      <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
         <Button
-          size="sm" kind="danger--ghost" renderIcon={TrashCan}
+          size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan}
+          iconDescription={t('storage.bulk_delete')} tooltipPosition="bottom"
           disabled={busy || deleteProgress !== null || batchItems.length === 0}
           onClick={() => void deleteSelected()}
-        >{t('storage.bulk_delete')}</Button>
+        />
         <Button
-          size="sm" kind="ghost" renderIcon={Download}
+          size="sm" kind="ghost" hasIconOnly renderIcon={Download}
+          iconDescription={t('storage.bulk_download')} tooltipPosition="bottom"
           disabled={busy || batchItems.length === 0}
           onClick={() => void downloadSelected()}
-        >{t('storage.bulk_download')}</Button>
-        <Button size="sm" kind="secondary" disabled={busy} onClick={exitSelect}>{t('storage.select_exit')}</Button>
+        />
+        <Button
+          size="sm" kind="ghost" hasIconOnly renderIcon={Close}
+          iconDescription={t('storage.select_exit')} tooltipPosition="bottom"
+          disabled={busy} onClick={exitSelect}
+        />
       </span>
     </div>
   )
@@ -1135,7 +1140,6 @@ export default function Storage({ project }: { project: string }) {
       <input ref={uploadInput} type="file" multiple hidden onChange={(e) => void onUploadPicked(e)} />
       {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} onCloseButtonClick={() => setError('')} style={{ marginBottom: '0.75rem' }} />}
       {breadcrumb}
-      {selectBar}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 380px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Left: search input + «select» toggle, then results or the lazy tree */}
         <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', overflowY: 'auto', minHeight: 0 }}>
@@ -1175,6 +1179,7 @@ export default function Storage({ project }: { project: string }) {
               </span>
             )}
           </div>
+          {selectBar}
           {runFiles ? runFilesPane() : searchMode ? searchPane() : (
             <>
               {areaSection('workspace')}
