@@ -247,11 +247,22 @@ docs/system-dashboard.md §1).</li>
 <p>Источник — свежий снапшот (кэш в памяти ядра; <code>?refresh=1</code> — пересчёт).</p>
 <h3 id="52-детали-проекта"><a class="anchor" href="#52-детали-проекта" aria-label="Section link">#</a>5.2. Детали проекта</h3><p><code>GET /v1/workspace/storage/projects/{id}?depth=4</code> — дерево с размерами и
 mtimes до глубины N, топ файлов по размеру. Reader.</p>
-<h3 id="53-ручная-уборка-фаза-2-не-реализована"><a class="anchor" href="#53-ручная-уборка-фаза-2-не-реализована" aria-label="Section link">#</a>5.3. Ручная уборка (фаза 2, не реализована)</h3><p><code>POST /v1/workspace/storage/projects/{id}/sweep</code>
-<code>{ &quot;dry_run&quot;: true, &quot;areas&quot;: [&quot;cache&quot;, &quot;workspace&quot;] }</code> (operator).
-Возвращает план и факт: что удалено/будет удалено, сколько байт освобождено.
-Аудит + событие. Реализованный файловый API (фаза 1): <code>GET dir/file</code>,
-<code>POST files</code>, <code>DELETE file</code> — на <code> /v1/workspace/storage/...</code>.</p>
+<h3 id="53-уборка-и-политики-реализовано"><a class="anchor" href="#53-уборка-и-политики-реализовано" aria-label="Section link">#</a>5.3. Уборка и политики (реализовано)</h3><p><code>POST /v1/workspace/storage/projects/{id}/sweep</code> (operator):
+<code>{ &quot;dry_run&quot;: true, &quot;areas&quot;: [&quot;cache&quot;, &quot;workspace&quot;],    &quot;older_than_hours&quot;: 168, &quot;paths&quot;: [&quot;...&quot;] }</code>.
+Возвращает план (<code>dry_run</code>) или факт: что удалено, сколько байт
+освобождено. <code>paths</code> — выборочное удаление (multi-select UI), без
+проверки возраста. Аудит + события <code>storage.evicted</code> (cap 100 на
+запуск) и <code>storage.swept</code> (сводка).</p>
+<p><code>GET</code>/<code>PUT /v1/workspace/storage/policies</code> — политики retention в
+<code>workspace_setting[&quot;storage.policy&quot;]</code>: <code>{enabled, cache_ttl_hours, workspace_stale_hours, quota_bytes}</code>. Дефолт: автоудаление ВЫКЛ,
+кэш 7 дней. При <code>enabled</code> часовой sweeper чистит кэш и старый
+воркспейс (пропуская <code>uploads/</code>, <code>inbox/</code>), пишет <code>storage.swept</code> и
+<code>storage.quota_exceeded</code> при превышении квоты.</p>
+<p>Поиск: <code>GET /v1/workspace/storage/projects/{id}/search?q=&amp;area=&amp;sort=&amp;limit=</code>
+(reader) — подстрока по имени/пути, сортировка recent/size/name,
+бюджет ~1.5s с <code>truncated</code> при исчерпании (реализовано).</p>
+<p>Файловый API (фаза 1): <code>GET dir/file</code>, <code>POST files</code>, <code>DELETE file</code> —
+на <code>/v1/workspace/storage/...</code>.</p>
 <h3 id="54-здоровье-сервера"><a class="anchor" href="#54-здоровье-сервера" aria-label="Section link">#</a>5.4. Здоровье сервера</h3><p><code>GET /v1/system/health</code> (reader):</p>
 <pre><code class="language-json">{
   &quot;disk&quot;: [{ &quot;path&quot;: &quot;/srv/temporality/.sandbox&quot;, &quot;total_bytes&quot;: 1e12, &quot;free_bytes&quot;: 2.3e11 }],
@@ -265,16 +276,20 @@ mtimes до глубины N, топ файлов по размеру. Reader.</
 существующему docker-бинарному пути ядра.</p>
 <h3 id="55-события-журнала"><a class="anchor" href="#55-события-журнала" aria-label="Section link">#</a>5.5. События журнала</h3><ul>
 <li><code>storage.snapshot</code> — итоги планового обхода (по проектам, свободное место) — <strong>реализовано</strong>;</li>
-<li><code>storage.evicted</code> — каждое удаление (путь, байты, политика) — фаза 2;</li>
-<li><code>storage.quota_exceeded</code> — проект вышел за квоту — фаза 2;</li>
-<li><code>storage.swept</code> — сводка цикла уборки (освобождено байт, длительность) — фаза 2.</li>
+<li><code>storage.evicted</code> — каждое удаление (путь, байты, политика) — <strong>реализовано</strong> (cap 100 на запуск + <code>evicted_suppressed</code> в сводке);</li>
+<li><code>storage.quota_exceeded</code> — проект вышел за квоту — <strong>реализовано</strong> (при <code>quota_bytes&gt;0</code> в политике);</li>
+<li><code>storage.swept</code> — сводка цикла уборки (освобождено байт, длительность) — <strong>реализовано</strong>.</li>
 </ul>
 <h2 id="6-sweeper-в-ядре"><a class="anchor" href="#6-sweeper-в-ядре" aria-label="Section link">#</a>6. Sweeper в ядре</h2><p>Не внешний cron: ядро уже владеет docker-бинарем, journal и настройками.</p>
 <ul>
 <li>Тикер в <code>agent-kernel</code> (старт при буте): обход-снапшот раз в час
 (<code>storage.snapshot</code>, <code>KERNEL_STORAGE_SWEEPER</code>, default on); политика
-уборки (квоты → кэш → мусор, удаления) — фаза 2, пока обход ничего
-не удаляет.</li>
+уборки (квоты → кэш → мусор, удаления) — часовой sweeper за
+<code>storage.policy.enabled</code> (по умолчанию выключен): <code>storage.swept</code> на
+каждый цикл, удаления — через <code>storage.evicted</code>.</li>
+<li>Отдельно от политик: run-scoped <code>/scratch</code> свипится по TTL
+(<code>TEMPORALITY_TEAM_SCRATCH_TTL</code>, дефолт 168h) — см.
+<code>SweepRunScratch</code>, тест-гард <code>kernel/agent/scratchsweep_test.go</code>.</li>
 <li>Порядок (план): снапшот → квоты (<code>storage.quota_exceeded</code>) → политика кэша →
 политика мусора воркспейса → <code>storage.swept</code>.</li>
 <li>Каждый шаг логируется slog-ом и журналом; ошибка обхода одного проекта не
@@ -287,9 +302,13 @@ mtimes до глубины N, топ файлов по размеру. Reader.</
 <li><strong>Виджет «Сервер»</strong>: load average, память, свободное место, объём
 docker-образов. Красные пороги — как у health-полосы.</li>
 </ul>
-<h3 id="72-страница-хранилище-настройки-хранилище-operator"><a class="anchor" href="#72-страница-хранилище-настройки-хранилище-operator" aria-label="Section link">#</a>7.2. Страница «Хранилище» (Настройки → Хранилище, operator)</h3><p>Таблица проектов (объёмы, квота, последняя активность, статус последней
-уборки) + дерево/топ путей проекта + dry-run и запуск уборки, история
-<code>storage.evicted</code> рядом. Для reader — read-only.</p>
+<h3 id="72-страница-хранилище-навигация-хранилище"><a class="anchor" href="#72-страница-хранилище-навигация-хранилище" aria-label="Section link">#</a>7.2. Страница «Хранилище» (Навигация → Хранилище)</h3><p>Поиск по имени/пути с плоской выдачей и подсветкой; breadcrumbs;
+сортировка дерева; обзор-панель (диск, квота с порогами, топ-тяжёлые
+каталоги, последние изменения); multi-select с массовым удалением
+(«N из M») и скачиванием; диалог «Очистить…» (areas + возраст →
+dry-run-план → запуск → итог); политики retention за шестерёнкой;
+превью/загрузка/скачивание/удаление — как раньше. Для reader —
+read-only.</p>
 <h3 id="73-карточка-проекта"><a class="anchor" href="#73-карточка-проекта" aria-label="Section link">#</a>7.3. Карточка проекта</h3><p>Строка «хранилище: 41 GiB / 50 GiB» со ссылкой на страницу хранилища.</p>
 <h2 id="8-дисциплина-артефактов"><a class="anchor" href="#8-дисциплина-артефактов" aria-label="Section link">#</a>8. Дисциплина артефактов</h2><p>Файл в воркспейсе агент создаёт законно (это транспорт); проблема —
 подмена понятий в отчёте. Решение из двух частей:</p>
@@ -312,12 +331,14 @@ docker-образов. Красные пороги — как у health-поло
 по крону (без удалений).</li>
 <li>Критерий: на стенде с реальным проектом видно top-путей и рост за окно.</li>
 </ul>
-<h3 id="фаза-2-уборка-и-мягкие-квоты"><a class="anchor" href="#фаза-2-уборка-и-мягкие-квоты" aria-label="Section link">#</a>Фаза 2 — уборка и мягкие квоты</h3><ul>
-<li>Политики retention в <code>workspace_setting</code>; sweeper (кэш → мусор) + события
-<code>storage.evicted</code>/<code>storage.swept</code>; ручной sweep с dry-run; квоты с
+<h3 id="фаза-2-уборка-и-мягкие-квоты-выполнено"><a class="anchor" href="#фаза-2-уборка-и-мягкие-квоты-выполнено" aria-label="Section link">#</a>Фаза 2 — уборка и мягкие квоты — <strong>выполнено</strong></h3><ul>
+<li>Политики retention в <code>workspace_setting</code> (<code>storage.policy</code>); sweeper
+(кэш → мусор) за флагом политики + события <code>storage.evicted</code>/<code>storage.swept</code>;
+ручной sweep с dry-run и выборочным удалением; квоты с
 предупреждением <code>storage.quota_exceeded</code>.</li>
-<li>Страница «Хранилище» в настройках.</li>
-<li>Критерий: уборка кэша приводит проект под кап без ручных действий;
+<li>Страница «Хранилище»: поиск, обзор-панель, multi-select, диалог
+уборки, политики.</li>
+<li>Критерий: уборка кэша продолжает проект под кап без ручных действий;
 каждое удаление видно в журнале.</li>
 </ul>
 <h3 id="фаза-3-жёсткие-квоты-и-мост-артефактов"><a class="anchor" href="#фаза-3-жёсткие-квоты-и-мост-артефактов" aria-label="Section link">#</a>Фаза 3 — жёсткие квоты и мост артефактов</h3><ul>
