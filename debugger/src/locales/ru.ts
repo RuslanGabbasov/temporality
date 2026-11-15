@@ -395,6 +395,7 @@ export const ru: Record<string, string> = {
     'storage.run_files_empty': 'Ран не трогал файлы.',
     'storage.run_files_failed': 'Не удалось загрузить файлы рана: {{error}}',
     'storage.run_files_count': '{{n}} изм.',
+    'storage.area_workspace_stats': '{{size}} · свободно {{free}}',
     'storage.sort_label': 'Сортировка',
     'storage.sort_name': 'Имя',
     'storage.sort_size': 'Размер',

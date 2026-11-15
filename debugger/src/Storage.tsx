@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, useCallback, useRef, type ChangeEvent, type CSSProperties, type ReactNode } from 'react'
 import { Button, Checkbox, Heading, InlineNotification, Tag } from '@carbon/react'
-import { Copy, Download, Renew, Settings, TrashCan, Upload, ChevronRight, ChevronDown } from '@carbon/icons-react'
+import { Copy, Download, Renew, Settings, TrashCan, Upload, ChevronRight, ChevronDown, Checkbox as CheckboxIcon } from '@carbon/icons-react'
 import ProjectRequired from './ProjectRequired'
 import Markdown from './Markdown'
 import { useConfirm } from './ConfirmDialog'
@@ -14,6 +14,7 @@ import {
   storageDeleteFile,
   storageUploadFile,
   storageSearch,
+  storageOverview,
   storageSweep,
   storageGetPolicies,
   storagePutPolicies,
@@ -223,6 +224,11 @@ export default function Storage({ project }: { project: string }) {
   // re-fetches its current query.
   const [refreshTick, setRefreshTick] = useState(0)
 
+  // ── Area header stats: the workspace total + free disk, shown in the
+  // workspace row where the header has room. Read-only numbers from the
+  // hourly snapshot; a failed fetch hides them instead of failing the page. ──
+  const [areaStats, setAreaStats] = useState<{ wsBytes?: number; free?: number } | null>(null)
+
   // ── Dialogs ──
   const [sweep, setSweep] = useState<SweepState | null>(null)
   const [policies, setPolicies] = useState<PoliciesState | null>(null)
@@ -266,6 +272,22 @@ export default function Storage({ project }: { project: string }) {
     await load()
     setRefreshTick((n) => n + 1)
   }, [load])
+
+  // ── Area header stats: workspace total + free disk from the hourly
+  // snapshot; a failed fetch hides the numbers, never the page. ──
+  useEffect(() => {
+    const pid = project.trim()
+    if (!pid) { setAreaStats(null); return }
+    let alive = true
+    storageOverview()
+      .then((snap) => {
+        if (!alive) return
+        const row = snap.projects.find((p) => p.project === pid)
+        setAreaStats({ wsBytes: row?.workspace_bytes, free: snap.disk?.free_bytes })
+      })
+      .catch(() => { if (alive) setAreaStats(null) })
+    return () => { alive = false }
+  }, [project, refreshTick])
 
   // ── Search: debounced (300 ms) flat query; only the latest request wins. ──
   useEffect(() => {
@@ -689,6 +711,14 @@ export default function Storage({ project }: { project: string }) {
       <div style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}>
           <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)' }}>{label}</span>
+          {area === 'workspace' && (areaStats?.wsBytes !== undefined || areaStats?.free !== undefined) && (
+            <span style={{ marginLeft: 'auto', fontSize: '0.66rem', color: 'var(--tm-text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {t('storage.area_workspace_stats', {
+                size: areaStats?.wsBytes !== undefined ? fmtBytes(areaStats.wsBytes) : '—',
+                free: areaStats?.free !== undefined ? fmtBytes(areaStats.free) : '—',
+              })}
+            </span>
+          )}
           <button
             title={t('storage.files_upload')}
             onClick={() => startUpload(area, '')}
@@ -1122,11 +1152,13 @@ export default function Storage({ project }: { project: string }) {
               />
             </div>
             <Button
-              size="sm" kind={selectMode ? 'secondary' : 'ghost'} style={{ flexShrink: 0 }}
+              size="sm" kind={selectMode ? 'secondary' : 'ghost'} hasIconOnly
+              renderIcon={CheckboxIcon}
+              iconDescription={selectMode ? t('storage.select_exit') : t('storage.select_mode')}
+              tooltipPosition="bottom"
+              style={{ flexShrink: 0 }}
               onClick={() => (selectMode ? exitSelect() : enterSelect())}
-            >
-              {selectMode ? t('storage.select_exit') : t('storage.select_mode')}
-            </Button>
+            />
           </div>
           {runFiles ? runFilesPane() : searchMode ? searchPane() : (
             <>
@@ -1162,12 +1194,12 @@ export default function Storage({ project }: { project: string }) {
                   : <Tag type="gray" size="sm">{fmtBytes(selected.entry.bytes)}</Tag>}
                 {selected.entry.mod_at && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>{new Date(selected.entry.mod_at).toLocaleString()}</span>}
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Upload} iconDescription={t('storage.files_upload')} title={t('storage.files_upload')} onClick={() => startUpload(selected.area, selected.entry.dir ? selected.entry.path : parentOf(selected.entry.path))} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Upload} iconDescription={t('storage.files_upload')} tooltipPosition="bottom" onClick={() => startUpload(selected.area, selected.entry.dir ? selected.entry.path : parentOf(selected.entry.path))} />
                   {!selected.entry.dir && (
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Download} iconDescription={t('storage.files_download')} title={t('storage.files_download')} onClick={() => void download(selected.area, selected.entry)} />
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Download} iconDescription={t('storage.files_download')} tooltipPosition="bottom" onClick={() => void download(selected.area, selected.entry)} />
                   )}
-                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={copied ? t('storage.copied') : t('storage.copy_path')} title={copied ? t('storage.copied') : t('storage.copy_path')} disabled={busy} onClick={() => void copyPath()} />
-                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete')} title={t('action.delete')} disabled={busy} onClick={() => void remove(selected.area, selected.entry)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={copied ? t('storage.copied') : t('storage.copy_path')} tooltipPosition="bottom" disabled={busy} onClick={() => void copyPath()} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete')} tooltipPosition="bottom" disabled={busy} onClick={() => void remove(selected.area, selected.entry)} />
                 </span>
               </div>
               {!selected.entry.dir && history.status === 'ready' && history.changes.length > 0 && (

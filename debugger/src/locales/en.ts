@@ -395,6 +395,7 @@ export const en: Record<string, string> = {
     'storage.run_files_empty': 'This run touched no files.',
     'storage.run_files_failed': 'Failed to load run files: {{error}}',
     'storage.run_files_count': '{{n}} chg',
+    'storage.area_workspace_stats': '{{size}} · {{free}} free',
     'storage.sort_label': 'Sort',
     'storage.sort_name': 'Name',
     'storage.sort_size': 'Size',
