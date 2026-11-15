@@ -9,7 +9,7 @@ import {
   Tag,
   Heading,
 } from '@carbon/react'
-import { Add, ArrowDown, Attachment, Branch, Send, TrashCan } from '@carbon/icons-react'
+import { Add, ArrowDown, Attachment, Branch, Checkmark, Send, Share, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile, ApiError } from './workspaceApi'
 import { runCost, taskCost, KERNEL_API, whoami, interactWithPresentation, type Whoami } from './kernelApi'
 import { authHeaders } from './api'
@@ -2238,40 +2238,6 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       </div>
                     )}
 
-                    {/* Share the finished answer: copy as Markdown for any
-                        messenger/doc, or copy the run's deep link — colleagues
-                        with access open the full trajectory. */}
-                    {msg.role === 'assistant' && msg.content && msg.status !== 'running' && (
-                      <div style={{ position: 'relative', marginTop: '0.4rem', display: 'flex', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          onClick={() => setShareMenu(shareMenu === i ? null : i)}
-                          title={t('chat.share') ?? 'Поделиться ответом'}
-                          style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: shareFlash ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.68rem', padding: '0.1rem 0.45rem' }}
-                        >
-                          {shareFlash === 'md' ? `✓ ${t('chat.share_copied') ?? 'Скопировано'}`
-                            : shareFlash === 'link' ? `✓ ${t('chat.share_copied') ?? 'Скопировано'}`
-                            : `↗ ${t('chat.share') ?? 'Поделиться'}`}
-                        </button>
-                        {shareMenu === i && (
-                          <div style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, zIndex: 30, background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,.3)', padding: '0.3rem', display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: '13rem', textAlign: 'left' }}>
-                            <button
-                              type="button"
-                              onClick={() => { void copyText(msg.content).then((ok) => { if (ok) flashShare('md') }) }}
-                              style={{ background: 'none', border: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.25rem 0.4rem', textAlign: 'left' }}
-                            >📋 {t('chat.share_copy_md') ?? 'Копировать текст (Markdown)'}</button>
-                            {msg.runId && (
-                              <button
-                                type="button"
-                                onClick={() => { void copyText(window.location.origin + runTraceUrl(project, msg.runId!)).then((ok) => { if (ok) flashShare('link') }) }}
-                                style={{ background: 'none', border: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.25rem 0.4rem', textAlign: 'left' }}
-                              >🔗 {t('chat.share_copy_link') ?? 'Скопировать ссылку на запуск'}</button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
                     {/* Mid-run addenda trail the original message (reply-style):
                         the first line is the text, everything amended later
                         stacks below with its timestamp. */}
@@ -2387,6 +2353,36 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                             simply continue — so the branch button stops one
                             message short of the end. */}
                         <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', alignItems: 'center', flexShrink: 0 }}>
+                          {/* Share sits with the other conversational actions in
+                              this corner: one square icon, the menu opens above
+                              it. The ✓ replaces the label after a copy. */}
+                          {msg.role === 'assistant' && msg.content && msg.status !== 'running' && (
+                            <span style={{ position: 'relative', display: 'flex' }}>
+                              <button
+                                type="button"
+                                onClick={() => setShareMenu(shareMenu === i ? null : i)}
+                                title={t('chat.share') ?? 'Поделиться ответом'}
+                                aria-label={t('chat.share') ?? 'Поделиться ответом'}
+                                style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: shareFlash ? 'var(--tm-teal)' : 'var(--tm-text-2)', cursor: 'pointer', padding: '0.25rem', lineHeight: 0, display: 'flex' }}
+                              >{shareFlash ? <Checkmark size={16} /> : <Share size={16} />}</button>
+                              {shareMenu === i && (
+                                <div style={{ position: 'absolute', bottom: 'calc(100% + 4px)', right: 0, zIndex: 30, background: 'var(--tm-elevated, #1a1a1a)', border: '1px solid var(--tm-border)', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,.3)', padding: '0.3rem', display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: '13rem', textAlign: 'left' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => { void copyText(msg.content).then((ok) => { if (ok) flashShare('md') }) }}
+                                    style={{ background: 'none', border: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.25rem 0.4rem', textAlign: 'left' }}
+                                  >📋 {t('chat.share_copy_md') ?? 'Копировать текст (Markdown)'}</button>
+                                  {msg.runId && (
+                                    <button
+                                      type="button"
+                                      onClick={() => { void copyText(window.location.origin + runTraceUrl(project, msg.runId!)).then((ok) => { if (ok) flashShare('link') }) }}
+                                      style={{ background: 'none', border: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.25rem 0.4rem', textAlign: 'left' }}
+                                    >🔗 {t('chat.share_copy_link') ?? 'Скопировать ссылку на запуск'}</button>
+                                  )}
+                                </div>
+                              )}
+                            </span>
+                          )}
                           {activeConv && i < activeConv.messages.length - 1 && (
                             <button
                               onClick={() => branchConversation(activeConv.id, i)}
