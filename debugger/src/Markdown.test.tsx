@@ -82,16 +82,32 @@ describe('Markdown', () => {
 describe('linkifyWorkspacePaths', () => {
   it('links absolute and relative workspace paths', () => {
     expect(linkifyWorkspacePaths('see /workspace/out/report.md', 'p1'))
-      .toBe(`see [${'/workspace/out/report.md'}](${URL_FOR('p1', '/workspace/out/report.md')})`)
+      .toBe(`see [${'/workspace/out/report.md'}](${URL_FOR('p1', 'out/report.md')})`)
+    // The bare "workspace/…" form is normalized too: the file API strips only
+    // the leading-slash variant, so as-is this link used to 404.
     expect(linkifyWorkspacePaths('saved to workspace/inbox/file.zip', 'p1'))
-      .toBe(`saved to [${'workspace/inbox/file.zip'}](${URL_FOR('p1', 'workspace/inbox/file.zip')})`)
+      .toBe(`saved to [${'workspace/inbox/file.zip'}](${URL_FOR('p1', 'inbox/file.zip')})`)
+  })
+
+  it('links a bare relative file path inside the workspace', () => {
+    expect(linkifyWorkspacePaths('тот же токен отдаёт scripts/fetch-mcp-secrets.mjs', 'p1'))
+      .toBe(`тот же токен отдаёт [scripts/fetch-mcp-secrets.mjs](${URL_FOR('p1', 'scripts/fetch-mcp-secrets.mjs')})`)
+    expect(linkifyWorkspacePaths('см. docs/tasks/plan.md и src/index.ts', 'p1'))
+      .toBe(`см. [docs/tasks/plan.md](${URL_FOR('p1', 'docs/tasks/plan.md')}) и [src/index.ts](${URL_FOR('p1', 'src/index.ts')})`)
+    expect(linkifyWorkspacePaths('в файле «scripts/x.mjs»', 'p1'))
+      .toBe(`в файле «[scripts/x.mjs](${URL_FOR('p1', 'scripts/x.mjs')})»`)
+  })
+
+  it('leaves prose that only looks like a path', () => {
+    const prose = 'версия v1.2.3, файл /etc/hosts, and/or, github.com/org/repo.md, e.g./i.e.'
+    expect(linkifyWorkspacePaths(prose, 'p1')).toBe(prose)
   })
 
   it('leaves trailing punctuation outside the link', () => {
     expect(linkifyWorkspacePaths('done: /workspace/out/report.md.', 'p1'))
-      .toBe(`done: [${'/workspace/out/report.md'}](${URL_FOR('p1', '/workspace/out/report.md')}).`)
+      .toBe(`done: [${'/workspace/out/report.md'}](${URL_FOR('p1', 'out/report.md')}).`)
     expect(linkifyWorkspacePaths('(/workspace/a.zip),', 'p1'))
-      .toBe(`([${'/workspace/a.zip'}](${URL_FOR('p1', '/workspace/a.zip')})),`)
+      .toBe(`([${'/workspace/a.zip'}](${URL_FOR('p1', 'a.zip')})),`)
   })
 
   it('does not touch fenced code blocks or inline code', () => {
@@ -104,7 +120,7 @@ describe('linkifyWorkspacePaths', () => {
   it('linkifies prose around code segments', () => {
     const input = 'report at /workspace/out/report.md:\n```\ncat /workspace/out/report.md\n```'
     const fence = '```'
-    const expected = 'report at [' + '/workspace/out/report.md' + '](' + URL_FOR('p1', '/workspace/out/report.md') + '):\n' + fence + '\ncat /workspace/out/report.md\n' + fence
+    const expected = 'report at [' + '/workspace/out/report.md' + '](' + URL_FOR('p1', 'out/report.md') + '):\n' + fence + '\ncat /workspace/out/report.md\n' + fence
     expect(linkifyWorkspacePaths(input, 'p1')).toBe(expected)
   })
 

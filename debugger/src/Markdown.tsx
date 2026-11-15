@@ -29,9 +29,23 @@ export function splitMermaidSegments(content: string): Array<{ kind: 'markdown';
   return segments
 }
 
-// A workspace path referenced in prose: "/workspace/out/report.md" or
-// "workspace/inbox/file.zip". The leading boundary avoids mid-word matches.
-const WORKSPACE_PATH_RE = /(^|[\s(\[<"'])(\/?workspace\/[A-Za-z0-9][A-Za-z0-9._/-]*)/g
+// A workspace path referenced in prose. Two shapes: the sandbox-absolute form
+// agents write ("/workspace/out/report.md", "workspace/inbox/file.zip") and
+// a bare relative path ("scripts/fetch-mcp-secrets.mjs") — the second needs
+// at least one directory step and a real extension, so prose like "v1.2.3",
+// "/etc/hosts", "and/or" or "github.com/org/repo" stays untouched. The
+// leading boundary avoids mid-word matches; a URL never matches because ":"
+// is neither a boundary nor a path character.
+const WORKSPACE_PATH_RE = /(^|[\s(\[<"«'])(\/?workspace\/[A-Za-z0-9][A-Za-z0-9._/-]*|[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{2,12})/g
+
+// The path the file API resolves inside the project's workspace area: it is
+// always area-relative ("out/report.md"). The API strips a leading
+// "/workspace" but not the bare "workspace/" form, so both are normalized
+// here — otherwise "workspace/inbox/f.zip" 404s — and the href matches what
+// the storage file route expects as well.
+function fileApiPath(path: string): string {
+  return path.replace(/^\/?workspace\//, '')
+}
 
 // Turns workspace paths outside code segments into real download links.
 export function linkifyWorkspacePaths(content: string, projectId: string): string {
@@ -42,7 +56,7 @@ export function linkifyWorkspacePaths(content: string, projectId: string): strin
       return segment.replace(WORKSPACE_PATH_RE, (_match, lead: string, rawPath: string) => {
         const path = rawPath.replace(/[._-]+$/, '')
         const trail = rawPath.slice(path.length)
-        const url = `${FILES_URL_PREFIX}${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(path)}`
+        const url = `${FILES_URL_PREFIX}${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(fileApiPath(path))}`
         return `${lead}[${path}](${url})${trail}`
       })
     })

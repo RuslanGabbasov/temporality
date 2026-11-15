@@ -8,8 +8,9 @@ const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
 const TEXT_EXTS = new Set([
   'md', 'markdown', 'txt', 'log', 'json', 'yaml', 'yml', 'toml', 'ini',
   'csv', 'tsv', 'xml', 'html', 'htm', 'css', 'scss', 'js', 'jsx', 'ts',
-  'tsx', 'go', 'py', 'rb', 'java', 'kt', 'rs', 'sh', 'bash', 'zsh', 'sql',
-  'env', 'conf', 'cfg', 'gitignore', 'dockerfile', 'makefile',
+  'tsx', 'mjs', 'cjs', 'mts', 'cts', 'go', 'py', 'rb', 'java', 'kt', 'rs',
+  'sh', 'bash', 'zsh', 'sql', 'env', 'conf', 'cfg', 'gitignore',
+  'dockerfile', 'makefile',
 ])
 
 /** Preview mode for a workspace path, or null when the file should just be
