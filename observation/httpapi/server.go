@@ -396,6 +396,7 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 		Type: r.URL.Query().Get("type"), Since: since, Until: until, KnownAt: knownAt, Limit: limit,
 		Order: r.URL.Query().Get("order"),
 		Types: commaList(r.URL.Query().Get("types"), 32),
+		Path:  r.URL.Query().Get("path"),
 	}
 	if filter.Project == "" {
 		// Global listing: constrain to the principal's visible set. Run-scoped

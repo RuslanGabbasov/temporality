@@ -48,6 +48,10 @@ type Filter struct {
 	// KnowledgeIDs restricts to events whose data.knowledge_id is listed;
 	// used to pull the full lifecycle of shared knowledge across projects.
 	KnowledgeIDs []string
+	// Path restricts to events whose data.path matches exactly — the storage
+	// page reads file.changed history per path (docs/sandbox-storage.md §7.2).
+	// Empty means no constraint; pair it with Type="file.changed".
+	Path string
 	// Order: "desc" walks the window newest-first (the experience timeline's
 	// progressive load paints the newest activity first, then extends into
 	// the past). Empty or "asc" — the default chronological order.

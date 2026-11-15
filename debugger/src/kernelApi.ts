@@ -561,6 +561,36 @@ export function storageSearch(project: string, query: string, opts?: { area?: 'w
   return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}/search?${params.toString()}`)
 }
 
+/** One recorded mutation of a file (file.changed journal event). */
+export interface StorageFileChange {
+  occurred_at: string
+  run: string
+  op: 'write' | 'edit' | 'upload' | 'delete' | string
+  bytes: number
+  operation?: string
+}
+
+/** Change history of one path, newest first — attribution (§7.2). */
+export function storageFileHistory(project: string, area: string, path: string, limit = 20): Promise<{ changes: StorageFileChange[] }> {
+  const params = new URLSearchParams({ area, path, limit: String(limit) })
+  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}/file/history?${params.toString()}`)
+}
+
+/** One path a run touched, aggregated. */
+export interface StorageRunFile {
+  path: string
+  area: string
+  changes: number
+  last_op: string
+  last_at: string
+}
+
+/** Every file one run touched (file.changed), newest touch first. */
+export function storageRunFiles(project: string, run: string, limit = 100): Promise<{ files: StorageRunFile[] }> {
+  const params = new URLSearchParams({ run, limit: String(limit) })
+  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}/file/run-files?${params.toString()}`)
+}
+
 export interface StorageSweepBody {
   dry_run: boolean
   areas: ('cache' | 'workspace')[]

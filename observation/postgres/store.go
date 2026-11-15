@@ -328,11 +328,12 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 		    SELECT 1 FROM workspace_run vr
 		    WHERE vr.id = observation_events.run_id
 		      AND (vr.exec_context->>'actor' = ANY($21) OR vr.exec_context->'authorized_by'->>'user_id' = ANY($21))))
+		AND ($22='' OR data->>'path'=$22)
 		ORDER BY occurred_at `+order+`,received_at `+order+`,source_id `+order+`,event_id `+order+` LIMIT $15`,
 		filter.Project, filter.SourceID, filter.EventID, filter.Run, filter.Task, filter.Actor, filter.Type,
 		filter.Since, filter.Until, filter.KnownAt, cursorOccurred, cursorReceived, cursorSource, cursorEvent, limit+1,
 		filter.ScopeKind, textList(filter.ScopeIDs), textList(filter.KnowledgeIDs), textList(filter.Projects), textList(filter.Types),
-		actorScopeArg(filter.ActorScope))
+		actorScopeArg(filter.ActorScope), filter.Path)
 	if err != nil {
 		return observation.Page{}, err
 	}

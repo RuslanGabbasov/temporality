@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,9 +11,11 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/storage"
+	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 )
 
@@ -24,7 +27,7 @@ import (
 
 // registerStorageFileRoutes mounts the per-project file routes. They live
 // under the same /v1/workspace/storage prefix as the read-only inventory.
-func registerStorageFileRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleProjects func(*http.Request) (map[string][]string, error), root string, ws *workspace.Store) {
+func registerStorageFileRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleProjects func(*http.Request) (map[string][]string, error), root string, ws *workspace.Store, events sandboxProfileOutbox) {
 	// Central guards shared by every route: configured root, project
 	// visibility, and the area/path pair resolved inside the area.
 	authorize := func(w http.ResponseWriter, r *http.Request, writer bool) (project, area, rel string, ok bool) {
@@ -143,6 +146,7 @@ func registerStorageFileRoutes(mux *http.ServeMux, gate *controlplane.Gate, visi
 			return
 		}
 		_ = auditStorageFile(r, ws, workspace.AuditArtifactUpdated, area, project+"/"+rel, map[string]any{"action": "upload", "bytes": len(data)})
+		journalStorageFileChange(r.Context(), events, project, area, rel, "upload", len(data))
 		writeJSON(w, 201, map[string]any{"path": rel})
 	})
 
@@ -161,6 +165,7 @@ func registerStorageFileRoutes(mux *http.ServeMux, gate *controlplane.Gate, visi
 			return
 		}
 		_ = auditStorageFile(r, ws, workspace.AuditArtifactDeleted, area, project+"/"+rel, map[string]any{"action": "delete"})
+		journalStorageFileChange(r.Context(), events, project, area, rel, "delete", 0)
 		writeJSON(w, 200, map[string]any{"deleted": rel})
 	})
 }
@@ -173,6 +178,31 @@ func auditStorageFile(r *http.Request, store *workspace.Store, action, area, sub
 	}
 	details["area"] = area
 	return store.RecordAccessAudit(r.Context(), requestUserID(r), action, "storage_file", subject, details)
+}
+
+// journalStorageFileChange mirrors kernel/agent's file.changed for the UI-
+// driven mutations (upload/delete): the storage page's history reads both
+// writers as one stream, answering «who touched this path» across agents and
+// humans (docs/sandbox-storage.md §7.2). Best-effort like the audit write.
+func journalStorageFileChange(ctx context.Context, events sandboxProfileOutbox, project, area, rel, op string, nbytes int) {
+	if events == nil {
+		return
+	}
+	now := time.Now().UTC()
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("storage/file-changed/%s/%d", project, now.UnixNano()),
+		OccurredAt: now,
+		Source:     observation.Source{ID: "temporality-agent-kernel", Integration: "temporality-agent-kernel", Version: "0.1"},
+		Context: observation.Context{Project: project,
+			Actor: observation.Actor{ID: "user", Type: "user"}},
+		Type: "file.changed",
+		Data: map[string]any{"area": area, "path": rel, "op": op, "bytes": nbytes},
+	}
+	if err := event.Validate(); err != nil {
+		return
+	}
+	_ = events.Enqueue(ctx, event)
 }
 
 // httpStatusFor maps filesystem errors onto HTTP: missing → 404, invalid

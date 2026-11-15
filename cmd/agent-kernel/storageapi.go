@@ -153,7 +153,7 @@ type storageHealthView struct {
 // health API. visibleProjects resolves the caller's project visibility (the
 // same ladder as the runs list); an empty root means the kernel runs without
 // a sandbox root and the storage routes answer 503.
-func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleProjects func(*http.Request) (map[string][]string, error), root, dockerBinary string, cache *storageSnapshotCache, ws *workspace.Store) {
+func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleProjects func(*http.Request) (map[string][]string, error), root, dockerBinary string, cache *storageSnapshotCache, ws *workspace.Store, events sandboxProfileOutbox) {
 	mux.HandleFunc("GET /v1/workspace/storage", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -245,7 +245,7 @@ func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleP
 		writeJSON(w, 200, view)
 	})
 
-	registerStorageFileRoutes(mux, gate, visibleProjects, root, ws)
+	registerStorageFileRoutes(mux, gate, visibleProjects, root, ws, events)
 	registerStorageSearch(mux, gate, visibleProjects, root)
 
 	mux.HandleFunc("GET /v1/system/health", func(w http.ResponseWriter, r *http.Request) {

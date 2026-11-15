@@ -3232,13 +3232,19 @@ func main() {
 	storageSnapshots := &storageSnapshotCache{}
 	RegisterStorageRoutes(mux, gate, func(r *http.Request) (map[string][]string, error) {
 		return overviewVisibleProjects(r, ws)
-	}, storageRoot, sandboxDockerBinary(), storageSnapshots, ws)
+	}, storageRoot, sandboxDockerBinary(), storageSnapshots, ws, events)
 	// Manual sweep + retention policies (docs/sandbox-storage.md §5.3, phase 2):
 	// dry-run/real cleanup of a project's areas, retention settings in
 	// workspace_setting, hourly sweeper behind the policy flag.
 	registerStorageSweep(mux, gate, func(r *http.Request) (map[string][]string, error) {
 		return overviewVisibleProjects(r, ws)
 	}, storageRoot, ws, events)
+	// File attribution (docs/sandbox-storage.md §7.2, stage 2): which run
+	// touched a path and which paths a run touched — file.changed history
+	// read back through the journal.
+	registerStorageHistory(mux, gate, func(r *http.Request) (map[string][]string, error) {
+		return overviewVisibleProjects(r, ws)
+	}, activities)
 	// Sandbox profile wizard (docs/sandbox-profiles.md): plain-language task
 	// description → profile draft via the supervisor-scope wizard client.
 	RegisterSandboxBuilderRoutes(mux, gate, wizardModelClient)

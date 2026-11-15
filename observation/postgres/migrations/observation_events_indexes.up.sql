@@ -26,3 +26,11 @@ CREATE INDEX IF NOT EXISTS observation_events_cursor_idx
 -- turns the first knowledge/map load after a journal restart into minutes.
 CREATE INDEX IF NOT EXISTS observation_events_project_occurred_idx
     ON observation_events (project_id, occurred_at, received_at, source_id, event_id);
+
+-- Per-file history of the storage page (docs/sandbox-storage.md §7.2):
+-- file.changed events are looked up by (project, data.path) — the path lives
+-- in the payload, so the lookup needs the payload key in the index or it
+-- seq-scans the whole journal as the run history grows.
+CREATE INDEX IF NOT EXISTS observation_events_file_changed_path_idx
+    ON observation_events (project_id, (data->>'path'))
+    WHERE type = 'file.changed';

@@ -19,7 +19,11 @@ import {
   storageGetPolicies,
   storagePutPolicies,
   storageProjectDetails,
+  storageFileHistory,
+  storageRunFiles,
   type StorageFileEntry,
+  type StorageFileChange,
+  type StorageRunFile,
   type StorageSnapshot,
   type StorageProjectDetails,
   type StorageSearchHit,
@@ -50,6 +54,21 @@ interface BatchItem { area: AreaName; path: string; name: string; bytes: number;
 interface SearchState {
   status: 'idle' | 'loading' | 'ready' | 'error'
   res?: StorageSearchResponse
+  error?: string
+}
+
+// ── Attribution (file.changed): the card's change history and the run's
+// file list — both degrade to nothing when the journal endpoint is missing
+// on an older deployment, never to a page-level error. ──
+interface HistoryState {
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  changes: StorageFileChange[]
+}
+
+interface RunFilesState {
+  run: string
+  status: 'loading' | 'ready' | 'error'
+  files: StorageRunFile[]
   error?: string
 }
 
@@ -117,6 +136,17 @@ function entryFromHit(hit: StorageSearchHit): StorageFileEntry {
   }
 }
 
+/** Carbon tag colour per recorded mutation — delete reads red, write blue. */
+function opTagType(op: string): 'gray' | 'blue' | 'purple' | 'teal' | 'red' {
+  switch (op) {
+    case 'write': return 'blue'
+    case 'edit': return 'purple'
+    case 'upload': return 'teal'
+    case 'delete': return 'red'
+    default: return 'gray'
+  }
+}
+
 /** Case-insensitive substring highlight for search results. */
 function highlightMatch(text: string, query: string): ReactNode {
   const idx = text.toLowerCase().indexOf(query.toLowerCase())
@@ -180,6 +210,12 @@ export default function Storage({ project }: { project: string }) {
   const searchQ = useDebouncedValue(query)
   const [search, setSearch] = useState<SearchState>({ status: 'idle' })
   const searchSeq = useRef(0)
+
+  // ── Attribution ──
+  const [history, setHistory] = useState<HistoryState>({ status: 'idle', changes: [] })
+  const historySeq = useRef(0)
+  const [runFiles, setRunFiles] = useState<RunFilesState | null>(null)
+  const runFilesSeq = useRef(0)
 
   // ── Bulk selection ──
   const [selectMode, setSelectMode] = useState(false)
@@ -303,11 +339,44 @@ export default function Storage({ project }: { project: string }) {
     })
   }
 
+  // loadHistory fetches the file's change attribution; a journal without the
+  // endpoint (older deployment) leaves the card without the section instead
+  // of failing the preview.
+  const loadHistory = async (area: AreaName, path: string) => {
+    const seq = ++historySeq.current
+    setHistory({ status: 'loading', changes: [] })
+    try {
+      const res = await storageFileHistory(project.trim(), area, path, 10)
+      if (seq !== historySeq.current) return
+      setHistory({ status: 'ready', changes: res.changes ?? [] })
+    } catch (f) {
+      if (seq !== historySeq.current) return
+      setHistory({ status: 'error', changes: [] })
+      void f
+    }
+  }
+
+  // openRunFiles switches the left pane to «files of this run» — the other
+  // half of attribution: from one changed file to everything the run touched.
+  const openRunFiles = async (run: string) => {
+    const seq = ++runFilesSeq.current
+    setRunFiles({ run, status: 'loading', files: [] })
+    try {
+      const res = await storageRunFiles(project.trim(), run, 100)
+      if (seq !== runFilesSeq.current) return
+      setRunFiles({ run, status: 'ready', files: res.files ?? [] })
+    } catch (f) {
+      if (seq !== runFilesSeq.current) return
+      setRunFiles({ run, status: 'error', files: [], error: message(f) })
+    }
+  }
+
   const openFile = async (area: AreaName, entry: StorageFileEntry) => {
     setSelected({ area, entry })
     setPreview(null)
     setPreviewError('')
     if (entry.dir) return
+    void loadHistory(area, entry.path)
     if (entry.bytes > 2 << 20) { setPreviewError(t('storage.files_too_big')); return }
     try {
       const response = await storageFileContent(project.trim(), area, entry.path)
@@ -743,6 +812,77 @@ export default function Storage({ project }: { project: string }) {
     return <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.2rem 0' }}>…</div>
   }
 
+  // runFilesPane is the attribution counterpart of the search pane: every
+  // file one run touched, click-to-preview like the search rows.
+  const runFilesPane = (): ReactNode => {
+    if (!runFiles) return null
+    const header = (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+        <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {t('storage.run_files_title', { id: runFiles.run })}
+        </span>
+        <span style={{ marginLeft: 'auto' }}>
+          <Button size="sm" kind="ghost" onClick={() => setRunFiles(null)}>{t('storage.search_back')}</Button>
+        </span>
+      </div>
+    )
+    if (runFiles.status === 'loading') {
+      return <>{header}<div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.2rem 0' }}>…</div></>
+    }
+    if (runFiles.status === 'error') {
+      return <>{header}<div style={{ fontSize: '0.75rem', color: 'var(--tm-danger)' }}>{t('storage.run_files_failed', { error: runFiles.error ?? '' })}</div></>
+    }
+    if (runFiles.files.length === 0) {
+      return <>{header}<div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.2rem 0' }}>{t('storage.run_files_empty')}</div></>
+    }
+    return (
+      <>
+        {header}
+        {runFiles.files.map((file) => {
+          const k = key(file.area as AreaName, file.path)
+          const batched = Boolean(batch[k])
+          const item: BatchItem = { area: file.area as AreaName, path: file.path, name: file.path.split('/').pop() ?? file.path, bytes: 0, dir: false }
+          const activate = () => {
+            if (selectMode) { toggleBatch(item); return }
+            void openFile(item.area, { name: item.name, path: file.path, dir: false, bytes: 0, mod_at: file.last_at })
+          }
+          return (
+            <div
+              key={k}
+              role="button" tabIndex={0}
+              onClick={activate}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } }}
+              title={`${file.area}/${file.path}`}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.18rem 0.3rem', cursor: 'pointer', borderRadius: '4px',
+                fontSize: '0.78rem', background: batched ? 'var(--tm-elevated)' : 'transparent',
+              }}
+            >
+              {selectMode && (
+                <input
+                  type="checkbox" checked={batched} aria-label={file.path}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => toggleBatch(item)}
+                  style={{ flexShrink: 0, cursor: 'pointer' }}
+                />
+              )}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.path}</span>
+              <Tag type={file.area === 'workspace' ? 'blue' : 'gray'} size="sm">
+                {file.area === 'workspace' || file.area === 'cache' ? areaLabel(file.area as AreaName) : file.area}
+              </Tag>
+              <span style={{ color: 'var(--tm-text-3)', fontSize: '0.66rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {t('storage.run_files_count', { n: String(file.changes) })}
+              </span>
+              <span style={{ color: 'var(--tm-text-3)', fontSize: '0.66rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {file.last_at ? new Date(file.last_at).toLocaleDateString() : ''}
+              </span>
+            </div>
+          )
+        })}
+      </>
+    )
+  }
+
   const breadcrumb = selected && (() => {
     const parts = selected.entry.path.split('/').filter(Boolean)
     const isDir = selected.entry.dir
@@ -1100,7 +1240,7 @@ export default function Storage({ project }: { project: string }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 380px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Left: search results or the lazy tree */}
         <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', overflowY: 'auto', minHeight: 0 }}>
-          {searchMode ? searchPane() : (
+          {runFiles ? runFilesPane() : searchMode ? searchPane() : (
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: '0.3rem' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
@@ -1147,6 +1287,47 @@ export default function Storage({ project }: { project: string }) {
               <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginBottom: '0.5rem', overflowWrap: 'anywhere' }}>
                 {selected.area}/{selected.entry.path}
               </div>
+              {!selected.entry.dir && (
+                <div style={{ marginBottom: '0.6rem' }}>
+                  <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>
+                    {t('storage.history_title')}
+                  </div>
+                  {history.status === 'loading' ? (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)' }}>…</div>
+                  ) : history.status === 'error' ? null : history.changes.length === 0 ? (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)' }}>{t('storage.history_empty')}</div>
+                  ) : (
+                    history.changes.map((change, i) => (
+                      <div
+                        key={`${change.occurred_at}-${i}`}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', padding: '0.15rem 0', minWidth: 0,
+                          borderBottom: i < history.changes.length - 1 ? '1px solid var(--tm-border)' : 'none',
+                        }}
+                      >
+                        <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{new Date(change.occurred_at).toLocaleString()}</span>
+                        <Tag type={opTagType(change.op)} size="sm">
+                          {change.op === 'write' || change.op === 'edit' || change.op === 'upload' || change.op === 'delete'
+                            ? t(`storage.op_${change.op}`) : change.op}
+                        </Tag>
+                        {change.bytes > 0 && <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{fmtBytes(change.bytes)}</span>}
+                        {change.run && (
+                          <button
+                            type="button"
+                            onClick={() => void openRunFiles(change.run)}
+                            title={t('storage.history_run_hint', { run: change.run })}
+                            style={{
+                              marginLeft: 'auto', background: 'none', border: 'none', padding: 0, font: 'inherit',
+                              color: 'var(--tm-chart-3)', cursor: 'pointer', fontSize: '0.72rem',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '9rem', flexShrink: 1,
+                            }}
+                          >{t('storage.history_run', { id: change.run.slice(-8) })}</button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
               {selected.entry.dir ? (
                 <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem' }}>
                   {children[key(selected.area, selected.entry.path)]?.length ?? selected.entry.entries ?? 0} {t('storage.files_items')} — {t('storage.files_expand')}

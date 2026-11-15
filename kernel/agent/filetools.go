@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/sandbox"
+	"github.com/temporality-project/temporality/observation"
 	"go.temporal.io/sdk/temporal"
 )
 
@@ -338,6 +340,7 @@ func (a *Activities) handleWriteFile(request ToolRequest) (ToolResult, error) {
 	if err := writeFileAtomic(abs, []byte(content)); err != nil {
 		return ToolResult{}, fileToolFailure(fmt.Errorf("write %q: %w", cleanPath(pathArg), err))
 	}
+	a.journalFileChange(request, "write", abs, len(content))
 	return ToolResult{Content: fmt.Sprintf("wrote %d bytes to %s", len(content), cleanPath(pathArg))}, nil
 }
 
@@ -387,5 +390,70 @@ func (a *Activities) handleEditFile(request ToolRequest) (ToolResult, error) {
 	if err := writeFileAtomic(abs, []byte(updated)); err != nil {
 		return ToolResult{}, fileToolFailure(fmt.Errorf("write %q: %w", cleanPath(pathArg), err))
 	}
+	a.journalFileChange(request, "edit", abs, len(updated))
 	return ToolResult{Content: fmt.Sprintf("replaced 1 occurrence in %s (file is now %d bytes)", cleanPath(pathArg), len(updated))}, nil
+}
+
+// journalFileChange records a successful file mutation so the storage page
+// can answer «which run wrote this path» — the filesystem alone only knows
+// mtime, not the author (docs/sandbox-storage.md §7.2, attribution). The
+// event mirrors the storage API's (area, path) vocabulary so the history
+// endpoint can filter on data.path directly. Best-effort: a journal hiccup
+// must never fail the write itself.
+func (a *Activities) journalFileChange(request ToolRequest, op, abs string, nbytes int) {
+	if a.Events == nil {
+		return
+	}
+	area, rel, ok := a.fileChangeLocation(abs)
+	if !ok {
+		return
+	}
+	now := time.Now().UTC()
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("%s/file-changed/%d", eventScope(a.SourceID, request.Project, request.RunID), now.UnixNano()),
+		OccurredAt: now,
+		Source:     observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
+		Context: observation.Context{Project: request.Project, Run: request.RunID,
+			Actor: observation.Actor{ID: "system", Type: "agent"}},
+		Type: "file.changed",
+		Data: map[string]any{"area": area, "path": rel, "op": op, "bytes": nbytes, "operation": request.OperationID},
+	}
+	if err := event.Validate(); err != nil {
+		return
+	}
+	_ = a.Events.Enqueue(context.Background(), event)
+}
+
+// fileChangeLocation maps an absolute sandbox path onto the (area, path)
+// pair the storage API speaks: <root>/projects/<p>/x → workspace/x,
+// <root>/cache/<p>/x → cache/x, <root>/scratch/... → scratch. Anything else
+// (path outside the root, root not configured) is not part of the storage
+// inventory and is skipped.
+func (a *Activities) fileChangeLocation(abs string) (area, rel string, ok bool) {
+	if a.Sandbox == nil {
+		return "", "", false
+	}
+	root := a.Sandbox.SandboxRoot()
+	if root == "" {
+		return "", "", false
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", "", false
+	}
+	parts := strings.SplitN(rel, string(filepath.Separator), 3)
+	if len(parts) < 3 {
+		return "", "", false
+	}
+	switch parts[0] {
+	case "projects":
+		return "workspace", filepath.ToSlash(parts[2]), true
+	case "cache":
+		return "cache", filepath.ToSlash(parts[2]), true
+	case "scratch":
+		return "scratch", filepath.ToSlash(parts[2]), true
+	default:
+		return "", "", false
+	}
 }

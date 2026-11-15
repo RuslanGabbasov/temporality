@@ -165,6 +165,12 @@ workspace_stale_hours, quota_bytes}`. Дефолт: автоудаление В�
 (reader) — подстрока по имени/пути, сортировка recent/size/name,
 бюджет ~1.5s с `truncated` при исчерпании (реализовано).
 
+Атрибуция: `GET /v1/workspace/storage/projects/{id}/file/history?area=&path=&limit=`
+и `GET /v1/workspace/storage/projects/{id}/file/run-files?run=` (reader) —
+события `file.changed` одного файла / одного рана (реализовано; журнал
+фильтрует по `data.path` через одноимённый query-параметр и partial-индекс
+`observation_events_file_changed_path_idx`).
+
 Файловый API (фаза 1): `GET dir/file`, `POST files`, `DELETE file` —
 на `/v1/workspace/storage/...`.
 
@@ -188,6 +194,7 @@ workspace_stale_hours, quota_bytes}`. Дефолт: автоудаление В�
 ### 5.5. События журнала
 
 * `storage.snapshot` — итоги планового обхода (по проектам, свободное место) — **реализовано**;
+* `file.changed` — атрибуция файла: `{area, path, op: write|edit|upload|delete, bytes, operation}` + run в контексте — **реализовано** (пишут write_file/edit_file и файловый API);
 * `storage.evicted` — каждое удаление (путь, байты, политика) — **реализовано** (cap 100 на запуск + `evicted_suppressed` в сводке);
 * `storage.quota_exceeded` — проект вышел за квоту — **реализовано** (при `quota_bytes>0` в политике);
 * `storage.swept` — сводка цикла уборки (освобождено байт, длительность) — **реализовано**.
@@ -228,6 +235,13 @@ workspace_stale_hours, quota_bytes}`. Дефолт: автоудаление В�
 dry-run-план → запуск → итог); политики retention за шестерёнкой;
 превью/загрузка/скачивание/удаление — как раньше. Для reader —
 read-only.
+
+Атрибуция (stage 2): карточка файла показывает «Историю изменений» —
+последние `file.changed` (дата, op, размер, бейдж рана); клик по бейджу
+переключает левую панель в «Файлы рана» (все пути, которые ран трогал,
+с числом изменений) с кликом-открытием в превью. Журналируют write_file/
+edit_file (ядро) и upload/delete (файловый API); панель деградирует в
+ничего, если журнал ещё без эндпоинта истории.
 
 ### 7.3. Карточка проекта
 

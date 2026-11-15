@@ -29,7 +29,7 @@ func newStorageTestServer(t *testing.T, root string, visible map[string][]string
 	mux := http.NewServeMux()
 	RegisterStorageRoutes(mux, gate, func(*http.Request) (map[string][]string, error) {
 		return visible, nil
-	}, root, "/nonexistent-docker-binary", &storageSnapshotCache{}, nil)
+	}, root, "/nonexistent-docker-binary", &storageSnapshotCache{}, nil, nil)
 	return httptest.NewServer(gate.Authenticate(mux))
 }
 
