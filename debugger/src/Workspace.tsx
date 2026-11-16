@@ -2449,7 +2449,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                 onMouseDown={startInputResize}
                 onDoubleClick={resetInputHeight}
                 title={t('chat.resize_input') ?? 'Потяните, чтобы растянуть поле ввода; двойной клик — автовысота'}
-                style={{ height: '5px', width: '3.5rem', margin: '0 auto 0.35rem', borderRadius: '3px', cursor: 'ns-resize', background: 'var(--tm-border)', opacity: 0.75 }}
+                style={{ height: '5px', width: '3.5rem', margin: '-5px auto 0.35rem', borderRadius: '3px', cursor: 'ns-resize', background: 'var(--tm-border)', opacity: 0.75 }}
               />
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end' }}>
                 <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => void onFilesPicked(e)} />
