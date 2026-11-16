@@ -144,11 +144,11 @@
 </tr>
 <tr>
 <td>§9 Activity Board</td>
-<td><code>GET /v1/org/activity</code>, <code>GET /v1/org/activity/event</code>, <code>GET /v1/org/active-runs</code>; фильтры периода/сотрудника/проекта/типа/статуса; UI <code>debugger/src/OrgActivityBoard.tsx</code> (группировка по run, настройки узла на странице).</td>
+<td><code>GET /v1/org/activity</code>, <code>GET /v1/org/activity/event</code>, <code>GET /v1/org/active-runs</code>; фильтры периода/сотрудника/проекта/типа/статуса; UI — вкладка «Активность» дашборда (<code>OrgActivityBoard.tsx</code>, embedded; группировка по run, настройки узла на странице).</td>
 </tr>
 <tr>
 <td>§10/§13 Work Board</td>
-<td><code>GET /v1/org/work-view</code>: колонки выводятся из lifecycle ранов (urgent-latch = waiting только по событию human/approval; failed → review/quality gate + флаг); metrics §10.5; problems §13 (waiting_on_human / failed_run / no_movement — no_movement информационный, не блокировка). UI <code>OrgWorkBoard.tsx</code> — канбан + problems + карточка с раскрытием.</td>
+<td><code>GET /v1/org/work-view</code>: колонки выводятся из lifecycle ранов (urgent-latch = waiting только по событию human/approval; failed → review/quality gate + флаг); metrics §10.5; problems §13 (waiting_on_human / failed_run / no_movement — no_movement информационный, не блокировка). UI — вкладка «Работа» дашборда (<code>OrgWorkBoard.tsx</code>, embedded) — канбан + problems + карточка с раскрытием; метрики/проблемы также выведены чипами на «Обзоре» (пульт: работа рядом со здоровьем системы).</td>
 </tr>
 <tr>
 <td>§11 Plan Graph</td>
@@ -156,7 +156,7 @@
 </tr>
 <tr>
 <td>§12 Awareness Flow</td>
-<td><code>GET /v1/org/awareness-flow</code> (delivery + batch + source_event в одной записи, фильтры §12); UI <code>OrgAwarenessFlow.tsx</code> — цепочка, 10 статусов, dismiss/follow-up/details, Batches-секция (manual batch, решения).</td>
+<td><code>GET /v1/org/awareness-flow</code> (delivery + batch + source_event в одной записи, фильтры §12); UI — вкладка «Поток» дашборда (<code>OrgAwarenessFlow.tsx</code>, embedded) — цепочка, 10 статусов, dismiss/follow-up/details, Batches-секция. Ссылки «доска → поток» работают внутри дашборда: <code>/dashboard?tab=flow&amp;target_run=…</code> (tab синхронизируется с URL, popstate-слушатель перечитывает вкладку; target_run читает flow).</td>
 </tr>
 <tr>
 <td>§15 API</td>
@@ -173,6 +173,10 @@
 <tr>
 <td>§18 наблюдаемость</td>
 <td><code>org.supervisor.batch</code> journal events (batch_id, node, counts, model); таблицы <code>org_activity_batch(+-state)</code>, статусы доставок — источник метрик; объяснения — reason без chain-of-thought.</td>
+</tr>
+<tr>
+<td>§19 UX</td>
+<td>Дашборд — пульт наблюдения за работой: Обзор (health + work-чипы §10.5/§13 со ссылками на вкладки), Работа (канбан), Активность (лента), Поток (осведомлённость), Саги, Supervisor, Users. Меню Settings поверхностей orgops не содержит (операционные виды — не конфигурация); роуты /org/* остаются для глубоких ссылок. Контекст сохраняется: вкладка в URL (?tab=), target_run передаётся из доски в Поток (<code>/dashboard?tab=flow&amp;target_run=…</code>, popstate-синхронизация).</td>
 </tr>
 </tbody></table>
 <h2 id="что-не-сделано-осознанно"><a class="anchor" href="#что-не-сделано-осознанно" aria-label="Section link">#</a>Что НЕ сделано (осознанно)</h2><ul>
