@@ -389,6 +389,51 @@ function foldContinuations(rows: RunRow[]): void {
   }
 }
 
+/** The rows an ACTIVE status filter names: an explicit query outranks the
+ *  collapse, so they stay listed under any collapsed parent (a dashboard chip
+ *  deep-link must land on the clicked subset) — and they are not counted as
+ *  hidden, they are right there on the screen. */
+function filterPinned(row: RunRow, statusFilter: RunStatus | 'waiting' | '', questionRuns: Set<string>): boolean {
+  return statusFilter === 'waiting'
+    ? questionRuns.has(row.id) && row.status === 'running'
+    : !!statusFilter && row.status === statusFilter
+}
+
+/** Running descendants each collapsed row hides, per row id. Collapse is
+ *  absolute — no live child leaks out of it — so the count feeds the ● N
+ *  marker on the collapsed row and keeps a running delegation tree from
+ *  reading as dead. Runs in `exclude` (the selection, filter-pinned rows) are
+ *  not counted: they stay visible through any collapse depth. Folded attempts
+ *  are skipped — they render under their head's ⟳ marker, never as rows, and
+ *  counting them would promise more live children than expanding shows.
+ *  Exported for tests. */
+export function hiddenLiveRows(rows: RunRow[], expanded: Set<string>, exclude: Iterable<string>): Map<string, number> {
+  const excluded = new Set(exclude)
+  const rowsById = new Map(rows.map((row) => [row.id, row]))
+  const childrenOf = new Map<string, string[]>()
+  for (const row of rows) {
+    if (!row.parent || row.folded) continue
+    const list = childrenOf.get(row.parent) ?? []
+    list.push(row.id)
+    childrenOf.set(row.parent, list)
+  }
+  const liveUnder = (id: string): number => {
+    let total = 0
+    for (const child of childrenOf.get(id) ?? []) {
+      if (!excluded.has(child) && rowsById.get(child)?.status === 'running') total += 1
+      total += liveUnder(child)
+    }
+    return total
+  }
+  const counts = new Map<string, number>()
+  for (const row of rows) {
+    if (row.folded || expanded.has(row.id)) continue
+    const live = liveUnder(row.id)
+    if (live) counts.set(row.id, live)
+  }
+  return counts
+}
+
 /** The attempt chain a run belongs to, oldest first: its head plus every
  *  auto-continuation under it. Delegations hanging off an attempt are not
  *  attempts and stay out. Feeds the run card's switcher; exported for tests. */
@@ -554,8 +599,12 @@ export default function AgentRuns({ project }: { project: string }) {
   const [rows, setRows] = useState<RunRow[]>(() => cacheGet<RunRow[]>(runsCacheKey(scopeKey)) ?? [])
   // Child runs collapse under their parents — delegation trees multiplied into
   // the list. The set holds EXPANDED parents: empty by default, so the list
-  // opens with the top-level runs and a delegation tree on demand (a running
-  // child stays visible even under a collapsed parent — liveness wins).
+  // opens with the top-level runs and a delegation tree on demand. Collapse is
+  // absolute: the whole subtree hides (only the selected run and the rows an
+  // active status filter names stay reachable), and live children surface as
+  // a ● N marker on the collapsed row instead of leaking out of the collapse
+  // (the old always-visible running child read as a collapse that silently
+  // failed).
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(() => new Set())
   // Whether at least one real fetch of this scope finished: only then does an
   // empty list mean «no runs» — before that it is «not yet», i.e. skeleton.
@@ -780,8 +829,11 @@ export default function AgentRuns({ project }: { project: string }) {
       return false
     }
     return rows.filter((row) => !row.folded && subtreeMatch(row.id)
-      // Selected or live rows stay reachable through any collapse depth.
-      && (row.id === selected || row.status === 'running' || !collapsedUnder(row)))
+      // The selected run and the rows an active status filter names stay
+      // reachable through any collapse depth. With no filter a collapsed
+      // parent hides its whole subtree — live children surface on it as a
+      // ● N marker (hiddenLiveRows) instead of leaking out of the collapse.
+      && (row.id === selected || filterPinned(row, statusFilter, questionRuns) || !collapsedUnder(row)))
   }, [rows, filter, initiatorPick, statusFilter, ageFilter, questionRuns, opsOnly, opRunIds, userNameOf, users, org.units, expandedRuns, selected])
   const childCount = useMemo(() => {
     const counts = new Map<string, number>()
@@ -793,6 +845,18 @@ export default function AgentRuns({ project }: { project: string }) {
     }
     return counts
   }, [rows])
+  // Running descendants a collapsed row hides (see hiddenLiveRows). Collapse
+  // no longer leaks live children, so the liveness signal moves onto the
+  // collapsed row itself: a ● N marker keeps a running delegation tree from
+  // reading as dead. The selection and filter-pinned rows are excluded — they
+  // are visible, not hidden.
+  const hiddenLiveKids = useMemo(() => {
+    const exclude = new Set<string>(selected ? [selected] : [])
+    for (const row of rows) {
+      if (filterPinned(row, statusFilter, questionRuns)) exclude.add(row.id)
+    }
+    return hiddenLiveRows(rows, expandedRuns, exclude)
+  }, [rows, expandedRuns, selected, statusFilter, questionRuns])
   const toggleChildren = (id: string) => {
     setExpandedRuns((prev) => {
       const next = new Set(prev)
@@ -1584,6 +1648,13 @@ export default function AgentRuns({ project }: { project: string }) {
                           title={open ? (t('runs.collapse_children') ?? 'Свернуть дочерние раны') : (t('runs.expand_children', { count: String(kids) }) ?? `Показать дочерние раны (${kids})`)}
                           style={{ background: 'none', border: 0, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.7rem', padding: '0 0.35rem 0 0', verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center', gap: '0.15rem' }}
                         >{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{kids}</button>
+                      )
+                    })()}
+                    {(() => {
+                      const live = hiddenLiveKids.get(row.id) ?? 0
+                      if (!live || expandedRuns.has(row.id)) return null
+                      return (
+                        <Tag type="blue" size="sm" title={t('runs.hidden_live', { count: String(live) })}>● {live}</Tag>
                       )
                     })()}
                     {row.depth > 0 && <span style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}>↳</span>}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace, runAttempt, buildRunRows, attemptChain, missingParents, attachParents, withParentRuns } from './AgentRuns'
+import { TRACE_WINDOW, TRACE_WINDOW_STEP, windowedTrace, runAttempt, buildRunRows, hiddenLiveRows, attemptChain, missingParents, attachParents, withParentRuns } from './AgentRuns'
 import { runOrigin } from './runOrigin'
 import type { ObservationEvent } from './observationApi'
 
@@ -86,6 +86,73 @@ describe('buildRunRows', () => {
     expect(rows[0].depth).toBe(0)
     expect(rows[2].depth).toBe(1)
     expect(rows[2].parent).toBe('root-1')
+  })
+})
+
+/** Collapse must hide the whole subtree: no live child leaks out from under a
+ *  collapsed parent (the old running-leaks rule read as a collapse that
+ *  silently failed). The liveness signal moves onto the collapsed row itself
+ *  — hiddenLiveRows feeds its ● N marker. */
+describe('hiddenLiveRows', () => {
+  const started = (run: string, at: string, parent?: string): ObservationEvent => ({
+    type: 'run.started', occurred_at: at, source: { id: 's' }, context: { run },
+    data: parent ? { parent_run_id: parent } : {},
+  } as unknown as ObservationEvent)
+  const at = (minute: number) => `2026-11-05T10:${String(minute).padStart(2, '0')}:00Z`
+  const statuses = (byRun: Record<string, 'running' | 'completed'>) =>
+    new Map(Object.entries(byRun)) as Map<string, 'running' | 'completed'>
+
+  it('counts the running descendants a collapsed parent hides', () => {
+    const rows = buildRunRows([
+      started('root', at(0)),
+      started('root/delegate/01', at(10), 'root'),
+      started('root/delegate/02', at(20), 'root'),
+    ], statuses({ root: 'completed', 'root/delegate/01': 'completed', 'root/delegate/02': 'running' }))
+    expect(hiddenLiveRows(rows, new Set(), new Set())).toEqual(new Map([['root', 1]]))
+  })
+
+  it('an expanded parent hides nothing', () => {
+    const rows = buildRunRows([
+      started('root', at(0)),
+      started('root/delegate/01', at(10), 'root'),
+    ], statuses({ root: 'completed', 'root/delegate/01': 'running' }))
+    expect(hiddenLiveRows(rows, new Set(['root']), new Set())).toEqual(new Map())
+  })
+
+  it('excluded runs (the selection) are not counted — they stay visible through the collapse', () => {
+    const rows = buildRunRows([
+      started('root', at(0)),
+      started('root/delegate/01', at(10), 'root'),
+    ], statuses({ root: 'completed', 'root/delegate/01': 'running' }))
+    expect(hiddenLiveRows(rows, new Set(), new Set(['root/delegate/01']))).toEqual(new Map())
+  })
+
+  it('the marker lands on the row whose own collapse hides the live run', () => {
+    const rows = buildRunRows([
+      started('root', at(0)),
+      started('root/delegate/01', at(10), 'root'),
+      started('root/delegate/01/delegate/01', at(15), 'root/delegate/01'),
+      started('root/delegate/02', at(20), 'root'),
+    ], statuses({
+      root: 'completed',
+      'root/delegate/01': 'completed',
+      'root/delegate/01/delegate/01': 'running',
+      'root/delegate/02': 'running',
+    }))
+    // Root collapsed: its whole subtree hides — both live runs count on it,
+    // and delegate/01 carries its own (unrendered) subtree count too.
+    expect(hiddenLiveRows(rows, new Set(), new Set())).toEqual(new Map([['root', 2], ['root/delegate/01', 1]]))
+    // Root expanded but delegate/01 collapsed: only the grandchild is hidden,
+    // and it counts on delegate/01 — delegate/02 is visible, root hides nothing.
+    expect(hiddenLiveRows(rows, new Set(['root']), new Set())).toEqual(new Map([['root/delegate/01', 1]]))
+  })
+
+  it('folded attempts are not counted — expanding shows fewer live rows than ⟳ promises', () => {
+    const rows = buildRunRows([
+      started('task', at(0)),
+      started('task-r1', at(10), 'task'),
+    ], statuses({ task: 'completed', 'task-r1': 'running' }))
+    expect(hiddenLiveRows(rows, new Set(), new Set())).toEqual(new Map())
   })
 })
 
