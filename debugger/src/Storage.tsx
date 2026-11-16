@@ -1162,7 +1162,6 @@ export default function Storage({ project }: { project: string }) {
       </div>
       <input ref={uploadInput} type="file" multiple hidden onChange={(e) => void onUploadPicked(e)} />
       {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} onCloseButtonClick={() => setError('')} style={{ marginBottom: '0.75rem' }} />}
-      {breadcrumb}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 380px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Left: search input + «select» toggle, then results or the lazy tree */}
         <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', overflowY: 'auto', minHeight: 0 }}>
@@ -1216,6 +1215,7 @@ export default function Storage({ project }: { project: string }) {
             <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem', padding: '1rem 0' }}>{t('storage.files_pick')}</div>
           ) : (
             <>
+              {breadcrumb}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
                 <strong style={{ fontSize: '0.85rem', overflowWrap: 'anywhere' }}>{selected.entry.name}</strong>
                 {selected.entry.dir
