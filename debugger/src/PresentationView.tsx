@@ -10,7 +10,7 @@
 import { memo, useMemo, ReactNode } from 'react'
 import { InlineNotification, Tag } from '@carbon/react'
 import HumanForm, { type FormSchema } from './HumanForm'
-import Markdown from './Markdown'
+import Markdown, { linkifyWorkspacePaths } from './Markdown'
 import MermaidDiagram from './MermaidDiagram'
 import { storageDownloadFile } from './kernelApi'
 import { resolveImageSource, useResolvedImage } from './imageResolution'
@@ -1194,14 +1194,23 @@ export default PresentationView
 // Markdown.tsx), everything else goes through the sanitized Markdown
 // component. A fence with invalid JSON stays visible as plain text rather
 // than disappearing (docs/presentation-engine.md × docs/artifact-registry.md).
-export function MarkdownWithPresentations({ content, project }: { content: string; project?: string }) {
+// With onFile + project set, workspace paths in the prose («Источник истины
+// по содержанию: docs/spec.md») linkify and open the file preview — the same
+// convention the chat answers and the trace responses use. Without a project
+// the paths stay plain text: the workspace they live in is unknowable.
+export function MarkdownWithPresentations({ content, project, onFile }: { content: string; project?: string; onFile?: (path: string) => void }) {
   const blocks = useMemo(() => splitMarkdownBlocks(content), [content])
   return (
     <>
       {blocks.map((block) =>
         block.kind === 'presentation'
           ? <PresentationView key={block.id} document={block.ir} project={project} />
-          : <Markdown key={md5like(block.text)} content={block.text} project={project} />,
+          : <Markdown
+              key={md5like(block.text)}
+              content={project && onFile ? linkifyWorkspacePaths(block.text, project) : block.text}
+              project={project}
+              onFile={onFile}
+            />,
       )}
     </>
   )

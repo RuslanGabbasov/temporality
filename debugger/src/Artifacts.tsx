@@ -30,6 +30,8 @@ import { ArtifactEditor } from './ArtifactEditor'
 import type { User } from './workspaceApi'
 import Markdown from './Markdown'
 import DocumentOutline from './DocumentOutline'
+import MediaViewer, { type MediaViewerPayload } from './MediaViewer'
+import { loadWorkspaceFilePreview } from './filePreview'
 import { linkifyArtifactMentions, referencedArtifactIds, stripArtifactMentions, type ArtifactRefInfo } from './artifactLinks'
 import { useArtifactBodyLinks } from './useArtifactBodyLinks'
 import { useFragmentNoteMenu } from './useFragmentNoteMenu'
@@ -674,6 +676,37 @@ export default function Artifacts({ project }: { project?: string }) {
     onOpenArtifact: (id) => { void openArtifactByID(id) },
     footnoteTitle: (n) => t('artifacts.footnote_hint', { n: String(n) }),
   })
+
+  // Workspace file paths in the body («Источник истины: docs/spec.md»)
+  // linkify into preview links: the browser-showable file opens in the
+  // fullscreen viewer, the rest downloads — the same flow the chat answers
+  // and the trace responses use. Stable identity (useCallback): onFile rides
+  // into memoized Markdown, an inline arrow would remount it per render.
+  const [fileViewer, setFileViewer] = useState<MediaViewerPayload | null>(null)
+  const closeFileViewer = useCallback(() => {
+    setFileViewer((current) => {
+      if (current?.kind === 'image') URL.revokeObjectURL(current.src)
+      return null
+    })
+  }, [])
+  const onBodyFileLink = useCallback(async (path: string) => {
+    const scope = project?.trim() || ''
+    if (!scope) return
+    try {
+      const preview = await loadWorkspaceFilePreview(scope, path)
+      if (preview) {
+        setFileViewer((current) => {
+          if (current?.kind === 'image') URL.revokeObjectURL(current.src)
+          return preview
+        })
+        return
+      }
+      await workspaceApi.downloadFile(scope, path)
+    } catch (f) {
+      setError(t('chat.download_failed') ?? 'Failed to download file')
+      console.error(f)
+    }
+  }, [project, t])
 
   // Lifecycle counters drive the status filter chips: how many artifacts sit in
   // each state. Pending reviews first — that is the human queue.
@@ -1812,7 +1845,7 @@ export default function Artifacts({ project }: { project?: string }) {
                           viewports (carbon.scss) and for short documents. */}
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
                         <div className="artifact-body artifact-review-body" ref={artifactBodyRef} style={{ flex: '1 1 auto', minWidth: 0 }}>
-                          <MarkdownWithPresentations content={bodyText} project={project} />
+                          <MarkdownWithPresentations content={bodyText} project={project} onFile={onBodyFileLink} />
                         </div>
                         <DocumentOutline content={bodyText} rootRef={artifactBodyRef} />
                       </div>
@@ -2264,6 +2297,9 @@ export default function Artifacts({ project }: { project?: string }) {
       )}
 
       {loading && <PageLoading />}
+
+      {/* Inline workspace file preview (file-path links in the artifact body) */}
+      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} />}
     </div>
   )
 }
@@ -2277,6 +2313,33 @@ function VersionHistory({ artifactID, project }: { artifactID: string; project?:
   const [versions, setVersions] = useState<ArtifactVersion[] | null>(null)
   const [expanded, setExpanded] = useState(0)
   const [error, setError] = useState('')
+  // Same workspace-file preview flow the read view uses (stable callback —
+  // onFile rides into memoized Markdown).
+  const [fileViewer, setFileViewer] = useState<MediaViewerPayload | null>(null)
+  const closeFileViewer = useCallback(() => {
+    setFileViewer((current) => {
+      if (current?.kind === 'image') URL.revokeObjectURL(current.src)
+      return null
+    })
+  }, [])
+  const onFileLink = useCallback(async (path: string) => {
+    const scope = project?.trim() || ''
+    if (!scope) return
+    try {
+      const preview = await loadWorkspaceFilePreview(scope, path)
+      if (preview) {
+        setFileViewer((current) => {
+          if (current?.kind === 'image') URL.revokeObjectURL(current.src)
+          return preview
+        })
+        return
+      }
+      await workspaceApi.downloadFile(scope, path)
+    } catch (f) {
+      setError(t('chat.download_failed') ?? 'Failed to download file')
+      console.error(f)
+    }
+  }, [project, t])
 
   useEffect(() => {
     setVersions(null)
@@ -2325,7 +2388,7 @@ function VersionHistory({ artifactID, project }: { artifactID: string; project?:
               {expanded === v.version && (
                 <div style={{ padding: '0 0.55rem 0.55rem' }}>
                   <div className="artifact-body" style={{ border: '1px dashed var(--tm-border)', borderRadius: '6px', padding: '0.5rem', maxHeight: '22rem', overflowY: 'auto' }}>
-                    <MarkdownWithPresentations content={v.content || ''} project={project} />
+                    <MarkdownWithPresentations content={v.content || ''} project={project} onFile={onFileLink} />
                   </div>
                 </div>
               )}
@@ -2334,6 +2397,7 @@ function VersionHistory({ artifactID, project }: { artifactID: string; project?:
           ))}
       </div>
 
+      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} />}
     </div>
   )
 }
