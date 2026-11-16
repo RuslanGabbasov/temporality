@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>Подписки Claude Code и Codex как провайдеры моделей — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/subscription-providers-claude-codex.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/subscription-providers-claude-codex.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="Подписки Claude Code и Codex как провайдеры моделей — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/subscription-providers-claude-codex.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Подписки Claude Code и Codex как провайдеры моделей — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/subscription-providers-claude-codex.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="organizational-operations-implementation.html">Реализация: Organizational Operations</a>
+<a class="docs-nav-row" href="organizational-operations-survey.html">Техническое обследование: Organizational Operations</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row active" href="subscription-providers-claude-codex.html">Подписки Claude Code и Codex как провайдеры моделей</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Подписки Claude Code и Codex как провайдеры моделей</h1>
+
+<p><strong>Статус:</strong> фаза 1 (Claude по подписке) реализована; Codex — в бэклоге.
+<strong>Дата:</strong> 2026-11-16 (факты проверены по официальной документации Anthropic и исходникам <code>openai/codex</code> на момент написания).</p>
+<blockquote>
+<p><strong>Реализация (фаза 1, 2026-11-16).</strong> Подписка Claude сделана через
+<code>auth=anthropic_oauth</code> на провайдере + полный адаптер <code>/v1/messages</code> в
+<code>kernel/llm/client_anthropic.go</code> — вместо ставки на недокументированный
+compat-слой (§3.1, «открытый вопрос №1» снят: OAuth-токен ходит по
+Messages-проводу, как сам Claude Code). Пресет «Claude (подписка)» в UI
+(Providers + онбординг) с инструкцией по <code>claude setup-token</code>, автосекрет
+<code>secret://claude-subscription-token</code>, seed-список моделей на случай
+закрытого каталога, «Test generation» ездит по тому же проводу.
+Роутинг отдаёт <code>auth</code> в ответе kernel, kernel строит Messages-клиент;
+поток-стражи (watchdogs) вынесены в общий <code>streamWatchdogs</code> для обоих
+проводов.</p>
+</blockquote>
+<p>Цель: поддержать в temporality доступ к моделям через <strong>подписки</strong> — Claude Pro/Max/Ultra/Team (через механизм Claude Code) и ChatGPT Plus/Pro/Business/Enterprise (через механизм Codex), — не ломая существующую модель провайдеров <code>base_url</code> + <code>api_key_ref</code>.</p>
+<hr>
+<h2 id="1-контекст-temporality"><a class="anchor" href="#1-контекст-temporality" aria-label="Section link">#</a>1. Контекст temporality</h2><p>Текущая архитектура, на которую ложится задача:</p>
+<ul>
+<li>Провайдер = строка <code>workspace_provider</code> (<code>id, name, base_url, api_key_ref, models, labels, model_limits, max_concurrent_requests, enabled, org_unit_id</code>). <code>api_key_ref</code> — <code>secret://…</code>, имя env-переменной или legacy-литерал.</li>
+<li>Ключ резолвится <strong>на границе маршрутизации</strong> (<code>resolveProviderAPIKey</code> в <code>cmd/agent-kernel/main.go</code>): plaintext-ключи не живут в БД (docs/secrets-management.md §4), есть envelope-секреты с <code>KERNEL_SECRET_MASTER_KEY</code>.</li>
+<li><code>kernel/llm/client.go</code> — OpenAI chat-completions клиент с tool calling и стримингом + спец-слой <code>anthropicCompatHost</code> для <code>api.anthropic.com</code> (каталог <code>/models</code> через <code>x-api-key</code> + <code>anthropic-version</code>, strip неподдерживаемых полей на compat-слое chat/completions).</li>
+<li>Каталог моделей провайдера синхронизируется из <code>GET {base_url}/models</code> (<code>cmd/agent-kernel/providermodels.go</code>), для Anthropic — с <code>x-api-key</code>.</li>
+<li>Ограничения провайдера (<code>model_limits</code>, <code>max_concurrent_requests</code>) + retry-ladder уже есть; диагностика <code>credentialSource</code> в <code>kernel/agent/activities.go</code> классифицирует, откуда брался ключ.</li>
+</ul>
+<h2 id="2-как-подписки-устроены-на-самом-деле"><a class="anchor" href="#2-как-подписки-устроены-на-самом-деле" aria-label="Section link">#</a>2. Как подписки устроены на самом деле</h2><p>Ключевой факт: оба вендора выдают доступ по подписке <strong>через OAuth-токены, живущие внутри их CLI</strong>, а не через обычные API-ключи. API-ключи (pay-per-token) — параллельный, независимый путь.</p>
+<h3 id="21-claude-claude-code-claudeai-подписка"><a class="anchor" href="#21-claude-claude-code-claudeai-подписка" aria-label="Section link">#</a>2.1 Claude (Claude Code / claude.ai подписка)</h3><p>Подтверждено официальной документацией (docs.claude.com → Claude Code → Authentication):</p>
+<ul>
+<li>Логин через <code>/login</code> создаёт <strong>subscription OAuth credentials</strong> (по умолчанию для Pro/Max/Ultra/Team/Enterprise). Хранятся в macOS Keychain либо <code>~/.claude/.credentials.json</code> (mode 0600; на Windows — в профиле пользователя); <code>CLAUDE_CONFIG_DIR</code> переносит путь.</li>
+<li><strong><code>claude setup-token</code></strong> — официальный путь для CI/автоматики: тот же browser-flow, на выходе <strong>OAuth-токен сроком на 1 год</strong>, печатается в терминал и нигде не сохраняется. Используется через env <code>CLAUDE_CODE_OAUTH_TOKEN</code>. Требует Pro/Max/Ultra/Team/Enterprise. Ограничение: <strong>только model requests</strong> (не работает Remote Control, claude.ai connectors; локальные MCP — работают).</li>
+<li>Приоритет креденшелов CLI: cloud-провайдеры → <code>ANTHROPIC_AUTH_TOKEN</code> (Bearer) → <code>ANTHROPIC_API_KEY</code> (x-api-key) → <code>apiKeyHelper</code> → <code>CLAUDE_CODE_OAUTH_TOKEN</code> → профили/federation → subscription OAuth.</li>
+<li><code>/login</code>-токены истекают (за 3 дня до истечения CLI показывает предупреждение) и обновляются самим CLI через refresh-токены.</li>
+</ul>
+<p>Из экосистемы (opencode и другие сторонние харнесы; перед реализацией перепроверить):</p>
+<ul>
+<li>Токен имеет вид <code>sk-ant-oat01-…</code>; при запросах к <code>api.anthropic.com</code> передаётся как <code>Authorization: Bearer</code> (не <code>x-api-key</code>) + заголовок <strong><code>anthropic-beta: oauth-2025-04-20</code></strong>.</li>
+<li>Wire-формат — нативный Anthropic <strong><code>/v1/messages</code></strong> (Claude Code сам так ходит). Работает ли OAuth-токен на OpenAI-compat слое <code>/v1/chat/completions</code> — <strong>неизвестно, надо проверять первым делом</strong>.</li>
+<li>OAuth-флоу <code>/login</code>: loopback-сервер на порту 54545, authorize на <code>claude.ai/oauth/authorize</code>, обмен кода на токены через <code>platform.claude.com/api/oauth/token</code>, короткоживущий access + refresh.</li>
+</ul>
+<h3 id="22-codex-подписка-chatgpt"><a class="anchor" href="#22-codex-подписка-chatgpt" aria-label="Section link">#</a>2.2 Codex (подписка ChatGPT)</h3><p>Подтверждено исходниками <code>openai/codex</code> (модули <code>codex-rs/login/*</code>, <code>codex-rs/model-provider-info/*</code>):</p>
+<ul>
+<li>README: «Sign in with ChatGPT» — рекомендуемый путь для Plus, Pro, Business, Edu, Enterprise. API-ключ — опция «requires additional setup».</li>
+<li><strong>Базовый URL при ChatGPT-аутентификации — <code>https://chatgpt.com/backend-api/codex</code></strong> (константа <code>CHATGPT_CODEX_BASE_URL</code>), а не <code>api.openai.com</code>. При API-key аутентификации — <code>https://api.openai.com/v1</code>.</li>
+<li><strong>Wire API — только Responses API</strong> (<code>/responses</code>): <code>wire_api = &quot;chat&quot;</code> <strong>удалён</strong> из CLI (ошибка с отсылкой к обсуждению #7782). Это касается и встроенных Ollama/LMStudio провайдеров — экосистема сходится на Responses.</li>
+<li>HTTP-дефолты клиента: заголовки <code>originator: codex_cli_rs</code>, User-Agent <code>codex_cli_rs/&lt;версия&gt; (&lt;ОС&gt;)</code>, для built-in OpenAI — <code>version: &lt;версия&gt;</code>. JWT-клеймы <code>id_token</code> лежат под <code>https://api.openai.com/auth</code>: <code>chatgpt_plan_type</code> (free/plus/pro/business/enterprise/edu), <code>chatgpt_user_id</code>, <code>chatgpt_account_id</code>, <code>chatgpt_account_is_fedramp</code>.</li>
+<li><strong>Хранение:</strong> <code>~/.codex/auth.json</code> = <code>AuthDotJson { auth_mode, openai_api_key?, tokens: TokenData, last_refresh, … }</code>, где <code>TokenData { id_token (JWT), access_token (JWT, короткоживущий), refresh_token, oauth_provenance {issuer, client_id}, account_id }</code>.</li>
+<li><strong>OAuth browser-flow:</strong> issuer <code>https://auth.openai.com</code>; loopback-сервер на порту <strong>1455</strong> (fallback 1457), redirect <code>http://127.0.0.1:{port}/auth/callback</code>; authorize <code>{issuer}/oauth/authorize</code>; scope <code>openid profile email offline_access api.connectors.read api.connectors.invoke</code>; extra-параметры <code>id_token_add_organizations=true</code>, <code>codex_cli_simplified_flow=true</code>, <code>originator=codex_cli_rs</code>; обмен кода — <code>POST {issuer}/oauth/token</code> (form-encoded, PKCE).</li>
+<li><strong>Device-code flow</strong> (есть в коде, <code>login/src/device_code_auth.rs</code>):<ol>
+<li><code>POST {issuer}/api/accounts/deviceauth/usercode</code> с <code>{client_id}</code> → <code>{device_auth_id, user_code, interval}</code>.</li>
+<li>Пользователь открывает <code>{issuer}/codex/device</code> и вводит код (живёт 15 минут).</li>
+<li>Клиент опрашивает <code>POST {issuer}/api/accounts/deviceauth/token</code> с <code>{device_auth_id, user_code}</code> каждые <code>interval</code> сек (403/404 = «ещё не подтвердили», таймаут 15 минут) → <code>{authorization_code, code_challenge, code_verifier}</code>.</li>
+<li>Обычный PKCE-обмен кода на токены через <code>POST {issuer}/oauth/token</code> (redirect <code>{issuer}/deviceauth/callback</code>).</li>
+</ol>
+<ul>
+<li>Сервер может ответить 404 на usercode — в CLI это «device code login is not enabled», флоу не гарантированно включён у всех.</li>
+</ul>
+</li>
+<li>Клиент собирается с <strong>Cloudflare cookie store</strong> для chatgpt.com — бэкенд за Cloudflare.</li>
+<li>Также в коде есть: обмен <code>id_token</code> на «API-key style» токен (grant token-exchange, <code>requested_token=openai-api-key</code>), PAT-логин, Bedrock через OpenAI-совместимый Mantle endpoint, WebSocket-транспорт Responses (перспективно, для v1 игнорируем).</li>
+</ul>
+<p>Не подтверждено из первоисточников (но общеизвестно в экосистеме интеграций): значение публичного <code>client_id</code> CLI, заголовок <code>chatgpt-account-id</code> на inference-запросах, <code>OpenAI-Beta: responses=experimental</code>. Перед реализацией — снять с актуального кода/трафика CLI.</p>
+<h3 id="23-сводка"><a class="anchor" href="#23-сводка" aria-label="Section link">#</a>2.3 Сводка</h3><table>
+<thead>
+<tr>
+<th></th>
+<th>Claude (подписка)</th>
+<th>Codex (подписка ChatGPT)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Токен</td>
+<td>OAuth <code>sk-ant-oat01-…</code></td>
+<td>access (JWT) + refresh</td>
+</tr>
+<tr>
+<td>Официальный путь наружу</td>
+<td><strong><code>claude setup-token</code></strong> → токен на 1 год</td>
+<td>только внутри CLI; device-code есть в коде, но «может быть не включён»</td>
+</tr>
+<tr>
+<td>Wire-протокол</td>
+<td>Anthropic <code>/v1/messages</code> (compat chat/completions — под вопросом)</td>
+<td><strong>только Responses API</strong></td>
+</tr>
+<tr>
+<td>Endpoint</td>
+<td><code>api.anthropic.com</code></td>
+<td><code>chatgpt.com/backend-api/codex</code></td>
+</tr>
+<tr>
+<td>Заголовки</td>
+<td><code>Authorization: Bearer</code> + <code>anthropic-beta: oauth-2025-04-20</code></td>
+<td><code>Authorization: Bearer</code> + <code>chatgpt-account-id</code> + <code>originator</code>/UA</td>
+</tr>
+<tr>
+<td>Обновление токена</td>
+<td>не нужно (год)</td>
+<td>обязательно: access короткий, refresh ротируется</td>
+</tr>
+<tr>
+<td>Квоты</td>
+<td>окна подписки, 429</td>
+<td>окна подписки (5h/week), 429</td>
+</tr>
+</tbody></table>
+<h2 id="3-варианты-интеграции"><a class="anchor" href="#3-варианты-интеграции" aria-label="Section link">#</a>3. Варианты интеграции</h2><h3 id="31-claude"><a class="anchor" href="#31-claude" aria-label="Section link">#</a>3.1 Claude</h3><p><strong>C1 — <code>claude setup-token</code> (рекомендуемый, стартовый).</strong> Пользователь на своей машине выполняет <code>claude setup-token</code>, вставляет токен в temporality как <code>secret://claude-oat</code>; провайдер <code>base_url=https://api.anthropic.com</code>. Auth-механику писать не надо — токен ведёт себя как обычный ключ с годовым сроком. Изменения точечные:</p>
+<ul>
+<li><code>kernel/llm/client.go</code>: для OAuth-провайдера слать <code>Bearer</code> (уже шлётся) + <code>anthropic-beta: oauth-2025-04-20</code>;</li>
+<li><code>cmd/agent-kernel/providermodels.go</code>: каталог <code>/models</code> с OAuth-токеном — тоже Bearer вместо <code>x-api-key</code>;</li>
+<li>UI: пресет «Claude по подписке» в мастере провайдера с инструкцией из двух команд.</li>
+</ul>
+<p>Открытый риск №1: <strong>работает ли OAuth-токен на compat-слое <code>/v1/chat/completions</code></strong> (который сейчас использует клиент). Если нет — нужен переводчик chat-completions ↔ <code>/v1/messages</code> (средний, хорошо понятный lift; anthropic-форму usage клиент уже парсит).</p>
+<p><strong>C2 — полный OAuth как у <code>/login</code></strong> (loopback :54545, refresh-цикл ~часы): имеет смысл только если нужен автологин без CLI. Третья сторона здесь заметно более «серая» по ToS и хрупче. Откладываем; setup-token закрывает потребность.</p>
+<h3 id="32-codex"><a class="anchor" href="#32-codex" aria-label="Section link">#</a>3.2 Codex</h3><p><strong>O1 — импорт <code>~/.codex/auth.json</code> (быстрый промежуточный).</strong> Пользователь логинится в CLI у себя, вставляет JSON (там refresh_token) → дальше temporality рефрешит сама. Убирает OAuth из первого релиза; фокус сразу на главной части — Responses-адаптере.</p>
+<p><strong>O2 — device-code flow (целевой UX).</strong> Схема в §2.2; не требует портов и достижимости kernel из браузера пользователя — правильно для docker-инсталляций. Fallback при 404 — рассказ про <code>codex login</code> + импорт (O1). Loopback-флоу (порт 1455) оставляем как опцию для локальных стендов, где kernel достижим на 127.0.0.1.</p>
+<p><strong>O3 — мост через сам CLI</strong> (<code>codex exec</code>, <code>claude -p</code>, app-server/MCP режимы) — <strong>отклонён</strong> для модельной сетки: это агентный уровень абстракции, tool calling остаётся внутри CLI, в контракт провайдера моделей не ложится.</p>
+<h3 id="33-общая-часть-обе-подписки"><a class="anchor" href="#33-общая-часть-обе-подписки" aria-label="Section link">#</a>3.3 Общая часть (обе подписки)</h3><ul>
+<li><strong>Хранение:</strong> токены/refresh — в envelope-секретах (master key), в БД только ссылки и метаданные (<code>plan</code>, <code>account_id</code>, <code>expires_at</code>, <code>last_refresh</code>). В логи/диагностику — только <code>maskKey</code>.</li>
+<li><strong>Рефрешер (Codex):</strong> проактивно по <code>exp</code> из access-JWT + реактивно на 401; singleflight на провайдера; при неудаче — деградация провайдера с внятным статусом в UI («подписка: re-login required»). Расширить <code>credentialSource</code>-диагностику oauth-состояниями.</li>
+<li><strong>UI статусов:</strong> карточка провайдера показывает <code>chatgpt_plan_type</code> / срок токена / время последнего рефреша.</li>
+<li><strong>Каталог моделей:</strong> у Codex бэкенда свой «Codex-native catalog» endpoint (упомянут в исходниках); для v1 проще захардкодить известные слаги и обновлять по расписанию. У Claude каталог <code>/models</code> уже умеется.</li>
+<li><strong>Квоты и стоимость:</strong> подписка = окна и 429, не биллинг. <code>model_limits</code>/<code>max_concurrent_requests</code> + retry-ladder покрывают; в <code>kernel/cost</code> цены отсутствуют → cost=0 (проверить, что парсер цен tolerate).</li>
+<li><strong>Мульти-аккаунты:</strong> несколько провайдеров (<code>claude-max-1/2</code>, <code>chatgpt-pro-1/2</code>) с разными подписками пулят квоты через существующую маршрутизацию по лейблам — бесплатная синергия с текущей архитектурой.</li>
+</ul>
+<h2 id="4-риски"><a class="anchor" href="#4-риски" aria-label="Section link">#</a>4. Риски</h2><ol>
+<li><strong>Cloudflare перед <code>chatgpt.com/backend-api</code>.</strong> CLI неспроста держит cookie store; с датацентровых IP вероятны challenge. С локальных docker-стендов (основной quickstart-сценарий) — обычно ок. Операционный риск, кодом заранее не закрывается.</li>
+<li><strong>Хрупкость/ToS.</strong> Подписочные эндпоинты Codex — не публичный API, менялись без уведомлений. Anthropic-путь сильно устойчивее (<code>setup-token</code> официальный). Честная позиция: подписка = best-effort, API-ключ = SLA-путь, держать рядом как fallback.</li>
+<li><strong>Reasoning-items в Responses.</strong> При continuation tool-calls их надо возвращать в <code>input</code> — иначе codex-модели ошибаются. Самая коварная часть адаптера.</li>
+<li><strong>Устаревание фактов.</strong> Слаги моделей, beta-заголовки, клиентские ID — зафиксировать в одном месте конфигом, не раскидывать по коду.</li>
+</ol>
+<h2 id="5-порядок-работ"><a class="anchor" href="#5-порядок-работ" aria-label="Section link">#</a>5. Порядок работ</h2><ol>
+<li><strong>Фаза 0 (спайка, полдня):</strong> вручную проверить два факта — OAuth-токен на <code>api.anthropic.com/v1/chat/completions</code> (compat) и на <code>/v1/messages</code>; трафик <code>codex</code> CLI к <code>chatgpt.com/backend-api/codex/responses</code> (заголовки, формат).</li>
+<li><strong>Фаза 1 (Claude, дни):</strong> C1 — beta-заголовок, Bearer в каталоге, пресет онбординга.</li>
+<li><strong>Фаза 2 (Codex импорт + Responses-адаптер):</strong> главная инженерная часть; wire-тип провайдера как явный атрибут (<code>chat_completions | anthropic_messages | openai_responses</code>).</li>
+<li><strong>Фаза 3 (Codex device-code):</strong> полный OAuth-UX без ручного импорта.</li>
+<li><strong>Фаза 4 (полировка):</strong> рефрешер-демон, статусы подписок в UI, oauth-диагностика, docs.</li>
+</ol>
+<h2 id="6-открытые-вопросы-для-обсуждения"><a class="anchor" href="#6-открытые-вопросы-для-обсуждения" aria-label="Section link">#</a>6. Открытые вопросы (для обсуждения)</h2><ol>
+<li>Compat-слой Anthropic + OAuth: работает? Если нет — делать ли messages-адаптер в фазе 1 или отложить Claude-подписку до него?</li>
+<li>Responses-адаптер: писать полноценный второй wire в <code>kernel/llm</code> или ограничиться подмножеством (без reasoning-summary, web_search и пр.) для v1?</li>
+<li>Device-code у OpenAI: насколько стабильно включён для плюс/pro-аккаунтов? Есть ли смысл закладывать loopback-флоу параллельно сразу?</li>
+<li>Хранение refresh-токенов: достаточно ли envelope-секретов или нужен отдельный контур ротации/отзыва?</li>
+<li>Политика по ToS-серой зоне Codex: включать ли фичу по умолчанию или под experimental-флагом с дисклеймером?</li>
+<li>Нужна ли поддержка нескольких подписок одного вендора как first-class (пул квот) уже в v1, или это бесплатно получится само?</li>
+</ol>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="secrets-management.html"><small>← Назад</small><strong>Управление секретами агентов (Secrets Management)</strong></a>
+    <a class="pager-next" href="supervisor-model.html"><small>Далее →</small><strong>Модель-супервайзер: роль, кейсы и метрики человеческого фактора</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
