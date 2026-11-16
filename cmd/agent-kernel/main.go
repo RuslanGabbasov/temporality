@@ -8200,6 +8200,17 @@ func main() {
 	// models and the human-attention coefficients.
 	RegisterSupervisorRoutes(mux, gate, ws, activities)
 	RegisterSupervisorQueueRoutes(ctx, mux, ws, gate, observationURL, journalToken, log)
+	// Organizational Operations (docs/temporality-organizational-operations-
+	// spec.md): the org activity projection, the per-node supervisor batches,
+	// the awareness steer delivery and the board APIs. ORG_OPERATIONS=off
+	// disables the supervisor + delivery loops (the projection keeps folding
+	// — the boards read it).
+	RegisterOrgOperationsRoutes(ctx, orgRoutesDeps{
+		mux: mux, gate: gate, ws: ws, visibleUnits: visibleUnits,
+		observationURL: observationURL, journalToken: func() string { return journalToken }, log: log,
+	}, activities, temporalClient, func(ctx context.Context) (*llm.Client, error) {
+		return judgeModelClient(ctx, ws, secretMasterKey)
+	})
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()

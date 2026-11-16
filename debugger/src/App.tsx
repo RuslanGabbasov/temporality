@@ -21,6 +21,9 @@ import Secrets from './Secrets'
 import Sandbox from './Sandbox'
 import Storage from './Storage'
 import Org from './Org'
+import OrgActivityBoard from './OrgActivityBoard'
+import OrgWorkBoard from './OrgWorkBoard'
+import OrgAwarenessFlow from './OrgAwarenessFlow'
 import ChannelSettingsPage from './ChannelSettings'
 import InboundMessages from './InboundMessages'
 import SupervisorModel from './SupervisorModel'
@@ -48,13 +51,18 @@ const Routes = {
   users: /^\/users(\/$|)/,
   triggers: /^\/triggers(\/$|)/,
   org: /^\/org(\/|$)/,
+  // Org operations pages live UNDER /org — they must match before the bare
+  // /org route above, or pageFor would fold them into the org tree page.
+  'org-activity': /^\/org\/activity(\/|$)/,
+  'org-work': /^\/org\/work(\/|$)/,
+  'org-flow': /^\/org\/flow(\/|$)/,
   channels: /^\/channels(\/|$)/,
   inbound: /^\/inbound(\/|$)/,
   'supervisor-model': /^\/supervisor-model(\/|$)/,
   harness: /^\/harness(\/|$)/,
 } as const
 
-type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound' | 'supervisor-model' | 'harness'
+type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'org/activity' | 'org/work' | 'org/flow' | 'channels' | 'inbound' | 'supervisor-model' | 'harness'
 
 function pageFor(pathname: string): Page {
   if (Routes.dashboard.test(pathname)) return 'dashboard'
@@ -74,6 +82,9 @@ function pageFor(pathname: string): Page {
   if (Routes.providers.test(pathname)) return 'providers'
   if (Routes.users.test(pathname)) return 'users'
   if (Routes.triggers.test(pathname)) return 'triggers'
+  if (Routes['org-activity'].test(pathname)) return 'org/activity'
+  if (Routes['org-work'].test(pathname)) return 'org/work'
+  if (Routes['org-flow'].test(pathname)) return 'org/flow'
   if (Routes.org.test(pathname)) return 'org'
   if (Routes.channels.test(pathname)) return 'channels'
   if (Routes.inbound.test(pathname)) return 'inbound'
@@ -141,6 +152,12 @@ export default function App() {
             return <Triggers project={project} />
           case 'org':
             return <Org />
+          case 'org/activity':
+            return <OrgActivityBoard />
+          case 'org/work':
+            return <OrgWorkBoard />
+          case 'org/flow':
+            return <OrgAwarenessFlow />
           case 'channels':
             return <ChannelSettingsPage />
           case 'inbound':

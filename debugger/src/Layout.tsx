@@ -92,6 +92,18 @@ const CONFIG_GROUPS: { title: string; items: { path: string; label: string; admi
       { path: '/channels', label: 'nav.channels', adminOnly: true },
     ],
   },
+  // Organization operations (docs/org-activity.md): the manager surfaces —
+  // the activity board, the work board and the awareness flow. Operational
+  // views, not configuration — hence their own group next to «Organization
+  // & access».
+  {
+    title: 'nav.group_orgops',
+    items: [
+      { path: '/org/activity', label: 'nav.org_activity' },
+      { path: '/org/work', label: 'nav.org_work' },
+      { path: '/org/flow', label: 'nav.org_flow' },
+    ],
+  },
   {
     title: 'nav.group_org',
     items: [
