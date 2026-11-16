@@ -41,6 +41,97 @@ const CATEGORY_KEYS: Record<string, string> = {
 
 const PAGE_SIZE = 50
 
+// Auto-granted approvals are system bookkeeping, not organizational news —
+// they never reach this board (the kernel skips folding them; this client-side
+// cut also hides rows folded by an OLDER kernel until its prune catches up).
+const NOISE_TYPES = new Set(['approval.auto_granted'])
+
+// Localized labels per event type (§4.2 families). Unknown types fall back to
+// the raw journal type — never a blank cell.
+const TYPE_KEYS: Record<string, string> = {
+  'run.started': 'orgact.type_run_started',
+  'run.restarted': 'orgact.type_run_restarted',
+  'run.completed': 'orgact.type_run_completed',
+  'run.failed': 'orgact.type_run_failed',
+  'run.cancelled': 'orgact.type_run_cancelled',
+  'delegation.started': 'orgact.type_delegation_started',
+  'delegation.completed': 'orgact.type_delegation_completed',
+  'delegation.failed': 'orgact.type_delegation_failed',
+  'plan.started': 'orgact.type_plan_started',
+  'plan.completed': 'orgact.type_plan_completed',
+  'plan.aborted': 'orgact.type_plan_aborted',
+  'plan.stopped': 'orgact.type_plan_stopped',
+  'plan.task.started': 'orgact.type_plan_task_started',
+  'plan.task.completed': 'orgact.type_plan_task_completed',
+  'plan.task.failed': 'orgact.type_plan_task_failed',
+  'plan.task.skipped': 'orgact.type_plan_task_skipped',
+  'saga.registered': 'orgact.type_saga_registered',
+  'saga.attached': 'orgact.type_saga_attached',
+  'saga.renamed': 'orgact.type_saga_renamed',
+  'saga.merged': 'orgact.type_saga_merged',
+  'saga.deleted': 'orgact.type_saga_deleted',
+  'artifact.proposed': 'orgact.type_artifact_proposed',
+  'artifact.updated': 'orgact.type_artifact_updated',
+  'artifact.review.requested': 'orgact.type_review_requested',
+  'artifact.review.approved': 'orgact.type_review_approved',
+  'artifact.review.rejected': 'orgact.type_review_rejected',
+  'artifact.returned_to_draft': 'orgact.type_returned_to_draft',
+  'verification.reviewed': 'orgact.type_verification_reviewed',
+  'behavior.reviewed': 'orgact.type_behavior_reviewed',
+  'supervisor.verdict': 'orgact.type_supervisor_verdict',
+  'agent.version.degraded': 'orgact.type_agent_degraded',
+  'hitl.verdict.recorded': 'orgact.type_hitl_verdict',
+  'human.requested': 'orgact.type_human_requested',
+  'human.answered': 'orgact.type_human_answered',
+  'human.timed_out': 'orgact.type_human_timed_out',
+  'approval.requested': 'orgact.type_approval_requested',
+  'approval.granted': 'orgact.type_approval_granted',
+  'approval.rejected': 'orgact.type_approval_rejected',
+}
+
+// The fold bakes English labels into summaries («run failed: timeout»). For
+// display the known head swaps to the localized type label; the tail (titles,
+// goals, model-written text) is user content and stays as-is.
+const SUMMARY_HEADS = [
+  'run started', 'run restarted', 'run completed', 'run failed', 'run cancelled',
+  'delegation started', 'delegation completed', 'delegation failed',
+  'plan started', 'plan completed', 'plan aborted', 'plan stopped',
+  'plan task started', 'plan task completed', 'plan task failed', 'plan task skipped',
+  'saga registered', 'saga attached', 'saga renamed', 'saga merged', 'saga deleted',
+  'artifact proposed', 'artifact updated', 'artifact review requested',
+  'artifact review approved', 'artifact review rejected', 'artifact returned to draft',
+  'verification reviewed', 'behavior reviewed', 'agent version degraded',
+]
+
+// Self-contained English labels the fold emits verbatim.
+const SUMMARY_WHOLE: Record<string, string> = {
+  'Waiting for human input': 'orgact.type_human_requested',
+  'Human input received': 'orgact.type_human_answered',
+  'Human input timed out': 'orgact.type_human_timed_out',
+  'Waiting for approval': 'orgact.type_approval_requested',
+  'Approval granted': 'orgact.type_approval_granted',
+  'Approval rejected': 'orgact.type_approval_rejected',
+}
+
+// localizedEventText returns [primary label, secondary summary]: the type
+// label localized, the fold's summary with its English head swapped.
+function localizedEventText(event: OrgActivityEvent, t: (key: string) => string | undefined): { label: string; summary: string } {
+  const raw = event.event_type
+  const label = TYPE_KEYS[raw] ? (t(TYPE_KEYS[raw]) ?? raw) : raw
+  const summary = event.summary ?? ''
+  const whole = SUMMARY_WHOLE[summary]
+  if (whole) return { label, summary: t(whole) ?? summary }
+  const lower = summary.toLowerCase()
+  for (const head of SUMMARY_HEADS) {
+    if (lower === head) return { label, summary: label }
+    if (lower.startsWith(head + ':')) {
+      const rest = summary.slice(head.length + 1).trim()
+      return { label, summary: rest ? `${label}: ${rest}` : label }
+    }
+  }
+  return { label, summary }
+}
+
 const GRID = 'minmax(4.5rem, 0.45fr) minmax(7.5rem, 1fr) minmax(12rem, 2.2fr) minmax(5rem, 0.7fr) minmax(5.5rem, 0.8fr) minmax(5.5rem, 0.8fr) minmax(5.5rem, 0.8fr)'
 
 function shortId(value?: string) {
@@ -64,16 +155,18 @@ function GridHead({ children }: { children: ReactNode }) {
 }
 
 function EventRow({ event }: { event: OrgActivityEvent }) {
+  const { t, locale } = useI18n()
+  const { label, summary } = localizedEventText(event, t)
   return (
     <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: '0.25rem 0.6rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)', fontSize: '0.78rem' }}>
       <TimeHint value={event.occurred_at} style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
         {briefDateTime(event.occurred_at)}
       </TimeHint>
       <span style={{ display: 'flex', gap: '0.3rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <Tag type={CATEGORY_TAGS[event.category] ?? 'gray'} size="sm">{event.category}</Tag>
-        <span className="mono" style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)' }}>{event.event_type}</span>
+        <Tag type={CATEGORY_TAGS[event.category] ?? 'gray'} size="sm" title={event.category}>{t(CATEGORY_KEYS[event.category]) ?? event.category}</Tag>
+        <span title={event.event_type}>{label}</span>
       </span>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={event.summary}>{event.summary}</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${event.event_type}: ${event.summary}`}>{summary}</span>
       <span className="mono" style={{ fontSize: '0.7rem' }} title={event.actor_id ?? ''}>{shortId(event.actor_id)}</span>
       <span className="mono" style={{ fontSize: '0.7rem' }} title={event.run_id ?? ''}>{shortId(event.run_id)}</span>
       <span className="mono" style={{ fontSize: '0.7rem' }} title={event.task_id ?? ''}>{shortId(event.task_id)}</span>
@@ -125,7 +218,8 @@ export default function OrgActivityBoard({ embedded }: { embedded?: boolean }) {
     }
     try {
       const page = await orgApi.activity(filters)
-      setEvents((prev) => (opts?.append ? [...prev, ...(page.events ?? [])] : (page.events ?? [])))
+      const rows = (page.events ?? []).filter((event) => !NOISE_TYPES.has(event.event_type))
+      setEvents((prev) => (opts?.append ? [...prev, ...rows] : rows))
       setCount(page.count ?? 0)
     } catch (failure) {
       setError(message(failure))
@@ -180,13 +274,10 @@ export default function OrgActivityBoard({ embedded }: { embedded?: boolean }) {
       )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0', borderBottom: '1px solid var(--tm-border)' }}>
-        <OrgUnitSelect id="orgact-unit" value={unit} onChange={(v) => setUnit(v)} org={org} label={t('orgops.unit')} size="sm" />
-        <label className="toolbar-select">
-          {t('orgops.scope')}
-          <select value={scope} onChange={(e) => setScope(e.target.value)}>
-            <option value="unit">{t('orgops.scope_unit')}</option>
-            <option value="subtree">{t('orgops.scope_subtree')}</option>
-          </select>
+        <OrgUnitSelect id="orgact-unit" compact value={unit} onChange={(v) => setUnit(v)} org={org} />
+        <label style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.74rem', whiteSpace: 'nowrap', cursor: 'pointer' }} title={t('orgops.scope_subtree')}>
+          <input type="checkbox" checked={scope === 'subtree'} onChange={(e) => setScope(e.target.checked ? 'subtree' : 'unit')} />
+          {t('orgops.include_children')}
         </label>
         <label className="toolbar-select">
           {t('orgops.period_from')}

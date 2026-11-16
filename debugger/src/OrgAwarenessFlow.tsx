@@ -335,14 +335,11 @@ export default function OrgAwarenessFlow({ embedded }: { embedded?: boolean }) {
       )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0', borderBottom: '1px solid var(--tm-border)' }}>
-        <OrgUnitSelect id="orgflow-unit" value={unit} onChange={setUnit} org={org} label={t('orgops.unit')} size="sm" />
-        <label className="toolbar-select">
-          {t('orgops.scope')}
-          <select value={scope} onChange={(e) => setScope(e.target.value)}>
-            <option value="unit">{t('orgops.scope_unit')}</option>
-            <option value="subtree">{t('orgops.scope_subtree')}</option>
-          </select>
-        </label>
+        <OrgUnitSelect id="orgflow-unit" compact value={unit} onChange={setUnit} org={org} />
+      <label style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.74rem', whiteSpace: 'nowrap', cursor: 'pointer' }} title={t('orgops.scope_subtree')}>
+        <input type="checkbox" checked={scope === 'subtree'} onChange={(e) => setScope(e.target.checked ? 'subtree' : 'unit')} />
+        {t('orgops.include_children')}
+      </label>
         <label className="toolbar-select">
           {t('orgflow.filter_status')}
           <select value={status} onChange={(e) => setStatus(e.target.value)}>

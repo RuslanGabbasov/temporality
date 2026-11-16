@@ -164,6 +164,10 @@ func (s *Store) ListOrgActivity(ctx context.Context, filter OrgActivityFilter) (
 	if filter.To != nil {
 		add(*filter.To, "occurred_at <= $%d")
 	}
+	// Auto-granted approvals never surface, even on the read path: rows folded
+	// by an older kernel before the skip existed would otherwise haunt the
+	// board until its prune tick.
+	where = append(where, "event_type <> 'approval.auto_granted'")
 	condition := ""
 	if len(where) > 0 {
 		condition = " WHERE " + strings.Join(where, " AND ")

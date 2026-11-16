@@ -95,11 +95,12 @@ const EDGE_KEYS: Record<string, string> = {
 }
 
 function MetricChip({ value, label }: { value: number; label: string }) {
+  // Inline pill — the strip rides the toolbar line, not its own row.
   return (
-    <div style={{ background: 'var(--tm-surface-2)', borderRadius: 'var(--tm-radius-sm)', padding: '0.3rem 0.7rem', textAlign: 'center' }}>
-      <div style={{ fontSize: '1rem', fontWeight: 600 }}>{value}</div>
-      <div style={{ fontSize: '0.62rem', color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{label}</div>
-    </div>
+    <span style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'baseline', background: 'var(--tm-surface-2)', borderRadius: '999px', padding: '0.12rem 0.55rem', fontSize: '0.72rem' }}>
+      <strong>{value}</strong>
+      <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{label}</span>
+    </span>
   )
 }
 
@@ -382,7 +383,6 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const metrics = view?.metrics ?? {}
 
   const openFlow = (runID: string) => navigate(`/dashboard?tab=flow&target_run=${encodeURIComponent(runID)}`)
-
   return (
     <div style={{ padding: embedded ? 0 : '1rem' }}>
       {error && (
@@ -394,71 +394,38 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
           right holds the selected task's runs — nothing pushes the board down
           the page anymore. */}
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'stretch', height: embedded ? 'calc(100vh - 140px)' : 'calc(100vh - 230px)' }}>
-        {/* Left ~80%: toolbar, metrics, problems, kanban */}
+        {/* Left ~80%: toolbar (filters AND metrics on one line), kanban */}
         <div style={{ flex: '4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem', flexShrink: 0 }}>
             {!embedded && (
-            <div>
-              <Heading style={{ fontSize: '1.1rem' }}>{t('orgwork.title')}</Heading>
-              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>{t('orgwork.subtitle')}</p>
-            </div>
+              <Heading style={{ fontSize: '1.05rem', marginRight: '0.25rem' }}>{t('orgwork.title')}</Heading>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <OrgUnitSelect id="orgwork-unit" value={unit} onChange={(v) => { setUnit(v); setSelectedTask(null) }} org={org} label={t('orgops.unit')} size="sm" />
-              <label className="toolbar-select">
-                {t('orgops.scope')}
-                <select value={scope} onChange={(e) => { setScope(e.target.value); setSelectedTask(null) }}>
-                  <option value="unit">{t('orgops.scope_unit')}</option>
-                  <option value="subtree">{t('orgops.scope_subtree')}</option>
-                </select>
-              </label>
-              <button className="toolbar-btn" onClick={() => void load()} disabled={loading} title={t('common.refresh')}>↻</button>
-            </div>
+            <OrgUnitSelect id="orgwork-unit" compact value={unit} onChange={(v) => { setUnit(v); setSelectedTask(null) }} org={org} />
+            <label style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.74rem', whiteSpace: 'nowrap', cursor: 'pointer' }} title={t('orgops.scope_subtree')}>
+              <input
+                type="checkbox"
+                checked={scope === 'subtree'}
+                onChange={(e) => { setScope(e.target.checked ? 'subtree' : 'unit'); setSelectedTask(null) }}
+              />
+              {t('orgops.include_children')}
+            </label>
+            <button className="toolbar-btn" onClick={() => void load()} disabled={loading} title={t('common.refresh')}>↻</button>
+            {METRIC_ORDER.some((key) => metrics[key] !== undefined) && (
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                {METRIC_ORDER.map((key) => (
+                  metrics[key] !== undefined && <MetricChip key={key} value={metrics[key] as number} label={t(METRIC_KEYS[key])} />
+                ))}
+              </span>
+            )}
           </div>
 
           {loading && !view ? <PageLoading /> : (
           <>
-          {/* Metrics strip */}
-          {METRIC_ORDER.some((key) => metrics[key] !== undefined) && (
-            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.5rem', flexShrink: 0 }}>
-              {METRIC_ORDER.map((key) => (
-                metrics[key] !== undefined && <MetricChip key={key} value={metrics[key] as number} label={t(METRIC_KEYS[key])} />
-              ))}
-            </div>
-          )}
-
-          {/* Problems first — this is the management view. Capped with its own
-              scroll: thirty stalled tasks must not eat the board. */}
-          {problems.length > 0 && (
-            <div style={{ border: '1px solid var(--tm-danger)', borderRadius: 'var(--tm-radius-md)', padding: '0.5rem 0.75rem', marginBottom: '0.6rem', maxHeight: '8.5rem', overflowY: 'auto', flexShrink: 0 }}>
-              <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>
-                {t('orgwork.problems_title')} <span style={{ textTransform: 'none' }}>({problems.length})</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                {problems.map((problem, i) => (
-                  <div key={`${problem.kind}-${problem.run_id ?? problem.task_id ?? i}`} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', fontSize: '0.76rem', flexWrap: 'wrap' }}>
-                    <Tag type={PROBLEM_TAGS[problem.kind] ?? 'gray'} size="sm">{t(PROBLEM_KEYS[problem.kind] ?? problem.kind)}</Tag>
-                    {problem.title && <span style={{ fontWeight: 600 }}>{problem.title}</span>}
-                    {problem.task_id && <span className="mono" style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }} title={problem.task_id}>{shortId(problem.task_id)}</span>}
-                    {problem.reason && <span style={{ color: 'var(--tm-text-2)' }}>{problem.reason}</span>}
-                    {problem.since && (
-                      <TimeHint value={problem.since} style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>
-                        {briefDateTime(problem.since)}
-                      </TimeHint>
-                    )}
-                    {problem.run_id && (
-                      <button className="toolbar-btn" onClick={() => openFlow(problem.run_id!)} title={t('orgwork.open_flow')}>
-                        {t('orgwork.open_flow')}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Kanban: each column scrolls on its own under a fixed header — a
-              hundred completed tasks scroll inside their column, not the page. */}
+              hundred completed tasks scroll inside their column, not the page.
+              Problems live in the inspector now (the right pane, visible when
+              nothing is selected) — the management view reads them next to the
+              live runs instead of above the board. */}
           {columns.length > 0 && (
             <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: '0.6rem', overflowX: 'auto', alignItems: 'stretch' }}>
               {columns.map((column) => {
@@ -497,9 +464,9 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
           )}
         </div>
 
-        {/* Right ~20%: the inspector — the selected task's runs live HERE, not
-            below the board. Nothing selected: the live view (ungrouped runs,
-            active runs, plan graph) instead. */}
+        {/* Right ~20%: the inspector — problems first (nothing selected = the
+            management view), then the selected task's runs; the live view
+            (ungrouped, active, plan graph) fills the rest. */}
         <div style={{ flex: '1 1 0', minWidth: '16rem', maxWidth: '24rem', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', background: 'var(--tm-surface)', overflowY: 'auto', padding: '0.6rem' }}>
           {selectedCard ? (
             <div>
@@ -536,6 +503,33 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
             </div>
           ) : (
             <>
+              {problems.length > 0 && (
+                <div style={{ border: '1px solid var(--tm-danger)', borderRadius: 'var(--tm-radius-md)', padding: '0.5rem 0.6rem', marginBottom: '0.7rem' }}>
+                  <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>
+                    {t('orgwork.problems_title')} <span style={{ textTransform: 'none' }}>({problems.length})</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                    {problems.map((problem, i) => (
+                      <div key={`${problem.kind}-${problem.run_id ?? problem.task_id ?? i}`} style={{ display: 'flex', gap: '0.4rem', alignItems: 'baseline', fontSize: '0.74rem', flexWrap: 'wrap' }}>
+                        <Tag type={PROBLEM_TAGS[problem.kind] ?? 'gray'} size="sm">{t(PROBLEM_KEYS[problem.kind] ?? problem.kind)}</Tag>
+                        {problem.title && <span style={{ fontWeight: 600 }}>{problem.title}</span>}
+                        {problem.task_id && <span className="mono" style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }} title={problem.task_id}>{shortId(problem.task_id)}</span>}
+                        {problem.reason && <span style={{ color: 'var(--tm-text-2)' }}>{problem.reason}</span>}
+                        {problem.since && (
+                          <TimeHint value={problem.since} style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem' }}>
+                            {briefDateTime(problem.since)}
+                          </TimeHint>
+                        )}
+                        {problem.run_id && (
+                          <button className="toolbar-btn" onClick={() => openFlow(problem.run_id!)} title={t('orgwork.open_flow')}>
+                            {t('orgwork.open_flow')}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div style={{ color: 'var(--tm-text-3)', fontSize: '0.74rem', padding: '0.2rem 0 0.5rem' }}>
                 {t('orgwork.select_hint')}
               </div>

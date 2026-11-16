@@ -81,7 +81,7 @@ export function flattenUnits(units: OrgUnit[]): { unit: OrgUnit; depth: number }
 /** Availability selector for resource forms: "Whole organization" plus every
  * unit, indented by depth. Disabled in edit mode for non-admins — re-scoping
  * an existing resource goes through the admin binding endpoint. */
-export function OrgUnitSelect({ id, value, onChange, org, disabled, allowUnassigned, label, size, hideLabel }: {
+export function OrgUnitSelect({ id, value, onChange, org, disabled, allowUnassigned, label, size, hideLabel, compact }: {
   id: string
   value: string
   onChange: (orgUnitID: string) => void
@@ -94,8 +94,31 @@ export function OrgUnitSelect({ id, value, onChange, org, disabled, allowUnassig
   /** Compact form for inline toolbars (LifecycleBar): sm + hidden label. */
   size?: 'sm' | 'md'
   hideLabel?: boolean
+  /** Timeline-style native select: the small toolbar control (no Carbon
+   *  chrome) — the orgops toolbars live on one line with the filters. */
+  compact?: boolean
 }) {
   const t = useT()
+  if (compact) {
+    return (
+      <label className="toolbar-select">
+        {label ?? (t('orgops.unit') ?? 'Unit')}
+        <select
+          value={value}
+          disabled={disabled || org.loading}
+          title={t('orgops.unit') ?? undefined}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
+        >
+          <option value="">{allowUnassigned
+            ? (t('org.unassigned') ?? 'Not assigned')
+            : (t('org.global') ?? 'Whole organization')}</option>
+          {org.flat.map(({ unit, depth }) => (
+            <option key={unit.id} value={unit.id}>{'\u00A0'.repeat(depth * 2)}{unit.name}</option>
+          ))}
+        </select>
+      </label>
+    )
+  }
   return (
     <Select
       id={id}
