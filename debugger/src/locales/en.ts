@@ -3300,6 +3300,7 @@ export const en: Record<string, string> = {
     'orgwork.waiting_reason': 'Waiting reason',
     'orgwork.runs_title': 'Runs',
     'orgwork.runs_empty': 'No runs on this task yet',
+    'orgwork.select_hint': 'Select a task on the board — its runs and awareness badges appear here. With nothing selected: live runs, ungrouped runs and the plan graph.',
     'orgwork.open_flow': 'Awareness flow',
     'orgwork.ungrouped_title': 'Runs without a task',
     'orgwork.active_title': 'Active runs',

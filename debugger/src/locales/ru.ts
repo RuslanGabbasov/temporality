@@ -3300,6 +3300,7 @@ export const ru: Record<string, string> = {
     'orgwork.waiting_reason': 'Причина ожидания',
     'orgwork.runs_title': 'Раны',
     'orgwork.runs_empty': 'Ранов по этой задаче пока нет',
+    'orgwork.select_hint': 'Выберите задачу на доске — её прогоны и осведомлённость появятся здесь. Пока ничего не выбрано: живые прогоны, прогоны без задачи и граф планов.',
     'orgwork.open_flow': 'Поток осведомлённости',
     'orgwork.ungrouped_title': 'Раны без задачи',
     'orgwork.active_title': 'Активные раны',
