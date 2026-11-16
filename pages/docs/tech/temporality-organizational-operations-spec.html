@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>Техническое задание: Organizational Operations для Temporality — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/temporality-organizational-operations-spec.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/temporality-organizational-operations-spec.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="Техническое задание: Organizational Operations для Temporality — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/temporality-organizational-operations-spec.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Техническое задание: Organizational Operations для Temporality — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/temporality-organizational-operations-spec.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="organizational-operations-implementation.html">Реализация: Organizational Operations</a>
+<a class="docs-nav-row" href="organizational-operations-survey.html">Техническое обследование: Organizational Operations</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row active" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Техническое задание: Organizational Operations для Temporality</h1>
+
+<p><strong>Версия:</strong> 1.0<br><strong>Дата:</strong> 16 ноября 2026 г.</p>
+<h2 id="1-назначение"><a class="anchor" href="#1-назначение" aria-label="Section link">#</a>1. Назначение</h2><p>Реализовать Organizational Operations --- подсистему коллективной
+осведомлённости агентной организации и наблюдения за исполнением работ в
+структурных подразделениях.</p>
+<p>Подсистема объединяет: 1. Organizational Activity --- проекцию событий
+существующего event stream. 2. Organizational Supervisor --- пакетный
+анализ событий и активных Run на уровне организационного узла. 3. Agent
+Awareness --- адресную доставку релевантного контекста через
+существующий steer. 4. Activity Board --- ленту событий подразделения.
+5. Work Board --- сводный канбан Task/Plan/Run для руководителя. 6. Plan
+Graph --- визуализацию планов и подтверждённых межплановых зависимостей.
+7. Awareness Flow --- визуализацию пути события от Supervisor до
+Run-получателя и последующих действий.</p>
+<p><strong>Архитектурное ограничение:</strong> использовать существующие Run, Task/Saga,
+Plan, Artifact, Trace, event stream, Supervisor, steer и Org-scoped
+RBAC. Не создавать параллельную систему управления задачами, новый
+источник истины, отдельный механизм трассировки или альтернативную
+авторизацию.</p>
+<h2 id="2-цели"><a class="anchor" href="#2-цели" aria-label="Section link">#</a>2. Цели</h2><ul>
+<li>Сократить дублирование исследований и конфликтующие изменения.</li>
+<li>Давать агентам контекст о релевантной работе коллег.</li>
+<li>Повторно использовать результаты исследований и артефакты.</li>
+<li>Дать руководителю достоверную картину фактического исполнения работ.</li>
+<li>Показывать делегирование, зависимости, блокировки и ожидания.</li>
+<li>Делать решения и доставки Supervisor наблюдаемыми и проверяемыми.</li>
+</ul>
+<p>Не является целью: корпоративный чат агентов, автоматическое управление
+чужими Run, оценка сотрудников по токенам/количеству запусков, замена
+внешней системы управления задачами или автоматическое раскрытие Trace.</p>
+<h2 id="3-пользователи-и-доступ"><a class="anchor" href="#3-пользователи-и-доступ" aria-label="Section link">#</a>3. Пользователи и доступ</h2><p><strong>Руководитель подразделения:</strong> Work Board, Plan Graph, Activity и
+Awareness Flow в пределах организационных полномочий; переход к Trace и
+Artifact только при наличии соответствующих прав.</p>
+<p><strong>Сотрудник:</strong> собственная работа и разрешённая активность
+подразделения.</p>
+<p><strong>Run/Agent:</strong> получает адресный steer и может запрашивать подробности
+через существующие инструменты доступа.</p>
+<p><strong>Администратор:</strong> системные настройки, политики хранения и диагностика.</p>
+<p>Публикация краткого события и право читать исходный Run --- разные
+полномочия. Получение steer не расширяет RBAC.</p>
+<p>Организационная принадлежность Run фиксируется на момент запуска.
+Перевод сотрудника не перемещает исторические события в другой узел.</p>
+<h2 id="4-organizational-activity"><a class="anchor" href="#4-organizational-activity" aria-label="Section link">#</a>4. Organizational Activity</h2><h3 id="41-источник"><a class="anchor" href="#41-источник" aria-label="Section link">#</a>4.1. Источник</h3><p>Источник --- существующий event stream Temporality. Organizational
+Activity является производной проекцией, а не новым источником истины.</p>
+<h3 id="42-события"><a class="anchor" href="#42-события" aria-label="Section link">#</a>4.2. События</h3><p>Минимальные категории: - Run: started, completed, failed, cancelled,
+waiting, resumed. - Progress: значимый этап, делегирование, возврат
+результата. - Plan: создание, активация, изменение, завершение. -
+Task/Saga: назначение, начало, блокировка, разблокировка, завершение. -
+Artifact: создание, обновление, review, approved/rejected, reuse. -
+Quality: начало и результат проверки, регрессия. - Human interaction:
+запрос и получение решения человека.</p>
+<p>Каждый tool call и каждое внутреннее изменение агента не должны
+автоматически становиться публичным событием.</p>
+<h3 id="43-логический-контракт"><a class="anchor" href="#43-логический-контракт" aria-label="Section link">#</a>4.3. Логический контракт</h3><pre><code class="language-json">{
+  &quot;event_id&quot;: &quot;stable-id&quot;,
+  &quot;event_type&quot;: &quot;run.started&quot;,
+  &quot;occurred_at&quot;: &quot;timestamp&quot;,
+  &quot;run_id&quot;: &quot;run-id&quot;,
+  &quot;task_id&quot;: &quot;task-id&quot;,
+  &quot;plan_id&quot;: &quot;plan-id&quot;,
+  &quot;actor_id&quot;: &quot;user-id&quot;,
+  &quot;org_node_id&quot;: &quot;org-node-id&quot;,
+  &quot;project_refs&quot;: [],
+  &quot;repository_refs&quot;: [],
+  &quot;artifact_refs&quot;: [],
+  &quot;component_refs&quot;: [],
+  &quot;summary&quot;: &quot;Safe short description&quot;,
+  &quot;visibility_policy&quot;: &quot;org-unit&quot;,
+  &quot;source_event_ref&quot;: &quot;event-reference&quot;,
+  &quot;schema_version&quot;: 1
+}
+</code></pre>
+<p>Это логическая схема; фактические поля согласовать с текущим event
+contract. Не дублировать существующие идентификаторы и provenance.</p>
+<p>Проекция должна поддерживать выборку по узлу и периоду, получение
+активных Run, фильтры для Board и входных пакетов Supervisor, переход к
+исходным сущностям. Полные Trace и содержимое Artifact не копировать.</p>
+<p>Обязательны идемпотентность, обработка поздних событий, watermark,
+replay/rebuild и безопасная обработка неизвестной версии схемы.</p>
+<h2 id="5-настройки-узла-оргструктуры"><a class="anchor" href="#5-настройки-узла-оргструктуры" aria-label="Section link">#</a>5. Настройки узла оргструктуры</h2><p>Настройки независимы для каждого узла:</p>
+<hr>
+<p>  Параметр                              Назначение</p>
+<hr>
+<p>  <code>activity_enabled</code>                    Сбор организационной активности</p>
+<p>  <code>activity_board_enabled</code>              Activity Board</p>
+<p>  <code>agent_awareness_enabled</code>             Organizational Supervisor и
+                                        доставка steer</p>
+<p>  <code>management_view_enabled</code>             Work Board и управленческие
+                                        представления</p>
+<p>  <code>publish_run_starts</code>                  Публиковать старты</p>
+<p>  <code>publish_run_completions</code>             Публиковать завершения</p>
+<p>  <code>publish_run_failures</code>                Публиковать ошибки</p>
+<p>  <code>publish_significant_progress</code>        Публиковать значимый прогресс</p>
+<p>  <code>publish_artifact_events</code>             Публиковать события Artifact</p>
+<p>  <code>publish_quality_events</code>              Публиковать результаты проверок</p>
+<p>  <code>allow_trace_discovery</code>               Разрешить запрос подробностей при
+                                        наличии прав</p>
+<p>  <code>awareness_scope</code>                     Область распространения</p>
+<p>  <code>batch_interval_minutes</code>              Интервал обработки, по умолчанию 10</p>
+<p>  <code>urgent_processing_enabled</code>           Внеочередная обработка критических
+                                        событий</p>
+<p>  <code>max_events_per_batch</code>                Ограничение размера пакета</p>
+<p>  <code>max_recipients_per_event</code>            Ограничение адресатов</p>
+<p>  <code>max_deliveries_per_run_per_window</code>   Ограничение частоты уведомлений</p>
+<p>  <code>activity_retention</code>                  Срок хранения проекции</p>
+<h2 id="deliveryretention-срок-хранения-доставок"><a class="anchor" href="#deliveryretention-срок-хранения-доставок" aria-label="Section link">#</a><code>delivery_retention</code>                  Срок хранения доставок</h2><p>Области видимости: собственный узел; собственный узел и дочерние;
+собственный узел и явно разрешённые смежные узлы.</p>
+<p>Поддержать локальные, унаследованные и системные значения. UI должен
+показывать источник настройки. Независимость функций обязательна:
+Activity Board и Management View могут работать без Awareness.</p>
+<p>Отключение Awareness прекращает новые решения и доставки, но не удаляет
+историю.</p>
+<h2 id="6-organizational-supervisor"><a class="anchor" href="#6-organizational-supervisor" aria-label="Section link">#</a>6. Organizational Supervisor</h2><h3 id="61-назначение"><a class="anchor" href="#61-назначение" aria-label="Section link">#</a>6.1. Назначение</h3><p>Использовать существующий Supervisor в контексте организационного узла.
+Он анализирует новые события вместе с актуальной картиной активных Run и
+решает, кому информация полезна.</p>
+<p>Supervisor не управляет чужими задачами, не меняет планы и не получает
+дополнительные права.</p>
+<h3 id="62-пакетная-обработка"><a class="anchor" href="#62-пакетная-обработка" aria-label="Section link">#</a>6.2. Пакетная обработка</h3><p>Основной интервал --- 10 минут. Activity Batch включает: - события после
+предыдущего успешного watermark; - актуальный список активных Run; -
+краткое состояние связанных Task/Saga; - Plan и стадии; -
+новые/изменённые Artifact metadata и безопасные summaries; - предыдущие
+решения и доставки для дедупликации; - конфигурацию узла и ограничения
+доступа.</p>
+<p>Передавать компактные summaries и метаданные, не полные Trace всех Run.</p>
+<p>Пустой batch не должен вызывать LLM. Допускается внеочередная обработка
+ограниченного набора критических событий.</p>
+<h3 id="63-решения"><a class="anchor" href="#63-решения" aria-label="Section link">#</a>6.3. Решения</h3><hr>
+<p>  Решение                             Действие</p>
+<hr>
+<p>  <code>ignore</code>                            Не информировать Run</p>
+<p>  <code>notify</code>                            Передать короткий контекст в steer</p>
+<p>  <code>recommend_lookup</code>                  Сообщить о релевантной работе и
+                                      предложить запросить детали</p>
+<p>  <code>urgent_steer</code>                      Внеочередная доставка важной
+                                      информации</p>
+<h2 id="updateawareness-обновить-ранее-доставленную-информацию-при-существенном-изменении"><a class="anchor" href="#updateawareness-обновить-ранее-доставленную-информацию-при-существенном-изменении" aria-label="Section link">#</a><code>update_awareness</code>                  Обновить ранее доставленную
+                                      информацию при существенном
+                                      изменении</h2><h3 id="64-выходной-контракт"><a class="anchor" href="#64-выходной-контракт" aria-label="Section link">#</a>6.4. Выходной контракт</h3><pre><code class="language-json">{
+  &quot;batch_id&quot;: &quot;batch-id&quot;,
+  &quot;decisions&quot;: [
+    {
+      &quot;source_event_id&quot;: &quot;event-id&quot;,
+      &quot;target_run_id&quot;: &quot;run-id&quot;,
+      &quot;decision&quot;: &quot;notify&quot;,
+      &quot;relevance&quot;: &quot;high&quot;,
+      &quot;reason&quot;: &quot;Related component is being modified&quot;,
+      &quot;message&quot;: &quot;A related authorization change was completed.&quot;,
+      &quot;suggested_lookup&quot;: {
+        &quot;run_id&quot;: &quot;source-run-id&quot;,
+        &quot;detail_level&quot;: &quot;summary&quot;
+      },
+      &quot;urgency&quot;: &quot;normal&quot;,
+      &quot;deduplication_key&quot;: &quot;stable-key&quot;
+    }
+  ]
+}
+</code></pre>
+<p>Согласовать контракт с фактическим интерфейсом существующего Supervisor.</p>
+<p>Supervisor обязан: - выбирать адресатов, а не рассылать всем; -
+учитывать Task, Plan, Artifact, project, repository и component; - не
+направлять сообщения завершённым Run; - подавлять повторы; - учитывать
+лимиты и приоритеты; - отличать гипотезу от подтверждённого факта; - не
+включать недоступные сведения; - возвращать краткое объяснение решения
+без chain-of-thought.</p>
+<p>При ошибке batch не теряется, watermark не продвигается до успешного
+завершения, повторная обработка идемпотентна. Недоступность Supervisor
+не блокирует обычные Run.</p>
+<h2 id="7-agent-awareness-и-доставка-steer"><a class="anchor" href="#7-agent-awareness-и-доставка-steer" aria-label="Section link">#</a>7. Agent Awareness и доставка steer</h2><p>Использовать существующий механизм steer. Не создавать отдельный чат и
+не изменять смысл исходного tool result. Организационная информация
+добавляется отдельным обозначенным блоком контекста.</p>
+<p>Уведомление содержит: - указание, что это организационная
+осведомлённость; - исходный Run; - статус и краткое описание; - причину
+релевантности; - возможность запросить подробности.</p>
+<p>Доставка выполняется в безопасной точке steer. Поддержать очередь,
+retry, отмену для завершившегося Run и urgent delivery. Не менять уже
+завершённый модельный вызов.</p>
+<h3 id="71-запрос-подробностей"><a class="anchor" href="#71-запрос-подробностей" aria-label="Section link">#</a>7.1. Запрос подробностей</h3><p>Уровни: - <code>summary</code>; - <code>findings</code>; - <code>decisions</code>; - <code>artifacts</code>; -
+<code>trace</code>.</p>
+<p>Каждый запрос проходит существующую авторизацию. Получение уведомления
+не даёт права читать чужой Trace или Artifact.</p>
+<h3 id="72-дедупликация"><a class="anchor" href="#72-дедупликация" aria-label="Section link">#</a>7.2. Дедупликация</h3><p>Повторно доставлять только при существенном изменении. Ввести лимиты на
+Run и временное окно, объединение низкоприоритетных уведомлений и
+приоритетную обработку важных сообщений.</p>
+<h2 id="8-awareness-delivery-lifecycle"><a class="anchor" href="#8-awareness-delivery-lifecycle" aria-label="Section link">#</a>8. Awareness Delivery lifecycle</h2><p>Состояния: - <code>selected</code>; - <code>queued</code>; - <code>delivered</code>; - <code>consumed</code>; -
+<code>follow_up_requested</code>; - <code>details_delivered</code>; - <code>acted_upon</code>; -
+<code>dismissed</code>; - <code>expired</code>; - <code>failed</code>.</p>
+<p><code>consumed</code> означает, что steer попал в модельный контекст, но не
+доказывает семантическое использование. <code>acted_upon</code> требует явной
+корреляции с действием или решением; временная близость недостаточна.</p>
+<p>Логическая запись:</p>
+<pre><code class="language-json">{
+  &quot;delivery_id&quot;: &quot;delivery-id&quot;,
+  &quot;source_event_id&quot;: &quot;event-id&quot;,
+  &quot;batch_id&quot;: &quot;batch-id&quot;,
+  &quot;decision_id&quot;: &quot;decision-id&quot;,
+  &quot;target_run_id&quot;: &quot;target-run-id&quot;,
+  &quot;status&quot;: &quot;delivered&quot;,
+  &quot;message_ref&quot;: &quot;steer-ref&quot;,
+  &quot;created_at&quot;: &quot;timestamp&quot;,
+  &quot;queued_at&quot;: &quot;timestamp&quot;,
+  &quot;delivered_at&quot;: &quot;timestamp&quot;,
+  &quot;consumed_at&quot;: null,
+  &quot;follow_up_refs&quot;: [],
+  &quot;related_action_refs&quot;: [],
+  &quot;deduplication_key&quot;: &quot;stable-key&quot;
+}
+</code></pre>
+<p>Использовать ссылки на исходные данные и существующие механизмы
+provenance/audit; не копировать Trace.</p>
+<h2 id="9-activity-board"><a class="anchor" href="#9-activity-board" aria-label="Section link">#</a>9. Activity Board</h2><p>Лента событий узла для ознакомления с происходящим.</p>
+<p>Карточка события: тип, заголовок, summary, сотрудник, Run, Task/Plan,
+проект, время, статус, доступность подробностей.</p>
+<p>Фильтры: период, сотрудник, проект/репозиторий, тип события, статус Run,
+Task/Plan.</p>
+<p>События одного Run можно группировать. Завершение Run обновляет
+существующую группу. Переход к Trace/Artifact повторно проверяет доступ.</p>
+<h2 id="10-work-board-----сводный-канбан"><a class="anchor" href="#10-work-board-----сводный-канбан" aria-label="Section link">#</a>10. Work Board --- сводный канбан</h2><h3 id="101-назначение"><a class="anchor" href="#101-назначение" aria-label="Section link">#</a>10.1. Назначение</h3><p>Основной интерфейс руководителя подразделения. Показывает фактическое
+исполнение, а не только статические отчётные показатели.</p>
+<h3 id="102-иерархия"><a class="anchor" href="#102-иерархия" aria-label="Section link">#</a>10.2. Иерархия</h3><pre><code class="language-text">Organizational Unit
+  +-- Task / Work Item
+        +-- Plan
+        |     +-- Plan Stage
+        |            +-- Run
+        |            +-- Delegated Run
+        +-- Artifacts
+        +-- Quality Results
+        +-- Dependencies
+</code></pre>
+<p>Это навигационная проекция существующих сущностей, а не новая модель
+данных.</p>
+<h3 id="103-колонки"><a class="anchor" href="#103-колонки" aria-label="Section link">#</a>10.3. Колонки</h3><p>Начальные состояния: - Planned / Not started; - In progress; - Waiting /
+Blocked; - Review / Quality gate; - Completed.</p>
+<p>Статусы выводятся из существующего lifecycle Task/Plan и событий. Не
+создавать независимый статус, расходящийся с исходной сущностью.</p>
+<h3 id="104-карточка"><a class="anchor" href="#104-карточка" aria-label="Section link">#</a>10.4. Карточка</h3><p>Показывает название Task/Plan, ответственного, активные Run, прогресс
+существующих этапов, проверки, блокировки, последнее событие, связанные
+Artifact и индикаторы межплановых зависимостей/Awareness.</p>
+<p>Раскрытие карточки показывает Plan Graph, делегирования, точки возврата
+постановщику, Run, Artifact, QA и связанные Awareness Delivery.</p>
+<h3 id="105-показатели"><a class="anchor" href="#105-показатели" aria-label="Section link">#</a>10.5. Показатели</h3><p>Допустимы числа активных работ, ожиданий, блокировок, проваленных
+проверок и завершений за период. Не использовать токены, число Run или
+длительность как рейтинг сотрудников.</p>
+<h2 id="11-plan-graph"><a class="anchor" href="#11-plan-graph" aria-label="Section link">#</a>11. Plan Graph</h2><p>Переиспользовать существующую визуализацию графов Plan.</p>
+<p>Дополнить её: - принадлежностью узлов сотрудникам и Run; - статусами; -
+делегированием и точками возврата; - Artifact; - quality gates; -
+блокировками; - Awareness-событиями.</p>
+<h3 id="111-сводный-граф-подразделения"><a class="anchor" href="#111-сводный-граф-подразделения" aria-label="Section link">#</a>11.1. Сводный граф подразделения</h3><p>Показывать связи между планами только при наличии основания в модели: -
+общая Task; - общий Artifact или версия; - явно заданная зависимость; -
+общий проект/репозиторий/компонент; - ссылка между планами; -
+зарегистрированная связь выполнения.</p>
+<p>Совпадение названий или текстовая похожесть не являются подтверждённой
+связью. Предположительные связи визуально отличать от фактических.</p>
+<p>Начальный уровень --- агрегированные Plan/Task; детализация --- этапы,
+делегирования, Run и Artifact. Поддержать фильтры и lazy loading. Не
+отображать все tool calls подразделения в одном графе.</p>
+<h2 id="12-awareness-flow"><a class="anchor" href="#12-awareness-flow" aria-label="Section link">#</a>12. Awareness Flow</h2><p>Показывает цепочку:</p>
+<p><strong>Activity Event → Supervisor Batch → Awareness Decision → Awareness
+Delivery → Target Run → Follow-up / Related Action.</strong></p>
+<p>Режимы: 1. Поток одного события и его получателей. 2. История
+уведомлений выбранного Run. 3. Состав и результат Supervisor Batch. 4.
+Граф распространения по подразделению.</p>
+<p>Для каждой доставки показывать исходное событие, адресата, тип решения,
+краткое основание, время, статус, follow-up и связанные действия.</p>
+<p>Фильтры: период, исходный/целевой Run, сотрудник, Task/Plan, тип
+события, решение, статус доставки, batch.</p>
+<p>В карточках Task/Plan показывать число связанных Awareness событий и
+переход к отфильтрованному Flow. В карточке Run --- число
+выбранных/доставленных/consumed уведомлений и запросов подробностей.</p>
+<h2 id="13-management-view"><a class="anchor" href="#13-management-view" aria-label="Section link">#</a>13. Management View</h2><p>Это управленческий слой Work Board, не отдельная отчётная система.</p>
+<p>Руководитель должен находить: - активные работы; - работы без движения
+дольше порога; - ожидание человека; - блокировки; - проваленные
+проверки; - Run с ошибками; - незавершённые зависимости; - потенциальные
+пересечения и дублирование; - результаты, влияющие на другие планы.</p>
+<p>Причину блокировки показывать только при наличии подтверждающего
+события/состояния. Не выводить блокировку только из длительности.</p>
+<h2 id="14-архитектура"><a class="anchor" href="#14-архитектура" aria-label="Section link">#</a>14. Архитектура</h2><pre><code class="language-text">Existing Event Stream
+        |
+        v
+Organizational Activity
+        |
+        +----&gt; Activity Board
+        |
+        +----&gt; Work Board / Plan Graph
+        |
+        v
+Organizational Supervisor
+        |
+        v
+Awareness Decisions
+        |
+        v
+Awareness Delivery
+        |
+        v
+Existing Steer Mechanism
+        |
+        v
+Target Run
+        |
+        v
+Follow-up / Related Actions
+        |
+        v
+Awareness Flow
+</code></pre>
+<p>Компоненты: - Organizational Activity: нормализация, оргатрибуция,
+проекции, active Run snapshot. - Organizational Supervisor: batch,
+релевантность, адресаты, объяснения. - Awareness Delivery: очередь,
+steer, дедупликация, статусы и корреляция. - UI: Activity, Work Board,
+Plan Graph integration, Awareness Flow, настройки.</p>
+<p>Фоновые процессы: проекция событий, snapshots, периодический batch,
+urgent processing, доставка, retry, retention и восстановление. Не
+вводить новый брокер или инфраструктурный сервис без подтверждённой
+необходимости; сначала использовать существующие механизмы Temporality.</p>
+<h2 id="15-api-----логические-операции"><a class="anchor" href="#15-api-----логические-операции" aria-label="Section link">#</a>15. API --- логические операции</h2><p>Названия адаптировать к фактическому API:</p>
+<pre><code class="language-text">list_activity(org_node_id, from, to, filters, cursor)
+get_activity_event(event_id)
+get_active_runs(org_node_id, scope, filters)
+
+create_activity_batch(org_node_id)
+get_activity_batch(batch_id)
+process_activity_batch(batch_id)
+get_awareness_decisions(batch_id, filters)
+
+list_run_awareness(run_id, filters)
+get_awareness_delivery(delivery_id)
+request_related_run_details(source_run_id, detail_level, sections)
+record_awareness_follow_up(delivery_id, action_ref)
+
+get_organizational_work_view(org_node_id, filters, projection_level)
+get_organizational_plan_graph(org_node_id, filters, depth)
+get_awareness_flow(org_node_id, filters, graph_level)
+</code></pre>
+<p>Использовать существующие аутентификацию, авторизацию, пагинацию и
+формат ошибок.</p>
+<h2 id="16-безопасность"><a class="anchor" href="#16-безопасность" aria-label="Section link">#</a>16. Безопасность</h2><ul>
+<li>Все чтения проходят серверную Org-scoped RBAC-проверку.</li>
+<li>UI-фильтрация не является защитой.</li>
+<li>Summary не раскрывает содержимое Trace.</li>
+<li>Artifact ref не предоставляет право чтения Artifact.</li>
+<li>Доступ к Trace и Artifact проверяется при каждом запросе.</li>
+<li>Содержимое событий и артефактов считается недоверенными данными, а
+не инструкциями.</li>
+<li>В steer явно указывать источник, Run и степень подтверждения.</li>
+<li>Аудировать изменение настроек, batch, решения, доставки и чтение
+защищённых данных.</li>
+<li>Не копировать секреты, токены, полные tool arguments/results и
+приватное содержимое файлов.</li>
+</ul>
+<h2 id="17-нефункциональные-требования"><a class="anchor" href="#17-нефункциональные-требования" aria-label="Section link">#</a>17. Нефункциональные требования</h2><p><strong>Производительность</strong> - Нет синхронного LLM-вызова на обычном tool
+call. - Supervisor обрабатывает пакет, а не отдельный вызов на
+событие. - Пустые batch пропускаются. - Active Run snapshot не требует
+чтения полных Trace. - UI использует пагинацию, агрегацию и lazy
+loading.</p>
+<p><strong>Надёжность</strong> - Идемпотентность событий и batch. - Надёжная очередь
+доставки. - Retry с ограничениями. - Восстановление после перезапуска. -
+Отсутствие потери событий. - Недоступность подсистемы не блокирует Run.</p>
+<p><strong>Масштабирование</strong> - Обработка по настроенным организационным узлам. -
+Изоляция областей доступа. - Поддержка большого числа Run и событий. -
+Отсутствие глобального контекста всей организации без необходимости.</p>
+<h2 id="18-наблюдаемость-подсистемы"><a class="anchor" href="#18-наблюдаемость-подсистемы" aria-label="Section link">#</a>18. Наблюдаемость подсистемы</h2><p>Технические метрики: - число событий по типам; - задержка проекции; -
+очередь событий; - число и длительность batch; - доля пустых batch; -
+число Run в snapshot; - решения и доставки по статусам; - задержка от
+события до доставки; - retry и ошибки; - объём проекции и хранения.</p>
+<p>Метрики качества: - доля выбранных адресатов; - delivered / consumed; -
+follow-up requested; - details delivered; - явно зарегистрированные
+acted upon; - дубли и устаревшие доставки; - распределение решений; -
+dismiss.</p>
+<p>Метрики не являются KPI сотрудников. Не сохранять chain-of-thought. Для
+объяснения хранить краткую причину и структурированные сигналы
+релевантности.</p>
+<h2 id="19-ux"><a class="anchor" href="#19-ux" aria-label="Section link">#</a>19. UX</h2><p>Основная навигация узла: - Work Board; - Plan Graph; - Activity; -
+Awareness Flow; - Settings.</p>
+<p>Контекст сохраняется при переходах: Task, Plan, Run, период, сотрудник,
+проект и фильтры.</p>
+<p>Приоритет информации на экране руководителя: 1. что выполняется; 2. что
+заблокировано; 3. что требует внимания; 4. какие зависимости существуют;
+5. как распространяется важная информация.</p>
+<p>Не показывать весь граф Run по умолчанию. Начинать с агрегированного
+канбана и раскрывать детали по запросу.</p>
+<h2 id="20-этапы-реализации"><a class="anchor" href="#20-этапы-реализации" aria-label="Section link">#</a>20. Этапы реализации</h2><h3 id="p0-----organizational-activity-foundation"><a class="anchor" href="#p0-----organizational-activity-foundation" aria-label="Section link">#</a>P0 --- Organizational Activity Foundation</h3><p>Контракт событий, подписка на event stream, оргатрибуция, проекция,
+active Run, watermark, RBAC, настройки узла, replay и идемпотентность.</p>
+<h3 id="p1-----activity-board"><a class="anchor" href="#p1-----activity-board" aria-label="Section link">#</a>P1 --- Activity Board</h3><p>Лента событий, группировка по Run, фильтры, ссылки на существующие
+сущности и безопасный просмотр.</p>
+<h3 id="p2-----organizational-supervisor"><a class="anchor" href="#p2-----organizational-supervisor" aria-label="Section link">#</a>P2 --- Organizational Supervisor</h3><p>Пакет раз в 10 минут, новые события + активные Run + Task/Plan/Artifact
+context, решения, дедупликация, пустые batch, urgent processing.</p>
+<h3 id="p3-----awareness-delivery"><a class="anchor" href="#p3-----awareness-delivery" aria-label="Section link">#</a>P3 --- Awareness Delivery</h3><p>Контракт Decision/Delivery, очередь, интеграция с steer, статусы, retry,
+запрос подробностей, проверки доступа.</p>
+<h3 id="p4-----organizational-operations-board"><a class="anchor" href="#p4-----organizational-operations-board" aria-label="Section link">#</a>P4 --- Organizational Operations Board</h3><p>Сводный канбан, Task/Plan cards, Run, блокировки, интеграция
+существующих Plan Graph.</p>
+<h3 id="p5-----awareness-flow"><a class="anchor" href="#p5-----awareness-flow" aria-label="Section link">#</a>P5 --- Awareness Flow</h3><p>Граф Event → Batch → Decision → Delivery → Run, история Run, follow-up,
+объяснимость и фильтры.</p>
+<h3 id="p6-----межплановая-аналитика"><a class="anchor" href="#p6-----межплановая-аналитика" aria-label="Section link">#</a>P6 --- Межплановая аналитика</h3><p>Сводный граф, подтверждённые зависимости, пересечения по
+компонентам/репозиториям/Artifact, маркировка гипотез.</p>
+<h2 id="21-критерии-приёмки"><a class="anchor" href="#21-критерии-приёмки" aria-label="Section link">#</a>21. Критерии приёмки</h2><h3 id="activity"><a class="anchor" href="#activity" aria-label="Section link">#</a>Activity</h3><ul>
+<li><input disabled="" type="checkbox"> Lifecycle события попадают в проекцию при разрешённой
+публикации.</li>
+<li><input disabled="" type="checkbox"> Историческая оргпривязка сохраняется.</li>
+<li><input disabled="" type="checkbox"> Дубликаты не создаются.</li>
+<li><input disabled="" type="checkbox"> Проекция восстанавливается из event stream.</li>
+</ul>
+<h3 id="настройки"><a class="anchor" href="#настройки" aria-label="Section link">#</a>Настройки</h3><ul>
+<li><input disabled="" type="checkbox"> Activity, Awareness и Management View включаются независимо.</li>
+<li><input disabled="" type="checkbox"> Работает наследование и отображается источник значения.</li>
+<li><input disabled="" type="checkbox"> Отключение Awareness прекращает новые доставки, сохраняя
+историю.</li>
+</ul>
+<h3 id="supervisor"><a class="anchor" href="#supervisor" aria-label="Section link">#</a>Supervisor</h3><ul>
+<li><input disabled="" type="checkbox"> Batch содержит события и актуальные активные Run.</li>
+<li><input disabled="" type="checkbox"> Учитываются Task, Plan и Artifact metadata.</li>
+<li><input disabled="" type="checkbox"> Возможны несколько адресатов и ignore.</li>
+<li><input disabled="" type="checkbox"> Есть краткое основание решения.</li>
+<li><input disabled="" type="checkbox"> Пустой batch не вызывает LLM.</li>
+<li><input disabled="" type="checkbox"> Retry не создаёт повторных доставок.</li>
+<li><input disabled="" type="checkbox"> Сбой не блокирует Run и не теряет события.</li>
+</ul>
+<h3 id="awareness"><a class="anchor" href="#awareness" aria-label="Section link">#</a>Awareness</h3><ul>
+<li><input disabled="" type="checkbox"> Steer получает только выбранный Run.</li>
+<li><input disabled="" type="checkbox"> Исходный tool result не изменяется по смыслу.</li>
+<li><input disabled="" type="checkbox"> Завершённый Run не получает новое уведомление.</li>
+<li><input disabled="" type="checkbox"> Повторы подавляются.</li>
+<li><input disabled="" type="checkbox"> Запрос подробностей проходит RBAC.</li>
+<li><input disabled="" type="checkbox"> Delivered и consumed различимы.</li>
+</ul>
+<h3 id="work-board"><a class="anchor" href="#work-board" aria-label="Section link">#</a>Work Board</h3><ul>
+<li><input disabled="" type="checkbox"> Руководитель видит разрешённые работы узла.</li>
+<li><input disabled="" type="checkbox"> Task, Plan и Run не смешиваются в одну сущность.</li>
+<li><input disabled="" type="checkbox"> Карточка раскрывается до Plan Graph и Run.</li>
+<li><input disabled="" type="checkbox"> Отображаются подтверждённые блокировки.</li>
+<li><input disabled="" type="checkbox"> Trace/Artifact открываются с проверкой прав.</li>
+<li><input disabled="" type="checkbox"> Большие наборы не требуют загрузки всех Trace.</li>
+</ul>
+<h3 id="awareness-flow"><a class="anchor" href="#awareness-flow" aria-label="Section link">#</a>Awareness Flow</h3><ul>
+<li><input disabled="" type="checkbox"> Видны исходное событие, batch, решение и адресат.</li>
+<li><input disabled="" type="checkbox"> Различимы все состояния доставки.</li>
+<li><input disabled="" type="checkbox"> Видны запросы подробностей.</li>
+<li><input disabled="" type="checkbox"> Связанные действия требуют явной корреляции.</li>
+<li><input disabled="" type="checkbox"> Нет утечки недоступных данных.</li>
+</ul>
+<h3 id="безопасность"><a class="anchor" href="#безопасность" aria-label="Section link">#</a>Безопасность</h3><ul>
+<li><input disabled="" type="checkbox"> Все операции проверяют RBAC на сервере.</li>
+<li><input disabled="" type="checkbox"> Идентификатор Run не позволяет обойти доступ к Trace.</li>
+<li><input disabled="" type="checkbox"> Summaries не содержат запрещённых данных.</li>
+<li><input disabled="" type="checkbox"> Изменения настроек и чтение подробностей аудируются.</li>
+</ul>
+<h2 id="22-тестовые-сценарии"><a class="anchor" href="#22-тестовые-сценарии" aria-label="Section link">#</a>22. Тестовые сценарии</h2><ol>
+<li>Два сотрудника работают над разными компонентами одного репозитория
+--- без релевантности уведомления не отправляются.</li>
+<li>Два Run затрагивают один компонент --- Supervisor может выбрать
+адресата.</li>
+<li>Завершённое исследование полезно активному Run --- доставляется
+steer.</li>
+<li>Уже доставленный факт не отправляется повторно.</li>
+<li>Run завершился до доставки --- уведомление истекает.</li>
+<li>Запрос чужого Trace проверяет права.</li>
+<li>Перевод сотрудника не перемещает историю.</li>
+<li>Awareness выключен на узле --- новые доставки прекращаются.</li>
+<li>Сбой Supervisor восстанавливает batch без потерь и дублей.</li>
+<li>Общий Artifact отображает подтверждённую межплановую связь.</li>
+<li>Отсутствие follow-up не трактуется как использование Trace.</li>
+<li>Явно связанное с уведомлением изменение Plan появляется в Awareness
+Flow.</li>
+</ol>
+<p>Нагрузочно проверить большое число активных Run, крупные batch,
+параллельные узлы, недоступность Supervisor, задержки steer,
+переполнение очереди, большие Plan Graph и восстановление после
+перезапуска.</p>
+<h2 id="23-обязательное-техническое-обследование-перед-реализацией"><a class="anchor" href="#23-обязательное-техническое-обследование-перед-реализацией" aria-label="Section link">#</a>23. Обязательное техническое обследование перед реализацией</h2><p>До разработки сопоставить ТЗ с кодом и подтвердить: 1. Контракт
+существующего Supervisor. 2. Точки интеграции и гарантии steer. 3.
+Реальные модели Plan Graph, Task/Saga и delegated Run. 4. Lifecycle
+events и получение active Run. 5. Org-scoped RBAC для Run, Trace и
+Artifact. 6. Watermark, replay и идемпотентность event stream. 7.
+Переиспользование существующей визуализации графов. 8. Механизмы фоновых
+задач. 9. Аудит чтения Artifact. 10. Фактические связи Plan, Task,
+Artifact и Run.</p>
+<p>Логические имена и схемы этого ТЗ не являются требованием переименовать
+существующие сущности. По итогам обследования уточнить контракты и точки
+интеграции.</p>
+<h2 id="24-итоговые-решения"><a class="anchor" href="#24-итоговые-решения" aria-label="Section link">#</a>24. Итоговые решения</h2><ol>
+<li>Organizational Operations --- отдельная подсистема на существующей
+модели Temporality.</li>
+<li>Organizational Activity --- проекция event stream.</li>
+<li>Organizational Supervisor работает на уровне настроенного узла
+оргструктуры.</li>
+<li>Базовая пакетная обработка --- каждые 10 минут; пустые batch
+пропускаются.</li>
+<li>Agent Awareness --- адресный steer выбранным Run.</li>
+<li>Доступ к Trace и Artifact всегда проверяется отдельно.</li>
+<li>Work Board --- основной интерфейс руководителя.</li>
+<li>Plan Graph переиспользует существующую визуализацию.</li>
+<li>Awareness Flow показывает путь события до Run и явно
+зарегистрированные последующие действия.</li>
+<li>Activity Board, Awareness и Management View независимы по включению.</li>
+<li>Не создавать параллельную систему задач, графовый движок, чат
+агентов или механизм авторизации.</li>
+</ol>
+<p><strong>Ключевой результат:</strong> Temporality получает механизм коллективной
+осведомлённости агентной организации и единое пространство наблюдения за
+реальным исполнением работ.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="temporality-contract.html"><small>← Назад</small><strong>Temporality event contract</strong></a>
+    <a class="pager-next" href="triggers-and-escalations.html"><small>Далее →</small><strong>Триггеры запуска операций и обращение агента к человеку</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

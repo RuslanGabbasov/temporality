@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>Техническое обследование: Organizational Operations — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/organizational-operations-survey.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/organizational-operations-survey.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="Техническое обследование: Organizational Operations — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/organizational-operations-survey.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Техническое обследование: Organizational Operations — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/organizational-operations-survey.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="organizational-operations-implementation.html">Реализация: Organizational Operations</a>
+<a class="docs-nav-row active" href="organizational-operations-survey.html">Техническое обследование: Organizational Operations</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Техническое обследование: Organizational Operations</h1>
+
+<p>Дата: 16.11.2026. Выполнено до реализации <code>docs/temporality-organizational-operations-spec.md</code>
+(§23 — обязательное обследование). Факты сверены с кодом, не с документами.</p>
+<h2 id="1-контракт-существующего-supervisor"><a class="anchor" href="#1-контракт-существующего-supervisor" aria-label="Section link">#</a>1. Контракт существующего Supervisor</h2><ul>
+<li>Supervisor — не workflow, а фоновые goroutine-циклы в <code>cmd/agent-kernel</code>:
+<code>startSupervisorTriageLoop</code> (<code>cmd/agent-kernel/supervisortriage.go:32</code>), волны A1/A3/B/C/reconcile
+на тике 2 мин (<code>KERNEL_SUPERVISOR_TRIAGE_INTERVAL</code>), kill-switch <code>KERNEL_SUPERVISOR_CASES=off</code>.</li>
+<li>Вход — журнал событий по HTTP (<code>GET /v1/observations/events</code>, bearer <code>TEMPORALITY_API_TOKEN</code>,
+читается на каждый проход). Хелперы: <code>supervisorEventPage</code>/<code>supervisorTypedEventPage</code>
+(<code>cmd/agent-kernel/supervisorqueue.go:340/353</code>), лимит страницы 500.</li>
+<li>Выход — события журнала <code>supervisor.verdict</code> / <code>supervisor.case</code> через durable outbox
+(<code>kernel/agent/activities.go</code>: <code>PublishSupervisorVerdict</code>, <code>PublishSupervisorCase</code> →
+<code>kernel_event_outbox</code> → <code>observation_events</code>). Ничего не исполняется автоматически.</li>
+<li>LLM: <code>judgeModelClient</code> (<code>cmd/agent-kernel/knowledgeareas.go:106</code>, настройка <code>eval.judge.model</code>),
+структурированный вызов <code>completeParsed[T]</code> (<code>kernel/agent/modeljson.go:64</code>).</li>
+<li>Пустой вход ⇒ нет LLM-вызова (прецедент: triage выходит при <code>len(failed)==0</code>).</li>
+<li>Дедуп: <code>SupervisorClusterKey</code> (нормализация digits→#, paths→~) и per-subject окна
+(<code>supervisorCaseDedupWindow = 7d</code>). Прямой образец для <code>deduplication_key</code> из ТЗ §6.4.</li>
+</ul>
+<h2 id="2-steer-точки-интеграции-и-гарантии"><a class="anchor" href="#2-steer-точки-интеграции-и-гарантии" aria-label="Section link">#</a>2. Steer: точки интеграции и гарантии</h2><ul>
+<li>Steer — Temporal-сигналы на workflow <code>AgentRun</code>: <code>kernel.user_note</code>
+(<code>agent.UserNoteSignal</code> → <code>agent.UserNote{Text, ActorID}</code>, <code>kernel/agent/workflow.go:42/621</code>),
+доставка <code>temporalClient.SignalWorkflow(ctx, agent.WorkflowID(sourceID, project, runID), &quot;&quot;, …)</code>
+(<code>WorkflowID</code> — <code>workflow.go:3955</code>; sourceID проставляется <code>ws.RunSourceID</code>, <code>workspace/store.go:911</code>).</li>
+<li>Точка применения — граница turn&#39;а: <code>appendUserNotes</code> (<code>workflow.go:1982</code>, 5560+) до построения
+следующего модельного запроса; история append-only, кэш-префикс стабилен. Уже завершённый
+модельный вызов не меняется; mid-call возможен только <code>kernel.nudge</code>.</li>
+<li>Очередь — сам канал сигналов Temporal (durable, replay-безопасный). Внутри workflow дедуп
+по <code>RequestID</code> для agent-сообщений; user notes не дедуплицируются — дедуп обязан делать
+ядро (наша таблица доставок).</li>
+<li>Run завершён до доставки ⇒ <code>SignalWorkflow</code> возвращает ошибку («workflow gone»): прецеденты
+<code>deliverUserNote</code> (<code>cmd/agent-kernel/channelinbound.go:1395</code>) и <code>healGoneRun</code>
+(<code>cmd/agent-kernel/nudge.go:137</code>). Доставку помечаем <code>expired</code>, не ретраим.</li>
+<li>Фрейминг для отдельного блока контекста — по образцу <code>userNotePrefix</code>/<code>agentMessageFraming</code>
+(<code>workflow.go:5206/5273</code>): явное указание источника и статуса.</li>
+</ul>
+<h2 id="3-модели-plan-graph-tasksaga-delegated-run"><a class="anchor" href="#3-модели-plan-graph-tasksaga-delegated-run" aria-label="Section link">#</a>3. Модели Plan Graph, Task/Saga, delegated Run</h2><ul>
+<li>Task: <code>workspace.Task</code> (<code>workspace/models.go:530</code>), таблица <code>workspace_task</code>; Run:
+<code>workspace.Run</code> (models.go:541), таблица <code>workspace_run</code>; связка <code>workspace_run.task_id</code>.</li>
+<li>Delegated child runs НЕ имеют строки <code>workspace_run</code> (комментарий <code>workspace/store.go:891</code>) —
+живут только в журнале; id <code>&lt;parent&gt;/delegate/&lt;NN&gt;</code>; причинность через
+<code>parent_run_id</code> в контексте событий; родитель публикует <code>delegation.started/completed/failed</code>.</li>
+<li>Saga — event-sourced, без таблицы: <code>saga.registered/attached/renamed/merged/deleted</code>
+(<code>cmd/agent-kernel/sagalifecycle.go</code>); UI-роуты <code>RegisterSagaRoutes</code> (main.go:3222).</li>
+<li>Plan — не персистентен: события <code>plan.started/task.started/task.completed/…</code> внутри workflow
+(<code>kernel/agent/workflow.go:1061–1729</code>); типы <code>PlanSpec</code>/<code>PlanTask</code> (<code>kernel/agent/plan.go:30/69</code>).
+Межплановых зависимостей в модели нет — только производные связи (§11.1 ТЗ):
+общая Task, общий Artifact/Saga, общий проект, явная ссылка.</li>
+<li>Существующая визуализация графа: <code>debugger/src/PlanGraph.tsx</code> — клиентский fold событий
+<code>plan.*</code> (<code>foldPlans</code>/<code>PlanDAG</code>), переиспользуем для раскрытия карточек.</li>
+</ul>
+<h2 id="4-lifecycle-events-и-active-run"><a class="anchor" href="#4-lifecycle-events-и-active-run" aria-label="Section link">#</a>4. Lifecycle events и active Run</h2><ul>
+<li>Есть: <code>run.started/completed/failed/cancelled/restarted</code>, <code>delegation.*</code>, <code>plan.*</code>,
+<code>saga.*</code>, <code>artifact.proposed/updated/review.*</code>, <code>human.requested/answered/timed_out</code>,
+<code>approval.requested/granted/rejected/auto_granted</code>, <code>run.user_note</code>, <code>supervisor.verdict</code>.</li>
+<li>Нет <code>run.waiting</code>/<code>run.resumed</code> — ожидание наблюдается парами
+<code>human.requested→answered</code> и <code>approval.requested→granted/rejected</code>; в проекции P0
+ожидание выводится из этих событий (и из открытых <code>human_request</code>).</li>
+<li>Нет <code>task.*</code> событий — состояние Task берётся из <code>workspace_task</code> + <code>workspace_run</code>.</li>
+<li>События <code>artifact.*</code> не несут <code>context.project</code> — на fold-этапе присоединяем
+<code>workspace_artifact</code>.</li>
+<li>Active Run: <code>RunsMissingTerminal</code> / <code>RunTerminalStatuses</code> (<code>workspace/store.go:1104/1068</code>) —
+journal-side; <code>ListStartedRuns</code> — только root-раны. Для проекции — свой снапшот
+<code>org_active_run</code>, обновляемый fold-циклом.</li>
+</ul>
+<h2 id="5-org-scoped-rbac"><a class="anchor" href="#5-org-scoped-rbac" aria-label="Section link">#</a>5. Org-scoped RBAC</h2><ul>
+<li>Роли: <code>RoleReader&lt;Writer&lt;Operator&lt;Admin</code> (<code>controlplane/controlplane.go:28</code>); проверка
+<code>gate.Allow/AllowQuery</code> в каждом обработчике; org-скоуп: <code>visibleUnits(r)</code> (main.go:1867),
+<code>workspace.OrgVisible</code>, <code>principal.MaxRoleAt</code>; run-скоуп: <code>RunVisibilityActors</code>
+(<code>workspace/runvisibility.go:26</code>) + <code>guardRunVisibility</code> (main.go:9350).</li>
+<li>Trace-чтение: журнал проверяет <code>AllowQuery(RoleReader)</code> + проекты + <code>ActorScope</code> на каждый
+запрос (<code>observation/httpapi/server.go:360/518</code>); kernel — <code>guardRunVisibility</code>.</li>
+<li>Artifact-чтение: <code>GET /v1/workspace/artifacts/{id}</code> — RoleReader + <code>OrgVisible</code> (404, не 403).</li>
+<li>Орг-привязка Run: НЕТ колонки <code>org_unit_id</code> на <code>workspace_run</code>; атрибуция — snapshot в
+<code>exec_context.authorized_by.org_unit_id</code> (<code>runExecContextFor</code>, main.go:9194) на момент запуска.
+Историческая привязка сохраняется (журнал append-only; перевод пишет аудит
+<code>user.org_unit_changed</code>, ничего не переписывает).</li>
+</ul>
+<h2 id="6-watermark-replay-идемпотентность-event-stream"><a class="anchor" href="#6-watermark-replay-идемпотентность-event-stream" aria-label="Section link">#</a>6. Watermark, replay, идемпотентность event stream</h2><ul>
+<li>Журнал: <code>observation_events</code>, PK <code>(source_id, event_id)</code> — базовый дедуп; append-only триггер;
+порядок всегда по кортежу <code>(occurred_at, received_at, source_id, event_id)</code>; ретеншн удаляет
+старые события ⇒ проекция обязана быть долговременной записью своей области.</li>
+<li>Паттерн консьюмера — <code>syncSupervisorCases</code> (<code>cmd/agent-kernel/supervisorqueue.go:174</code>):
+watermark <code>workspace_supervisor_sync</code> + якорная таблица <code>workspace_supervisor_case_event</code>
+(<code>ON CONFLICT DO NOTHING RETURNING</code>), <code>since = watermark − 1s</code>, advance после страниц.</li>
+<li>Поздние события: старше watermark — пропускаются; принятая компенсация — ограниченное
+переполнение окна (SRE rollup перекатывает последние часы). Для орг-проекции: якорь +
+повторный fold последнего окна на каждом проходе (безопасно по якорю).</li>
+<li>Replay/rebuild: truncate проекции + сброс watermark; fold — чистая функция событий в строки.</li>
+</ul>
+<h2 id="7-переиспользование-визуализации-графов"><a class="anchor" href="#7-переиспользование-визуализации-графов" aria-label="Section link">#</a>7. Переиспользование визуализации графов</h2><p><code>debugger/src/PlanGraph.tsx</code> (<code>foldPlans</code>, <code>fetchPlans</code>, <code>PlanDAG</code>) — переиспользуется как есть
+для per-run графов; сводный граф подразделения требует нового агрегирующего эндпоинта
+(<code>GET /v1/org/plan-graph</code>) — клиентского fold для подразделения недостаточно.</p>
+<h2 id="8-фоновые-задачи"><a class="anchor" href="#8-фоновые-задачи" aria-label="Section link">#</a>8. Фоновые задачи</h2><p>Канонический шаблон — goroutine + <code>time.NewTicker</code>, запуск в <code>run()</code> рядом с
+<code>go runArtifactReviewSweep(...)</code> (main.go:8221); best-effort, идемпотентные проходы,
+dedupe через DB-штампы и journal EventID. Лидер-элекшена нет — безопасно при одном инстансе
+kernel (текущий деплой). Пример для копирования: <code>cmd/agent-kernel/artifactreviewsweep.go</code>.</p>
+<h2 id="9-аудит-чтения-artifact"><a class="anchor" href="#9-аудит-чтения-artifact" aria-label="Section link">#</a>9. Аудит чтения Artifact</h2><ul>
+<li>Агентские чтения уже журналируются: событие <code>artifact.read</code> из <code>handleArtifactRead</code>
+(<code>kernel/agent/artifacttools.go:183</code>) с checksum-версией.</li>
+<li>Человеческие/API чтения НЕ аудируются: <code>access_audit_log</code> фиксирует только мутации
+(<code>workspace/audit.go:143</code> <code>RecordAccessAudit</code>, ~70 констант действий, listing
+<code>GET /v1/org/audit</code>). Для §16 ТЗ добавляем аудируемые действия чтения (<code>artifact.read</code> /
+<code>trace.read</code> / <code>org_awareness.details</code>) в местах защищённых чтений — best-effort по
+конвенции.</li>
+</ul>
+<h2 id="10-связи-plan-task-artifact-run"><a class="anchor" href="#10-связи-plan-task-artifact-run" aria-label="Section link">#</a>10. Связи Plan, Task, Artifact, Run</h2><p><code>workspace_run.task_id → workspace_task.id → workspace_project</code>; plan — события журнала,
+группируются по <code>operation_id</code>; child runs — <code>parent_run_id</code> в контексте событий;
+<code>workspace_artifact.origin_run → run</code>, <code>saga_id → saga</code>; орг-скоуп — <code>org_unit_id</code> на
+ресурсах + <code>workspace_project_org_unit</code> + <code>visibleUnits</code>/<code>RunVisibilityActors</code>.</p>
+<h2 id="итоговые-решения-по-контрактам-уточнение-тз"><a class="anchor" href="#итоговые-решения-по-контрактам-уточнение-тз" aria-label="Section link">#</a>Итоговые решения по контрактам (уточнение ТЗ)</h2><ol>
+<li><code>org_node_id</code> события = снапшот атрибуции: для root-ранов <code>exec_context.authorized_by.org_unit_id</code>,
+для дочерних — наследование от родителя; резолв один раз при первом fold-событии рана,
+хранится в <code>org_active_run</code>; перевод сотрудника историю не двигает (§3 ТЗ).</li>
+<li>Названия операций API — <code>/v1/org/*</code> поверх существующих middleware; формат ошибок
+<code>{&quot;error&quot;: …}</code> (<code>writeError</code>), конверты <code>{&lt;entity&gt;: [...], count}</code>.</li>
+<li>Настройки узла — таблица <code>org_activity_setting(org_unit_id, key, value)</code> + резолв по цепочке
+предков (шаблон <code>org_policy</code>/<code>EffectivePolicy</code> с <code>sources</code> для UI).</li>
+<li>Steer-доставка — <code>agent.UserNoteSignal</code> с явным фреймингом «organizational awareness» и
+маркером <code>[org-awareness:&lt;delivery_id&gt;]</code> в тексте: маркер позволяет correlate
+<code>run.user_note</code> (событие workflow) с доставкой и честно отмечать <code>consumed</code>.</li>
+<li>Дедуп решений — уникальный индекс <code>(deduplication_key, target_run_id)</code> на доставках;
+<code>ignore</code>-решения не создают доставок.</li>
+<li>run.waiting/run.resumed не добавляются в kernel/agent в рамках P0 — проекция выводит
+ожидание из <code>human.*</code>/<code>approval.*</code> (изменение workflow-эмитов — отдельный PR при необходимости).</li>
+</ol>
+<p>Схема логического контракта события (§4.3 ТЗ) согласована с фактическим конвертом
+<code>observation.Event</code>: <code>event_id</code>+<code>source_id</code> (дедуп), <code>type</code>, <code>occurred_at</code>,
+<code>context.{project,run,task,actor}</code>, <code>data</code> — источник для summary/refs;
+<code>org_node_id</code>, <code>summary</code>, <code>visibility_policy</code>, <code>schema_version</code> — поля проекции, не журнала.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="organizational-operations-implementation.html"><small>← Назад</small><strong>Реализация: Organizational Operations</strong></a>
+    <a class="pager-next" href="plan-evaluable-agent.html"><small>Далее →</small><strong>План работ: Evaluable Agent — определение агента и компиляция системного промта</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
