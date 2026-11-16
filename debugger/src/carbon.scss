@@ -3375,6 +3375,10 @@ button.header-nav-link {
 }
 .artifact-outline-item:hover { background: var(--tm-surface-2); color: var(--tm-text); }
 .artifact-outline-item.active { color: var(--tm-teal); background: var(--tm-surface-2); }
+/* Collapsed: the whole column shrinks to the lone expand chevron — the body
+   text gets the width back (the 200px empty strip was the old collapse). */
+.artifact-outline.collapsed { width: auto; padding: 0.1rem 0 0.4rem 0.35rem; }
+.artifact-outline.collapsed .artifact-outline-title { justify-content: center; padding: 0.2rem 0.3rem; }
 @media (max-width: 1279px) { .artifact-outline { display: none; } }
 .artifact-selection-menu, .artifact-annotation-editor { position: fixed; z-index: 10000; transform: translate(-50%, -100%); background: var(--tm-bg); border: 1px solid var(--tm-border); box-shadow: 0 4px 18px #0004; border-radius: 8px; }
 /* Below the selection (not enough room above): the transform anchors the

@@ -174,14 +174,17 @@ export default function DocumentOutline({ content, rootRef }: {
   const minLevel = Math.min(...outline.map((item) => item.level))
 
   return (
-    <nav className="artifact-outline" aria-label={t('artifacts.outline_title') ?? 'Contents'}>
+    <nav className={`artifact-outline${open ? '' : ' collapsed'}`} aria-label={t('artifacts.outline_title') ?? 'Contents'}>
       <button
         type="button"
         className="artifact-outline-title"
         onClick={() => setOpen((v) => !v)}
         title={t('artifacts.outline_toggle') ?? undefined}
       >
-        <span>{t('artifacts.outline_title') ?? 'Contents'}</span>
+        {/* Collapsed, the nav shrinks to this chevron alone — the title text
+            would force the column back open. The chevron points right while
+            collapsed (expand hint) and down while the outline is open. */}
+        {open && <span>{t('artifacts.outline_title') ?? 'Contents'}</span>}
         <ChevronRight size={12} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }} />
       </button>
       {open && outline.map((item, index) => (
