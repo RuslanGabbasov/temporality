@@ -92,14 +92,13 @@ const CONFIG_GROUPS: { title: string; items: { path: string; label: string; admi
       { path: '/channels', label: 'nav.channels', adminOnly: true },
     ],
   },
-  // Organization operations (docs/org-activity.md): the manager surfaces —
-  // the activity board, the work board and the awareness flow. Operational
-  // views, not configuration — hence their own group next to «Organization
-  // & access».
+  // Organization operations (docs/temporality-organizational-operations-
+  // spec.md): the manager surfaces — work board and awareness flow. The
+  // activity feed is NOT here: it is a dashboard tab (the user's ask — the
+  // feed is an overview surface, not a destination).
   {
     title: 'nav.group_orgops',
     items: [
-      { path: '/org/activity', label: 'nav.org_activity' },
       { path: '/org/work', label: 'nav.org_work' },
       { path: '/org/flow', label: 'nav.org_flow' },
     ],

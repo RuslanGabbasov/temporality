@@ -15,6 +15,7 @@ import {
 } from './kernelApi'
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
+import OrgActivityBoard from './OrgActivityBoard'
 import { SupervisorPanels } from './Supervisor'
 import { workspaceApi, type UserMetricsRow, type UserFact } from './workspaceApi'
 import { useI18n, pluralT } from './i18n'
@@ -30,12 +31,12 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'sagas' | 'supervisor' | 'users'
+type Tab = 'overview' | 'activity' | 'sagas' | 'supervisor' | 'users'
 // Every valid tab: the URL param and the last-tab memory validate against this
 // full set (the TAB_KEYS strip above it is only the initial-render order).
 // 'quality' was removed: the eval-loop table rendered all-dashes without
 // evaluation runs (see the tabs comment below).
-const ALL_TABS: Tab[] = ['overview', 'sagas', 'supervisor', 'users']
+const ALL_TABS: Tab[] = ['overview', 'activity', 'sagas', 'supervisor', 'users']
 const TAB_KEYS: Tab[] = ['overview', 'sagas']
 // The last open tab survives reloads and revisits: returning to the
 // supervisor triage mid-investigation must not land back on the overview.
@@ -310,6 +311,10 @@ export default function Dashboard({ project, setProject }: Props) {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: t('dashboard.tab_overview') ?? 'Overview' },
+    // The organizational activity feed (docs/temporality-organizational-
+    // operations-spec.md §9) lives here as a tab — it is an overview
+    // surface, not a destination of its own.
+    { key: 'activity', label: t('dashboard.tab_activity') ?? 'Activity' },
     { key: 'sagas', label: t('dashboard.tab_sagas') ?? 'Sagas' },
     // The knowledge observability tab was removed (an atavism next to the
     // Knowledge explorer page): its patterns and historical filters live
@@ -708,6 +713,8 @@ export default function Dashboard({ project, setProject }: Props) {
           )}
         </>
       )}
+
+      {tab === 'activity' && <OrgActivityBoard embedded />}
 
       {tab === 'sagas' && <ProjectOverview project={project} />}
 

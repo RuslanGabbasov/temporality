@@ -106,6 +106,7 @@ export const ru: Record<string, string> = {
     // System dashboard (docs/system-dashboard.md)
     'dashboard.title': 'Дашборд системы',
     'dashboard.tab_overview': 'Обзор',
+    'dashboard.tab_activity': 'Активность',
     'dashboard.tab_quality': 'Качество',
     'dashboard.tab_sagas': 'Саги',
     'dashboard.tab_knowledge': 'Знания',

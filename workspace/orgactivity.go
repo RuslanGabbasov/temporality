@@ -327,6 +327,17 @@ func (s *Store) PruneOrgActivity(ctx context.Context, olderThan time.Time) (int6
 	return tag.RowsAffected(), nil
 }
 
+// DeleteOrgActivityByType removes every projection row of one event type —
+// the cleanup path when a type moves to the projection skip list (the
+// already-folded rows would otherwise haunt the board until retention).
+func (s *Store) DeleteOrgActivityByType(ctx context.Context, eventType string) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM org_activity WHERE event_type = $1`, eventType)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // PruneOrgActiveRunsFinished drops terminal snapshot rows older than the
 // given age — the snapshot stays small while terminal history lives in
 // org_activity.

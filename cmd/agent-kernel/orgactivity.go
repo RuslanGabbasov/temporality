@@ -97,6 +97,16 @@ var orgActivityTypeGates = map[string]func(workspace.OrgActivitySettings) bool{
 
 func publishProgressGate(s workspace.OrgActivitySettings) bool { return s.PublishSignificantProgress }
 
+// orgActivityProjectionSkip: types the fold keeps fetching (their snapshot
+// side-effects matter — approval.auto_granted clears the waiting-on-human
+// urgent latch) but never publishes: an automatic system action is not a
+// public organizational event (spec §4.2 — «каждое внутреннее изменение
+// агента не должно автоматически становиться публичным событием»). Without
+// this skip an auto-approval install floods the Activity Board.
+var orgActivityProjectionSkip = map[string]bool{
+	"approval.auto_granted": true,
+}
+
 func publishArtifactGate(s workspace.OrgActivitySettings) bool { return s.PublishArtifactEvents }
 
 func publishQualityGate(s workspace.OrgActivitySettings) bool { return s.PublishQualityEvents }
@@ -331,6 +341,12 @@ func foldOrgEvent(ctx context.Context, deps *orgFoldDeps, event *observation.Eve
 		if err := updateOrgActiveRun(ctx, deps, event, category, project, runID, actorID, attrib); err != nil {
 			return false, err
 		}
+	}
+
+	// Internal/system events update the snapshot but never surface in the
+	// feed (spec §4.2).
+	if orgActivityProjectionSkip[event.Type] {
+		return false, nil
 	}
 
 	// The §5 publish gates decide whether the event becomes a public
@@ -707,6 +723,11 @@ func runOrgActivityPrune(ctx context.Context, log *slog.Logger, ws *workspace.St
 		if _, err := ws.PruneOrgActivity(ctx, time.Now().UTC().Add(-minActivity)); err != nil {
 			log.Warn("org activity prune: rows", "error", err)
 		}
+	}
+	// One-off cleanup: rows folded before approval.auto_granted was moved to
+	// the projection skip list — they are noise on the board.
+	if _, err := ws.DeleteOrgActivityByType(ctx, "approval.auto_granted"); err != nil {
+		log.Warn("org activity prune: auto approvals", "error", err)
 	}
 	if minDelivery > 0 {
 		if _, err := ws.PruneOrgAwarenessDeliveries(ctx, time.Now().UTC().Add(-minDelivery)); err != nil {

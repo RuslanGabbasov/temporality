@@ -58,6 +58,15 @@ func TestOrgActivityCategoriesClosed(t *testing.T) {
 	require.Contains(t, orgActivityCategories, "artifact.review.approved")
 }
 
+// §4.2: automatic system actions never surface in the feed — an auto-granted
+// approval is bookkeeping, not organizational news (the flood regression).
+func TestOrgActivityProjectionSkip(t *testing.T) {
+	require.Contains(t, orgActivityProjectionSkip, "approval.auto_granted")
+	require.NotContains(t, orgActivityProjectionSkip, "approval.granted")
+	require.NotContains(t, orgActivityProjectionSkip, "approval.requested")
+	require.NotContains(t, orgActivityProjectionSkip, "human.answered")
+}
+
 // §8: the consumption marker parse — one id, several, junk-safe.
 func TestOrgAwarenessMarkerIDs(t *testing.T) {
 	require.Nil(t, orgAwarenessMarkerIDs("no markers here"))
