@@ -93,16 +93,10 @@ const CONFIG_GROUPS: { title: string; items: { path: string; label: string; admi
     ],
   },
   // Organization operations (docs/temporality-organizational-operations-
-  // spec.md): the manager surfaces — work board and awareness flow. The
-  // activity feed is NOT here: it is a dashboard tab (the user's ask — the
-  // feed is an overview surface, not a destination).
-  {
-    title: 'nav.group_orgops',
-    items: [
-      { path: '/org/work', label: 'nav.org_work' },
-      { path: '/org/flow', label: 'nav.org_flow' },
-    ],
-  },
+  // spec.md): all three manager surfaces — work board, activity feed and
+  // awareness flow — live in the DASHBOARD as tabs (the control tower for
+  // actual work). Nothing here: operational views are not configuration.
+  // The /org/* routes remain for deep links only.
   {
     title: 'nav.group_org',
     items: [

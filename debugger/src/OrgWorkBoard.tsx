@@ -318,7 +318,7 @@ function ActiveRunsSection({ unit, scope }: { unit: string; scope: string }) {
     if (open) void load()
   }, [open, load])
 
-  const openFlow = (runID: string) => navigate(`/org/flow?target_run=${encodeURIComponent(runID)}`)
+  const openFlow = (runID: string) => navigate(`/dashboard?tab=flow&target_run=${encodeURIComponent(runID)}`)
 
   return (
     <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.6rem' }}>
@@ -349,7 +349,9 @@ function ActiveRunsSection({ unit, scope }: { unit: string; scope: string }) {
   )
 }
 
-export default function OrgWorkBoard() {
+// embedded renders the board inside the dashboard's Work tab: no page
+// padding, no page heading — the tab strip above already names it.
+export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const { t, locale } = useI18n()
   const org = useOrgUnits()
   const [loading, setLoading] = useState(true)
@@ -379,19 +381,21 @@ export default function OrgWorkBoard() {
   const problems = view?.problems ?? []
   const metrics = view?.metrics ?? {}
 
-  const openFlow = (runID: string) => navigate(`/org/flow?target_run=${encodeURIComponent(runID)}`)
+  const openFlow = (runID: string) => navigate(`/dashboard?tab=flow&target_run=${encodeURIComponent(runID)}`)
 
   return (
-    <div style={{ padding: '1rem', maxWidth: '86rem', margin: '0 auto' }}>
+    <div style={{ padding: embedded ? 0 : '1rem', maxWidth: embedded ? undefined : '86rem', margin: embedded ? undefined : '0 auto' }}>
       {error && (
         <InlineNotification kind="error" title={t('common.error')} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+        {!embedded && (
         <div>
           <Heading style={{ fontSize: '1.1rem' }}>{t('orgwork.title')}</Heading>
           <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>{t('orgwork.subtitle')}</p>
         </div>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <OrgUnitSelect id="orgwork-unit" value={unit} onChange={(v) => { setUnit(v); setSelectedTask(null) }} org={org} label={t('orgops.unit')} size="sm" />
           <label className="toolbar-select">

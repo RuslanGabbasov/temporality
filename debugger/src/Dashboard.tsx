@@ -16,6 +16,9 @@ import {
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
 import OrgActivityBoard from './OrgActivityBoard'
+import OrgWorkBoard from './OrgWorkBoard'
+import OrgAwarenessFlow from './OrgAwarenessFlow'
+import { orgApi, type OrgWorkView } from './orgApi'
 import { SupervisorPanels } from './Supervisor'
 import { workspaceApi, type UserMetricsRow, type UserFact } from './workspaceApi'
 import { useI18n, pluralT } from './i18n'
@@ -31,12 +34,12 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'activity' | 'sagas' | 'supervisor' | 'users'
+type Tab = 'overview' | 'work' | 'activity' | 'flow' | 'sagas' | 'supervisor' | 'users'
 // Every valid tab: the URL param and the last-tab memory validate against this
 // full set (the TAB_KEYS strip above it is only the initial-render order).
 // 'quality' was removed: the eval-loop table rendered all-dashes without
 // evaluation runs (see the tabs comment below).
-const ALL_TABS: Tab[] = ['overview', 'activity', 'sagas', 'supervisor', 'users']
+const ALL_TABS: Tab[] = ['overview', 'work', 'activity', 'flow', 'sagas', 'supervisor', 'users']
 const TAB_KEYS: Tab[] = ['overview', 'sagas']
 // The last open tab survives reloads and revisits: returning to the
 // supervisor triage mid-investigation must not land back on the overview.
@@ -150,6 +153,17 @@ export default function Dashboard({ project, setProject }: Props) {
     setTab(next)
     try { window.localStorage.setItem(LAST_TAB_KEY, next) } catch { /* private mode: memory-only */ }
   }, [])
+  // In-dashboard deep links (pushState + popstate from the work board's
+  // «open flow» buttons) re-read the tab here — the page itself does not
+  // remount when only the query string changed.
+  useEffect(() => {
+    const syncFromURL = () => {
+      const next = new URLSearchParams(window.location.search).get('tab') as Tab | null
+      if (next && ALL_TABS.includes(next)) setTab((prev) => (prev === next ? prev : next))
+    }
+    window.addEventListener('popstate', syncFromURL)
+    return () => window.removeEventListener('popstate', syncFromURL)
+  }, [])
   const [windowIdx, setWindowIdx] = useState(1) // 24h by default
   // One cache read per mount: hydration only, writes happen after a refresh
   // lands. A cache stamped with another journal window is ignored — numbers
@@ -167,6 +181,11 @@ export default function Dashboard({ project, setProject }: Props) {
     typeof cached?.opsCount === 'number' ? cached.opsCount : null)
   const [storage_, setStorage] = useState<StorageSnapshot | null>(() => cached?.storage ?? null)
   const [syshealth, setSyshealth] = useState<SystemHealth | null>(() => cached?.syshealth ?? null)
+  // The work strip (the orgops work-view metrics): what is actually running,
+  // waiting and broken across the viewer's org scope — the control tower's
+  // first glance. Best-effort: a failed fetch keeps the strip hidden (the
+  // endpoint needs the org API; a non-org viewer loses nothing).
+  const [workView, setWorkView] = useState<OrgWorkView | null>(null)
   // Run id → title from run.started events: the sandbox digest shows the human
   // name of the run, not the opaque id. Best-effort — failures leave ids.
   const [runTitles, setRunTitles] = useState<Map<string, string>>(() => new Map(Object.entries(cached?.runTitles ?? {})))
@@ -268,6 +287,25 @@ export default function Dashboard({ project, setProject }: Props) {
     if (tab === 'overview') void loadOverviewData()
   }, [tab, loadOverviewData])
 
+  // The work strip: orgops work-view metrics + problems, fetched alongside
+  // the overview slices and refreshed on the same cadence. Best-effort —
+  // a failed fetch keeps the strip hidden instead of showing zeros.
+  useEffect(() => {
+    if (tab !== 'overview') return
+    let cancelled = false
+    const loadWork = async () => {
+      try {
+        const view = await orgApi.workView({ scope: 'subtree' })
+        if (!cancelled) setWorkView(view)
+      } catch { /* strip stays hidden */ }
+    }
+    void loadWork()
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') void loadWork()
+    }, REFRESH_MS)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [tab])
+
   // Auto-refresh the live tab while it is visible; a hidden tab (background
   // window) must not keep hammering the journal.
   useEffect(() => {
@@ -311,10 +349,13 @@ export default function Dashboard({ project, setProject }: Props) {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: t('dashboard.tab_overview') ?? 'Overview' },
-    // The organizational activity feed (docs/temporality-organizational-
-    // operations-spec.md §9) lives here as a tab — it is an overview
-    // surface, not a destination of its own.
+    // The work observation console (docs/temporality-organizational-
+    // operations-spec.md §10/§9/§12): the manager surfaces live here as
+    // tabs — the dashboard is the control tower for actual work, not just
+    // system health.
+    { key: 'work', label: t('dashboard.tab_work') ?? 'Work' },
     { key: 'activity', label: t('dashboard.tab_activity') ?? 'Activity' },
+    { key: 'flow', label: t('dashboard.tab_flow') ?? 'Flow' },
     { key: 'sagas', label: t('dashboard.tab_sagas') ?? 'Sagas' },
     // The knowledge observability tab was removed (an atavism next to the
     // Knowledge explorer page): its patterns and historical filters live
@@ -437,6 +478,57 @@ export default function Dashboard({ project, setProject }: Props) {
               </>
             )}
           </div>
+
+          {/* Work strip (the control tower's work glance, docs/temporality-
+              organizational-operations-spec.md §10.5/§13): active / waiting /
+              review / failed across the viewer's org scope — each chip dives
+              into the Work tab. Hidden until the first work-view lands: zeros
+              of a failed fetch must not read as «nothing is happening». */}
+          {workView?.metrics && (
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
+              <HealthChip
+                value={workView.metrics.active ?? 0}
+                label={pluralT(t, locale, 'dashboard.work_active_n', workView.metrics.active ?? 0)}
+                title={t('dashboard.work_active_hint') ?? undefined}
+                onClick={() => switchTab('work')}
+              />
+              <HealthChip
+                value={workView.metrics.waiting ?? 0}
+                label={pluralT(t, locale, 'dashboard.work_waiting_n', workView.metrics.waiting ?? 0)}
+                danger={(workView.metrics.waiting ?? 0) > 0}
+                title={t('dashboard.work_waiting_hint') ?? undefined}
+                onClick={() => switchTab('work')}
+              />
+              <HealthChip
+                value={workView.metrics.review ?? 0}
+                label={pluralT(t, locale, 'dashboard.work_review_n', workView.metrics.review ?? 0)}
+                title={t('dashboard.work_review_hint') ?? undefined}
+                onClick={() => switchTab('work')}
+              />
+              <HealthChip
+                value={workView.metrics.failed_runs ?? 0}
+                label={pluralT(t, locale, 'dashboard.work_failed_n', workView.metrics.failed_runs ?? 0)}
+                danger={(workView.metrics.failed_runs ?? 0) > 0}
+                title={t('dashboard.work_failed_hint') ?? undefined}
+                onClick={() => switchTab('work')}
+              />
+              <HealthChip
+                value={workView.metrics.completed_runs_24h ?? 0}
+                label={pluralT(t, locale, 'dashboard.work_done24h_n', workView.metrics.completed_runs_24h ?? 0)}
+                title={t('dashboard.work_done24h_hint') ?? undefined}
+                onClick={() => switchTab('activity')}
+              />
+              {(workView.problems?.length ?? 0) > 0 && (
+                <HealthChip
+                  value={workView.problems!.length}
+                  label={pluralT(t, locale, 'dashboard.work_problems_n', workView.problems!.length)}
+                  danger
+                  title={t('dashboard.work_problems_hint') ?? undefined}
+                  onClick={() => switchTab('work')}
+                />
+              )}
+            </div>
+          )}
 
           {/* Tool readiness (docs/onboarding-readiness): unset configuration
               that silently degrades tools, surfaced before anyone wonders why
@@ -714,7 +806,11 @@ export default function Dashboard({ project, setProject }: Props) {
         </>
       )}
 
+      {tab === 'work' && <OrgWorkBoard embedded />}
+
       {tab === 'activity' && <OrgActivityBoard embedded />}
+
+      {tab === 'flow' && <OrgAwarenessFlow embedded />}
 
       {tab === 'sagas' && <ProjectOverview project={project} />}
 

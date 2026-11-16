@@ -193,7 +193,9 @@ function ChainRow({ row, onDismiss, onAction, onDetails, busy }: {
   )
 }
 
-export default function OrgAwarenessFlow() {
+// embedded renders the flow inside the dashboard's Flow tab: no page
+// padding, no page heading — the tab strip above already names it.
+export default function OrgAwarenessFlow({ embedded }: { embedded?: boolean }) {
   const { t, locale } = useI18n()
   const org = useOrgUnits()
   const [loading, setLoading] = useState(true)
@@ -317,7 +319,7 @@ export default function OrgAwarenessFlow() {
   const canMore = rows.length < count
 
   return (
-    <div style={{ padding: '1rem', maxWidth: '86rem', margin: '0 auto' }}>
+    <div style={{ padding: embedded ? 0 : '1rem', maxWidth: embedded ? undefined : '86rem', margin: embedded ? undefined : '0 auto' }}>
       {error && (
         <InlineNotification kind="error" title={t('common.error')} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}
@@ -325,10 +327,12 @@ export default function OrgAwarenessFlow() {
         <InlineNotification kind="error" title={t('common.error')} subtitle={actionError} onClose={() => setActionError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}
 
+      {!embedded && (
       <div style={{ marginBottom: '0.75rem' }}>
         <Heading style={{ fontSize: '1.1rem' }}>{t('orgflow.title')}</Heading>
         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>{t('orgflow.subtitle')}</p>
       </div>
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0', borderBottom: '1px solid var(--tm-border)' }}>
         <OrgUnitSelect id="orgflow-unit" value={unit} onChange={setUnit} org={org} label={t('orgops.unit')} size="sm" />
