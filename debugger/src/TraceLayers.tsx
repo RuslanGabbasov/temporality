@@ -102,10 +102,9 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
             window.history.pushState(null, '', link.url)
             window.dispatchEvent(new PopStateEvent('popstate'))
           }}
-          style={{ fontSize: '0.72rem', color: 'var(--tm-teal)', overflowWrap: 'anywhere' }}
+          style={{ display: 'block', fontSize: '0.72rem', color: 'var(--tm-teal)', overflowWrap: 'anywhere' }}
         >
-          {link.kind === 'child_run' ? `↗ ${t('runs.layers.child.open')}` : link.kind === 'artifact' ? `📄 ${t('runs.layers.artifact.open')}` : `📚 ${t('runs.layers.knowledge.open')}`}
-          {' — '}
+          {link.kind === 'child_run' ? `↗ ${t('runs.layers.child.open')} — ` : link.kind === 'artifact' ? '📄 ' : '📚 '}
           {link.label}
         </a>
       ))}
