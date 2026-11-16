@@ -24,7 +24,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -141,7 +140,13 @@ type Config struct {
 	BaseURL               string
 	Model                 string
 	APIKey                string
-	Temperature           float64
+	// AnthropicOAuth marks a provider whose credential is a Claude
+	// subscription OAuth token (claude setup-token). Those tokens are issued
+	// for the native /v1/messages surface, so the client swaps the wire
+	// entirely (client_anthropic.go) instead of sending OAuth to the OpenAI
+	// compatibility layer.
+	AnthropicOAuth bool
+	Temperature    float64
 	// Timeout is the total per-attempt budget for blocking requests. Streaming
 	// requests ignore it: long generations are legal as long as chunks keep
 	// arriving, so streams are bounded by StreamIdleTimeout instead plus the
@@ -657,7 +662,12 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		option(&req)
 	}
 	c.compatSanitize(&req)
-	payload, err := json.Marshal(req)
+	if c.messagesWire() {
+		// No Messages surface for response_format; leaving it set would send
+		// the ladder chasing a field that no longer exists on the wire.
+		req.ResponseFormat = nil
+	}
+	payload, err := c.encodePayload(&req)
 	if err != nil {
 		return Completion{}, err
 	}
@@ -705,7 +715,7 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 			var statusErr *statusError
 			if errors.As(err, &statusErr) && (statusErr.code == http.StatusBadRequest || statusErr.code == http.StatusUnprocessableEntity) {
 				req.ResponseFormat = nil
-				payload, err = json.Marshal(req)
+				payload, err = c.encodePayload(&req)
 				if err != nil {
 					return Completion{}, err
 				}
@@ -718,12 +728,14 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		// implement (reasoning, prompt cache key, parallel-tool toggle, stream
 		// options). Strip them one at a time and retry — the same degradation
 		// philosophy as the response_format drop above.
+		// (The Messages wire already omits every one of these fields, so the
+		// strip ladder is meaningless there — a 400 is a real refusal.)
 		var statusErr *statusError
-		if errors.As(err, &statusErr) && statusErr.code == http.StatusBadRequest {
+		if !c.messagesWire() && errors.As(err, &statusErr) && statusErr.code == http.StatusBadRequest {
 			if stripped < maxBadRequestStrips {
 				if _, ok := badRequestStrip(&req); ok {
 					stripped++
-					payload, err = json.Marshal(req)
+					payload, err = c.encodePayload(&req)
 					if err != nil {
 						return Completion{}, err
 					}
@@ -763,6 +775,9 @@ type ToolCallDelta struct {
 // StreamComplete sends a streaming request and calls onToken for each chunk.
 // The final Completion is returned with accumulated content and tool calls.
 func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools []ToolDef, onToken TokenCallback, options ...Option) (Completion, error) {
+	if c.messagesWire() {
+		return c.messagesStreamComplete(ctx, messages, tools, onToken, options...)
+	}
 	req := chatRequest{
 		Model:       c.cfg.Model,
 		Messages:    toRequestMessages(messages),
@@ -807,69 +822,13 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	// limit.
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
-	request, err := http.NewRequestWithContext(streamCtx, http.MethodPost, strings.TrimRight(c.cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.completionsURL(), bytes.NewReader(payload))
 	if err != nil {
 		return Completion{}, err
 	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "text/event-stream")
-	if c.cfg.APIKey != "" {
-		request.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	}
-	idle := c.cfg.StreamIdleTimeout
-	noProgress := c.cfg.StreamNoProgressTimeout
-	firstToken := c.firstTokenBudget(payload)
-	var lastTraffic atomic.Int64  // last parseable data line (any payload)
-	var lastProgress atomic.Int64 // last chunk that carried generated tokens
-	var anyProgress atomic.Bool   // first generated token seen at all
-	var cancelReason atomic.Value // string: which watchdog fired, for the error
-	start := time.Now().UnixNano()
-	lastTraffic.Store(start)
-	lastProgress.Store(start)
-	stopWatchdog := make(chan struct{})
-	defer close(stopWatchdog)
-	go func() {
-		// Three budgets share one watchdog: idle (no data lines at all — the
-		// connection is dead or parked behind keepalive comments), no-progress
-		// (data lines flow but carry no generated tokens — the request sits in a
-		// server-side queue) and first-token (no generated token ever — the
-		// request never left the queue). Tick at the finest granularity.
-		tick := idle / 4
-		if noProgress > 0 && noProgress/4 < tick {
-			tick = noProgress / 4
-		}
-		if firstToken > 0 && firstToken/4 < tick {
-			tick = firstToken / 4
-		}
-		if tick <= 0 {
-			tick = time.Second
-		}
-		ticker := time.NewTicker(tick)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stopWatchdog:
-				return
-			case <-ticker.C:
-				now := time.Now()
-				if now.Sub(time.Unix(0, lastTraffic.Load())) >= idle {
-					cancelReason.Store(fmt.Sprintf("idle timeout: no data lines for %s", idle))
-					cancelStream()
-					return
-				}
-				if noProgress > 0 && now.Sub(time.Unix(0, lastProgress.Load())) >= noProgress {
-					cancelReason.Store(fmt.Sprintf("stalled stream: no generated tokens for %s", noProgress))
-					cancelStream()
-					return
-				}
-				if firstToken > 0 && !anyProgress.Load() && now.Sub(time.Unix(0, start)) >= firstToken {
-					cancelReason.Store(fmt.Sprintf("first token timeout: no generated tokens for %s", firstToken))
-					cancelStream()
-					return
-				}
-			}
-		}
-	}()
+	c.applyRequestHeaders(request, true)
+	watchdogs := c.startStreamWatchdogs(cancelStream, payload)
+	defer watchdogs.halt()
 	response, err := c.streamHTTP.Do(request)
 	if err != nil {
 		// The watchdogs may have canceled the request while Do was still waiting
@@ -879,31 +838,14 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		// callers into the blocking retry ladder, which joins the same queue and
 		// adds minutes of silent waiting — exactly what the watchdogs exist to
 		// cut short.
-		if reason, ok := cancelReason.Load().(string); ok {
-			return Completion{}, &watchdogError{reason: reason, cause: err}
-		}
-		return Completion{}, &transportError{err: err}
+		return Completion{}, watchdogs.doFailure(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 		// StreamComplete does not retry status errors — the caller decides —
 		// but the parsed Retry-After still rides the error for the message.
-		return Completion{}, &statusError{
-			code:       response.StatusCode,
-			body:       truncate(string(body), 400),
-			retryAfter: parseRetryAfterHeader(response.Header.Get("Retry-After"), time.Now()),
-			url:        request.URL.String(),
-			reqHeaders: map[string]string{
-				"Content-Type":  "application/json",
-				"Authorization": "Bearer " + maskKey(c.cfg.APIKey),
-			},
-			reqBody: truncate(string(payload), 2000),
-			respHeaders: map[string]string{
-				"Content-Type":     response.Header.Get("Content-Type"),
-				"Www-Authenticate": response.Header.Get("Www-Authenticate"),
-			},
-		}
+		return Completion{}, c.statusErrorFrom(request, response, body, payload)
 	}
 
 	// Parse SSE stream
@@ -939,7 +881,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 			// Unparsable data lines are protocol noise, not traffic either.
 			continue
 		}
-		lastTraffic.Store(time.Now().UnixNano())
+		watchdogs.traffic()
 		// Usage may ride either a usage-only chunk (empty choices) or the final
 		// finish_reason chunk depending on the gateway — accept both.
 		if chunk.Usage != nil {
@@ -956,8 +898,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		// only proof the stream is making progress; usage-only and empty-choice
 		// chunks keep the connection alive but say nothing about generation.
 		if choice.Delta.Content != "" || choice.Delta.ReasoningContent != "" || len(choice.Delta.ToolCalls) > 0 {
-			lastProgress.Store(time.Now().UnixNano())
-			anyProgress.Store(true)
+			watchdogs.progress()
 			deltas++
 			if firstTokenAt.IsZero() {
 				firstTokenAt = time.Now()
@@ -1000,13 +941,10 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		if reason, ok := cancelReason.Load().(string); ok {
-			// The watchdog canceled the request context; name the budget that
-			// fired so the fallback path can log a diagnosable cause and decide
-			// whether a blocking retry can help at all.
-			return Completion{}, &watchdogError{reason: reason, cause: err}
-		}
-		return Completion{}, fmt.Errorf("stream read: %w", err)
+		// The watchdog may have canceled the request context mid-read; name the
+		// budget that fired so the fallback path can log a diagnosable cause and
+		// decide whether a blocking retry can help at all.
+		return Completion{}, watchdogs.scannerFailure(err)
 	}
 
 	// Build final completion
@@ -1280,14 +1218,11 @@ func (c *Client) firstTokenBudget(payload []byte) time.Duration {
 }
 
 func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.completionsURL(), bytes.NewReader(payload))
 	if err != nil {
 		return Completion{}, err
 	}
-	request.Header.Set("Content-Type", "application/json")
-	if c.cfg.APIKey != "" {
-		request.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	}
+	c.applyRequestHeaders(request, false)
 	response, err := c.http.Do(request)
 	if err != nil {
 		return Completion{}, &transportError{err: err}
@@ -1298,21 +1233,10 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 		return Completion{}, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return Completion{}, &statusError{
-			code:       response.StatusCode,
-			body:       truncate(string(body), 400),
-			retryAfter: parseRetryAfterHeader(response.Header.Get("Retry-After"), time.Now()),
-			url:        request.URL.String(),
-			reqHeaders: map[string]string{
-				"Content-Type":  "application/json",
-				"Authorization": "Bearer " + maskKey(c.cfg.APIKey),
-			},
-			reqBody: truncate(string(payload), 2000),
-			respHeaders: map[string]string{
-				"Content-Type":     response.Header.Get("Content-Type"),
-				"Www-Authenticate": response.Header.Get("Www-Authenticate"),
-			},
-		}
+		return Completion{}, c.statusErrorFrom(request, response, body, payload)
+	}
+	if c.messagesWire() {
+		return decodeMessagesCompletion(c.providerHost, payload, body)
 	}
 	var decoded chatResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {

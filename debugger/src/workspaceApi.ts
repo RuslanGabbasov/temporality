@@ -899,6 +899,10 @@ export interface Provider {
   enabled?: boolean
   base_url: string
   api_key_ref: string
+  /** credential kind: absent = an API key on the OpenAI-compatible wire;
+   *  'anthropic_oauth' = a Claude subscription token (claude setup-token)
+   *  that must speak the native /v1/messages surface */
+  auth?: string
   models: string[]
   labels: Record<string, string>
   /** optional per-model call caps (docs/agents.md §routing):
@@ -1475,7 +1479,7 @@ export const workspaceApi = {
   // Providers
   listProviders: () => request<{ providers: Provider[] }>('/v1/workspace/providers'),
   getProvider: (id: string) => request<Provider>(`/v1/workspace/providers/${id}`),
-  createProvider: (data: { id?: string; name: string; base_url: string; api_key_ref?: string; models?: string[]; model_limits?: Record<string, { max_output_tokens?: number }>; max_concurrent_requests?: number; org_unit_id?: string }) =>
+  createProvider: (data: { id?: string; name: string; base_url: string; api_key_ref?: string; auth?: string; models?: string[]; model_limits?: Record<string, { max_output_tokens?: number }>; max_concurrent_requests?: number; org_unit_id?: string }) =>
     request<Provider>('/v1/workspace/providers', { method: 'POST', body: JSON.stringify(data) }),
   updateProvider: (id: string, data: Partial<Provider>) =>
     request<Provider>(`/v1/workspace/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -1485,7 +1489,7 @@ export const workspaceApi = {
   // catalog; probe previews a not-yet-saved form's catalog without persisting.
   refreshProviderModels: (id: string) =>
     request<{ models: string[]; count: number }>(`/v1/workspace/providers/${id}/refresh-models`, { method: 'POST' }),
-  probeProviderModels: (data: { base_url: string; api_key_ref?: string }) =>
+  probeProviderModels: (data: { base_url: string; api_key_ref?: string; auth?: string }) =>
     request<{ models: string[]; count: number }>('/v1/workspace/providers/probe-models', { method: 'POST', body: JSON.stringify(data) }),
   // One minimal chat completion with the STORED credential — the runtime
   // path of call_model in one click (probe-models only authenticates

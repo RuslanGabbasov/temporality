@@ -2156,6 +2156,10 @@ type modelConfigAnswer struct {
 	BaseURL      string  `json:"base_url"`
 	APIKey       *string `json:"api_key"`
 	Model        string  `json:"model"`
+	// Auth is the provider's credential kind (workspace.ProviderAuth*); the
+	// only value the kernel acts on today is anthropic_oauth, which swaps the
+	// client onto the native Anthropic Messages wire.
+	Auth string `json:"auth,omitempty"`
 	// MaxOutputTokens is the provider's per-model cap (docs/agents.md
 	// §routing); 0 = the env/hard default applies.
 	MaxOutputTokens       int `json:"max_output_tokens,omitempty"`
@@ -2169,6 +2173,7 @@ func applyModelOutputCap(config *llm.Config, answer modelConfigAnswer) {
 	if answer.MaxOutputTokens > 0 {
 		config.MaxOutputTokens = answer.MaxOutputTokens
 	}
+	config.AnthropicOAuth = answer.Auth == workspace.ProviderAuthAnthropicOAuth
 }
 
 // pinnedConfigFrom decodes the model-config answer into the pinned llm.Config,

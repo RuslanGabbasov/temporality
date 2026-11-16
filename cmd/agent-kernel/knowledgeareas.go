@@ -169,6 +169,7 @@ func providerModelClient(ctx context.Context, ws *workspace.Store, masterKey []b
 	optional.BaseURL = provider.BaseURL
 	optional.Model = model
 	optional.APIKey = apiKey
+	optional.AnthropicOAuth = provider.Auth == workspace.ProviderAuthAnthropicOAuth
 	return llm.New(optional), nil
 }
 

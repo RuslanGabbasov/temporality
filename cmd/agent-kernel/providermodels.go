@@ -119,6 +119,7 @@ func (s *ProviderModelSync) RegisterRoutes(mux *http.ServeMux, gate *controlplan
 		var req struct {
 			BaseURL   string `json:"base_url"`
 			APIKeyRef string `json:"api_key_ref"`
+			Auth      string `json:"auth,omitempty"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
 			writeError(w, 400, err)
@@ -128,7 +129,7 @@ func (s *ProviderModelSync) RegisterRoutes(mux *http.ServeMux, gate *controlplan
 			writeError(w, 422, errors.New("base_url is required"))
 			return
 		}
-		models, err := s.Probe(r.Context(), req.BaseURL, req.APIKeyRef)
+		models, err := s.Probe(r.Context(), req.BaseURL, req.APIKeyRef, req.Auth)
 		if err != nil {
 			s.writeSyncError(w, err)
 			return
@@ -164,7 +165,7 @@ func (s *ProviderModelSync) Refresh(ctx context.Context, providerID string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	models, err := s.discover(ctx, provider.BaseURL, provider.APIKeyRef)
+	models, err := s.discover(ctx, provider.BaseURL, provider.APIKeyRef, provider.Auth)
 	if err != nil {
 		return nil, err
 	}
@@ -190,16 +191,16 @@ func (s *ProviderModelSync) Refresh(ctx context.Context, providerID string) ([]s
 }
 
 // Probe resolves the credential and fetches the catalog without persisting.
-func (s *ProviderModelSync) Probe(ctx context.Context, baseURL, apiKeyRef string) ([]string, error) {
-	return s.discover(ctx, baseURL, apiKeyRef)
+func (s *ProviderModelSync) Probe(ctx context.Context, baseURL, apiKeyRef, auth string) ([]string, error) {
+	return s.discover(ctx, baseURL, apiKeyRef, auth)
 }
 
-func (s *ProviderModelSync) discover(ctx context.Context, baseURL, apiKeyRef string) ([]string, error) {
+func (s *ProviderModelSync) discover(ctx context.Context, baseURL, apiKeyRef, auth string) ([]string, error) {
 	key, err := s.keys(ctx, apiKeyRef)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errCredential, err)
 	}
-	return fetchProviderModels(ctx, s.client, baseURL, key)
+	return fetchProviderModels(ctx, s.client, baseURL, key, auth)
 }
 
 // RefreshAsync fire-and-forgets a refresh for one provider; a sync already in
@@ -355,27 +356,44 @@ func (s *ProviderModelSync) TestGeneration(ctx context.Context, providerID, mode
 			return report, errors.New("no model: pick one from the catalog first")
 		}
 	}
-	endpoint := strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/") + "/chat/completions"
-	payload, _ := json.Marshal(map[string]any{
+	oauth := provider.Auth == workspace.ProviderAuthAnthropicOAuth
+	// The test must ride the exact wire a runtime model call takes: a Claude
+	// subscription token speaks /v1/messages, everything else speaks the
+	// OpenAI-compatible chat completions.
+	suffix := "/chat/completions"
+	if oauth {
+		suffix = "/messages"
+	}
+	payload := map[string]any{
 		"model":      model,
 		"messages":   []map[string]string{{"role": "user", "content": "Reply with the single word: ok"}},
 		"max_tokens": 8,
-	})
+	}
+	endpoint := strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/") + suffix
+	requestBody, _ := json.Marshal(payload)
 	report.Request.Method = http.MethodPost
 	report.Request.URL = endpoint
 	report.Request.Headers = map[string]string{
 		"Content-Type":  "application/json",
 		"Authorization": "Bearer " + maskSecret(key),
 	}
-	report.Request.Body = string(payload)
+	if oauth {
+		report.Request.Headers["Anthropic-Version"] = "2023-06-01"
+		report.Request.Headers["Anthropic-Beta"] = "oauth-2025-04-20"
+	}
+	report.Request.Body = string(requestBody)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(requestBody))
 	if err != nil {
 		return report, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	if oauth {
+		req.Header.Set("Anthropic-Version", "2023-06-01")
+		req.Header.Set("Anthropic-Beta", "oauth-2025-04-20")
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -400,7 +418,7 @@ func (s *ProviderModelSync) TestGeneration(ctx context.Context, providerID, mode
 // OpenAI-compatible gateways (z.ai, xiaomi), local ollama/lmstudio. A bare
 // top-level array is accepted too — several gateways return it without the
 // {"data": …} envelope.
-func fetchProviderModels(ctx context.Context, client *http.Client, baseURL, apiKey string) ([]string, error) {
+func fetchProviderModels(ctx context.Context, client *http.Client, baseURL, apiKey, auth string) ([]string, error) {
 	endpoint := strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -410,13 +428,18 @@ func fetchProviderModels(ctx context.Context, client *http.Client, baseURL, apiK
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	// Anthropic's catalog authenticates differently from its OpenAI-compat
-	// chat surface: x-api-key + anthropic-version, not the bearer token.
-	// Sending both is harmless for every other provider.
+	// chat surface: x-api-key + anthropic-version, not the bearer token. A
+	// subscription OAuth token inverts that again: it is a bearer credential
+	// on the Messages surface, so it rides Authorization (+ the oauth beta);
+	// x-api-key would only confuse it. Sending x-api-key is harmless for
+	// every other provider.
 	if host := hostOf(endpoint); host == "api.anthropic.com" {
-		if apiKey != "" {
+		req.Header.Set("anthropic-version", "2023-06-01")
+		if auth == workspace.ProviderAuthAnthropicOAuth {
+			req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+		} else if apiKey != "" {
 			req.Header.Set("x-api-key", apiKey)
 		}
-		req.Header.Set("anthropic-version", "2023-06-01")
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)

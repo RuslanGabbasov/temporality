@@ -4397,10 +4397,14 @@ func main() {
 			writeError(w, 422, errors.New("max_concurrent_requests must be between 1 and 128"))
 			return
 		}
+		if req.Auth != "" && req.Auth != workspace.ProviderAuthAnthropicOAuth {
+			writeError(w, 422, fmt.Errorf("unknown auth kind %q (supported: %s)", req.Auth, workspace.ProviderAuthAnthropicOAuth))
+			return
+		}
 		if req.ID == "" {
 			req.ID = "prov-" + shortID()
 		}
-		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits, MaxConcurrentRequests: req.MaxConcurrentRequests, OrgUnitID: req.OrgUnitID}
+		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Auth: req.Auth, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits, MaxConcurrentRequests: req.MaxConcurrentRequests, OrgUnitID: req.OrgUnitID}
 		// An operator who typed a model list curated it: tag the row so the
 		// background loop never overwrites it. An empty list means "discover
 		// from the provider" — sync starts right after the row lands.
@@ -4448,7 +4452,11 @@ func main() {
 			writeError(w, 422, errors.New("max_concurrent_requests must be between 1 and 128"))
 			return
 		}
-		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits, MaxConcurrentRequests: req.MaxConcurrentRequests}
+		if req.Auth != "" && req.Auth != workspace.ProviderAuthAnthropicOAuth {
+			writeError(w, 422, fmt.Errorf("unknown auth kind %q (supported: %s)", req.Auth, workspace.ProviderAuthAnthropicOAuth))
+			return
+		}
+		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Auth: req.Auth, Models: req.Models, Labels: req.Labels, ModelLimits: req.ModelLimits, MaxConcurrentRequests: req.MaxConcurrentRequests}
 		// Editing config must not silently re-scope a provider: bindings change
 		// only through the admin binding endpoint.
 		if prev, err := ws.GetProvider(r.Context(), provider.ID); err == nil {
@@ -4570,6 +4578,11 @@ func main() {
 						return
 					}
 					payload := map[string]any{"provider_id": p.ID, "provider_name": p.Name, "base_url": p.BaseURL, "model": m, "max_concurrent_requests": p.EffectiveMaxConcurrentRequests()}
+					// The credential kind rides along: anthropic_oauth tells the
+					// kernel to build a Messages-wire client (client_anthropic.go).
+					if p.Auth != "" {
+						payload["auth"] = p.Auth
+					}
 					// Per-model caps ride the routing answer (docs/agents.md §routing):
 					// the kernel default output ceiling is a conservative floor, a
 					// capable model carries its own.
@@ -8434,7 +8447,24 @@ func main() {
 		log.Warn("close the boot listener", "error", err)
 	}
 	server := newKernelHTTPServer(address, root)
-	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
+	// Bounded drain (restart-time fix): Shutdown waits for every active
+	// connection, and the SSE run/token/console streams hold theirs for as
+	// long as the client keeps the page open — a stuck run's stream never
+	// ends on its own (the tool ceiling alone is 15 minutes), so the old
+	// unbounded Shutdown(context.Background()) turned each restart into a
+	// SIGKILL lottery: the process hung in Shutdown until docker's default
+	// 10s grace expired (or forever under `go run` + Ctrl-C). Eight seconds
+	// is far above any plain request; stream clients reconnect either way —
+	// they already survive the SIGKILL this bound replaces.
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Warn("graceful shutdown timed out; closing remaining connections (stream clients reconnect)", "error", err)
+			_ = server.Close()
+		}
+	}()
 	bootDone.Store(true)
 	log.Info("agent kernel started", "address", address, "task_queue", taskQueue)
 	serveErr := server.ListenAndServe()
@@ -10444,6 +10474,7 @@ func workspaceDraftModel(ctx context.Context, lister providerLister, resolveKey 
 		config.BaseURL = p.BaseURL
 		config.Model = model
 		config.APIKey = apiKey
+		config.AnthropicOAuth = p.Auth == workspace.ProviderAuthAnthropicOAuth
 		config.ProviderID = p.ID
 		config.MaxConcurrentRequests = p.EffectiveMaxConcurrentRequests()
 		return llm.New(config), nil

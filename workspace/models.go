@@ -622,12 +622,22 @@ type ModelLimit struct {
 	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
 }
 
+// ProviderAuthAnthropicOAuth marks a provider whose credential is a Claude
+// subscription OAuth token (claude setup-token): the client swaps to the
+// native Anthropic Messages wire and rides the oauth beta header.
+const ProviderAuthAnthropicOAuth = "anthropic_oauth"
+
 // Provider is an OpenAI-compatible model endpoint (e.g. z.ai, xiaomi).
 type Provider struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	BaseURL   string `json:"base_url"`
 	APIKeyRef string `json:"api_key_ref,omitempty"` // env var name or secret ref
+	// Auth is the credential kind: "" (default) = an API key on the
+	// OpenAI-compatible wire, ProviderAuthAnthropicOAuth = a Claude
+	// subscription token that must speak /v1/messages. It travels with the
+	// routing answer so the kernel builds the right client.
+	Auth string `json:"auth,omitempty"`
 	// Enabled is the uniform on/off switch (the trigger/MCP pattern): a
 	// disabled provider refuses to serve model calls — runs referencing it
 	// fail loudly instead of looping on provider auth errors.
@@ -879,6 +889,7 @@ type CreateProviderRequest struct {
 	Name                  string                `json:"name"`
 	BaseURL               string                `json:"base_url"`
 	APIKeyRef             string                `json:"api_key_ref,omitempty"`
+	Auth                  string                `json:"auth,omitempty"`
 	Models                []string              `json:"models,omitempty"`
 	Labels                map[string]string     `json:"labels,omitempty"`
 	ModelLimits           map[string]ModelLimit `json:"model_limits,omitempty"`

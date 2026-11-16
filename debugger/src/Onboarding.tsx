@@ -24,6 +24,11 @@ const STEP_KEYS = [
 
 type StepId = typeof STEP_KEYS[number]['id']
 
+// The Claude subscription preset seeds the stable model aliases: the catalog
+// endpoint may not open with an OAuth token, so discovery cannot be relied
+// on (keep in sync with Providers.tsx).
+const CLAUDE_SUBSCRIPTION_SEED_MODELS = ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-haiku-4-5']
+
 export default function Onboarding({ onComplete }: OnboardingProps) {
   const t = useT()
   const [step, setStep] = useState<StepId>('welcome')
@@ -35,6 +40,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [providerName, setProviderName] = useState('')
   const [providerUrl, setProviderUrl] = useState('')
   const [providerKey, setProviderKey] = useState('')
+  // Claude subscription preset: swaps the provider onto the native Messages
+  // wire (auth=anthropic_oauth, workspace.ProviderAuthAnthropicOAuth).
+  const [providerAuth, setProviderAuth] = useState('')
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([])
   const [providerModel, setProviderModel] = useState('')
   const [checking, setChecking] = useState(false)
@@ -57,7 +65,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [error, setError] = useState('')
 
   const currentStep = STEP_KEYS.find((s) => s.id === step)!
-  const modelOptions = discoveredModels.length > 0 ? discoveredModels : (providerModel ? [providerModel] : [])
+  const modelOptions = discoveredModels.length > 0 ? discoveredModels
+    : providerAuth === 'anthropic_oauth' ? CLAUDE_SUBSCRIPTION_SEED_MODELS
+    : (providerModel ? [providerModel] : [])
 
   // The wizard needs the bootstrap status before the sandbox step too:
   // master_key_configured decides whether the provider key travels as an
@@ -145,14 +155,16 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     if (!providerUrl.trim()) return
     setChecking(true); setCheckNote('')
     try {
-      const data = await workspaceApi.probeProviderModels({ base_url: providerUrl.trim(), api_key_ref: providerKey.trim() })
+      const data = await workspaceApi.probeProviderModels({ base_url: providerUrl.trim(), api_key_ref: providerKey.trim(), auth: providerAuth })
       const models = data.models ?? []
       setDiscoveredModels(models)
       setProviderModel((current) => (current && models.includes(current) ? current : models[0] ?? ''))
       setCheckNote(t('providers.fetched_n', { count: String(data.count ?? models.length) }) ?? `${data.count ?? models.length}`)
     } catch (e) {
+      // A subscription token may not open the catalog endpoint at all — the
+      // seeded alias list keeps the wizard usable (fill models manually later).
       setDiscoveredModels([])
-      setProviderModel('')
+      setProviderModel((current) => (providerAuth === 'anthropic_oauth' && !current ? CLAUDE_SUBSCRIPTION_SEED_MODELS[0] : current))
       setCheckNote(`${t('providers.fetch_failed') ?? 'Failed'}: ${e instanceof Error ? e.message : 'Request failed'}`)
     } finally { setChecking(false) }
   }
@@ -182,7 +194,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           name: providerName.trim(),
           base_url: providerUrl.trim(),
           api_key_ref: apiKeyRef,
-          models: discoveredModels,
+          auth: providerAuth || undefined,
+          models: discoveredModels.length > 0 ? discoveredModels
+            : providerAuth === 'anthropic_oauth' ? CLAUDE_SUBSCRIPTION_SEED_MODELS : [],
         }),
       })
       if (!resp.ok) throw new Error(await resp.text())
@@ -356,28 +370,59 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProviderUrl(e.target.value)}
                 placeholder="https://api.openai.com/v1"
               />
+              <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+                <Tag
+                  size="sm"
+                  type={providerAuth === 'anthropic_oauth' ? 'green' : 'outline'}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    if (providerAuth === 'anthropic_oauth') {
+                      setProviderAuth('')
+                      return
+                    }
+                    setProviderAuth('anthropic_oauth')
+                    setProviderUrl('https://api.anthropic.com/v1')
+                    setProviderName((n) => n.trim() || (t('providers.preset_claude_sub') ?? 'Claude (subscription)'))
+                    setProviderKey('')
+                    setDiscoveredModels([])
+                    setProviderModel((current) => current || CLAUDE_SUBSCRIPTION_SEED_MODELS[0])
+                  }}
+                >
+                  {t('providers.preset_claude_sub') ?? 'Claude (subscription)'}
+                </Tag>
+              </div>
+              {providerAuth === 'anthropic_oauth' && (
+                <p className="onboarding-hint" style={{ margin: 0 }}>
+                  {t('providers.oauth_instructions') ?? '1) Install Claude Code. 2) Run claude setup-token. 3) Paste the token below.'}
+                </p>
+              )}
               <TextInput
                 id="ob-prov-key"
-                labelText={t('providers.key')}
+                labelText={providerAuth === 'anthropic_oauth' ? (t('providers.oauth_token_label') ?? 'OAuth token (claude setup-token)') : t('providers.key')}
                 type="password"
                 value={providerKey}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProviderKey(e.target.value)}
-                placeholder="sk-..."
+                placeholder={providerAuth === 'anthropic_oauth' ? 'sk-ant-oat01-…' : 'sk-...'}
               />
               <div>
                 <Button size="sm" kind="secondary" renderIcon={Add} disabled={checking || !providerUrl.trim()} onClick={() => void checkProvider()}>
                   {checking ? (t('providers.fetching_models') ?? 'Discovering…') : (t('providers.check_and_fetch') ?? 'Check key & fetch models')}
                 </Button>
                 {checkNote && <p className="onboarding-hint" style={{ marginBottom: 0 }}>{checkNote}</p>}
+                {providerAuth === 'anthropic_oauth' && (
+                  <p className="onboarding-hint" style={{ marginBottom: 0 }}>
+                    {t('providers.oauth_catalog_hint') ?? 'If the catalog does not open with a subscription token, the seeded model list is used — adjust it later in Providers.'}
+                  </p>
+                )}
               </div>
-              {discoveredModels.length > 0 && (
+              {(discoveredModels.length > 0 || providerAuth === 'anthropic_oauth') && (
                 <Select
                   id="ob-prov-model"
                   labelText={t('onboarding.provider_default_model') ?? 'Default model'}
                   value={providerModel}
                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProviderModel(e.target.value)}
                 >
-                  {discoveredModels.map((m) => <SelectItem key={m} value={m} text={m} />)}
+                  {(discoveredModels.length > 0 ? discoveredModels : CLAUDE_SUBSCRIPTION_SEED_MODELS).map((m) => <SelectItem key={m} value={m} text={m} />)}
                 </Select>
               )}
               {status && !status.master_key_configured && (

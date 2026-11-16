@@ -50,6 +50,23 @@ function parseModelLimits(raw: string): Record<string, { max_output_tokens?: num
   return Object.keys(out).length ? out : undefined
 }
 
+// The auth kind that swaps the provider onto the native Anthropic Messages
+// wire. Kept in sync with workspace.ProviderAuthAnthropicOAuth (Go).
+const AUTH_ANTHROPIC_OAUTH = 'anthropic_oauth'
+
+// Claude subscription tokens come from `claude setup-token`; the catalog
+// endpoint may not accept them, so the preset seeds the three stable model
+// aliases instead of relying on discovery. The user can edit or re-discover.
+const CLAUDE_SUBSCRIPTION_SEED_MODELS = ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-haiku-4-5']
+// The secret name a pasted raw subscription token is stored under.
+const CLAUDE_TOKEN_SECRET_NAME = 'claude-subscription-token'
+
+// isEnvName matches the UPPER_SNAKE api_key_ref shape the backend resolves
+// from the kernel environment (providerEnvNameRe in main.go).
+function isEnvName(ref: string): boolean {
+  return /^[A-Z][A-Z0-9_]*$/.test(ref)
+}
+
 function formatModelLimits(limits?: Record<string, { max_output_tokens?: number }>): string {
   return Object.entries(limits ?? {})
     .filter(([, v]) => (v?.max_output_tokens ?? 0) > 0)
@@ -138,11 +155,36 @@ export default function Providers() {
       .catch(() => setSecrets([])) // picker is optional; the field works without it
   }
 
+  // A pasted raw subscription token is too valuable to store as a plaintext
+  // literal: wrap it into a builtin secret (create or rotate) and point
+  // api_key_ref at it. Falls back to the literal on any failure — the
+  // backend accepts it, the token just loses the envelope protection.
+  const ensureClaudeTokenSecret = async (): Promise<string | null> => {
+    const raw = (form.api_key_ref ?? '').trim()
+    if (!raw || raw.startsWith('secret://') || isEnvName(raw)) return null
+    try {
+      const existing = await workspaceApi.listSecrets()
+      const found = (existing.secrets ?? []).find((s) => s.name === CLAUDE_TOKEN_SECRET_NAME)
+      if (found) {
+        await workspaceApi.updateSecret(found.id, { value: raw })
+      } else {
+        await workspaceApi.createSecret({ name: CLAUDE_TOKEN_SECRET_NAME, provider: 'builtin', value: raw })
+      }
+      return `secret://${CLAUDE_TOKEN_SECRET_NAME}`
+    } catch {
+      return null
+    }
+  }
+
   const save = async () => {
     if (!form.name?.trim() || !form.base_url?.trim()) return
     setLoading(true); setError('')
-    const payload: Partial<Provider> = { ...form, model_limits: parseModelLimits(limitsText) }
+    let payload: Partial<Provider> = { ...form, model_limits: parseModelLimits(limitsText) }
     try {
+      if ((form.auth ?? '') === AUTH_ANTHROPIC_OAUTH) {
+        const secretRef = await ensureClaudeTokenSecret()
+        if (secretRef) payload = { ...payload, api_key_ref: secretRef }
+      }
       if (editing) {
         await workspaceApi.updateProvider(editing.id, payload)
         // PUT payloads ignore org bindings: re-scoping goes through the admin
@@ -175,7 +217,7 @@ export default function Providers() {
     if (!form.base_url?.trim()) return
     setFetching(true); setFetchNote('')
     try {
-      const data = await workspaceApi.probeProviderModels({ base_url: form.base_url.trim(), api_key_ref: form.api_key_ref ?? '' })
+      const data = await workspaceApi.probeProviderModels({ base_url: form.base_url.trim(), api_key_ref: form.api_key_ref ?? '', auth: form.auth ?? '' })
       setForm((f) => ({ ...f, models: data.models ?? [] }))
       setFetchNote(t('providers.fetched_n', { count: String(data.count ?? 0) }) ?? `${data.count ?? 0}`)
     } catch (f) {
@@ -312,6 +354,11 @@ export default function Providers() {
                   {p.api_key_ref && (
                     <Tag type="gray" size="sm" style={{ marginTop: '0.25rem' }}>
                       {p.api_key_ref.startsWith('secret://') ? `secret: ${p.api_key_ref.slice('secret://'.length)}` : 'key: ••••••••'}
+                    </Tag>
+                  )}
+                  {p.auth === AUTH_ANTHROPIC_OAUTH && (
+                    <Tag type="purple" size="sm" style={{ marginTop: '0.25rem' }}>
+                      {t('providers.oauth_badge') ?? 'Claude subscription'}
                     </Tag>
                   )}
                   {p.models?.length ? (
@@ -461,25 +508,40 @@ export default function Providers() {
             <Stack gap={3}>
               <TextInput id="prov-name" labelText={t('providers.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="z.ai" autoFocus />
               <TextInput id="prov-url" labelText={t('providers.url_label') ?? 'Base URL'} value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
-              {/* One-click presets for the two direct-connection hosts people
-                  reach for first; everything OpenAI-compatible works by URL. */}
+              {/* One-click presets for the hosts people reach for first; everything
+          OpenAI-compatible works by URL. The Claude subscription preset swaps
+          the provider onto the native /v1/messages wire. */}
               <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
                 {[
                   { label: 'Anthropic', url: 'https://api.anthropic.com/v1' },
                   { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+                  { label: t('providers.preset_claude_sub') ?? 'Claude (subscription)', url: 'https://api.anthropic.com/v1', auth: AUTH_ANTHROPIC_OAUTH },
                 ].map((preset) => (
                   <Tag
                     key={preset.label}
                     size="sm"
-                    type={form.base_url === preset.url ? 'green' : 'outline'}
+                    type={form.base_url === preset.url && (form.auth ?? '') === (preset.auth ?? '') ? 'green' : 'outline'}
                     style={{ cursor: 'pointer' }}
-                    onClick={() => setForm({ ...form, base_url: preset.url, name: form.name?.trim() || preset.label })}
+                    onClick={() => setForm((f) => ({
+                      ...f,
+                      base_url: preset.url,
+                      auth: preset.auth,
+                      name: f.name?.trim() || preset.label,
+                      // Seed the stable aliases for a subscription provider —
+                      // the catalog endpoint may not open with an OAuth token.
+                      models: preset.auth && !(f.models?.length) ? CLAUDE_SUBSCRIPTION_SEED_MODELS : f.models,
+                    }))}
                   >
                     {preset.label}
                   </Tag>
                 ))}
               </div>
-              <TextInput id="prov-key" labelText={t('providers.key_label') ?? 'API Key'} value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="secret://my-api-key, Z_AI_API_KEY or the key itself" helperText={t('providers.key_helper') ?? 'secret://name (recommended), an env var name, or the key itself'} />
+              {(form.auth ?? '') === AUTH_ANTHROPIC_OAUTH && (
+                <InlineNotification kind="info" lowContrast hideCloseButton
+                  title={t('providers.oauth_instructions_title') ?? 'Claude subscription (Claude Code)'}
+                  subtitle={t('providers.oauth_instructions') ?? '1) Install Claude Code. 2) Run claude setup-token. 3) Paste the token below.'} />
+              )}
+              <TextInput id="prov-key" labelText={(form.auth ?? '') === AUTH_ANTHROPIC_OAUTH ? (t('providers.oauth_token_label') ?? 'OAuth token (claude setup-token)') : (t('providers.key_label') ?? 'API Key')} value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder={(form.auth ?? '') === AUTH_ANTHROPIC_OAUTH ? 'sk-ant-oat01-…' : 'secret://my-api-key, Z_AI_API_KEY or the key itself'} helperText={(form.auth ?? '') === AUTH_ANTHROPIC_OAUTH ? (t('providers.oauth_key_helper') ?? 'A pasted token is stored as secret://claude-subscription-token; secret://name and ENV_NAME work as-is.') : (t('providers.key_helper') ?? 'secret://name (recommended), an env var name, or the key itself')} />
               {secrets.length > 0 && (
                 <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
                   {secrets.map((s) => (
@@ -501,6 +563,10 @@ export default function Providers() {
                   </Button>
                   {fetchNote && <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{fetchNote}</span>}
                 </div>
+                {(form.auth ?? '') === AUTH_ANTHROPIC_OAUTH && (
+                  <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
+                    {t('providers.oauth_catalog_hint') ?? 'If the catalog does not open with a subscription token, keep the seeded list or type models manually (e.g. claude-sonnet-4-5).'}</p>
+                )}
               </div>
               {org.units.length > 0 && (
                 <>
