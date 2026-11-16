@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import MermaidDiagram from './MermaidDiagram'
@@ -72,6 +72,20 @@ function pathFromFilesUrl(href: string): string | null {
   } catch {
     return null
   }
+}
+
+// In-document links: «See [Setup](#setup)» — handled by the reader surface
+// (the artifacts page scrolls to the section), never a new tab.
+function isInternalHref(href: string | undefined): boolean {
+  return !!href && href.startsWith('#')
+}
+
+// Cross-artifact links: [Runbook](artifact:a1). The artifacts page opens the
+// referenced document in place; react-markdown's default URL transform
+// strips unknown schemes, so the artifact: scheme is allow-listed here.
+export function artifactUrlTransform(url: string): string {
+  if (/^artifact:(?:\/\/)?[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/.test(url)) return url
+  return defaultUrlTransform(url)
 }
 
 // A blockquote line immediately followed by a table line (no blank line
@@ -154,8 +168,9 @@ function MarkdownImage({ src = '', alt, project }: { src?: string; alt?: string;
 const MarkdownSegment = memo(function MarkdownSegment({ content, onFile, project }: { content: string; onFile?: (path: string) => void; project?: string }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm, remarkBreaks]}
+    urlTransform={artifactUrlTransform}
     components={{
-      a: ({ href, children }) => {
+      a: ({ node: _node, href, children, ...rest }) => {
         const filePath = href ? pathFromFilesUrl(href) : null
         if (filePath && onFile) {
           return (
@@ -167,7 +182,14 @@ const MarkdownSegment = memo(function MarkdownSegment({ content, onFile, project
             >{children} ⬇</a>
           )
         }
-        return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+        // Anchors (#section, footnote refs/backrefs) and artifact: links open
+        // in place — a new tab there would orphan the reader mid-document.
+        // The rest keep the rest-props: footnote refs carry ids and
+        // data-footnote-ref that the native footnote UX relies on.
+        if (isInternalHref(href) || (href && href.startsWith('artifact:'))) {
+          return <a href={href} {...rest}>{children}</a>
+        }
+        return <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>{children}</a>
       },
       img: ({ src, alt }) => <MarkdownImage src={src} alt={alt} project={project} />,
     }}

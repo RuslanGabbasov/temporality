@@ -3309,6 +3309,73 @@ button.header-nav-link {
 .artifact-body th, .artifact-body td { border: 1px solid var(--tm-border); padding: 0.3rem 0.55rem; text-align: left; }
 .artifact-body a { color: var(--tm-teal); }
 .artifact-review-body { user-select: text; }
+/* Cross-links inside the rendered body: @artifact:<id> mentions and
+   [text](artifact:id) links read as chips (the label keeps the raw text —
+   annotation offsets are text offsets — the hover hint carries the title). */
+.artifact-body a.artifact-mention,
+.artifact-body a[href^='artifact:'] {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--tm-surface-3, rgba(127, 127, 127, 0.16));
+  border: 1px solid var(--tm-border);
+  color: var(--tm-teal);
+  font-size: 0.92em;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.artifact-body a.artifact-mention:hover,
+.artifact-body a[href^='artifact:']:hover { border-color: var(--tm-teal); }
+/* The hint popover for those chips and for footnote references — same fixed,
+   elevated look as the note popover; hides on scroll. */
+.artifact-link-popover {
+  position: fixed;
+  z-index: 10000;
+  width: min(360px, calc(100vw - 24px));
+  padding: 0.5rem 0.7rem;
+  background: var(--tm-elevated, #1a302c);
+  border: 1px solid var(--tm-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 18px #0004;
+  font-size: 0.78rem;
+  color: var(--tm-text);
+}
+.artifact-link-popover.above { transform: translateY(-100%); }
+.artifact-link-popover-title { font-weight: 600; margin-bottom: 0.15rem; overflow-wrap: anywhere; }
+.artifact-link-popover-body { color: var(--tm-text-2); line-height: 1.45; overflow-wrap: anywhere; max-height: 12rem; overflow-y: auto; white-space: pre-wrap; }
+/* Document outline (Notion-style section navigation): a sticky rail to the
+   right of the rendered body. Hidden on narrow viewports where the two
+   columns would crush the text, and for documents without headings (the
+   component renders nothing at all then). */
+.artifact-outline {
+  flex: 0 0 auto;
+  width: 200px;
+  position: sticky;
+  top: 4rem;
+  align-self: flex-start;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  border-left: 1px solid var(--tm-border);
+  padding: 0.1rem 0 0.4rem 0.65rem;
+}
+.artifact-outline-title {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  background: none; border: none; cursor: pointer; padding: 0.25rem 0.3rem; border-radius: 4px;
+  color: var(--tm-text-3); font: inherit; font-size: 0.66rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em; text-align: left;
+}
+.artifact-outline-title:hover { color: var(--tm-text-2); background: var(--tm-surface-2); }
+.artifact-outline-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer;
+  color: var(--tm-text-2); font: inherit; font-size: 0.74rem; line-height: 1.35;
+  padding: 0.14rem 0.3rem; border-radius: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.artifact-outline-item:hover { background: var(--tm-surface-2); color: var(--tm-text); }
+.artifact-outline-item.active { color: var(--tm-teal); background: var(--tm-surface-2); }
+@media (max-width: 1279px) { .artifact-outline { display: none; } }
 .artifact-selection-menu, .artifact-annotation-editor { position: fixed; z-index: 10000; transform: translate(-50%, -100%); background: var(--tm-bg); border: 1px solid var(--tm-border); box-shadow: 0 4px 18px #0004; border-radius: 8px; }
 /* Below the selection (not enough room above): the transform anchors the
    popup's top-left corner instead of its bottom, so it hangs under the text. */

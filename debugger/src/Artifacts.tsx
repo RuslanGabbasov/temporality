@@ -29,6 +29,9 @@ import RichDiff from './RichDiff'
 import { ArtifactEditor } from './ArtifactEditor'
 import type { User } from './workspaceApi'
 import Markdown from './Markdown'
+import DocumentOutline from './DocumentOutline'
+import { linkifyArtifactMentions, referencedArtifactIds, stripArtifactMentions, type ArtifactRefInfo } from './artifactLinks'
+import { useArtifactBodyLinks } from './useArtifactBodyLinks'
 import { useFragmentNoteMenu } from './useFragmentNoteMenu'
 import { copyText } from './clipboard'
 import { projectBudget, type SagaRollup } from './kernelApi'
@@ -349,12 +352,14 @@ export default function Artifacts({ project }: { project?: string }) {
   // distinguishable from a broken one (the ambiguous-column SQL bug read as
   // «you have nothing to review» for weeks).
   const inboxDefaultRef = useRef(true)
-  const loadInbox = useCallback(async () => {
+  // quiet: refresh in the background after a mutation — the rows swap in
+  // place without the «Loading…» tile flashing over the queue.
+  const loadInbox = useCallback(async (opts?: { quiet?: boolean }) => {
     // The auto-flip below belongs to the default-tab probe only: a tab the
     // user picked by hand always stays put, empty queue or not.
     const defaultProbe = inboxDefaultRef.current
     inboxDefaultRef.current = false
-    setInboxBusy(true)
+    if (!opts?.quiet) setInboxBusy(true)
     try {
       const page = await workspaceApi.artifactInbox()
       setInbox(page.entries ?? [])
@@ -515,16 +520,22 @@ export default function Artifacts({ project }: { project?: string }) {
     const root = artifactBodyRef.current
     if (!root || !selected || selected.provider === 'url' || diffMode || bodyEditing) return
     const apply = () => {
+      // Mentions re-wrap first-and-last: the anchors must not survive into
+      // the annotation offset math (they wrap, never retype text).
+      stripArtifactMentions(root)
       stripAnnotationHighlights(root)
       for (const item of annotationsForVersion) highlightAnnotationRange(root, item)
       root.querySelectorAll('mark.artifact-ann').forEach((mark) => {
         const html = mark as HTMLElement
         html.classList.toggle('artifact-ann-active', Boolean(activeAnnotation) && html.dataset.annId === activeAnnotation)
       })
+      // Mention chips go in last — after the annotation marks — so the
+      // annotation ranges never split across them.
+      linkifyArtifactMentions(root)
     }
     const first = window.setTimeout(apply, 60)
     const second = window.setTimeout(apply, 700)
-    return () => { window.clearTimeout(first); window.clearTimeout(second); stripAnnotationHighlights(root) }
+    return () => { window.clearTimeout(first); window.clearTimeout(second); stripAnnotationHighlights(root); stripArtifactMentions(root) }
   }, [selected, displayedVersion, bodyText, annotationsForVersion, diffMode, bodyEditing, activeAnnotation])
 
   // Clicking a highlight in the text opens the note popover right at the
@@ -612,6 +623,57 @@ export default function Artifacts({ project }: { project?: string }) {
   const annotationDraft = artifactNoteMenu.draft
   const setAnnotationDraft = artifactNoteMenu.setDraft
   const closeSelectionMenu = artifactNoteMenu.close
+
+  // ── Cross-links in the body (@artifact mentions, artifact: links) ──────
+  // Titles for referenced artifacts: the catalog page covers what is loaded;
+  // anything else is fetched once and cached for the hover hints.
+  const [fetchedArtifactRefs, setFetchedArtifactRefs] = useState<Record<string, ArtifactRefInfo>>({})
+  const catalogArtifactRefs = useMemo(() => Object.fromEntries(artifacts.map((a) => [a.id, { title: a.title, status: a.status, version: a.version }] as const)), [artifacts])
+  const artifactRefs = useMemo(() => ({ ...fetchedArtifactRefs, ...catalogArtifactRefs }), [fetchedArtifactRefs, catalogArtifactRefs])
+  const artifactRefsStableRef = useRef(artifactRefs)
+  artifactRefsStableRef.current = artifactRefs
+  useEffect(() => {
+    if (!bodyText) return
+    const missing = referencedArtifactIds(bodyText).filter((id) => !artifactRefsStableRef.current[id]).slice(0, 20)
+    if (missing.length === 0) return
+    let stale = false
+    void Promise.all(missing.map(async (id) => {
+      try {
+        const page = await workspaceApi.getArtifact(id)
+        const a = page.artifact
+        return { id, info: { title: a.title, status: a.status, version: a.version } as ArtifactRefInfo }
+      } catch { return null }
+    })).then((entries) => {
+      if (stale) return
+      const found: Record<string, ArtifactRefInfo> = {}
+      for (const entry of entries) {
+        if (entry) found[entry.id] = entry.info
+      }
+      setFetchedArtifactRefs((current) => ({ ...current, ...found }))
+    })
+    return () => { stale = true }
+  }, [bodyText])
+
+  // Open a linked artifact in place: select it, and when it sits outside the
+  // loaded page, fetch the shell the same way the deep link does.
+  const openArtifactByID = useCallback(async (id: string) => {
+    setSelectedId(id)
+    if (artifacts.some((a) => a.id === id)) return
+    try {
+      const page = await workspaceApi.getArtifact(id)
+      const full = page.artifact
+      setArtifacts((current) => (current.some((a) => a.id === id) ? current : [{ ...full, content: '' }, ...current]))
+    } catch { /* the selection pane reports it */ }
+  }, [artifacts])
+  const bodyLinks = useArtifactBodyLinks({
+    enabled: Boolean(selected && selected.provider !== 'url' && !bodyEditing && !diffMode),
+    rootRef: artifactBodyRef,
+    content: bodyText,
+    resolveArtifact: (id) => artifactRefsStableRef.current[id],
+    describeArtifact: (info) => [info.status ? statusLabel(info.status) : '', info.version ? `v${info.version}` : ''].filter(Boolean).join(' · '),
+    onOpenArtifact: (id) => { void openArtifactByID(id) },
+    footnoteTitle: (n) => t('artifacts.footnote_hint', { n: String(n) }),
+  })
 
   // Lifecycle counters drive the status filter chips: how many artifacts sit in
   // each state. Pending reviews first — that is the human queue.
@@ -863,6 +925,10 @@ export default function Artifacts({ project }: { project?: string }) {
       await workspaceApi.deleteArtifact(a.id)
       if (selectedId === a.id) setSelectedId('')
       await load()
+      // Deleting an artifact closes its open review round server-side: the
+      // approvals tab must drop the row (and fix the badge) right away, not
+      // after the next manual tab switch.
+      void loadInbox({ quiet: true })
     } catch (f) { setError(message(f)) }
   }
 
@@ -909,6 +975,14 @@ export default function Artifacts({ project }: { project?: string }) {
       setSubmitReviewerTokens([])
       setSubmitNote('')
       await load()
+      // The «Согласование» tab must show the round just opened: reload the
+      // rounds (the tab only fetched when previously empty) and land on it —
+      // the submitter sees the queue they created, not a stale list. The
+      // inbox refresh keeps the badge truthful when the submitter is also a
+      // reviewer (a self-approval round, project_owner matching admins…).
+      await reloadReviews(selected.id)
+      setDetailTab('review')
+      void loadInbox({ quiet: true })
     } catch (f) { setError(message(f)) }
     finally { setBusy(false) }
   }
@@ -933,6 +1007,8 @@ export default function Artifacts({ project }: { project?: string }) {
       await workspaceApi.addArtifactReviewers(selected!.id, r.id, roundTokens)
       await reloadReviews(selected!.id)
       setRoundManage(null); setRoundTokens([])
+      // New reviewers may include the caller — the inbox badge follows.
+      void loadInbox({ quiet: true })
     } catch (f) { setError(message(f)) }
     finally { setRoundBusy(false) }
   }
@@ -943,6 +1019,8 @@ export default function Artifacts({ project }: { project?: string }) {
       await workspaceApi.delegateArtifactReview(selected!.id, r.id, delegateTarget.trim())
       await reloadReviews(selected!.id)
       setRoundManage(null); setDelegateTarget('')
+      // Delegation can move the round off (or onto) the caller's queue.
+      void loadInbox({ quiet: true })
     } catch (f) { setError(message(f)) }
     finally { setRoundBusy(false) }
   }
@@ -953,6 +1031,9 @@ export default function Artifacts({ project }: { project?: string }) {
       await workspaceApi.setArtifactReviewMode(selected!.id, r.id, mode)
       await reloadReviews(selected!.id)
       await load()
+      // A retroactive close (any + an approve already cast) empties the
+      // caller's queue entry — the badge must follow.
+      void loadInbox({ quiet: true })
     } catch (f) { setError(message(f)) }
     finally { setRoundBusy(false) }
   }
@@ -973,6 +1054,8 @@ export default function Artifacts({ project }: { project?: string }) {
       await workspaceApi.cancelArtifactReview(selected.id, r.id)
       await reloadReviews(selected.id)
       await load()
+      // The withdrawn round leaves the caller's approvals queue.
+      void loadInbox({ quiet: true })
     } catch (f) { setError(message(f)) }
     finally { setBusy(false) }
   }
@@ -986,6 +1069,10 @@ export default function Artifacts({ project }: { project?: string }) {
       const page = await workspaceApi.listArtifactReviews(selected.id)
       setReviews(page.reviews ?? [])
       await load()
+      // The decided round leaves the approvals queue: drop the row and fix
+      // the badge immediately (the old flow kept it until a manual tab
+      // switch — a decided item looked pending).
+      void loadInbox({ quiet: true })
     } catch (f) { setError(message(f)) }
     finally { setBusy(false) }
   }
@@ -1009,6 +1096,7 @@ export default function Artifacts({ project }: { project?: string }) {
       const page = await workspaceApi.listArtifactReviews(selected.id)
       setReviews(page.reviews ?? [])
       await load()
+      void loadInbox({ quiet: true })
     } catch (f) { setError(message(f)) }
     finally { setBusy(false) }
   }
@@ -1471,7 +1559,7 @@ export default function Artifacts({ project }: { project?: string }) {
                       key={tab}
                       role="tab"
                       aria-selected={detailTab === tab}
-                      onClick={() => { setDetailTab(tab); if (tab === 'review' && reviews.length === 0) void openReviews(selected) }}
+                      onClick={() => { setDetailTab(tab); if (tab === 'review') void openReviews(selected) }}
                       style={{ background: detailTab === tab ? 'var(--tm-elevated)' : 'none', border: '1px solid var(--tm-border)', borderBottomColor: detailTab === tab ? 'var(--tm-elevated)' : 'var(--tm-border)', borderRadius: '6px 6px 0 0', padding: '0.3rem 0.75rem', cursor: 'pointer', color: 'var(--tm-text)', fontSize: '0.78rem' }}
                     >{label}</button>
                   ))}
@@ -1718,9 +1806,28 @@ export default function Artifacts({ project }: { project?: string }) {
                     </>
                   ) : bodyText ? (
                     <>
-                      <div className="artifact-body artifact-review-body" ref={artifactBodyRef}>
-                        <MarkdownWithPresentations content={bodyText} project={project} />
+                      {/* The outline (Notion-style section navigation) sits
+                          beside the text: the body shrinks by the rail's
+                          width, the rail is sticky and disappears on narrow
+                          viewports (carbon.scss) and for short documents. */}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+                        <div className="artifact-body artifact-review-body" ref={artifactBodyRef} style={{ flex: '1 1 auto', minWidth: 0 }}>
+                          <MarkdownWithPresentations content={bodyText} project={project} />
+                        </div>
+                        <DocumentOutline content={bodyText} rootRef={artifactBodyRef} />
                       </div>
+                      {/* Hover hints for the body's cross-links: footnote text
+                          at the reference, the target artifact's title/status
+                          at mentions and artifact: links. */}
+                      {bodyLinks.hint && (
+                        <div
+                          className={`artifact-link-popover${bodyLinks.hint.placement === 'above' ? ' above' : ''}`}
+                          style={{ left: bodyLinks.hint.x, top: bodyLinks.hint.y }}
+                        >
+                          <div className="artifact-link-popover-title">{bodyLinks.hint.title}</div>
+                          {bodyLinks.hint.body && <div className="artifact-link-popover-body">{bodyLinks.hint.body}</div>}
+                        </div>
+                      )}
                       {/* Clicking inside either popup must NOT collapse the
                           selection — the menu survives until an explicit
                           dismiss (outside click, Escape, scroll). Inputs are
