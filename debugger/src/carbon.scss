@@ -2567,6 +2567,14 @@ button.header-nav-link {
   text-decoration: underline;
 }
 
+.markdown-body img {
+  max-width: 100%;
+  display: block;
+  margin: 0.5em 0;
+  border-radius: 6px;
+  border: 1px solid var(--tm-border);
+}
+
 .markdown-body hr {
   border: none;
   border-top: 1px solid var(--tm-border);

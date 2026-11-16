@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import MermaidDiagram from './MermaidDiagram'
+import { IN_APP_STORAGE_PATH, resolveImageSource, useResolvedImage } from './imageResolution'
 
 const FILES_URL_PREFIX = '/kernel-api/v1/workspace/projects/'
 
@@ -102,24 +103,55 @@ export function normalizeBlockquoteTable(content: string): string {
 // 1Hz metrics ticker — without memo, EVERY bubble's markdown re-parses on
 // each of those (a long streaming answer re-parsing dozens of times per
 // second is the main source of the streaming bubble's jitter). content is
-// the full parse input, so comparing it is exact; onFile participates too —
-// Workspace passes a useCallback-stabilized handler.
-export default memo(MarkdownBase, (prev, next) => prev.content === next.content && prev.onFile === next.onFile)
+// the full parse input, so comparing it is exact; onFile and project
+// participate too — Workspace passes a useCallback-stabilized handler and a
+// stable project id.
+export default memo(MarkdownBase, (prev, next) => prev.content === next.content && prev.onFile === next.onFile && prev.project === next.project)
 
-function MarkdownBase({ content, onFile }: { content: string; onFile?: (path: string) => void }) {
+function MarkdownBase({ content, onFile, project }: { content: string; onFile?: (path: string) => void; project?: string }) {
   const normalized = normalizeBlockquoteTable(content)
   const segments = normalized.includes('```mermaid') ? splitMermaidSegments(normalized) : null
   if (segments) {
     return <div className="markdown-body">
       {segments.map((segment, index) => segment.kind === 'mermaid'
         ? <MermaidDiagram key={`m${index}`} chart={segment.chart} />
-        : <MarkdownSegment key={`t${index}`} content={segment.text} onFile={onFile} />)}
+        : <MarkdownSegment key={`t${index}`} content={segment.text} onFile={onFile} project={project} />)}
     </div>
   }
-  return <div className="markdown-body"><MarkdownSegment content={normalized} onFile={onFile} /></div>
+  return <div className="markdown-body"><MarkdownSegment content={normalized} onFile={onFile} project={project} /></div>
 }
 
-const MarkdownSegment = memo(function MarkdownSegment({ content, onFile }: { content: string; onFile?: (path: string) => void }) {
+// A markdown image. In-app references (`/workspace/<rel>`, `/cache/<rel>`) sit
+// behind the kernel storage API, which wants the auth header — a bare <img>
+// 404s on this origin — so they are fetched through useResolvedImage and shown
+// from a blob URL (the same pattern the presentation engine uses, PresentationView
+// ImageView). Until the fetch settles — and after a failed one — the old link
+// fallback stays, pointing at the real storage endpoint instead of the raw
+// sandbox path. http(s) images render as plain <img>.
+function MarkdownImage({ src = '', alt, project }: { src?: string; alt?: string; project?: string }) {
+  // A bare relative src ("design-mockups/x.png") is a sandbox workspace path,
+  // same convention linkifyWorkspacePaths uses — normalize it so it resolves
+  // through the storage API instead of 404-ing on the debugger origin.
+  const normalized = !src ? '' : /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src) ? src : `/workspace/${src}`
+  const ref = resolveImageSource(normalized, project)
+  const resolved = useResolvedImage(normalized, project)
+  if (!src) return null
+  const label = alt || src
+  if (ref.storage) {
+    if (!resolved || resolved === ref.src) {
+      return <a className="markdown-image-link" href={ref.storage.url} target="_blank" rel="noopener noreferrer">Image: {label}</a>
+    }
+    return <img src={resolved} alt={label} loading="lazy" />
+  }
+  if (IN_APP_STORAGE_PATH.test(normalized)) {
+    // In-app path but no project to resolve it against — a plain <img> would
+    // 404 here, keep the link.
+    return <a className="markdown-image-link" href={normalized} target="_blank" rel="noopener noreferrer">Image: {label}</a>
+  }
+  return <img src={normalized} alt={label} loading="lazy" />
+}
+
+const MarkdownSegment = memo(function MarkdownSegment({ content, onFile, project }: { content: string; onFile?: (path: string) => void; project?: string }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm, remarkBreaks]}
     components={{
@@ -137,7 +169,7 @@ const MarkdownSegment = memo(function MarkdownSegment({ content, onFile }: { con
         }
         return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
       },
-      img: ({ src, alt }) => <a className="markdown-image-link" href={src} target="_blank" rel="noopener noreferrer">Image: {alt || src}</a>,
+      img: ({ src, alt }) => <MarkdownImage src={src} alt={alt} project={project} />,
     }}
   >{content}</ReactMarkdown>
 })

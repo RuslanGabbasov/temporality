@@ -2194,7 +2194,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     )}
 
                     {msg.content && msg.role === 'assistant' ? (
-                      <Markdown content={linkifyWorkspacePaths(stripPresentationFences(msg.content), project)} onFile={onFileLink} />
+                      <Markdown content={linkifyWorkspacePaths(stripPresentationFences(msg.content), project)} project={project} onFile={onFileLink} />
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}

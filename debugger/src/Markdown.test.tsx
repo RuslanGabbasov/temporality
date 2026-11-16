@@ -1,6 +1,12 @@
+// @vitest-environment jsdom
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import Markdown, { linkifyWorkspacePaths, splitMermaidSegments } from './Markdown'
+
+// React act() support flag for the jsdom environment.
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const URL_FOR = (projectId: string, path: string) =>
   `/kernel-api/v1/workspace/projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(path)}`
@@ -76,6 +82,70 @@ describe('Markdown', () => {
     expect(html).not.toContain('<script>')
     expect(html).toContain('target="_blank"')
     expect(html).toContain('rel="noopener noreferrer"')
+  })
+})
+
+describe('Markdown images', () => {
+  it('renders http(s) images as real <img> tags', () => {
+    const html = renderToStaticMarkup(<Markdown content={'![logo](https://example.com/logo.png)'} />)
+    expect(html).toContain('<img src="https://example.com/logo.png" alt="logo"')
+    expect(html).not.toContain('markdown-image-link')
+  })
+
+  // Regression: workspace images rendered as bare links to /workspace/...,
+  // which 404s on the debugger origin. The fallback link must target the
+  // storage file endpoint — the same URL the image is fetched from.
+  it('points the fallback link at the storage endpoint when a project is known', () => {
+    const html = renderToStaticMarkup(
+      <Markdown content={'![Настройки пользователя](/workspace/design-mockups/us2-profile-settings.png)'} project="omni" />,
+    )
+    expect(html).toContain('markdown-image-link')
+    expect(html).toContain('href="/kernel-api/v1/workspace/storage/projects/omni/file?area=workspace&amp;path=design-mockups%2Fus2-profile-settings.png"')
+    expect(html).not.toContain('href="/workspace/')
+  })
+
+  it('keeps the link fallback for in-app paths without a project', () => {
+    const html = renderToStaticMarkup(<Markdown content={'![x](/workspace/a.png)'} />)
+    expect(html).toContain('markdown-image-link')
+    expect(html).not.toContain('<img')
+  })
+
+  it('normalizes bare relative image paths as workspace paths', () => {
+    const html = renderToStaticMarkup(<Markdown content={'![x](design-mockups/a.png)'} project="omni" />)
+    expect(html).toContain('href="/kernel-api/v1/workspace/storage/projects/omni/file?area=workspace&amp;path=design-mockups%2Fa.png"')
+  })
+
+  it('renders an <img> once the workspace file is fetched from the storage endpoint', async () => {
+    const urls: string[] = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      urls.push(String(input))
+      return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(['img'])) } as Response)
+    }) as typeof fetch
+    const createObjectURL = URL.createObjectURL
+    const revokeObjectURL = URL.revokeObjectURL
+    URL.createObjectURL = (() => 'blob:mock-image') as typeof URL.createObjectURL
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL
+
+    let root: Root | undefined
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    try {
+      root = createRoot(container)
+      await act(async () => {
+        root!.render(<Markdown content={'![shot](/workspace/design-mockups/mount-test.png)'} project="omni" />)
+      })
+      // Let the fetch → blob → object URL chain settle.
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:mock-image')
+      expect(urls).toEqual(['/kernel-api/v1/workspace/storage/projects/omni/file?area=workspace&path=design-mockups%2Fmount-test.png'])
+    } finally {
+      if (root) await act(async () => { root!.unmount() })
+      container.remove()
+      globalThis.fetch = originalFetch
+      URL.createObjectURL = createObjectURL
+      URL.revokeObjectURL = revokeObjectURL
+    }
   })
 })
 
