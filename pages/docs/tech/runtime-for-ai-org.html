@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>ТЗ: Обновление сайта Temporality — Runtime for AI Organizations — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/runtime-for-ai-org.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/runtime-for-ai-org.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="ТЗ: Обновление сайта Temporality — Runtime for AI Organizations — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/runtime-for-ai-org.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ТЗ: Обновление сайта Temporality — Runtime for AI Organizations — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/runtime-for-ai-org.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="organizational-operations-implementation.html">Реализация: Organizational Operations</a>
+<a class="docs-nav-row" href="organizational-operations-survey.html">Техническое обследование: Organizational Operations</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row active" href="runtime-for-ai-org.html">ТЗ: Обновление сайта Temporality — Runtime for AI Organizations</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="subscription-providers-claude-codex.html">Подписки Claude Code и Codex как провайдеры моделей</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>ТЗ: Обновление сайта Temporality — Runtime for AI Organizations</h1>
+
+<p><strong>Версия:</strong> 1.0<br><strong>Дата:</strong> 17 ноября 2026<br><strong>Проект:</strong> <a href="https://temporality.tech" target="_blank" rel="noreferrer">Temporality&nbsp;<span class="ext">↗</span></a><br><strong>Цель:</strong> изменение позиционирования и структуры маркетингового сайта без изменения фундаментальной архитектурной концепции продукта.</p>
+<hr>
+<h2 id="1-цель-изменений"><a class="anchor" href="#1-цель-изменений" aria-label="Section link">#</a>1. Цель изменений</h2><p>Пересмотреть позиционирование Temporality, перейдя от преимущественно технической категории Agent Runtime / Control Plane к более широкой концепции:</p>
+<p><strong>Open-source Runtime for AI Organizations</strong></p>
+<p>Temporality должна восприниматься не просто как инфраструктура для запуска отдельных AI-агентов, а как операционная среда для создания и эксплуатации организаций, в которых люди и автономные агенты совместно выполняют работу.</p>
+<p>Основная маркетинговая идея:</p>
+<blockquote>
+<p>AI agents are becoming a workforce. Temporality provides the infrastructure to organize, operate, supervise and continuously improve that workforce.</p>
+</blockquote>
+<p>По мере удешевления создания отдельных AI-агентов основная проблема перемещается на следующий уровень: организация их совместной работы.</p>
+<p>Необходимо обеспечить:</p>
+<ul>
+<li>организационную структуру;</li>
+<li>распределение ответственности;</li>
+<li>координацию работы;</li>
+<li>устойчивое исполнение;</li>
+<li>наблюдение за деятельностью;</li>
+<li>управление вниманием и вмешательствами;</li>
+<li>контроль результатов;</li>
+<li>накопление и использование организационного опыта.</li>
+</ul>
+<p>Temporality предоставляет инфраструктуру для решения этих задач.</p>
+<h3 id="11-основное-позиционирование"><a class="anchor" href="#11-основное-позиционирование" aria-label="Section link">#</a>1.1. Основное позиционирование</h3><p>Название категории:</p>
+<p><strong>AI Organization Runtime</strong></p>
+<p>Дополнительное описание:</p>
+<p><strong>Open-source Runtime and Operating Environment for AI Organizations</strong></p>
+<p>Не следует позиционировать Temporality как поставщика готовых виртуальных сотрудников или готовых организаций по подписке (Organization as a Service).</p>
+<p>Temporality — инфраструктурная платформа, на которой заказчик может создавать собственные AI-организации и управлять ими.</p>
+<h3 id="12-основное-отличие"><a class="anchor" href="#12-основное-отличие" aria-label="Section link">#</a>1.2. Основное отличие</h3><p>Развести три уровня:</p>
+<ol>
+<li>AI Workforce — агенты, выполняющие работу.</li>
+<li>AI Organization — организационная структура, роли, ответственность, взаимодействие людей и агентов.</li>
+<li>AI Organization Runtime — инфраструктура исполнения, управления, контроля и развития такой организации.</li>
+</ol>
+<p>Temporality относится к третьему уровню и обеспечивает первые два необходимыми механизмами.</p>
+<hr>
+<h2 id="2-основные-принципы-обновления"><a class="anchor" href="#2-основные-принципы-обновления" aria-label="Section link">#</a>2. Основные принципы обновления</h2><ol>
+<li>Не переписывать сайт с нуля. Сохранить существующий дизайн, визуальный язык, технические иллюстрации и общую структуру, где они остаются актуальными.</li>
+<li>Не отказываться от четырёх существующих архитектурных слоёв: Execution, Observability, Governance, Learning.</li>
+<li>Организационное управление представить как новый пользовательский и функциональный уровень, объединяющий четыре слоя.</li>
+<li>Не создавать впечатление, что Temporality — очередной мультиагентный фреймворк.</li>
+<li>Не создавать впечатление, что продукт предназначен исключительно для разработки программного обеспечения.</li>
+<li>Сохранить open-source, self-hosted и security-first позиционирование.</li>
+<li>Все утверждения о производительности, масштабируемости и возможностях должны опираться на реализованные функции и подтверждённые испытания.</li>
+<li>Русская и английская версии должны иметь одинаковую структуру и смысловую полноту.</li>
+</ol>
+<hr>
+<h2 id="3-первый-экран-hero"><a class="anchor" href="#3-первый-экран-hero" aria-label="Section link">#</a>3. Первый экран (Hero)</h2><p>Полностью пересмотреть основной заголовок и подзаголовок.</p>
+<h3 id="31-английская-версия"><a class="anchor" href="#31-английская-версия" aria-label="Section link">#</a>3.1. Английская версия</h3><p>Основной заголовок:</p>
+<h1 id="run-ai-agents-like-an-organization-not-a-collection-of-scripts"><a class="anchor" href="#run-ai-agents-like-an-organization-not-a-collection-of-scripts" aria-label="Section link">#</a>Run AI agents like an organization. Not a collection of scripts.</h1><p>Подзаголовок:</p>
+<p>Temporality is an open-source runtime for AI organizations. Build, operate and supervise teams of autonomous agents and people with durable execution, organizational control, human oversight and accumulated experience.</p>
+<p>Основные CTA:</p>
+<ul>
+<li>Get started — переход к быстрому запуску.</li>
+<li>Explore the architecture — переход к архитектуре.</li>
+</ul>
+<p>Дополнительные признаки:</p>
+<ul>
+<li>Open Source</li>
+<li>Self-hosted</li>
+<li>Built on Temporal and PostgreSQL</li>
+</ul>
+<h3 id="32-русская-версия"><a class="anchor" href="#32-русская-версия" aria-label="Section link">#</a>3.2. Русская версия</h3><p>Основной заголовок:</p>
+<h1 id="управляйте-ai-агентами-как-организацией-а-не-набором-скриптов"><a class="anchor" href="#управляйте-ai-агентами-как-организацией-а-не-набором-скриптов" aria-label="Section link">#</a>Управляйте AI-агентами как организацией, а не набором скриптов.</h1><p>Подзаголовок:</p>
+<p>Temporality — открытая операционная среда для организаций из AI-агентов и людей. Создавайте структуру, распределяйте работу, контролируйте исполнение, принимайте результаты и накапливайте опыт организации.</p>
+<p>CTA:</p>
+<ul>
+<li>Запустить локально</li>
+<li>Посмотреть архитектуру</li>
+</ul>
+<h3 id="33-визуальное-представление"><a class="anchor" href="#33-визуальное-представление" aria-label="Section link">#</a>3.3. Визуальное представление</h3><p>Заменить или дополнить текущую главную иллюстрацию визуализацией организационной структуры.</p>
+<p>В ней должны быть видны:</p>
+<ul>
+<li>организация;</li>
+<li>несколько подразделений;</li>
+<li>руководители или супервизоры;</li>
+<li>специализированные агенты;</li>
+<li>задачи и планы;</li>
+<li>взаимодействие между подразделениями;</li>
+<li>человеческие точки принятия решений.</li>
+</ul>
+<p>Не использовать условную картинку с десятками одинаковых AI-роботов.</p>
+<p>Нужно показать именно организацию как работающую систему.</p>
+<hr>
+<h2 id="4-новый-раздел-ai-organization"><a class="anchor" href="#4-новый-раздел-ai-organization" aria-label="Section link">#</a>4. Новый раздел: AI Organization</h2><p>Добавить на главную страницу отдельный смысловой раздел сразу после Hero.</p>
+<p>Заголовок:</p>
+<p><strong>From individual agents to AI organizations</strong></p>
+<p>Подзаголовок:</p>
+<p>An agent working alone is an automation. A team of agents with roles, responsibilities, shared context and supervision is an organization.</p>
+<p>Русский вариант:</p>
+<p><strong>От отдельных агентов к AI-организациям</strong></p>
+<p>Один агент автоматизирует задачу. Организация агентов с ролями, ответственностью, общим контекстом и управлением способна выполнять целые направления работы.</p>
+<h3 id="41-что-необходимо-показать"><a class="anchor" href="#41-что-необходимо-показать" aria-label="Section link">#</a>4.1. Что необходимо показать</h3><p>Четыре принципиальных элемента:</p>
+<p><strong>Organizational Structure</strong></p>
+<p>Организации, подразделения, команды, роли и участники.</p>
+<p><strong>Work Coordination</strong></p>
+<p>Планы, задачи, делегирование, зависимости и взаимодействие между подразделениями.</p>
+<p><strong>Operational Supervision</strong></p>
+<p>Наблюдение за состоянием работы, анализ проблем, эскалации и управленческие вмешательства.</p>
+<p><strong>Organizational Learning</strong></p>
+<p>Накопление проверенного опыта, знаний, навыков и результатов работы.</p>
+<h3 id="42-иллюстрация"><a class="anchor" href="#42-иллюстрация" aria-label="Section link">#</a>4.2. Иллюстрация</h3><p>Сделать интерактивную или статическую архитектурную иллюстрацию организационной структуры.</p>
+<p>В качестве примера можно использовать организацию разработки ПО:</p>
+<ul>
+<li>Development</li>
+<li>QA</li>
+<li>Research</li>
+<li>DevOps</li>
+</ul>
+<p>Внутри подразделений — специализированные агенты и их руководители.</p>
+<p>Показать, что руководитель может наблюдать за работой всей организации, переходить к подразделению, плану, задаче, запуску и результату.</p>
+<p>Не утверждать, что все подразделения обязательно должны состоять только из агентов. Поддерживается смешанная модель людей и AI-агентов.</p>
+<hr>
+<h2 id="5-новый-раздел-organizational-operations"><a class="anchor" href="#5-новый-раздел-organizational-operations" aria-label="Section link">#</a>5. Новый раздел: Organizational Operations</h2><p>Это наиболее важное функциональное обновление сайта.</p>
+<p>Необходимо продемонстрировать, что Temporality предоставляет средства управления не только отдельными запусками, но и деятельностью целых подразделений.</p>
+<p>Заголовок:</p>
+<p><strong>Operate your AI organization</strong></p>
+<p>Подзаголовок:</p>
+<p>A unified operational view of your organization — from department-level activity to individual agent runs and deliverables.</p>
+<h3 id="51-organizational-dashboard"><a class="anchor" href="#51-organizational-dashboard" aria-label="Section link">#</a>5.1. Organizational Dashboard</h3><p>Показать реальный интерфейс сводной доски руководителя.</p>
+<p>Основные элементы:</p>
+<ul>
+<li>организационная структура;</li>
+<li>состояние подразделений;</li>
+<li>активность и состояние запусков;</li>
+<li>планы и рабочие доски;</li>
+<li>текущие проблемы;</li>
+<li>уведомления и эскалации;</li>
+<li>связанные артефакты;</li>
+<li>переход к трассам конкретных запусков.</li>
+</ul>
+<p>Важно: визуально подчеркнуть возможность перехода от общей картины к конкретному исполнению.</p>
+<h3 id="52-supervisor"><a class="anchor" href="#52-supervisor" aria-label="Section link">#</a>5.2. Supervisor</h3><p>Показать модельного супервайзера как интеллектуальный механизм анализа деятельности организации.</p>
+<p>Возможности, которые необходимо отразить при наличии реализации:</p>
+<ul>
+<li>анализ проблем в работе подразделений;</li>
+<li>обнаружение отклонений;</li>
+<li>анализ результатов запусков;</li>
+<li>подготовка рекомендаций;</li>
+<li>выявление конфликтов и проблем качества;</li>
+<li>предложения по управленческому вмешательству.</li>
+</ul>
+<p>Не изображать Supervisor как полностью автономного руководителя, принимающего любые решения без человека.</p>
+<p>Основной принцип:</p>
+<p><strong>AI analyzes. Humans decide. Agents execute.</strong></p>
+<h3 id="53-work-control-tower"><a class="anchor" href="#53-work-control-tower" aria-label="Section link">#</a>5.3. Work Control Tower</h3><p>Показать единую рабочую картину:</p>
+<ul>
+<li>планы и задачи;</li>
+<li>связанные запуски;</li>
+<li>состояние выполнения;</li>
+<li>обнаруженные проблемы;</li>
+<li>артефакты и результаты;</li>
+<li>историю управленческих решений.</li>
+</ul>
+<p>Подчеркнуть, что руководитель наблюдает не за абстрактными метриками, а за реальной работой организации.</p>
+<h3 id="54-activity-and-awareness"><a class="anchor" href="#54-activity-and-awareness" aria-label="Section link">#</a>5.4. Activity and Awareness</h3><p>Отдельно продемонстрировать управление потоками внимания.</p>
+<p>Нужно показать:</p>
+<ul>
+<li>какие уведомления и управленческие сигналы были сформированы;</li>
+<li>какие запуски их получили;</li>
+<li>какие решения были приняты;</li>
+<li>какие вопросы ожидают ответа человека;</li>
+<li>где требуется вмешательство.</li>
+</ul>
+<p>Не сводить это к обычному списку уведомлений.</p>
+<p>Смысл — управлять осведомлённостью организации и доставкой важных сигналов нужным участникам работы.</p>
+<hr>
+<h2 id="6-обновление-раздела-four-layers"><a class="anchor" href="#6-обновление-раздела-four-layers" aria-label="Section link">#</a>6. Обновление раздела Four Layers</h2><p>Сохранить четыре архитектурных слоя, но изменить контекст их представления.</p>
+<p>Заголовок:</p>
+<p><strong>One runtime. Four layers. One operating organization.</strong></p>
+<h3 id="61-execution"><a class="anchor" href="#61-execution" aria-label="Section link">#</a>6.1. Execution</h3><p>Исполнение работы организации.</p>
+<ul>
+<li>Durable workflows на Temporal.</li>
+<li>Делегирование между агентами.</li>
+<li>Планы-графы.</li>
+<li>Фоновые команды.</li>
+<li>Долгоживущие задачи.</li>
+<li>Восстановление после сбоев.</li>
+<li>Human-in-the-loop.</li>
+</ul>
+<p>Основной тезис:</p>
+<p>Work continues even when services restart, deployments happen or humans take time to respond.</p>
+<h3 id="62-observability"><a class="anchor" href="#62-observability" aria-label="Section link">#</a>6.2. Observability</h3><p>Полная история деятельности организации.</p>
+<ul>
+<li>Событийный журнал.</li>
+<li>Трассы запусков.</li>
+<li>Вызовы моделей и инструментов.</li>
+<li>История делегирования.</li>
+<li>Восстановление причин инцидентов.</li>
+<li>Связь задач, запусков и результатов.</li>
+</ul>
+<p>Основной тезис:</p>
+<p>Every action has a trace. Every result has a history.</p>
+<h3 id="63-governance"><a class="anchor" href="#63-governance" aria-label="Section link">#</a>6.3. Governance</h3><p>Контроль организации и её участников.</p>
+<ul>
+<li>Организационная структура.</li>
+<li>Роли и политики.</li>
+<li>Разграничение доступа.</li>
+<li>Управление секретами.</li>
+<li>Сетевые ограничения.</li>
+<li>Подтверждение значимых действий.</li>
+<li>Согласование документов.</li>
+<li>Эскалации человеку.</li>
+</ul>
+<p>Основной тезис:</p>
+<p>Autonomy without losing control.</p>
+<h3 id="64-learning"><a class="anchor" href="#64-learning" aria-label="Section link">#</a>6.4. Learning</h3><p>Накопление и использование опыта.</p>
+<ul>
+<li>Проверенные знания.</li>
+<li>Происхождение знаний.</li>
+<li>Жизненный цикл знаний.</li>
+<li>Навыки с контрактами и версиями.</li>
+<li>Оценка качества.</li>
+<li>Проверка изменений.</li>
+<li>Возврат опыта в последующие запуски.</li>
+</ul>
+<p>Основной тезис:</p>
+<p>Every completed task can make the organization better at the next one.</p>
+<hr>
+<h2 id="7-новый-раздел-human-ai-workforce"><a class="anchor" href="#7-новый-раздел-human-ai-workforce" aria-label="Section link">#</a>7. Новый раздел: Human + AI Workforce</h2><p>Показать, что Temporality не предполагает замену всей организации агентами.</p>
+<p>Заголовок:</p>
+<p><strong>People and agents. One organization.</strong></p>
+<p>Основные тезисы:</p>
+<ul>
+<li>Люди могут быть полноценными участниками организационной структуры.</li>
+<li>Люди и агенты могут получать задачи.</li>
+<li>Агенты могут обращаться к людям за решениями и согласованиями.</li>
+<li>Люди могут принимать результаты и возвращать работу на доработку.</li>
+<li>Управленческие решения фиксируются и остаются частью истории организации.</li>
+<li>Взаимодействие осуществляется через подключаемые каналы коммуникации.</li>
+</ul>
+<p>Показать пример рабочего цикла:</p>
+<ol>
+<li>Агент получает задачу.</li>
+<li>Выполняет работу.</li>
+<li>Создаёт артефакт.</li>
+<li>Передаёт результат на проверку.</li>
+<li>Человек принимает результат либо возвращает его на доработку.</li>
+<li>Агент продолжает исполнение.</li>
+<li>Проверенный результат и опыт сохраняются.</li>
+</ol>
+<p>Основной тезис:</p>
+<p><strong>Human oversight is part of the workflow, not an external interruption.</strong></p>
+<hr>
+<h2 id="8-новый-раздел-build-your-own-ai-organization"><a class="anchor" href="#8-новый-раздел-build-your-own-ai-organization" aria-label="Section link">#</a>8. Новый раздел: Build your own AI organization</h2><p>Показать, что Temporality является инфраструктурой, а не готовой организацией с заранее определённым набором сотрудников.</p>
+<p>Заголовок:</p>
+<p><strong>Your organization. Your agents. Your infrastructure.</strong></p>
+<p>Три основных направления:</p>
+<h3 id="bring-your-own-agents"><a class="anchor" href="#bring-your-own-agents" aria-label="Section link">#</a>Bring your own agents</h3><p>Используйте собственных агентов, модели и инструменты.</p>
+<ul>
+<li>OpenAI-compatible providers.</li>
+<li>MCP servers.</li>
+<li>Подключение внешних агентных систем через предусмотренные интерфейсы.</li>
+<li>Собственные специализации и навыки.</li>
+</ul>
+<h3 id="define-your-organization"><a class="anchor" href="#define-your-organization" aria-label="Section link">#</a>Define your organization</h3><p>Определяйте структуру и правила:</p>
+<ul>
+<li>подразделения;</li>
+<li>роли;</li>
+<li>участники;</li>
+<li>полномочия;</li>
+<li>рабочие процессы;</li>
+<li>правила взаимодействия.</li>
+</ul>
+<h3 id="run-it-your-way"><a class="anchor" href="#run-it-your-way" aria-label="Section link">#</a>Run it your way</h3><p>Разворачивайте систему на собственной инфраструктуре.</p>
+<ul>
+<li>Docker Compose.</li>
+<li>PostgreSQL.</li>
+<li>Temporal.</li>
+<li>Собственные модели и провайдеры.</li>
+<li>Контроль над данными и секретами.</li>
+</ul>
+<p>Не заявлять универсальную совместимость со всеми агентными фреймворками без подтверждённой интеграции.</p>
+<hr>
+<h2 id="9-обновление-сравнительной-таблицы"><a class="anchor" href="#9-обновление-сравнительной-таблицы" aria-label="Section link">#</a>9. Обновление сравнительной таблицы</h2><p>Сохранить сравнение с Mem0, Zep, LangSmith, LangFuse, LangGraph и CrewAI, но изменить её смысл.</p>
+<p>Заголовок:</p>
+<p><strong>Different tools solve different parts of the problem. Temporality connects them.</strong></p>
+<p>Добавить следующие критерии:</p>
+<table>
+<thead>
+<tr>
+<th>Возможность</th>
+<th>Temporality</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Durable agent execution</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Organization structure</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Department-level operations</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Agent delegation</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Human and AI collaboration</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Organizational supervision</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Execution traces and evidence</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Human approvals</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Knowledge lifecycle</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Skill lifecycle and evaluation</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Artifact management</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Organizational policies</td>
+<td>Да</td>
+</tr>
+<tr>
+<td>Self-hosted deployment</td>
+<td>Да</td>
+</tr>
+</tbody></table>
+<p>Сравнивать конкурирующие продукты только по их реальным возможностям.</p>
+<p>Не делать вид, что LangGraph, CrewAI или LangSmith вообще не поддерживают отдельные организационные механизмы.</p>
+<p>Основная мысль:</p>
+<p>Frameworks build agents. Observability tools inspect them. Temporality provides the operational environment in which an AI organization works.</p>
+<hr>
+<h2 id="10-новый-раздел-use-cases"><a class="anchor" href="#10-новый-раздел-use-cases" aria-label="Section link">#</a>10. Новый раздел: Use Cases</h2><p>Добавить несколько конкретных примеров применения.</p>
+<p>Не ограничиваться разработкой ПО.</p>
+<h3 id="software-engineering-organization"><a class="anchor" href="#software-engineering-organization" aria-label="Section link">#</a>Software Engineering Organization</h3><p>Подразделения:</p>
+<ul>
+<li>Research</li>
+<li>Development</li>
+<li>QA</li>
+<li>DevOps</li>
+</ul>
+<p>Сценарий: выполнение сложных задач разработки с делегированием, проверкой результатов и согласованием изменений.</p>
+<h3 id="ai-research-organization"><a class="anchor" href="#ai-research-organization" aria-label="Section link">#</a>AI Research Organization</h3><p>Подразделения:</p>
+<ul>
+<li>Research</li>
+<li>Analysis</li>
+<li>Validation</li>
+<li>Documentation</li>
+</ul>
+<p>Сценарий: проведение исследований, проверка гипотез, подготовка аналитических материалов и контроль качества результатов.</p>
+<h3 id="enterprise-operations"><a class="anchor" href="#enterprise-operations" aria-label="Section link">#</a>Enterprise Operations</h3><p>Подразделения:</p>
+<ul>
+<li>Operations</li>
+<li>Compliance</li>
+<li>Support</li>
+<li>Analytics</li>
+</ul>
+<p>Сценарий: выполнение регулярных операционных процессов с человеческими согласованиями и контролем полномочий.</p>
+<p>Это примеры возможных конфигураций, а не готовые отраслевые решения Temporality.</p>
+<hr>
+<h2 id="11-обновление-демонстрационного-видео"><a class="anchor" href="#11-обновление-демонстрационного-видео" aria-label="Section link">#</a>11. Обновление демонстрационного видео</h2><p>Подготовить новое основное видео продолжительностью 90–120 секунд.</p>
+<p>Название:</p>
+<p><strong>Inside an AI Organization powered by Temporality</strong></p>
+<p>Сценарий:</p>
+<ol>
+<li>Общая организационная структура.</li>
+<li>Руководитель открывает подразделение.</li>
+<li>Просматривает рабочую доску и планы.</li>
+<li>Видит активные запуски и возникающую проблему.</li>
+<li>Supervisor анализирует ситуацию.</li>
+<li>Руководитель получает рекомендацию и переходит к соответствующему запуску.</li>
+<li>Просматривает трассу выполнения.</li>
+<li>Проверяет созданный артефакт.</li>
+<li>Принимает результат либо отправляет на доработку.</li>
+<li>Возвращается к общей доске, где обновляется состояние работы.</li>
+</ol>
+<p>Основная задача ролика — продемонстрировать единый управленческий цикл, а не перечислять функции интерфейса.</p>
+<p>Использовать исключительно реальные скриншоты и записи работающей версии продукта.</p>
+<p>Не имитировать несуществующую функциональность.</p>
+<p>Существующее видео о карте знаний можно оставить как отдельную техническую демонстрацию.</p>
+<hr>
+<h2 id="12-структура-главной-страницы"><a class="anchor" href="#12-структура-главной-страницы" aria-label="Section link">#</a>12. Структура главной страницы</h2><p>Предлагаемая последовательность блоков:</p>
+<ol>
+<li>Hero — Run AI agents like an organization.</li>
+<li>From individual agents to AI organizations.</li>
+<li>Organizational Operations — общая рабочая картина.</li>
+<li>Four Layers — Execution, Observability, Governance, Learning.</li>
+<li>Human + AI Workforce.</li>
+<li>Work Control Tower и Supervisor.</li>
+<li>Build your own AI organization.</li>
+<li>Architecture.</li>
+<li>Performance and benchmarks.</li>
+<li>Comparison.</li>
+<li>Use Cases.</li>
+<li>Quick Start.</li>
+<li>Open Source and Community.</li>
+</ol>
+<p>Существующие технические разделы не удалять. Перераспределить их с учётом новой смысловой структуры.</p>
+<hr>
+<h2 id="13-seo-и-метаданные"><a class="anchor" href="#13-seo-и-метаданные" aria-label="Section link">#</a>13. SEO и метаданные</h2><h3 id="131-основные-поисковые-направления"><a class="anchor" href="#131-основные-поисковые-направления" aria-label="Section link">#</a>13.1. Основные поисковые направления</h3><p>Приоритетные запросы:</p>
+<ul>
+<li>AI organization</li>
+<li>AI organization platform</li>
+<li>AI organization runtime</li>
+<li>AI agent organization</li>
+<li>Agentic organization</li>
+<li>AI workforce management</li>
+<li>AI agent operations</li>
+<li>AI agent orchestration</li>
+<li>AI agent governance</li>
+<li>Open-source agent runtime</li>
+<li>Self-hosted AI agents</li>
+</ul>
+<p>Не пытаться оптимизировать все страницы под один набор ключевых слов.</p>
+<h3 id="132-title"><a class="anchor" href="#132-title" aria-label="Section link">#</a>13.2. Title</h3><p>Temporality — Open-source Runtime for AI Organizations</p>
+<h3 id="133-meta-description"><a class="anchor" href="#133-meta-description" aria-label="Section link">#</a>13.3. Meta description</h3><p>Build and operate AI organizations with an open-source, self-hosted runtime. Coordinate agents and people, supervise execution, control workflows and accumulate organizational experience.</p>
+<h3 id="134-отдельная-seo-страница"><a class="anchor" href="#134-отдельная-seo-страница" aria-label="Section link">#</a>13.4. Отдельная SEO-страница</h3><p>Создать страницу:</p>
+<p><code>/ai-organization-runtime/</code></p>
+<p>Содержимое:</p>
+<ul>
+<li>Что такое AI Organization Runtime.</li>
+<li>Чем AI-организация отличается от мультиагентной системы.</li>
+<li>Какие инфраструктурные проблемы возникают при масштабировании количества агентов.</li>
+<li>Как Temporality решает эти проблемы.</li>
+<li>Архитектура четырёх слоёв.</li>
+<li>Примеры организационных сценариев.</li>
+<li>Быстрый запуск.</li>
+</ul>
+<h3 id="135-дополнительные-страницы"><a class="anchor" href="#135-дополнительные-страницы" aria-label="Section link">#</a>13.5. Дополнительные страницы</h3><p>При наличии содержательного материала:</p>
+<ul>
+<li><code>/organizational-operations/</code></li>
+<li><code>/agent-supervision/</code></li>
+<li><code>/human-ai-workforce/</code></li>
+</ul>
+<p>Не создавать пустые SEO-страницы ради ключевых слов.</p>
+<p>Добавить Open Graph, структурированные метаданные SoftwareApplication и корректные canonical/hreflang для двух языков.</p>
+<hr>
+<h2 id="14-что-оставить-без-изменений"><a class="anchor" href="#14-что-оставить-без-изменений" aria-label="Section link">#</a>14. Что оставить без изменений</h2><p>Необходимо сохранить:</p>
+<ul>
+<li>Техническую архитектуру Agent Kernel + Journal.</li>
+<li>Temporal и PostgreSQL.</li>
+<li>Событийную модель.</li>
+<li>Четыре основных архитектурных слоя.</li>
+<li>Self-hosted deployment.</li>
+<li>Open-source Apache-2.0.</li>
+<li>Текущую модель работы с агентами, знаниями и навыками.</li>
+<li>Существующие технические показатели производительности.</li>
+<li>Текущую документацию и Quick Start.</li>
+<li>Возможность использования Temporality как инфраструктуры для отдельных агентов без построения полноценной организации.</li>
+</ul>
+<p>Последний пункт принципиален: организационная модель должна расширять область применения продукта, а не становиться обязательной для каждого пользователя.</p>
+<hr>
+<h2 id="15-чего-не-следует-делать"><a class="anchor" href="#15-чего-не-следует-делать" aria-label="Section link">#</a>15. Чего не следует делать</h2><ol>
+<li>Не превращать Temporality в каталог готовых AI-сотрудников.</li>
+<li>Не вводить искусственную сущность «AI Employee» вместо существующих агентов.</li>
+<li>Не позиционировать продукт как автономную виртуальную компанию, которая самостоятельно ведёт бизнес.</li>
+<li>Не обещать полностью автономное управление организацией.</li>
+<li>Не отказываться от технической аудитории разработчиков и архитекторов.</li>
+<li>Не скрывать архитектуру за маркетинговыми формулировками.</li>
+<li>Не использовать неподтверждённые показатели производительности.</li>
+<li>Не добавлять в сравнение сомнительные утверждения о конкурентах.</li>
+<li>Не делать визуальный редизайн ради редизайна.</li>
+<li>Не создавать впечатление, что все функции корпоративного управления уже готовы для промышленного применения.</li>
+</ol>
+<hr>
+<h2 id="16-критерии-приёмки"><a class="anchor" href="#16-критерии-приёмки" aria-label="Section link">#</a>16. Критерии приёмки</h2><h3 id="позиционирование"><a class="anchor" href="#позиционирование" aria-label="Section link">#</a>Позиционирование</h3><ul>
+<li><input disabled="" type="checkbox"> Основное позиционирование изменено на Open-source Runtime for AI Organizations.</li>
+<li><input disabled="" type="checkbox"> На первом экране понятно, какую проблему решает продукт.</li>
+<li><input disabled="" type="checkbox"> Понятно отличие от агентных фреймворков, memory и observability-продуктов.</li>
+<li><input disabled="" type="checkbox"> Подчёркнута инфраструктурная природа решения.</li>
+</ul>
+<h3 id="организационная-модель"><a class="anchor" href="#организационная-модель" aria-label="Section link">#</a>Организационная модель</h3><ul>
+<li><input disabled="" type="checkbox"> Показана организация из людей и AI-агентов.</li>
+<li><input disabled="" type="checkbox"> Продемонстрированы подразделения и роли.</li>
+<li><input disabled="" type="checkbox"> Показано делегирование и взаимодействие.</li>
+<li><input disabled="" type="checkbox"> Показана роль Supervisor.</li>
+<li><input disabled="" type="checkbox"> Продемонстрирован Work Control Tower.</li>
+</ul>
+<h3 id="функциональность"><a class="anchor" href="#функциональность" aria-label="Section link">#</a>Функциональность</h3><ul>
+<li><input disabled="" type="checkbox"> Сохранены четыре архитектурных слоя.</li>
+<li><input disabled="" type="checkbox"> Объяснена связь организационного уровня с четырьмя слоями.</li>
+<li><input disabled="" type="checkbox"> Показаны человеческие согласования.</li>
+<li><input disabled="" type="checkbox"> Показана связь задач, запусков, трасс и артефактов.</li>
+<li><input disabled="" type="checkbox"> Показано накопление проверенного организационного опыта.</li>
+</ul>
+<h3 id="маркетинг-и-seo"><a class="anchor" href="#маркетинг-и-seo" aria-label="Section link">#</a>Маркетинг и SEO</h3><ul>
+<li><input disabled="" type="checkbox"> Русская и английская версии синхронизированы.</li>
+<li><input disabled="" type="checkbox"> Обновлены Title, Description и Open Graph.</li>
+<li><input disabled="" type="checkbox"> Создана страница AI Organization Runtime.</li>
+<li><input disabled="" type="checkbox"> Добавлены реальные демонстрационные материалы.</li>
+<li><input disabled="" type="checkbox"> Существующий Quick Start доступен с первого экрана.</li>
+<li><input disabled="" type="checkbox"> Все CTA ведут на соответствующие страницы.</li>
+</ul>
+<h3 id="технические-требования"><a class="anchor" href="#технические-требования" aria-label="Section link">#</a>Технические требования</h3><ul>
+<li><input disabled="" type="checkbox"> Сохранена адаптивность.</li>
+<li><input disabled="" type="checkbox"> Не ухудшена производительность сайта.</li>
+<li><input disabled="" type="checkbox"> Сохранена поддержка двух языков.</li>
+<li><input disabled="" type="checkbox"> Проверены все ссылки.</li>
+<li><input disabled="" type="checkbox"> Не нарушена текущая SEO-индексация.</li>
+<li><input disabled="" type="checkbox"> Не удалены существующие технические страницы и материалы.</li>
+</ul>
+<hr>
+<h2 id="17-итоговый-ожидаемый-результат"><a class="anchor" href="#17-итоговый-ожидаемый-результат" aria-label="Section link">#</a>17. Итоговый ожидаемый результат</h2><p>После обновления посетитель должен понимать три вещи:</p>
+<p><strong>1. Что такое Temporality?</strong></p>
+<p>Open-source Runtime for AI Organizations.</p>
+<p><strong>2. Какую проблему решает?</strong></p>
+<p>Позволяет перейти от отдельных AI-агентов и разрозненных автоматизаций к управляемым организациям, в которых агенты и люди совместно выполняют работу.</p>
+<p><strong>3. Почему это не очередной Agent Framework?</strong></p>
+<p>Потому что Temporality обеспечивает не только создание и запуск агентов, но и всю операционную среду организации: устойчивое исполнение, организационное управление, наблюдение, контроль, согласования и накопление опыта.</p>
+<p>Главный маркетинговый тезис:</p>
+<blockquote>
+<p><strong>AI agents can do the work. Temporality makes them work as an organization.</strong></p>
+</blockquote>
+<p>Русский вариант:</p>
+<blockquote>
+<p><strong>AI-агенты умеют выполнять работу. Temporality позволяет организовать их совместную работу.</strong></p>
+</blockquote>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="runbook.html"><small>← Назад</small><strong>Runbook — Temporality</strong></a>
+    <a class="pager-next" href="runtime-knowledge-activation.html"><small>Далее →</small><strong>Техническое задание: Runtime Knowledge Activation в Temporality</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

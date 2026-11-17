@@ -22,7 +22,7 @@
 
 `temporalio/auto-setup` поверх той же Postgres, что использует ядро
 (отдельные БД `temporal` + `temporal_visibility`, auto-setup создаёт их сам
-при первом старте; лимиты истории — в `temporal-dynamicconfig/`): история
+при первом старте; лимиты истории — в `docker-compose.yml`, `configs.temporal-dynamic`): история
 workflow переживает рестарты и пересборки контейнера. Предыдущая ступень —
 `server start-dev --db-filename /data/temporal-dev.db` на volume — тоже
 переживала рестарты, но деградировала с данными: файл SQLite рос с каждым

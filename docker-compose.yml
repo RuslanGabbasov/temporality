@@ -98,15 +98,18 @@ services:
       POSTGRES_USER: temporality
       POSTGRES_PWD: temporality
       POSTGRES_SEEDS: postgres
-      # The two start-dev history ceilings (see temporal-dynamicconfig/).
+      # The two start-dev history ceilings (see the temporal-dynamic config
+      # at the bottom of this file).
       DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/temporality.yaml
-    volumes:
-      # The server fatals on boot without this file ("Unable to create
-      # dynamic config client" — DYNAMIC_CONFIG_FILE_PATH points at a missing
-      # path) and the container crash-loops. The server's cwd is /etc/temporal,
-      # so the target must land under /etc/temporal/config/dynamicconfig/.
-      # The quickstart curl (README) downloads this file next to the compose.
-      - ./temporal-dynamicconfig/temporality.yaml:/etc/temporal/config/dynamicconfig/temporality.yaml
+    # DYNAMIC_CONFIG_FILE_PATH is relative to the server's cwd (/etc/temporal),
+    # so the config must land under config/dynamicconfig/. It lives in the
+    # configs: block at the bottom of this file — the old ./temporal-dynamicconfig
+    # bind mount made every quickstart fetch a second file, and installs that
+    # missed it got an empty directory mounted in its place (the server fatals
+    # on boot — "Unable to create dynamic config client" — and crash-loops).
+    configs:
+      - source: temporal-dynamic
+        target: /etc/temporal/config/dynamicconfig/temporality.yaml
     restart: unless-stopped
     ports:
       - "7233:7233"
@@ -139,11 +142,13 @@ services:
     restart: unless-stopped
 
   # Self-hosted meta-search backing the agents' web_search tool. JSON output
-  # must stay enabled in searxng-settings.yml — the kernel parses format=json.
+  # must stay enabled in the searxng-settings config (bottom of this file) —
+  # the kernel parses format=json.
   searxng:
     image: searxng/searxng:latest
-    volumes:
-      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+    configs:
+      - source: searxng-settings
+        target: /etc/searxng/settings.yml
     ports:
       - "127.0.0.1:8889:8080"
     healthcheck:
@@ -421,3 +426,61 @@ networks:
     name: temporality-sandbox-internal
     internal: true
   egress-out: {}
+
+# Self-contained configuration: both files the stack needs live right here.
+# They used to be two extra files beside the compose (./searxng-settings.yml,
+# ./temporal-dynamicconfig/temporality.yaml) — every quickstart had to fetch
+# them, and installs that missed one got an empty directory mounted in its
+# place (dead Temporal, dead SearXNG). Inline content requires Docker
+# Compose v2.23.3+ (Dec 2023).
+configs:
+  temporal-dynamic:
+    # Temporal dynamic config of the temporality stack. Carries over, 1:1, the
+    # two --dynamic-config-value flags the start-dev command used to set:
+    # every call_model activity input (the full message array, screenshots
+    # included) is part of the workflow history, so a long agentic run crosses
+    # the default 50 MB limit and the server TERMINATES it mid-work (the
+    # 2026-11-09 incident). The ceilings here keep such runs alive; the
+    # structural fix (ContinueAsNew at compaction boundaries) is tracked in
+    # docs/context-compaction.md.
+    #
+    # Format note: the file-based client of Temporal >= 1.24 only accepts the
+    # constrained-values form — every key maps to a list of {constraints,
+    # value} entries. The old flat scalar form
+    # (`limit.historySize.error: 524288000`) fails the decode with "cannot
+    # unmarshal !!int into []struct {…}" and the server refuses to start.
+    content: |
+      limit.historySize.error:
+        - constraints: {}
+          value: 524288000
+      limit.historySize.warn:
+        - constraints: {}
+          value: 104857600
+  searxng-settings:
+    # SearXNG settings for the Temporality stack. use_default_settings keeps
+    # engine lists maintained upstream; we only enable the JSON output format
+    # (off by default) that the kernel's web_search parses.
+    #
+    # Engine bans: SearXNG queries every enabled engine in parallel and merges
+    # results, so the default engine set (duckduckgo, brave, qwant, bing,
+    # mojeek, wikipedia, ...) already spreads per-engine load; an engine that
+    # starts answering with captchas is auto-suspended and results keep
+    # flowing from the rest. The kernel adds a process-global rate limit on
+    # top (KERNEL_WEB_SEARCH_PER_MIN) so agent fleets cannot hammer the
+    # instance. For heavier fleets, route engine traffic through rotating
+    # proxies by adding to this config:
+    #
+    #   outgoing:
+    #     proxies:
+    #       all://:
+    #         - http://proxy-1:8080
+    #         - http://proxy-2:8080
+    content: |
+      use_default_settings: true
+      server:
+        secret_key: "temporality-dev-secret" # replace for anything beyond local dev
+        limiter: false # the stack runs behind the compose network
+      search:
+        formats:
+          - html
+          - json

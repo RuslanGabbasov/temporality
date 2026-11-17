@@ -29,7 +29,7 @@
 
 ### 2.2. web_search
 
-Метапоиск через self-hosted SearXNG (решение: свой инстанс — без внешних поисковых API, ключей и лимитов; JSON-формат включён в `searxng-settings.yml`).
+Метапоиск через self-hosted SearXNG (решение: свой инстанс — без внешних поисковых API, ключей и лимитов; JSON-формат включён в конфиге SearXNG в `docker-compose.yml`, `configs.searxng-settings`).
 
 Контракт:
 

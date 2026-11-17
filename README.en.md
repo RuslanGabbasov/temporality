@@ -22,16 +22,21 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 ## Quick stand
 
-All you need is Docker (BuildKit). No .env, no keys to start — the model,
-the first agent and the sandbox are configured in the onboarding wizard on
-first open of the UI.
+All you need is Docker with Compose v2.23.3+. No .env, no keys to start — the
+model, the first agent and the sandbox are configured in the onboarding
+wizard on first open of the UI.
 
 ```sh
-mkdir -p temporality/temporal-dynamicconfig && cd temporality
+curl -fsSL https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/install.sh | sh
+```
+
+The script fetches the compose file (configs are embedded), starts the stack
+and waits until it is healthy. Or manually:
+
+```sh
+mkdir temporality && cd temporality
 curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
-curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
-curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
-docker compose up -d
+docker compose up -d --wait
 ```
 
 Open `http://localhost:3000` — the wizard walks you through: first project →

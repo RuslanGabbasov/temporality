@@ -22,16 +22,21 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 ## Быстрый стенд
 
-Нужен только Docker (BuildKit). Никаких .env и ключей на старте — модель,
+Нужен Docker с Compose v2.23.3+. Никаких .env и ключей на старте — модель,
 первый агент и песочница настраиваются в мастере онбординга при первом
 открытии интерфейса.
 
 ```sh
-mkdir -p temporality/temporal-dynamicconfig && cd temporality
+curl -fsSL https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/install.sh | sh
+```
+
+Скрипт скачает compose-файл (конфиги встроены в него), поднимет стек и
+дождётся готовности. Или вручную:
+
+```sh
+mkdir temporality && cd temporality
 curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
-curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
-curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
-docker compose up -d
+docker compose up -d --wait
 ```
 
 Откройте `http://localhost:3000` — мастер проведёт через: первый проект →

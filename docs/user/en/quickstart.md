@@ -9,7 +9,7 @@ description: From zero to your first agent task — installation, onboarding, th
 
 ## Requirements
 
-- Docker (Linux, macOS; Windows via WSL2). BuildKit recommended.
+- Docker with Compose v2.23.3+ (Linux, macOS; Windows via WSL2). BuildKit recommended.
 - ~4 GB of free memory for the stack (PostgreSQL, Temporal, Journal, Kernel, UI).
 - A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama,
   etc.) — the onboarding wizard asks for it on step three.
@@ -19,30 +19,38 @@ are configured in the first-run wizard — no `.env` needed for that.
 
 ## Run it
 
-Prebuilt images from GHCR — the recommended path, nothing to clone or build:
+Prebuilt images from GHCR — the recommended path, nothing to clone or build.
+
+One-line install (recommended for beginners): the script checks the
+environment, fetches the compose file, starts the stack and waits until it
+is healthy:
 
 ```sh
-mkdir -p temporality/temporal-dynamicconfig && cd temporality
-curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
-curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
-curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
-docker compose up -d
+curl -fsSL https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/install.sh | sh
 ```
 
-Two configs are required: `temporal-dynamicconfig/temporality.yaml` — the
-Temporal dynamic config (long-run history ceilings; without it the Temporal
-server will not start) and `searxng-settings.yml` — the SearXNG metasearch
-settings (enables the JSON format the agent's `web_search` parses; when the
-file is missing Docker substitutes an empty directory and the container
-dies). All files are fetched from the same repository and the same `main`
-branch.
+Manually, without the script — the compose file is self-contained (the
+Temporal dynamic config and the SearXNG settings are embedded via
+`configs:`), and the `--wait` flag holds the command until the stack is
+healthy:
+
+```sh
+mkdir temporality && cd temporality
+curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+docker compose up -d --wait
+```
 
 The latest published release comes up by default (images from the
 [releases page](https://github.com/RuslanGabbasov/temporality/releases)). For
 controlled upgrades pin a version:
-`TEMPORALITY_VERSION=2026.2.113 docker compose up -d`. Upgrading to a newer
-release: `docker compose pull && docker compose up -d` (or set the new pinned
-version) — the kernel migrates on start.
+`TEMPORALITY_VERSION=2026.2.113 docker compose up -d --wait`. Upgrading to a
+newer release: `docker compose pull && docker compose up -d --wait` (or
+`… install.sh | sh -s -- update`) — the kernel migrates on start.
+
+The installer has two more modes: `… install.sh | sh -s -- doctor`
+diagnoses an install (docker, compose version, container state, port
+reachability), `… install.sh | sh -s -- uninstall` stops and removes the
+stack (data volumes are kept; `--purge` deletes them too).
 
 Building from source (for developing Temporality itself):
 

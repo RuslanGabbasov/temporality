@@ -9,7 +9,7 @@ description: От нуля до первой задачи агента — ус�
 
 ## Требования
 
-- Docker (Linux, macOS; Windows — через WSL2). Рекомендуется BuildKit.
+- Docker с Compose v2.23.3+ (Linux, macOS; Windows — через WSL2). Рекомендуется BuildKit.
 - ~4 ГБ свободной памяти для стека (PostgreSQL, Temporal, Journal, Kernel, UI).
 - Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный
   Ollama и т.д.) — понадобится в мастере онбординга на третьем шаге.
@@ -20,29 +20,36 @@ description: От нуля до первой задачи агента — ус�
 ## Запуск
 
 Готовые образы из GHCR — рекомендуемый путь, ничего клонировать и собирать
-не нужно:
+не нужно.
+
+Установка одной строкой (рекомендуется новичкам): скрипт проверит окружение,
+скачает compose-файл, поднимет стек и дождётся готовности:
 
 ```sh
-mkdir -p temporality/temporal-dynamicconfig && cd temporality
-curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
-curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
-curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
-docker compose up -d
+curl -fsSL https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/install.sh | sh
 ```
 
-Два конфига обязательны: `temporal-dynamicconfig/temporality.yaml` —
-динамический конфиг Temporal (потолки истории длинных ранов; без него сервер
-Temporal не стартует), `searxng-settings.yml` — настройки метапоиска SearXNG
-(включает JSON-формат, без которого `web_search` агента не работает; если
-файла нет, Docker подставит вместо него пустую директорию и контейнер
-упадёт). Все файлы скачиваются из того же репозитория и той же ветки `main`.
+Вручную, без скрипта — compose-файл самодостаточен (динамический конфиг
+Temporal и настройки SearXNG встроены в него через `configs:`), а флаг
+`--wait` держит команду до готовности стека:
+
+```sh
+mkdir temporality && cd temporality
+curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+docker compose up -d --wait
+```
 
 По умолчанию поднимается последний опубликованный релиз (образы — из
 [релизов](https://github.com/RuslanGabbasov/temporality/releases)). Для
 контролируемого обновления версию можно закрепить:
-`TEMPORALITY_VERSION=2026.2.113 docker compose up -d`. Обновление до новой
-версии: `docker compose pull && docker compose up -d` — миграции применяются
-ядром на старте.
+`TEMPORALITY_VERSION=2026.2.113 docker compose up -d --wait`. Обновление до
+новой версии: `docker compose pull && docker compose up -d --wait` (или
+`… install.sh | sh -s -- update`) — миграции применяются ядром на старте.
+
+Скрипт-установщик умеет ещё два режима: `… install.sh | sh -s -- doctor` —
+диагностика установки (docker, версия compose, состояние контейнеров,
+доступность портов), `… install.sh | sh -s -- uninstall` — остановить и
+удалить стек (данные в томах остаются; `--purge` удалит и их).
 
 Сборка из исходников (для разработки самого Temporality):
 
