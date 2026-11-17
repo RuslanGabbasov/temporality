@@ -42,24 +42,26 @@ export function splitMermaidSegments(content: string): Array<{ kind: 'markdown';
   return segments
 }
 
-// A workspace path referenced in prose. Two shapes: the sandbox-absolute form
-// agents write ("/workspace/out/report.md", "workspace/inbox/file.zip") and
-// a bare relative path ("scripts/fetch-mcp-secrets.mjs") — the second needs
-// at least one directory step and a real extension, so prose like "v1.2.3",
-// "/etc/hosts", "and/or" or "github.com/org/repo" stays untouched. The
-// leading boundary avoids mid-word matches; markdown emphasis characters
-// (* _ ~ = +) are boundaries too — bolded file names ("**docs/spec.md**",
-// the most common shape in agent answers and artifact bodies) must linkify;
-// a URL never matches because ":" is neither a boundary nor a path character.
-const WORKSPACE_PATH_RE = /(^|[\s(\[<"«'*_~=+])(\/?workspace\/[A-Za-z0-9][A-Za-z0-9._/-]*|[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{2,12})/g
+// A workspace path referenced in prose. Three shapes: the sandbox-absolute
+// form agents write ("/workspace/out/report.md", "workspace/inbox/file.zip"),
+// a root-absolute form inside the workspace — «/docs/client-vulns-inventory.md»
+// (leading slash, at least one directory step, a real extension: /etc/hosts or
+// /api/v1/events stay untouched) — and a bare relative path
+// ("scripts/fetch-mcp-secrets.mjs") with the same directory+extension floor,
+// so prose like "v1.2.3" or "github.com/org/repo" stays untouched. The leading
+// boundary avoids mid-word matches; markdown emphasis characters (* _ ~ = +)
+// are boundaries too — bolded file names ("**docs/spec.md**", the most common
+// shape in agent answers and artifact bodies) must linkify; a URL never
+// matches because ":" is neither a boundary nor a path character.
+const WORKSPACE_PATH_RE = /(^|[\s(\[<"«'*_~=+])(\/?workspace\/[A-Za-z0-9][A-Za-z0-9._/-]*|\/(?:[A-Za-z0-9_-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{2,12}|[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{2,12})/g
 
 // The path the file API resolves inside the project's workspace area: it is
-// always area-relative ("out/report.md"). The API strips a leading
-// "/workspace" but not the bare "workspace/" form, so both are normalized
-// here — otherwise "workspace/inbox/f.zip" 404s — and the href matches what
+// always area-relative ("out/report.md"). Stripped: a leading "/workspace",
+// the bare "workspace/" form and the root-absolute leading slash — otherwise
+// "/docs/x.md" and "workspace/inbox/f.zip" 404 — and the href matches what
 // the storage file route expects as well.
 function fileApiPath(path: string): string {
-  return path.replace(/^\/?workspace\//, '')
+	return path.replace(/^\/?workspace\//, '').replace(/^\//, '')
 }
 
 // Turns workspace paths outside fenced blocks and markdown links into real

@@ -173,6 +173,19 @@ describe('linkifyWorkspacePaths', () => {
     expect(linkifyWorkspacePaths(prose, 'p1')).toBe(prose)
   })
 
+  // Root-absolute paths inside the workspace («/docs/client-vulns-inventory.md»)
+  // — live-reported: the file existed in the workspace, but the leading slash
+  // was neither a boundary nor the /workspace form, so nothing linked. The
+  // api-like paths (/etc/hosts, /api/v1/events) stay untouched: no extension.
+  it('links root-absolute workspace paths', () => {
+    expect(linkifyWorkspacePaths('см. /docs/client-vulns-inventory.md', 'p1'))
+      .toBe(`см. [${'/docs/client-vulns-inventory.md'}](${URL_FOR('p1', 'docs/client-vulns-inventory.md')})`)
+    expect(linkifyWorkspacePaths('документ `/docs/client-vulns-inventory.md` в коде', 'p1'))
+      .toBe(`документ [${'/docs/client-vulns-inventory.md'}](${URL_FOR('p1', 'docs/client-vulns-inventory.md')}) в коде`)
+    expect(linkifyWorkspacePaths('эндпоинт /api/v1/events и файл /etc/hosts', 'p1'))
+      .toBe('эндпоинт /api/v1/events и файл /etc/hosts')
+  })
+
   // Markdown emphasis around a file name is the most common shape in agent
   // answers and artifact bodies («**docs/spec.md** — главный документ»): the
   // emphasis characters are boundaries, so the path inside linkifies while
