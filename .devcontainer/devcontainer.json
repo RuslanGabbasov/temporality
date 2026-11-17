@@ -1,0 +1,28 @@
+{
+  // Try Temporality without installing anything: GitHub Codespaces gives
+  // every personal account 120 core-hours/month free — the default 2-core
+  // machine (8 GB RAM) comfortably fits the whole stack, and the
+  // docker-in-docker feature below provides the Docker socket the kernel's
+  // sandbox needs for sibling containers. Data (postgres volume, sandbox
+  // files) survives stop/start; a full rebuild resets everything except
+  // /workspaces, so the sandbox root is parked there on purpose.
+  "name": "Temporality (full stack)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "containerEnv": {
+    // Under /workspaces on purpose: codespace rebuilds preserve /workspaces
+    // but reset the rest of the filesystem — project workspaces survive.
+    "TEMPORALITY_SANDBOX_ROOT": "/workspaces/temporality/.sandbox"
+  },
+  "forwardPorts": [3000, 8080, 8090, 8233],
+  "portsAttributes": {
+    "3000": { "label": "Temporality UI", "onAutoForward": "openBrowser" },
+    "8080": { "label": "Journal API" },
+    "8090": { "label": "Agent Kernel API" },
+    "8233": { "label": "Temporal UI" }
+  },
+  // First run pulls ~2 GB of images into the inner Docker — give it room.
+  "postCreateCommand": "docker compose up -d --wait --wait-timeout 600"
+}

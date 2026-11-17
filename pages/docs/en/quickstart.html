@@ -100,6 +100,23 @@ newer release: <code>docker compose pull &amp;&amp; docker compose up -d --wait<
 diagnoses an install (docker, compose version, container state, port
 reachability), <code>… install.sh | sh -s -- uninstall</code> stops and removes the
 stack (data volumes are kept; <code>--purge</code> deletes them too).</p>
+<h3 id="no-install-at-all-github-codespaces"><a class="anchor" href="#no-install-at-all-github-codespaces" aria-label="Section link">#</a>No install at all: GitHub Codespaces</h3><p>You can try the full stack right in the browser without a local Docker: the
+button opens a codespace, brings up the whole compose stack (including the
+sandbox — Docker-in-Docker works inside codespaces) and opens the UI:</p>
+<p><a href="https://codespaces.new/RuslanGabbasov/temporality" target="_blank" rel="noreferrer">Open in GitHub Codespaces&nbsp;<span class="ext">↗</span></a></p>
+<p>Good to know:</p>
+<ul>
+<li>personal GitHub accounts get 120 core-hours of Codespaces per month free
+(the default machine is 2 cores / 8 GB — the stack fits); this is your
+account&#39;s quota, the project pays nothing;</li>
+<li>the first start pulls ~2 GB of images into the inner Docker — a few
+minutes;</li>
+<li>a codespace sleeps after ~30 minutes of inactivity: data is kept and
+waking it takes about a minute. A full container rebuild resets everything
+except <code>/workspaces</code> (the sandbox root lives there on purpose);</li>
+<li>this is a &quot;try it&quot; path, not production: the quota and the codespace
+lifetime are limited.</li>
+</ul>
 <p>Building from source (for developing Temporality itself):</p>
 <pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d

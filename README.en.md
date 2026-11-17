@@ -39,6 +39,10 @@ curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker
 docker compose up -d --wait
 ```
 
+No install at all: [open in GitHub Codespaces](https://codespaces.new/RuslanGabbasov/temporality)
+— the full stack in your browser, billed to the free quota of your GitHub
+account (120 core-hours/month).
+
 Open `http://localhost:3000` — the wizard walks you through: first project →
 administrator → model provider (key + auto-fetched catalog) → sandbox profile
 (Node / Python / Browser E2E, one-click build) → first agent from a template →

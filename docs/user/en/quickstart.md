@@ -52,6 +52,27 @@ diagnoses an install (docker, compose version, container state, port
 reachability), `… install.sh | sh -s -- uninstall` stops and removes the
 stack (data volumes are kept; `--purge` deletes them too).
 
+### No install at all: GitHub Codespaces
+
+You can try the full stack right in the browser without a local Docker: the
+button opens a codespace, brings up the whole compose stack (including the
+sandbox — Docker-in-Docker works inside codespaces) and opens the UI:
+
+[Open in GitHub Codespaces](https://codespaces.new/RuslanGabbasov/temporality)
+
+Good to know:
+
+- personal GitHub accounts get 120 core-hours of Codespaces per month free
+  (the default machine is 2 cores / 8 GB — the stack fits); this is your
+  account's quota, the project pays nothing;
+- the first start pulls ~2 GB of images into the inner Docker — a few
+  minutes;
+- a codespace sleeps after ~30 minutes of inactivity: data is kept and
+  waking it takes about a minute. A full container rebuild resets everything
+  except `/workspaces` (the sandbox root lives there on purpose);
+- this is a "try it" path, not production: the quota and the codespace
+  lifetime are limited.
+
 Building from source (for developing Temporality itself):
 
 ```sh

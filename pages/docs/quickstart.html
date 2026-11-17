@@ -99,6 +99,22 @@ docker compose up -d --wait
 диагностика установки (docker, версия compose, состояние контейнеров,
 доступность портов), <code>… install.sh | sh -s -- uninstall</code> — остановить и
 удалить стек (данные в томах остаются; <code>--purge</code> удалит и их).</p>
+<h3 id="без-установки-github-codespaces"><a class="anchor" href="#без-установки-github-codespaces" aria-label="Section link">#</a>Без установки: GitHub Codespaces</h3><p>Попробовать полный стек можно прямо в браузере, без локального Docker:
+кнопка открывает кодспейс, поднимает весь compose-стек (включая песочницу —
+в кодспейсе работает Docker-in-Docker) и открывает интерфейс:</p>
+<p><a href="https://codespaces.new/RuslanGabbasov/temporality" target="_blank" rel="noreferrer">Открыть в GitHub Codespaces&nbsp;<span class="ext">↗</span></a></p>
+<p>Что важно знать:</p>
+<ul>
+<li>личному аккаунту GitHub даётся 120 core-часов Codespaces в месяц бесплатно
+(машинка по умолчанию — 2 ядра / 8 ГБ, стек помещается); это квота вашего
+аккаунта, проект ничего не платит;</li>
+<li>первый запуск тянет ~2 ГБ образов во внутренний Docker — несколько минут;</li>
+<li>кодспейс засыпает после ~30 минут простоя: данные сохраняются, пробуждение
+занимает около минуты. Полная пересборка контейнера сбрасывает всё, кроме
+<code>/workspaces</code> (песочница специально живёт там);</li>
+<li>это путь «попробовать», не продакшен: квоты и время жизни кодспейса
+ограничены.</li>
+</ul>
 <p>Сборка из исходников (для разработки самого Temporality):</p>
 <pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d

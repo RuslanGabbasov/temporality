@@ -39,6 +39,10 @@ curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker
 docker compose up -d --wait
 ```
 
+Без установки вообще: [открыть в GitHub Codespaces](https://codespaces.new/RuslanGabbasov/temporality)
+— полный стек в браузере, бесплатная квота вашего GitHub-аккаунта
+(120 core-часов/мес).
+
 Откройте `http://localhost:3000` — мастер проведёт через: первый проект →
 администратор → провайдер моделей (ключ + автоподгрузка каталога) → профиль
 песочницы (Node / Python / Browser E2E, сборка в один клик) → первый агент
