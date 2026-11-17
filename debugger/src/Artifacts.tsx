@@ -717,11 +717,17 @@ export default function Artifacts({ project }: { project?: string }) {
     return acc
   }, {})
   const orderedStatuses = ['in_review', 'draft', 'rejected', 'approved', 'deprecated'].filter((s) => statusCounts[s] > 0)
-  // Filtering happens server-side (tens of thousands of rows); the page
-  // only sorts the served page the way the registry reads: lifecycle first,
-  // then title.
-  const visibleArtifacts = [...artifacts]
-    .sort((x, y) => (STATUS_ORDER[x.status ?? 'approved'] - STATUS_ORDER[y.status ?? 'approved']) || x.title.localeCompare(y.title))
+  	// Filtering happens server-side (tens of thousands of rows); the page
+  	// only re-sorts the served page the way the registry reads: freshest
+  	// activity first (an edit lifts the document), lifecycle stage breaks
+  	// ties so the human queue (in_review) stays above settled rows.
+  	const visibleArtifacts = [...artifacts]
+  		.sort((x, y) => {
+  			const xAt = Date.parse(x.updated_at || x.created_at || '') || 0
+  			const yAt = Date.parse(y.updated_at || y.created_at || '') || 0
+  			if (xAt !== yAt) return yAt - xAt
+  			return (STATUS_ORDER[x.status ?? 'approved'] - STATUS_ORDER[y.status ?? 'approved']) || x.title.localeCompare(y.title)
+  		})
   const hasMore = totalKnown === null && artifacts.length >= limit
 
   const providerLabel = (p: string) =>

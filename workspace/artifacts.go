@@ -203,7 +203,7 @@ func (a *Artifact) chunk(offset, limit int) {
 
 func (s *Store) ListAllArtifacts(ctx context.Context) ([]Artifact, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+artifactColumns+` FROM workspace_artifact ORDER BY title, id`)
+		`SELECT `+artifactColumns+` FROM workspace_artifact ORDER BY updated_at DESC, created_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +329,9 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 		args = append(args, textArray(f.Tags))
 		query += ` AND tags @> $` + strconv.Itoa(len(args))
 	}
-	query += ` ORDER BY title, id`
+	// The registry reads newest-activity-first: a fresh artifact or a fresh
+	// edit surfaces on top; id breaks ties deterministically.
+	query += ` ORDER BY updated_at DESC, created_at DESC, id DESC`
 	if f.Limit > 0 {
 		args = append(args, f.Limit)
 		query += ` LIMIT $` + strconv.Itoa(len(args))
