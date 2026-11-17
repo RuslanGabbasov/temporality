@@ -700,7 +700,7 @@ function TimelineView({ component }: { component: PresentationComponent }) {
 
 function ImageView({ component, project }: { component: PresentationComponent; project?: string }) {
   const src = safeURL(component.props?.src)
-  const resolved = useResolvedImage(src, project)
+  const { src: resolved } = useResolvedImage(src, project)
   if (!src) return <Placeholder what="image without a safe src" />
   const caption = text(component.props?.caption) || text(component.content)
   return (
@@ -715,7 +715,7 @@ interface GalleryIR { src?: string; alt?: string; caption?: string }
 
 // One gallery item per component instance: hooks cannot run in a list map.
 function GalleryItem({ item, project }: { item: GalleryIR & { src: string }; project?: string }) {
-  const resolved = useResolvedImage(item.src, project)
+  const { src: resolved } = useResolvedImage(item.src, project)
   return (
     <figure className="presentation-image">
       {resolved ? <img src={resolved} alt={text(item.alt) || text(item.caption) || 'image'} loading="lazy" /> : null}

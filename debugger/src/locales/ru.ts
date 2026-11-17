@@ -3303,6 +3303,7 @@ export const ru: Record<string, string> = {
     'orgact.type_approval_granted': 'Одобрено',
     'orgact.type_approval_rejected': 'Отклонено',
     // Настройки активности: пресеты + полная локализованная грамматика (раздел 5 спецификации)
+    'orgops.preset_hint': 'Пресет задаёт профиль активности узла одним переключением — тонкая настройка ниже.',
     'orgops.preset_off': 'Выключено',
     'orgops.preset_off_hint': 'Для узла ничего не собирается - ни ленты, ни доски, ни осведомлённости',
     'orgops.preset_observe': 'Наблюдение',

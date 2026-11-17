@@ -497,8 +497,21 @@ export function storageListDir(project: string, area: 'workspace' | 'cache', pat
 /** Raw file content for inline preview (text) and object URLs (images). */
 export async function storageFileContent(project: string, area: 'workspace' | 'cache', path: string): Promise<Response> {
   const response = await fetch(`${KERNEL_API}${storageFileQuery(project, area, path)}`, { headers: authHeaders() })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  if (!response.ok) throw new Error(await storageResponseError(response))
   return response
+}
+
+// The kernel answers errors with {"error": "..."} — surface the text (503:
+// KERNEL_SANDBOX_ROOT missing, 404: file gone, 403: role) instead of a bare
+// status: a broken image preview with only «HTTP 503» is undebuggable.
+async function storageResponseError(response: Response): Promise<string> {
+  let detail = ''
+  try {
+    const text = await response.text()
+    try { detail = (JSON.parse(text) as { error?: string }).error ?? text } catch { detail = text }
+  } catch { /* body unreadable — the status alone still tells the class */ }
+  detail = detail.replace(/\s+/g, ' ').trim().slice(0, 200)
+  return `HTTP ${response.status}${detail ? `: ${detail}` : ''}`
 }
 
 /** Direct content URL is not usable for <img>/<a> with header auth — callers

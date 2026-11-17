@@ -3303,6 +3303,7 @@ export const en: Record<string, string> = {
     'orgact.type_approval_granted': 'Approval granted',
     'orgact.type_approval_rejected': 'Approval rejected',
     // Activity settings: presets + the full localized grammar (spec section 5)
+    'orgops.preset_hint': 'A preset sets the whole activity profile in one switch — fine-tune below.',
     'orgops.preset_off': 'Off',
     'orgops.preset_off_hint': 'Nothing is collected for this unit - no feed, no board, no awareness',
     'orgops.preset_observe': 'Observation',
