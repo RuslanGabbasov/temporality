@@ -96,10 +96,15 @@ func SupervisorCaseKey(eventID string) string {
 // lane: an already-acknowledged event (legacy acks) lands as decided, a
 // digest family lands in the digest lane, everything else opens.
 // supervisorCaseUpsertSQL folds one verdict event into its case row. The
-// timestamp value rides THREE DISTINCT parameters ($11 first_seen, $12
-// last_seen, $13 decided_at): one parameter through several inference
-// contexts (plain column vs CASE…ELSE NULL) once broke the parse with
-// 42P08 «inconsistent types deduced», sticking the whole sync pass.
+// timestamp values ride THREE DISTINCT parameters ($11 first_seen, $12
+// last_seen, $13 decided_at), each pinned with ::timestamptz: $11/$12 sit in
+// plain column slots (the column gives the inference for free), but $13 sits
+// inside CASE…THEN — there the parameter type inference once concluded TEXT
+// and the insert died with 42804 «column decided_at is of type timestamp
+// with time zone but expression is of type text»; an earlier cousin of the
+// same fragility answered 42P08 «inconsistent types deduced» before the
+// values were split apart. The explicit casts make the statement immune to
+// whichever describe/protocol mode pgx picks.
 const supervisorCaseUpsertSQL = `INSERT INTO workspace_supervisor_case
 	 (case_key, family, cause, subject, project, summary, recommendation, payload, status,
 	  occurrences, first_seen, last_seen, last_event_id, decided_by, decided_at, decision)
@@ -107,9 +112,9 @@ const supervisorCaseUpsertSQL = `INSERT INTO workspace_supervisor_case
 	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'decided'
 	              WHEN $10 THEN 'digest'
 	              ELSE 'open' END,
-	         1, $11, $12, $9,
+	         1, $11::timestamptz, $12::timestamptz, $9,
 	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'legacy-ack' ELSE '' END,
-	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN $13 ELSE NULL END,
+	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN $13::timestamptz ELSE NULL END,
 	         CASE WHEN EXISTS (SELECT 1 FROM supervisor_ack WHERE verdict_event_id = $9) THEN 'acknowledge' ELSE '' END)
 	 ON CONFLICT (case_key) DO UPDATE SET
 	   occurrences = workspace_supervisor_case.occurrences + 1,

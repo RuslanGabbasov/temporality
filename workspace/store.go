@@ -1214,7 +1214,7 @@ func (s *Store) ListTriggersScoped(ctx context.Context, projects []string) ([]Tr
 	for rows.Next() {
 		var t Trigger
 		var agentID, orgUnitID, identityID *string
-		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.AgentID = derefPtr(agentID)
@@ -1237,7 +1237,7 @@ func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 	for rows.Next() {
 		var t Trigger
 		var agentID, orgUnitID, identityID *string
-		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.AgentID = derefPtr(agentID)

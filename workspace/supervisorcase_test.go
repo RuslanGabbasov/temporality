@@ -34,17 +34,19 @@ func TestSupervisorDigestFamilies(t *testing.T) {
 	require.False(t, supervisorDigestFamilies[""])
 }
 
-// UpsertSupervisorCaseSQLShape pins the upsert against the 42P08 incident:
-// the timestamp value rode ONE parameter ($11) through three inference
-// contexts — two plain column positions and a CASE…ELSE NULL branch for
-// decided_at — and Postgres deduced conflicting types at parse, sticking
-// the whole sync pass (it returns on the first fold error, so the watermark
-// never advanced). Each occurrence is now its own parameter; the shape test
-// keeps them single-context forever.
+// UpsertSupervisorCaseSQLShape pins the upsert against two inference
+// incidents: 42P08 «inconsistent types deduced» — the timestamp rode ONE
+// parameter ($11) through three inference contexts — and, after the split,
+// 42804 «column decided_at is of type timestamp with time zone but
+// expression is of type text» — the CASE…ELSE NULL branch let Postgres
+// conclude TEXT for $13. Each occurrence is now its own parameter AND each
+// carries an explicit ::timestamptz cast, so no describe/protocol mode can
+// re-run the inference lottery; the shape test keeps all of that forever.
 func TestUpsertSupervisorCaseSQLShape(t *testing.T) {
-	// The timestamp placeholders are distinct, each in exactly one position.
-	require.Contains(t, supervisorCaseUpsertSQL, "1, $11, $12, $9,")
-	require.Contains(t, supervisorCaseUpsertSQL, "THEN $13 ELSE NULL END")
+	// The timestamp placeholders are distinct, each in exactly one position,
+	// each explicitly timestamptz.
+	require.Contains(t, supervisorCaseUpsertSQL, "1, $11::timestamptz, $12::timestamptz, $9,")
+	require.Contains(t, supervisorCaseUpsertSQL, "THEN $13::timestamptz ELSE NULL END")
 	// No reused timestamp parameter, in any of the old spellings.
 	require.NotContains(t, supervisorCaseUpsertSQL, "$11, $11")
 	require.NotContains(t, supervisorCaseUpsertSQL, "THEN $11 ELSE NULL")
