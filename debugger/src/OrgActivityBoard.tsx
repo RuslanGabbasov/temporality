@@ -275,7 +275,7 @@ export default function OrgActivityBoard({ embedded }: { embedded?: boolean }) {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0', borderBottom: '1px solid var(--tm-border)' }}>
         <OrgUnitSelect id="orgact-unit" compact value={unit} onChange={(v) => setUnit(v)} org={org} />
-        <label style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.74rem', whiteSpace: 'nowrap', cursor: 'pointer' }} title={t('orgops.scope_subtree')}>
+        <label className={`lens-toggle ${scope === 'subtree' ? 'on' : ''}`} title={t('orgops.scope_subtree')}>
           <input type="checkbox" checked={scope === 'subtree'} onChange={(e) => setScope(e.target.checked ? 'subtree' : 'unit')} />
           {t('orgops.include_children')}
         </label>

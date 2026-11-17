@@ -401,7 +401,7 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
               <Heading style={{ fontSize: '1.05rem', marginRight: '0.25rem' }}>{t('orgwork.title')}</Heading>
             )}
             <OrgUnitSelect id="orgwork-unit" compact value={unit} onChange={(v) => { setUnit(v); setSelectedTask(null) }} org={org} />
-            <label style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.74rem', whiteSpace: 'nowrap', cursor: 'pointer' }} title={t('orgops.scope_subtree')}>
+            <label className={`lens-toggle ${scope === 'subtree' ? 'on' : ''}`} title={t('orgops.scope_subtree')}>
               <input
                 type="checkbox"
                 checked={scope === 'subtree'}
