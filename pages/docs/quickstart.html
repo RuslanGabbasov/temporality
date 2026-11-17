@@ -93,6 +93,10 @@ Temporal и настройки SearXNG встроены в него через <
 curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 docker compose up -d --wait
 </code></pre>
+<p>Если какие-то из портов 3000 (UI), 8080 (journal), 8090 (kernel), 8233
+(Temporal UI) или 5432 (postgres) заняты на сервере — установщик проверит
+их до старта и подскажет; переопределить можно в <code>.env</code> рядом с
+compose-файлом, например <code>UI_PORT=3001</code>.</p>
 <p>По умолчанию поднимается последний опубликованный релиз (образы — из
 <a href="https://github.com/RuslanGabbasov/temporality/releases" target="_blank" rel="noreferrer">релизов&nbsp;<span class="ext">↗</span></a>). Для
 контролируемого обновления версию можно закрепить:

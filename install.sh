@@ -41,7 +41,9 @@ fetch() { # fetch <url> <output-file>
 check_docker() {
   need_cmd docker || die "Docker is not installed — get it at https://docs.docker.com/get-docker/ and re-run."
   if docker info >/dev/null 2>&1; then ok "Docker is up"; return; fi
-  err=$(docker info 2>&1 | head -n 3 || true)
+  # The reason sits at the END of docker info's output (the Client: section
+  # comes first) — classify against the full text, not the first lines.
+  err=$(docker info 2>&1 || true)
   # Rootless installs keep the socket under the user's runtime dir; a plain
   # non-interactive shell does not know it. Try it before failing.
   rdir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
@@ -75,6 +77,7 @@ check_docker() {
 compose_at_least() {
   raw=$(docker compose version --short 2>/dev/null || true)
   [ -n "$raw" ] || return 1
+  raw=${raw##* } # tolerate the verbose form ("Docker Compose version v2.24.0")
   raw=${raw#v}
   MAJOR=${raw%%.*}; rest=${raw#*.}
   MINOR=${rest%%.*}; PATCH=${rest#*.}
@@ -114,6 +117,41 @@ pin_version() { # write TEMPORALITY_VERSION into .env next to the compose file
   ok "Images pinned to $VERSION_PIN (.env)"
 }
 
+# Is a TCP port already listening on the host? ss → netstat → nc; if none
+# exists, the check is skipped (return 1 = not busy).
+port_busy() {
+  if need_cmd ss; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -q "[:.]$1$"
+  elif need_cmd netstat; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -q "[:.]$1$"
+  elif need_cmd nc; then
+    nc -z localhost "$1" >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+# Fails BEFORE any container starts when a host port is taken — the daemon's
+# «address already in use» otherwise surfaces mid-pull after minutes. Runs
+# only before the first start: an update rebinds the stack's own ports.
+preflight_ports() {
+  [ -z "$(docker compose ps -q 2>/dev/null | head -n 1)" ] || return 0
+  busy=""
+  for pair in "UI_PORT:3000" "JOURNAL_PORT:8080" "KERNEL_PORT:8090" "TEMPORAL_UI_PORT:8233" "POSTGRES_PORT:5432"; do
+    var=${pair%%:*}; def=${pair##*:}
+    val=$(grep "^$var=" .env 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
+    [ -n "$val" ] || val=$def
+    port_busy "$val" && busy="$busy $var=$val"
+  done
+  [ -z "$busy" ] && return 0
+  say "" >&2
+  say "These ports are already in use on this host:$busy" >&2
+  warn "Free the ports, or set your own in $(pwd)/.env before starting, e.g.:"
+  warn "  echo 'UI_PORT=3001' >> .env   # the UI then lives at http://localhost:3001"
+  warn "(the same pattern works for JOURNAL_PORT / KERNEL_PORT / TEMPORAL_UI_PORT / POSTGRES_PORT)"
+  die "Port conflict — adjust the ports and re-run the installer."
+}
+
 wait_stack() { # up --wait and translate the failure into next steps
   say "Starting the stack (first pull can take a few minutes)…"
   if ! docker compose up -d --wait --wait-timeout 300; then
@@ -136,6 +174,7 @@ do_install() {
   say "Fetching the compose file…"
   fetch "$COMPOSE_URL" docker-compose.yml
   pin_version
+  preflight_ports
   wait_stack
   say ""
   ok "Temporality is running → http://localhost:$UI_PORT"

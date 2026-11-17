@@ -94,6 +94,10 @@ healthy:</p>
 curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 docker compose up -d --wait
 </code></pre>
+<p>If any of the ports 3000 (UI), 8080 (journal), 8090 (kernel), 8233
+(Temporal UI) or 5432 (postgres) are taken on the server — the installer
+checks them before starting and tells you; override them in a <code>.env</code> next
+to the compose file, e.g. <code>UI_PORT=3001</code>.</p>
 <p>The latest published release comes up by default (images from the
 <a href="https://github.com/RuslanGabbasov/temporality/releases" target="_blank" rel="noreferrer">releases page&nbsp;<span class="ext">↗</span></a>). For
 controlled upgrades pin a version:

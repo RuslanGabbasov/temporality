@@ -44,6 +44,11 @@ curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker
 docker compose up -d --wait
 ```
 
+Если какие-то из портов 3000 (UI), 8080 (journal), 8090 (kernel), 8233
+(Temporal UI) или 5432 (postgres) заняты на сервере — установщик проверит
+их до старта и подскажет; переопределить можно в `.env` рядом с
+compose-файлом, например `UI_PORT=3001`.
+
 По умолчанию поднимается последний опубликованный релиз (образы — из
 [релизов](https://github.com/RuslanGabbasov/temporality/releases)). Для
 контролируемого обновления версию можно закрепить:
