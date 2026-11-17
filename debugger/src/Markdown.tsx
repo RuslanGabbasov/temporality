@@ -7,9 +7,15 @@ import { IN_APP_STORAGE_PATH, resolveImageSource, useResolvedImage } from './ima
 
 const FILES_URL_PREFIX = '/kernel-api/v1/workspace/projects/'
 
-// Segments that must never be linkified: fenced code blocks and inline code
-// spans. Splitting on this pattern yields alternating plain/code segments.
+// Segments that must never be linkified: fenced code blocks, inline code
+// spans — and markdown links/images. A `![alt](/workspace/x.png)` or
+// `[text](docs/x.md)` is ALREADY a link: wrapping the path inside its
+// parentheses nests one markdown link inside another, the renderer decodes
+// it as literal text (the «картинки перестали рендериться» regression of the
+// artifacts linkify pass) — so link syntax splits out untouched, exactly
+// like code does.
 const CODE_SEGMENT_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g
+const MARKDOWN_LINK_SEGMENT_RE = /(!\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\([^)]*\))/g
 
 // ```mermaid fenced blocks render as diagrams, not as code — agents emit
 // them in artifacts and answers (ER charts, sequences, state machines).
@@ -48,20 +54,29 @@ function fileApiPath(path: string): string {
   return path.replace(/^\/?workspace\//, '')
 }
 
-// Turns workspace paths outside code segments into real download links.
+// Turns workspace paths outside code segments and markdown links into real
+// download links.
 export function linkifyWorkspacePaths(content: string, projectId: string): string {
-  return content
-    .split(CODE_SEGMENT_RE)
-    .map((segment, index) => {
-      if (index % 2 === 1) return segment
-      return segment.replace(WORKSPACE_PATH_RE, (_match, lead: string, rawPath: string) => {
-        const path = rawPath.replace(/[._-]+$/, '')
-        const trail = rawPath.slice(path.length)
-        const url = `${FILES_URL_PREFIX}${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(fileApiPath(path))}`
-        return `${lead}[${path}](${url})${trail}`
-      })
-    })
-    .join('')
+	return content
+		.split(CODE_SEGMENT_RE)
+		.map((segment, index) => {
+			if (index % 2 === 1) return segment
+			return segment
+				.split(MARKDOWN_LINK_SEGMENT_RE)
+				.map((part, partIndex) => (partIndex % 2 === 1 ? part : linkifyPlainPaths(part, projectId)))
+				.join('')
+		})
+		.join('')
+}
+
+// The inner transform: wrap bare workspace paths of one plain-text piece.
+function linkifyPlainPaths(segment: string, projectId: string): string {
+	return segment.replace(WORKSPACE_PATH_RE, (_match, lead: string, rawPath: string) => {
+		const path = rawPath.replace(/[._-]+$/, '')
+		const trail = rawPath.slice(path.length)
+		const url = `${FILES_URL_PREFIX}${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(fileApiPath(path))}`
+		return `${lead}[${path}](${url})${trail}`
+	})
 }
 
 function pathFromFilesUrl(href: string): string | null {

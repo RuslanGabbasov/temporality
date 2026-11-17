@@ -198,4 +198,17 @@ describe('linkifyWorkspacePaths', () => {
     expect(linkifyWorkspacePaths('the file /etc/hosts and /tmp/x', 'p1'))
       .toBe('the file /etc/hosts and /tmp/x')
   })
+
+  // The artifacts regression: an image markdown is already a link — wrapping
+  // its path nested one markdown link inside the parentheses, the renderer
+  // then showed a literal `[…](…)` string instead of the picture.
+  it('leaves markdown images and links intact, linkifying the prose around them', () => {
+    const image = '![Настройки уведомлений при DND](/workspace/design-mockups/us6-notification-settings.png)'
+    expect(linkifyWorkspacePaths(image, 'p1')).toBe(image)
+    const link = '[Чеклист](docs/checklists/us6.md) готов'
+    expect(linkifyWorkspacePaths(link, 'p1')).toBe(link)
+    const mixed = 'Смотри ![макет](/workspace/design-mockups/us6.png) и описано в docs/tasks/plan.md.'
+    expect(linkifyWorkspacePaths(mixed, 'p1'))
+      .toBe(`Смотри ![макет](/workspace/design-mockups/us6.png) и описано в [docs/tasks/plan.md](${URL_FOR('p1', 'docs/tasks/plan.md')}).`)
+  })
 })
