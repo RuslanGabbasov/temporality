@@ -29,6 +29,11 @@ is healthy:
 curl -fsSL https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/install.sh | sh
 ```
 
+On a server where Docker requires root, pipe into sudo:
+`curl -fsSL … install.sh | sudo sh` — sudo in front of curl alone does not
+help, the script would run without privileges. Or add yourself to the
+docker group: `sudo usermod -aG docker $USER` (then log out and back in).
+
 Manually, without the script — the compose file is self-contained (the
 Temporal dynamic config and the SearXNG settings are embedded via
 `configs:`), and the `--wait` flag holds the command until the stack is

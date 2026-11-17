@@ -27,6 +27,7 @@ UI_PORT=3000
 
 say() { printf '%s\n' "$*"; }
 ok() { printf '✓ %s\n' "$*"; }
+warn() { printf '  %s\n' "$*" >&2; }
 die() { printf '✗ %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
@@ -39,8 +40,35 @@ fetch() { # fetch <url> <output-file>
 
 check_docker() {
   need_cmd docker || die "Docker is not installed — get it at https://docs.docker.com/get-docker/ and re-run."
-  docker info >/dev/null 2>&1 || die "Docker is installed but not reachable — start Docker Desktop / the docker daemon, then re-run."
-  ok "Docker is up"
+  if docker info >/dev/null 2>&1; then ok "Docker is up"; return; fi
+  err=$(docker info 2>&1 | head -n 3 || true)
+  # Rootless installs keep the socket under the user's runtime dir; a plain
+  # non-interactive shell does not know it. Try it before failing.
+  rdir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  if [ -S "$rdir/docker.sock" ]; then
+    DOCKER_HOST="unix://$rdir/docker.sock"
+    export DOCKER_HOST
+    if docker info >/dev/null 2>&1; then ok "Docker (rootless socket) is up"; return; fi
+  fi
+  say "" >&2
+  case $err in
+    *ermission*denied*|*ot\ in\ the\ docker\ group*)
+      say "The Docker socket is not accessible for this user." >&2
+      if [ "$(id -u)" != "0" ]; then
+        warn "Two ways to fix:"
+        warn "• add yourself to the docker group:  sudo usermod -aG docker $USER  (then log out and back in)"
+        warn "• or run the installer as root:      curl -fsSL $RAW_BASE/install.sh | sudo sh"
+        warn "Note: «sudo curl … | sh» runs the script WITHOUT root — sudo applies to curl only."
+      fi
+      die "Docker socket: permission denied."
+      ;;
+    *Cannot\ connect*|*daemon*running*|*refused*)
+      die "The Docker daemon is not running — start it (sudo systemctl start docker, or Docker Desktop) and re-run."
+      ;;
+    *)
+      die "Docker is installed but not reachable: $(printf '%s' "$err" | tr '\n' ' ' | cut -c1-160)"
+      ;;
+  esac
 }
 
 # docker compose version --short prints "2.29.7" (older print "v2.24.0").
@@ -100,7 +128,10 @@ wait_stack() { # up --wait and translate the failure into next steps
 do_install() {
   check_docker
   check_compose
-  mkdir -p "$DIR"
+  # Same directory as a previous install (or an existing compose file):
+  # reinstall/update in place instead of nesting temporality/temporality.
+  DIR=$(find_dir)
+  [ -d "$DIR" ] || mkdir -p "$DIR"
   cd "$DIR"
   say "Fetching the compose file…"
   fetch "$COMPOSE_URL" docker-compose.yml

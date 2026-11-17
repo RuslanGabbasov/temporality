@@ -82,6 +82,10 @@ environment, fetches the compose file, starts the stack and waits until it
 is healthy:</p>
 <pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/install.sh | sh
 </code></pre>
+<p>On a server where Docker requires root, pipe into sudo:
+<code>curl -fsSL … install.sh | sudo sh</code> — sudo in front of curl alone does not
+help, the script would run without privileges. Or add yourself to the
+docker group: <code>sudo usermod -aG docker $USER</code> (then log out and back in).</p>
 <p>Manually, without the script — the compose file is self-contained (the
 Temporal dynamic config and the SearXNG settings are embedded via
 <code>configs:</code>), and the <code>--wait</code> flag holds the command until the stack is

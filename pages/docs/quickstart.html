@@ -82,6 +82,10 @@ Ollama и т.д.) — понадобится в мастере онбордин�
 скачает compose-файл, поднимет стек и дождётся готовности:</p>
 <pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/install.sh | sh
 </code></pre>
+<p>На сервере, где Docker требует root, направьте пайп в sudo:
+<code>curl -fsSL … install.sh | sudo sh</code> — sudo перед curl не помогает, скрипт
+запустится без прав. Или добавьте себя в группу docker:
+<code>sudo usermod -aG docker $USER</code> (затем перелогиньтесь).</p>
 <p>Вручную, без скрипта — compose-файл самодостаточен (динамический конфиг
 Temporal и настройки SearXNG встроены в него через <code>configs:</code>), а флаг
 <code>--wait</code> держит команду до готовности стека:</p>

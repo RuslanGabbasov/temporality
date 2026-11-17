@@ -29,6 +29,11 @@ description: От нуля до первой задачи агента — ус�
 curl -fsSL https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/install.sh | sh
 ```
 
+На сервере, где Docker требует root, направьте пайп в sudo:
+`curl -fsSL … install.sh | sudo sh` — sudo перед curl не помогает, скрипт
+запустится без прав. Или добавьте себя в группу docker:
+`sudo usermod -aG docker $USER` (затем перелогиньтесь).
+
 Вручную, без скрипта — compose-файл самодостаточен (динамический конфиг
 Temporal и настройки SearXNG встроены в него через `configs:`), а флаг
 `--wait` держит команду до готовности стека:
