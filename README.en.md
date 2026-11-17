@@ -27,8 +27,9 @@ the first agent and the sandbox are configured in the onboarding wizard on
 first open of the UI.
 
 ```sh
-mkdir temporality && cd temporality
+mkdir -p temporality/temporal-dynamicconfig && cd temporality
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
 docker compose up -d
 ```
 

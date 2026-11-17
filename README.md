@@ -27,8 +27,9 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 открытии интерфейса.
 
 ```sh
-mkdir temporality && cd temporality
+mkdir -p temporality/temporal-dynamicconfig && cd temporality
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
 docker compose up -d
 ```
 

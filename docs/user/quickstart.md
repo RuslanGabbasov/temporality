@@ -23,10 +23,15 @@ description: От нуля до первой задачи агента — ус�
 не нужно:
 
 ```sh
-mkdir temporality && cd temporality
+mkdir -p temporality/temporal-dynamicconfig && cd temporality
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
 docker compose up -d
 ```
+
+Второй файл — динамический конфиг Temporal (потолки истории длинных ранов);
+без него сервер Temporal не стартует. Оба файла скачиваются из того же
+репозитория и той же ветки `main`.
 
 По умолчанию поднимается последний опубликованный релиз (образы — из
 [релизов](https://github.com/RuslanGabbasov/temporality/releases)). Для

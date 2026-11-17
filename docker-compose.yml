@@ -100,6 +100,13 @@ services:
       POSTGRES_SEEDS: postgres
       # The two start-dev history ceilings (see temporal-dynamicconfig/).
       DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/temporality.yaml
+    volumes:
+      # The server fatals on boot without this file ("Unable to create
+      # dynamic config client" — DYNAMIC_CONFIG_FILE_PATH points at a missing
+      # path) and the container crash-loops. The server's cwd is /etc/temporal,
+      # so the target must land under /etc/temporal/config/dynamicconfig/.
+      # The quickstart curl (README) downloads this file next to the compose.
+      - ./temporal-dynamicconfig/temporality.yaml:/etc/temporal/config/dynamicconfig/temporality.yaml
     restart: unless-stopped
     ports:
       - "7233:7233"
