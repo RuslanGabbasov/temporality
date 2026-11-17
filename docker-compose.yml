@@ -114,10 +114,12 @@ services:
     # this healthcheck is for humans and other observers — compose ordering
     # does not depend on it anymore (see agent-kernel's depends_on note).
     # First boot runs the schema auto-setup over the network — give it room;
-    # later boots only re-check and answer in seconds. Alpine image: nc
-    # (busybox) probes the gRPC port.
+    # later boots only re-check and answer in seconds. The probe can NOT be
+    # nc: the auto-setup image is ubuntu-based and ships no nc binary (the
+    # old temporalio/temporal dev image did), a missing executable reads as
+    # an unhealthy server forever. bash's /dev/tcp does the same TCP probe.
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 7233 || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/7233' 2>/dev/null || exit 1"]
       interval: 3s
       timeout: 3s
       retries: 90

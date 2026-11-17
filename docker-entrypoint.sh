@@ -25,11 +25,27 @@ if [ "$(id -u)" = "0" ]; then
   # (uid 10001) cannot mkdir inside it — every project start died with
   # «create project workspace: permission denied». While still root: create
   # the directory tree and hand it to the unprivileged user.
+  #
+  # NOT a recursive chown anymore: the tree grows with the stack (weeks of
+  # project workspaces, node_modules, build artifacts), and re-owning every
+  # file on every boot held the container for many minutes before the kernel
+  # binary even started — the «очень долго запускается» of a long-lived
+  # server. Ownership persists on the host volume, so the recursive pass now
+  # runs only for top-level entries that are actually misowned (a uid
+  # migration); normally nothing matches and boot proceeds in milliseconds.
   SANDBOX_ROOT="${KERNEL_SANDBOX_ROOT:-${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}}"
   if [ -d "$(dirname "$SANDBOX_ROOT")" ] || [ -d "$SANDBOX_ROOT" ]; then
     mkdir -p "$SANDBOX_ROOT/projects" 2>/dev/null || true
-    chown -R "$TARGET_UID:$TARGET_GID" "$SANDBOX_ROOT" 2>/dev/null || \
+    chown "$TARGET_UID:$TARGET_GID" "$SANDBOX_ROOT" 2>/dev/null || \
       echo "WARN: could not chown $SANDBOX_ROOT — pre-create it manually and chown to $TARGET_UID:$TARGET_GID"
+    for entry in "$SANDBOX_ROOT"/* ; do
+      [ -e "$entry" ] || continue
+      owner="$(stat -c %u "$entry" 2>/dev/null || echo "$TARGET_UID")"
+      if [ "$owner" != "$TARGET_UID" ]; then
+        echo "sandbox entry $entry is owned by $owner — re-owning recursively (uid migration)"
+        chown -R "$TARGET_UID:$TARGET_GID" "$entry" 2>/dev/null || true
+      fi
+    done
   fi
   # The docker CLI reads $HOME/.docker/config.json; the image ships HOME=/root,
   # which the dropped user cannot read — every invocation printed a WARNING and

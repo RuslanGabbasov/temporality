@@ -17,12 +17,13 @@ import (
 
 // sweepStore fakes the store face the sweep needs.
 type sweepStore struct {
-	runs     []workspace.Run
-	missing  []workspace.RunRef
-	terminal map[string]string
-	sources  map[string]string
-	updated  map[string]string
-	probed   []string
+	runs        []workspace.Run
+	missing     []workspace.RunRef
+	terminal    map[string]string
+	sources     map[string]string
+	updated     map[string]string
+	updateErrOn map[string]error
+	probed      []string
 }
 
 func (s *sweepStore) ListStartedRuns(ctx context.Context, limit int) ([]workspace.Run, error) {
@@ -47,6 +48,9 @@ func (s *sweepStore) RunSourceID(ctx context.Context, project, runID string) (st
 }
 
 func (s *sweepStore) UpdateRunStatus(ctx context.Context, id, status, answer string, turns int, runErr string) error {
+	if err, ok := s.updateErrOn[id]; ok {
+		return err
+	}
 	s.updated[id] = status
 	return nil
 }
@@ -121,6 +125,46 @@ func TestSweepOrphanedRuns(t *testing.T) {
 	require.Equal(t, true, data["orphaned"])
 	require.Contains(t, data["error"], "restart")
 	require.Equal(t, "lost-run", event["context"].(map[string]any)["run"])
+}
+
+// A journal-only candidate — a delegation child with no workspace row — must
+// still get its derived terminal event: the store cannot close a row that
+// does not exist, but the Sagas and the runs list count the run live until
+// the journal event lands. Skipping the emit re-enqueued the same zombie on
+// every pass forever (the «orphan sweep: close run row … not found» flood).
+func TestSweepOrphanedRunsEmitsVerdictForJournalOnlyRuns(t *testing.T) {
+	var mu sync.Mutex
+	var events []map[string]any
+	journal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Events []map[string]any `json:"events"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		mu.Lock()
+		events = append(events, payload.Events...)
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer journal.Close()
+
+	store := &sweepStore{
+		missing: []workspace.RunRef{{RunID: "root/delegate/01", ProjectID: "proj"}},
+		terminal: map[string]string{},
+		sources: map[string]string{"root/delegate/01": "kernel-source"},
+		updated: map[string]string{},
+		// The row is missing: UpdateRunStatus answers ErrNotFound.
+		updateErrOn: map[string]error{"root/delegate/01": workspace.ErrNotFound},
+	}
+	liveness := &sweepLiveness{}
+	sweepOrphanedRuns(context.Background(), store, liveness, journal.URL, "token", "kernel-source", slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	require.Empty(t, store.updated, "no row to update")
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, events, 1, "the journal verdict must land even without a workspace row")
+	require.Equal(t, "run.failed", events[0]["type"])
+	require.Equal(t, "root/delegate/01", events[0]["context"].(map[string]any)["run"])
 }
 
 // A turn-limit continuation chain head whose workflow FINISHED (the outcome

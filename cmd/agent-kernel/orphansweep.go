@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -157,8 +158,15 @@ func sweepOrphanedRuns(ctx context.Context, store orphanStore, liveness clientSw
 			// an explanatory reason.
 			reason := "kernel or Temporal restart removed the run's workflow before it finished"
 			if err := store.UpdateRunStatus(ctx, run.ID, "failed", "", 0, reason); err != nil {
-				log.Warn("orphan sweep: close run row", "run", run.ID, "error", err)
-				continue
+				if !errors.Is(err, workspace.ErrNotFound) {
+					log.Warn("orphan sweep: close run row", "run", run.ID, "error", err)
+					continue
+				}
+				// A journal-only candidate (a delegation child without a
+				// workspace row): there is no row to close, but the journal
+				// verdict still must land — the Sagas and the runs list count a
+				// run live until its terminal event arrives, and skipping the
+				// emit here re-enqueued the same zombie on every pass forever.
 			}
 			emitSweepEvent(ctx, journalURL, token, sourceID, run, "run.failed", map[string]any{
 				"error": reason, "orphaned": true, "turns": run.Turns, "derived": true,
