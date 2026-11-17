@@ -779,8 +779,9 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   } else if (args && tool === 'remember_many') {
     // Memory writes are the reader's «what did it decide to keep?» moment: a
     // raw JSON fragment of the items array says nothing — one line per
-    // proposition instead (the kernel fragment carries up to ~500 chars, so
-    // the propositions here are already a bounded preview).
+    // proposition instead (the kernel's dedicated preview keeps the whole
+    // batch — up to the 50-item cap — with propositions clipped to one line
+    // each; evidence refs ride the per-item knowledge.proposed events).
     const items = Array.isArray(args.items) ? (args.items as unknown[]) : []
     items.forEach((item, index) => {
       const proposition = squash(item && typeof item === 'object' ? (item as Record<string, unknown>).proposition : item)

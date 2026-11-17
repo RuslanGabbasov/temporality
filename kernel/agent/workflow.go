@@ -2443,10 +2443,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		var turnImages []llm.ImageBlock
 		// argumentsPreview journals a tool call's arguments: plans get the
 		// structural preview (whole DAG, clipped prompts) — the trace renders
-		// them per task; everything else keeps the bounded generic compact.
+		// them per task; bulk memory gets the propositions list (the trace
+		// renders one line per fact); everything else keeps the bounded generic
+		// compact.
 		argumentsPreview := func(name string, args map[string]any) string {
 			if name == "plan" {
 				return planArgsPreview(args)
+			}
+			if name == "remember_many" {
+				return rememberManyArgsPreview(args)
 			}
 			return compactJSON(args, 500)
 		}
@@ -3193,7 +3198,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 					toolResult.Content = "Knowledge recorded with id " + knowledgeID
 				}
-				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 300)}); err != nil {
 					return result, err
 				}
 			} else if call.Name == "remember_many" {
@@ -3233,7 +3238,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 					toolResult.Content = fmt.Sprintf("Recorded %d knowledge items (%d skipped: empty). Proposed items surface in hints as unconfirmed until confirmed.", recorded, skipped)
 				}
-				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 300)}); err != nil {
 					return result, err
 				}
 			} else if call.Name == "delegate" {
@@ -4339,6 +4344,32 @@ const compactJSONStringFloor = 48
 // first (bounded — some MCP servers answer that way), JSON documents get
 // the repair shrink so they stay parseable, plain text cuts on a rune
 // boundary with a visible ellipsis.
+// rememberManyArgsPreview keeps the bulk-memory write legible in the trace:
+// the generic 500-char compact turns a 50-item batch into two shrunken
+// propositions and an ellipsis — exactly the «what did it decide to keep?»
+// moment the trace exists for. Every proposition stays present, clipped to
+// one line; evidence refs degrade out (each item's full proposition and
+// evidence ride its own knowledge.proposed event anyway). The max batch is
+// 50 items; at the 200-byte proposition clip that is ~11 KB of JSON — the
+// budget holds it whole, and an over-cap batch degrades through the same
+// valid-JSON shrink/truncate ladder as everything else.
+func rememberManyArgsPreview(args map[string]any) string {
+	rawItems, _ := args["items"].([]any)
+	items := make([]map[string]any, 0, len(rawItems))
+	for _, raw := range rawItems {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		proposition, _ := item["proposition"].(string)
+		if strings.TrimSpace(proposition) == "" {
+			continue
+		}
+		items = append(items, map[string]any{"proposition": compactContent(proposition, 200)})
+	}
+	return compactJSON(map[string]any{"items": items}, 12000)
+}
+
 func compactContent(s string, maxLen int) string {
 	for i := 0; i < 3; i++ {
 		var inner string

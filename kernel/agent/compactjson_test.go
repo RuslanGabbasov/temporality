@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -139,5 +140,65 @@ func TestCompactJSONStringPlainTextCutsOnRuneBoundary(t *testing.T) {
 	}
 	if !utf8.ValidString(got) {
 		t.Fatalf("the cut must not break multibyte runes, got %q", got)
+	}
+}
+
+// rememberManyArgsPreview backs the remember_many tool row: the trace must
+// let the reader see WHAT the agent decided to keep — the generic 500-char
+// compact turned a big batch into two shrunken items and an ellipsis.
+
+func TestRememberManyArgsPreviewKeepsEveryProposition(t *testing.T) {
+	items := make([]any, 0, 30)
+	for i := 0; i < 30; i++ {
+		items = append(items, map[string]any{
+			"proposition": fmt.Sprintf("Fact %02d: %s", i, strings.Repeat("абвгд ", 40)), // ~240 bytes of multibyte text each
+			"evidence":    []any{"artifact://e1"},
+		})
+	}
+	got := rememberManyArgsPreview(map[string]any{"items": items})
+	if len(got) > 12000 {
+		t.Fatalf("the preview must fit its budget, got %d chars", len(got))
+	}
+	parsed := mustParse(t, got)
+	list, ok := parsed["items"].([]any)
+	if !ok || len(list) != 30 {
+		t.Fatalf("every proposition must survive the preview, got %d items in %d chars", len(list), len(got))
+	}
+	for i, raw := range list {
+		item, _ := raw.(map[string]any)
+		proposition, _ := item["proposition"].(string)
+		if !strings.HasPrefix(proposition, fmt.Sprintf("Fact %02d:", i)) {
+			t.Fatalf("item %d lost its proposition head: %q", i, proposition)
+		}
+	}
+	// Evidence degrades out of the preview: the full refs ride each item's
+	// own knowledge.proposed event.
+	if strings.Contains(got, "evidence") {
+		t.Fatalf("evidence refs must not bloat the preview, got %s", got[:200])
+	}
+}
+
+func TestRememberManyArgsPreviewDropsEmptyAndClipsLong(t *testing.T) {
+	got := rememberManyArgsPreview(map[string]any{"items": []any{
+		map[string]any{"proposition": strings.Repeat("длинный факт ", 100)},
+		map[string]any{"proposition": "   "},
+		"not-an-object",
+	}})
+	parsed := mustParse(t, got)
+	list := parsed["items"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("empty propositions and non-objects must be dropped, got %v", parsed)
+	}
+	first := list[0].(map[string]any)["proposition"].(string)
+	if len(first) > 201 || !strings.HasSuffix(first, "…") {
+		t.Fatalf("a long proposition must clip to one line, got %d bytes: %q", len(first), first)
+	}
+}
+
+func TestRememberManyArgsPreviewEmptyBatch(t *testing.T) {
+	got := rememberManyArgsPreview(map[string]any{"items": []any{}})
+	parsed := mustParse(t, got)
+	if list := parsed["items"].([]any); len(list) != 0 {
+		t.Fatalf("an empty batch must preview as an empty list, got %s", got)
 	}
 }
