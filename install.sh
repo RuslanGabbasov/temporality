@@ -5,6 +5,10 @@
 #
 # The script checks Docker + Compose, fetches the compose file (both required
 # configs live inside it), starts the stack and waits until it is healthy.
+# Questions (sudo escalation, busy ports) are asked in the terminal — under
+# `curl | sh` stdin is the script stream, so prompts read /dev/tty; in a
+# pipeline without a terminal set NON_INTERACTIVE=1 (or --non-interactive)
+# and the script fails with written instructions instead.
 #
 # Subcommands:
 #   install (default)  fetch the compose file and start the stack
@@ -13,7 +17,7 @@
 #   uninstall          stop the stack (add --purge to also delete ALL data)
 #
 # Flags: --dir <path> (default ./temporality), --version <tag> (pin images),
-#        --purge (uninstall: delete volumes), -h/--help.
+#        --purge (uninstall: delete volumes), --non-interactive, -h/--help.
 # The stack itself needs no .env: the model, the first agent and the sandbox
 # are configured in the onboarding wizard on first open of http://localhost:3000.
 set -eu
@@ -31,6 +35,24 @@ warn() { printf '  %s\n' "$*" >&2; }
 die() { printf '✗ %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# When the user accepts the sudo escalation, every docker call below goes
+# through dk and runs with sudo; files created in the install dir stay
+# owned by the user.
+SUDO_PREFIX=""
+INTERACTIVE=1
+
+dk() { $SUDO_PREFIX docker "$@"; }
+
+ask() { # ask <prompt> <default-answer>; echoes the answer; fails without a terminal
+  [ "$INTERACTIVE" = 1 ] || return 1
+  printf '%s [%s] ' "$1" "$2" >/dev/tty 2>/dev/null || return 1
+  answer=""
+  read -r answer </dev/tty || return 1
+  CR=$(printf '\r')
+  answer=${answer%"$CR"} # some ptys hand back CRLF
+  printf '%s' "${answer:-$2}"
+}
+
 fetch() { # fetch <url> <output-file>
   if need_cmd curl; then curl -fsSL "$1" -o "$2"
   elif need_cmd wget; then wget -qO "$2" "$1"
@@ -40,22 +62,36 @@ fetch() { # fetch <url> <output-file>
 
 check_docker() {
   need_cmd docker || die "Docker is not installed — get it at https://docs.docker.com/get-docker/ and re-run."
-  if docker info >/dev/null 2>&1; then ok "Docker is up"; return; fi
+  if dk info >/dev/null 2>&1; then ok "Docker is up"; return; fi
   # The reason sits at the END of docker info's output (the Client: section
   # comes first) — classify against the full text, not the first lines.
-  err=$(docker info 2>&1 || true)
+  err=$(dk info 2>&1 || true)
   # Rootless installs keep the socket under the user's runtime dir; a plain
   # non-interactive shell does not know it. Try it before failing.
   rdir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
   if [ -S "$rdir/docker.sock" ]; then
     DOCKER_HOST="unix://$rdir/docker.sock"
     export DOCKER_HOST
-    if docker info >/dev/null 2>&1; then ok "Docker (rootless socket) is up"; return; fi
+    if dk info >/dev/null 2>&1; then ok "Docker (rootless socket) is up"; return; fi
   fi
   say "" >&2
   case $err in
     *ermission*denied*|*ot\ in\ the\ docker\ group*)
       say "The Docker socket is not accessible for this user." >&2
+      if answer=$(ask "Run the installer as root via sudo now" "Y"); then
+        case $answer in
+          y|Y|yes|Yes|YES)
+            need_cmd sudo || die "sudo is not available — add yourself to the docker group instead: sudo usermod -aG docker $USER"
+            sudo -v || die "sudo authentication failed."
+            SUDO_PREFIX="sudo"
+            if dk info >/dev/null 2>&1; then
+              ok "Docker is up (the stack runs as root via sudo; files stay yours)"
+              return
+            fi
+            ;;
+          *) : ;;
+        esac
+      fi
       if [ "$(id -u)" != "0" ]; then
         warn "Two ways to fix:"
         warn "• add yourself to the docker group:  sudo usermod -aG docker $USER  (then log out and back in)"
@@ -75,7 +111,7 @@ check_docker() {
 
 # docker compose version --short prints "2.29.7" (older print "v2.24.0").
 compose_at_least() {
-  raw=$(docker compose version --short 2>/dev/null || true)
+  raw=$(dk compose version --short 2>/dev/null || true)
   [ -n "$raw" ] || return 1
   raw=${raw##* } # tolerate the verbose form ("Docker Compose version v2.24.0")
   raw=${raw#v}
@@ -92,11 +128,11 @@ compose_at_least() {
 
 check_compose() {
   need_cmd docker || die "Docker is not installed."
-  docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is missing — install the compose plugin (https://docs.docker.com/compose/install/)."
+  dk compose version >/dev/null 2>&1 || die "Docker Compose v2 is missing — install the compose plugin (https://docs.docker.com/compose/install/)."
   if compose_at_least "$MIN_MAJOR" "$MIN_MINOR" "$MIN_PATCH"; then
-    ok "Docker Compose $(docker compose version --short)"
+    ok "Docker Compose $(dk compose version --short)"
   else
-    die "Docker Compose $(docker compose version --short 2>/dev/null) is too old — the compose file uses inline configs (needs v$MIN_MAJOR.$MIN_MINOR.$MIN_PATCH+, Dec 2023). Upgrade Docker Desktop / the compose plugin, then re-run."
+    die "Docker Compose $(dk compose version --short 2>/dev/null) is too old — the compose file uses inline configs (needs v$MIN_MAJOR.$MIN_MINOR.$MIN_PATCH+, Dec 2023). Upgrade Docker Desktop / the compose plugin, then re-run."
   fi
 }
 
@@ -131,30 +167,50 @@ port_busy() {
   fi
 }
 
+find_free() { # the next free host port at or after $1 (bounded scan)
+  p=$1; i=0
+  while port_busy "$p" && [ "$i" -lt 50 ]; do p=$((p + 1)); i=$((i + 1)); done
+  port_busy "$p" && return 1
+  printf '%s' "$p"
+}
+
 # Fails BEFORE any container starts when a host port is taken — the daemon's
-# «address already in use» otherwise surfaces mid-pull after minutes. Runs
-# only before the first start: an update rebinds the stack's own ports.
+# «address already in use» otherwise surfaces mid-pull after minutes. Asks
+# for a free port right here (Enter accepts the nearest suggestion) and
+# writes the choice into .env. Runs only before the first start: an update
+# rebinds the stack's own ports.
 preflight_ports() {
-  [ -z "$(docker compose ps -q 2>/dev/null | head -n 1)" ] || return 0
+  [ -z "$(dk compose ps -q 2>/dev/null | head -n 1)" ] || return 0
   busy=""
   for pair in "UI_PORT:3000" "JOURNAL_PORT:8080" "KERNEL_PORT:8090" "TEMPORAL_UI_PORT:8233" "POSTGRES_PORT:5432"; do
     var=${pair%%:*}; def=${pair##*:}
     val=$(grep "^$var=" .env 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
     [ -n "$val" ] || val=$def
-    port_busy "$val" && busy="$busy $var=$val"
+    port_busy "$val" && busy="$busy $var:$val"
   done
-  [ -z "$busy" ] && return 0
-  say "" >&2
-  say "These ports are already in use on this host:$busy" >&2
-  warn "Free the ports, or set your own in $(pwd)/.env before starting, e.g.:"
-  warn "  echo 'UI_PORT=3001' >> .env   # the UI then lives at http://localhost:3001"
-  warn "(the same pattern works for JOURNAL_PORT / KERNEL_PORT / TEMPORAL_UI_PORT / POSTGRES_PORT)"
-  die "Port conflict — adjust the ports and re-run the installer."
+  [ -z "$busy" ] || say "These ports are already in use on this host:$busy" >&2
+  for entry in $busy; do
+    var=${entry%%:*}; val=${entry##*:}
+    suggestion=$(find_free $((val + 1)) || true)
+    answer=$(ask "New host port for $var (was $val)" "${suggestion:-}") || {
+      warn "No terminal to pick a port — set it in $(pwd)/.env and re-run, e.g.: echo 'UI_PORT=3001' >> .env"
+      die "Port conflict."
+    }
+    case $answer in
+      ''|*[!0-9]*) die "Not a port number: $answer" ;;
+    esac
+    if port_busy "$answer"; then
+      die "Port $answer is busy too — pick another one."
+    fi
+    printf '%s=%s\n' "$var" "$answer" >> .env
+    ok "$var=$answer written to .env"
+  done
+  [ -z "$busy" ] || ok "Ports re-pointed in .env — continuing."
 }
 
 wait_stack() { # up --wait and translate the failure into next steps
   say "Starting the stack (first pull can take a few minutes)…"
-  if ! docker compose up -d --wait --wait-timeout 300; then
+  if ! dk compose up -d --wait --wait-timeout 300; then
     say ""
     say "The stack did not become healthy in time. Look at the failing container:"
     say "  cd $(pwd) && docker compose ps && docker compose logs --tail 30"
@@ -188,13 +244,14 @@ do_install() {
 
 do_update() {
   check_docker
+  check_compose
   DIR=$(find_dir)
   [ -f "$DIR/docker-compose.yml" ] || die "No docker-compose.yml in $DIR — run the installer without arguments first."
   cd "$DIR"
   say "Fetching the latest compose file…"
   fetch "$COMPOSE_URL" docker-compose.yml
   say "Pulling newer images…"
-  docker compose pull
+  dk compose pull
   wait_stack
   ok "Update complete → http://localhost:$UI_PORT"
 }
@@ -209,10 +266,10 @@ do_uninstall() {
     printf 'This deletes ALL Temporality data (projects, runs, knowledge — the postgres volume). Type YES to continue: '
     read -r answer < /dev/tty 2>/dev/null || die "No terminal to confirm — download the script and run it locally, or drop the stack without --purge."
     [ "$answer" = "YES" ] || die "Aborted — nothing was deleted."
-    docker compose down -v --rmi all
+    dk compose down -v --rmi all
     ok "Stack removed. The sandbox files stay in /srv/temporality/sandbox (rm -rf it yourself if you want a clean slate)."
   else
-    docker compose down
+    dk compose down
     ok "Stack stopped and containers removed. Data volumes kept — re-run with --purge to delete them too."
   fi
 }
@@ -220,7 +277,7 @@ do_uninstall() {
 do_doctor() {
   check_docker
   if compose_at_least "$MIN_MAJOR" "$MIN_MINOR" "$MIN_PATCH"; then
-    ok "Docker Compose $(docker compose version --short)"
+    ok "Docker Compose $(dk compose version --short)"
   else
     say "✗ Docker Compose is older than v$MIN_MAJOR.$MIN_MINOR.$MIN_PATCH — the compose file needs inline configs."
   fi
@@ -229,7 +286,7 @@ do_doctor() {
     cd "$DIR"
     say ""
     say "Containers (${DIR}):"
-    docker compose ps
+    dk compose ps
   else
     say ""
     say "No install found in $DIR (no docker-compose.yml)."
@@ -258,7 +315,8 @@ Temporality installer.
   curl -fsSL $RAW_BASE/install.sh | sh -s -- uninstall  stop the stack (keep data)
 
 Flags: --dir <path> (default $DEFAULT_DIR), --version <tag> (pin images),
-       --purge (uninstall: also delete volumes), -h/--help.
+       --purge (uninstall: also delete volumes), --non-interactive (never
+       ask: fail with written instructions instead), -h/--help.
 EOF
 }
 
@@ -269,11 +327,15 @@ while [ $# -gt 0 ]; do
     --dir) [ $# -ge 2 ] || die "--dir needs a value"; DIR=$2; shift ;;
     --version) [ $# -ge 2 ] || die "--version needs a tag"; VERSION_PIN=$2; shift ;;
     --purge) PURGE=1 ;;
+    --non-interactive) INTERACTIVE=0 ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown argument: $1 (see --help)" ;;
   esac
   shift
 done
+# NON_INTERACTIVE=1 in the environment acts the same as --non-interactive;
+# the guard keeps `set -u` quiet when the variable is not set.
+if [ "${NON_INTERACTIVE:-0}" = "1" ]; then INTERACTIVE=0; fi
 
 case $cmd in
   install) do_install ;;
