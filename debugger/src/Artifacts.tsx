@@ -1483,16 +1483,18 @@ export default function Artifacts({ project }: { project?: string }) {
                 						</p>
                 					</div>
                 					<Stack orientation="horizontal" gap={2} style={{ flexShrink: 0 }}>
-                						{(reviewable || (revisionOpen && revisionEditable)) && (
-                							<Button size="sm" onClick={() => {
-                								setSubmitReviewerTokens([])
-                								setSubmitNote('')
-                								setSubmitOpen(true)
-                								void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
-                							}}>
-                								{t('artifacts.submit_review') ?? 'На согласование'}
-                							</Button>
-                						)}
+						{(reviewable || (revisionOpen && revisionEditable)) && (
+							<div data-learn="artifact.approval.rules">
+								<Button size="sm" onClick={() => {
+									setSubmitReviewerTokens([])
+									setSubmitNote('')
+									setSubmitOpen(true)
+									void workspaceApi.listUsers().then((data) => setDirectory(data.users ?? [])).catch(() => setDirectory([]))
+								}}>
+									{t('artifacts.submit_review') ?? 'На согласование'}
+								</Button>
+							</div>
+						)}
 						{/* The pencil edits the ATTRIBUTES (title, description, kind,
 						    storage, saga) in a dialog, like every other entity — the
 						    body has its own editor on the Document tab. */}

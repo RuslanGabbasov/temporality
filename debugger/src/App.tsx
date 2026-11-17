@@ -28,6 +28,8 @@ import ChannelSettingsPage from './ChannelSettings'
 import InboundMessages from './InboundMessages'
 import SupervisorModel from './SupervisorModel'
 import Harness from './Harness'
+import LearningCenter from './learning/LearningCenter'
+import LessonRunner from './learning/LessonRunner'
 
 const Routes = {
   dashboard: /^\/dashboard(\/|$)/,
@@ -60,9 +62,10 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
   'supervisor-model': /^\/supervisor-model(\/|$)/,
   harness: /^\/harness(\/|$)/,
+  learning: /^\/learning(\/|$)/,
 } as const
 
-type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'org/activity' | 'org/work' | 'org/flow' | 'channels' | 'inbound' | 'supervisor-model' | 'harness'
+type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'org/activity' | 'org/work' | 'org/flow' | 'channels' | 'inbound' | 'supervisor-model' | 'harness' | 'learning'
 
 function pageFor(pathname: string): Page {
   if (Routes.dashboard.test(pathname)) return 'dashboard'
@@ -90,6 +93,7 @@ function pageFor(pathname: string): Page {
   if (Routes.inbound.test(pathname)) return 'inbound'
   if (Routes['supervisor-model'].test(pathname)) return 'supervisor-model'
   if (Routes.harness.test(pathname)) return 'harness'
+  if (Routes.learning.test(pathname)) return 'learning'
   return 'workspace'
 }
 
@@ -166,11 +170,16 @@ export default function App() {
             return <SupervisorModel />
           case 'harness':
             return <Harness />
+          case 'learning':
+            return <LearningCenter />
           default:
             return <ExperienceTimeline project={project} />
         }
       }}
     </Layout>
+    {/* The lesson runner mounts ABOVE pages (§8.3): a lesson leads the user
+        across routes, so it must survive SPA navigation. */}
+    <LessonRunner />
     </I18nProvider>
     </ThemePrefProvider>
   )

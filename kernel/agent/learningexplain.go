@@ -100,3 +100,85 @@ func LearningExplainCase(ctx context.Context, model *llm.Client, in LearningExpl
 		return plan, nil
 	})
 }
+
+// LearningPlanLesson is the catalog entry the planner sees: strings only, so
+// the caller's catalog types never leak into this package.
+type LearningPlanLesson struct {
+	ID       string
+	Goal     string
+	Audience []string
+	Feature  string
+}
+
+// LearningPlanInput: the factual configuration digest plus the lesson and
+// capability catalogs — the planner picks WHAT to teach this user and WHY.
+type LearningPlanInput struct {
+	Role     string
+	Context  string
+	Lessons  []LearningPlanLesson
+	Features []string
+}
+
+// LearningPlanItem is one planned lesson slot.
+type LearningPlanItem struct {
+	LessonID string `json:"lesson_id"`
+	Why      string `json:"why,omitempty"`
+}
+
+// LearningPlanCase (stage P2): the supervisor assembles the personal program
+// from the catalog — applicable lessons first, with a reason per lesson. The
+// caller degrades to the deterministic ladder when the model is unavailable.
+func LearningPlanCase(ctx context.Context, model *llm.Client, in LearningPlanInput) ([]LearningPlanItem, error) {
+	if model == nil {
+		return nil, fmt.Errorf("model client is not configured")
+	}
+	var lessonsDesc strings.Builder
+	for _, lesson := range in.Lessons {
+		fmt.Fprintf(&lessonsDesc, "- %s: %s (для ролей: %s; возможности: %s)\n",
+			lesson.ID, lesson.Goal, strings.Join(lesson.Audience, ","), lesson.Feature)
+	}
+	var featuresDesc strings.Builder
+	for _, feature := range in.Features {
+		fmt.Fprintf(&featuresDesc, "- %s\n", feature)
+	}
+	prompt := fmt.Sprintf(`Собери программу обучения пользователя Temporality.
+
+РОЛЬ ПОЛЬЗОВАТЕЛЯ: %s
+КОНФИГУРАЦИЯ ОРГАНИЗАЦИИ:
+%s
+
+ДОСТУПНЫЕ УРОКИ:
+%s
+
+ВОЗМОЖНОСТИ ПЛАТФОРМЫ:
+%s
+
+Правила:
+- включай только уроки, применимые к этой организации и роли;
+- порядок: от базы к продвинутым;
+- для каждого урока — короткое «почему» из фактов конфигурации;
+- не выдумывай id уроков вне списка.
+
+Ответ одним JSON-объектом:
+{"items": [{"lesson_id": "...", "why": "..."}]}`, in.Role, in.Context, lessonsDesc.String(), featuresDesc.String())
+	plan := struct {
+		Items []LearningPlanItem `json:"items"`
+	}{}
+	if _, err := completeParsed(ctx, model, []llm.Message{
+		{Role: "system", Content: "You assemble personal learning programs for Temporality users. You answer with JSON only."},
+		{Role: "user", Content: prompt},
+	}, func(content string) (struct {
+		Items []LearningPlanItem `json:"items"`
+	}, error) {
+		if err := parseCaseReply(content, &plan); err != nil {
+			return plan, err
+		}
+		if len(plan.Items) == 0 {
+			return plan, fmt.Errorf("model returned an empty program")
+		}
+		return plan, nil
+	}); err != nil {
+		return nil, err
+	}
+	return plan.Items, nil
+}

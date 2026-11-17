@@ -2825,6 +2825,31 @@ button.header-nav-link {
 
 .toolbar-btn { padding: 0.25rem 0.55rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: transparent; color: var(--tm-text-3); font: 0.68rem var(--tm-mono); cursor: pointer; }
 .toolbar-btn:hover { color: var(--tm-teal); border-color: var(--tm-teal); }
+.toolbar-btn.primary { color: var(--tm-teal); border-color: var(--tm-teal); background: rgba(45, 178, 165, 0.12); }
+.toolbar-btn:disabled { opacity: 0.45; cursor: default; }
+
+/* Learning center + lesson runner (docs/ai-guided-onboarding-and-learning.md
+   §12): quiet surfaces in the same visual language as the rest of the
+   debugger — cards, rows, one accent, no rainbows. */
+.learn-section { margin-bottom: 1.5rem; }
+.learn-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.learn-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); }
+.learn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.5rem; }
+.learn-card { padding: 0.6rem 0.7rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); }
+.learn-mastery { border: 1px solid var(--tm-border); color: var(--tm-text-3); }
+.learn-mastery-1 { color: #d4b8f2; border-color: rgba(212, 184, 242, 0.5); }
+.learn-mastery-2 { color: #7cc7ff; border-color: rgba(124, 199, 255, 0.5); }
+.learn-mastery-3 { color: var(--tm-teal); border-color: var(--tm-teal); }
+.lesson-runner {
+  position: fixed; right: 1rem; bottom: 1rem; width: min(380px, calc(100vw - 2rem));
+  background: var(--tm-surface); border: 1px solid var(--tm-border-strong);
+  box-shadow: 0 18px 60px rgba(0,0,0,.4); padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+}
+.lesson-runner-min {
+  display: inline-flex; align-items: center; gap: 0.45rem; width: auto;
+  font: 0.72rem var(--tm-font); color: var(--tm-text-2);
+}
 
 .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
 

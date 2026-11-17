@@ -533,7 +533,7 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
               {columns.map((column) => {
                 const columnCards = cards.filter((card) => card.column === column)
                 return (
-                  <div key={column} style={{ flex: '1 0 11rem', minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--tm-surface-2)', borderRadius: 'var(--tm-radius-sm)', padding: '0.5rem' }}>
+                  <div key={column} data-learn={column === 'review' ? 'orgwork.column.review' : undefined} style={{ flex: '1 0 11rem', minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--tm-surface-2)', borderRadius: 'var(--tm-radius-sm)', padding: '0.5rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '0.1rem 0.2rem 0.4rem', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', flexShrink: 0 }}>
                       <span>{COLUMN_KEYS[column] ? t(COLUMN_KEYS[column]) : column}</span>
                       <span style={{ textTransform: 'none' }}>{columnCards.length}</span>

@@ -538,7 +538,7 @@ export default function Org() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1fr) minmax(300px, 1.4fr)', gap: '1rem', alignItems: 'start' }}>
         {/* Tree */}
-        <div className="org-tree" style={{ border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '0.5rem', background: 'var(--tm-elevated)' }}>
+        <div className="org-tree" data-learn="org.tree" style={{ border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '0.5rem', background: 'var(--tm-elevated)' }}>
           {roots.map((node) => renderNode(node, 0))}
         </div>
 

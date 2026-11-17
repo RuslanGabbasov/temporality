@@ -1785,12 +1785,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       onToggle={(checked: boolean) => { touch('capabilities'); setCap(key, checked ? undefined : false) }}
                     />
                   ))}
-                  <Toggle
-                    id="agent-cap-delegation"
-                    labelText={t('agents.cap.delegation') ?? 'Delegate to other agents'}
-                    toggled={form.definition?.capabilities?.delegation === true}
-                    onToggle={(checked: boolean) => { touch('capabilities'); setCap('delegation', checked ? true : undefined) }}
-                  />
+                  <div data-learn="agent.delegation.configuration">
+                    <Toggle
+                      id="agent-cap-delegation"
+                      labelText={t('agents.cap.delegation') ?? 'Delegate to other agents'}
+                      toggled={form.definition?.capabilities?.delegation === true}
+                      onToggle={(checked: boolean) => { touch('capabilities'); setCap('delegation', checked ? true : undefined) }}
+                    />
+                  </div>
                   <Toggle
                     id="agent-cap-triggers"
                     labelText={t('agents.cap.triggers') ?? 'Create triggers'}

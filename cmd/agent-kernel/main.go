@@ -8245,6 +8245,10 @@ func main() {
 	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, liveness, func(ctx context.Context) (*llm.Client, error) {
 		return judgeModelClient(ctx, ws, secretMasterKey)
 	})
+	// Learning needs (docs/ai-guided-onboarding-and-learning.md, P3):
+	// factual config vs capability mastery — capped suggestions into the
+	// learning center, never a notification flood. Own slow cadence.
+	startLearningNeedsLoop(ctx, log, ws)
 	// AgentSRE metrics rollup (docs/agent-evolution.md §3): per-version daily
 	// counters and observation verdicts — how a version proves itself on real
 	// work instead of a pre-apply gate.

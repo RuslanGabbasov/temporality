@@ -29,3 +29,148 @@ export async function fetchLearningCatalog(): Promise<Array<{ id: string; title:
   const data = await response.json()
   return data.targets ?? []
 }
+
+// ── Learning center (P1–P4) ────────────────────────────────────────────────
+// Types mirror the kernel's JSON (cmd/agent-kernel/learning.go,
+// learningcatalog.go). The lesson DEFINITIONS are declarative: the frontend
+// executes steps (navigate/highlight), the kernel keeps the session state.
+
+export interface LearningStep {
+  type: string // explain|navigate|highlight|example|user_action|configuration|verification|summary
+  title: string
+  text?: string
+  target_id?: string
+  route?: string
+  example?: string
+  action_hint?: string
+}
+
+export interface LearningLessonDef {
+  id: string
+  version: number
+  title: string
+  goal?: string
+  description?: string
+  audience?: string[]
+  page: string
+  feature_id: string
+  steps: LearningStep[]
+  verify_feature?: string
+  priority: number
+  duration_min?: number
+}
+
+export interface LearningProgramItem {
+  lesson_id: string
+  state: string // pending|scheduled|available|in_progress|completed|skipped|not_applicable
+  why?: string
+  scheduled_at?: string
+}
+
+export interface LearningProgram {
+  id: string
+  user_id: string
+  kind: string
+  goal?: string
+  status: string
+  items: LearningProgramItem[]
+  created_at: string
+  updated_at: string
+}
+
+export interface LearningSession {
+  id: string
+  user_id: string
+  lesson_id: string
+  program_id?: string
+  status: string // active|waiting_for_user|paused|completed|aborted
+  step_index: number
+  created_at: string
+  updated_at: string
+}
+
+export interface LearningCapabilityState {
+  id: string
+  title: string
+  about?: string
+  applies: boolean
+  mastery?: string // unknown|introduced|practiced|verified|needs_refresh
+  mastery_source?: string
+  mastery_at?: string
+}
+
+export interface LearningSuggestion {
+  user_id: string
+  feature_id: string
+  status: string // suggested|dismissed|accepted
+  at: string
+}
+
+export interface LearningState {
+  program: LearningProgram | null
+  capabilities: LearningCapabilityState[]
+  has_program: boolean
+  suggestions: LearningSuggestion[]
+}
+
+async function kernelFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${KERNEL_API}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}), ...authHeaders() },
+  })
+}
+
+export async function fetchLearningState(): Promise<LearningState> {
+  const response = await kernelFetch('/v1/learning/state')
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const data = await response.json()
+  return {
+    program: data.program ?? null,
+    capabilities: data.capabilities ?? [],
+    has_program: !!data.has_program,
+    suggestions: data.suggestions ?? [],
+  }
+}
+
+export async function fetchLearningLessons(): Promise<LearningLessonDef[]> {
+  const response = await kernelFetch('/v1/learning/lessons')
+  if (!response.ok) return []
+  const data = await response.json()
+  return data.lessons ?? []
+}
+
+export async function buildLearningProgram(): Promise<LearningProgram> {
+  const response = await kernelFetch('/v1/learning/program/build', { method: 'POST', body: '{}' })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+export async function startLearningSession(lessonId: string): Promise<LearningSession> {
+  const response = await kernelFetch('/v1/learning/sessions/start', { method: 'POST', body: JSON.stringify({ lesson_id: lessonId }) })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+export async function fetchCurrentSession(): Promise<{ session: LearningSession | null; lesson: LearningLessonDef | null }> {
+  const response = await kernelFetch('/v1/learning/sessions/current')
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const data = await response.json()
+  return { session: data.session ?? null, lesson: data.lesson ?? null }
+}
+
+export async function postSessionStep(sessionId: string, action: string, evidence?: string): Promise<{ session: LearningSession; lesson: LearningLessonDef | null }> {
+  const response = await kernelFetch(`/v1/learning/sessions/${sessionId}/step`, { method: 'POST', body: JSON.stringify({ action, evidence: evidence ?? '' }) })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+export async function resumeLearningSession(sessionId: string): Promise<{ session: LearningSession; lesson: LearningLessonDef | null }> {
+  const response = await kernelFetch(`/v1/learning/sessions/${sessionId}/resume`, { method: 'POST' })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+export async function setSuggestionStatus(featureId: string, status: 'accepted' | 'dismissed'): Promise<void> {
+  const response = await kernelFetch('/v1/learning/suggestions/set', { method: 'POST', body: JSON.stringify({ feature_id: featureId, status }) })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+}
