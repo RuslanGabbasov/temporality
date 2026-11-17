@@ -722,29 +722,33 @@ func (s *Store) GetArtifactReview(ctx context.Context, reviewID string) (Artifac
 // by a model, and "Ivanov" vs "ivanov" must not void a review. An account
 // without an active workspace row satisfies nothing: deactivated reviewers
 // must not decide.
-// DeprecateArtifact retires an approved artifact («устарел»): the document
-// stays readable, drops out of the default listing and keeps its history,
-// but skills and agents must stop relying on it. Two guards: only an
-// approved artifact can be deprecated (a draft is not in service yet, an
-// in-review one is already being reworked), and a skill manifest still
-// referencing it blocks the transition — the caller names the skills so the
+// DeprecateArtifact retires an artifact («устарел») from any live stage:
+// the document stays readable, drops out of the default listing and keeps
+// its history, but skills and agents must stop relying on it. A draft no
+// one will finish, an in-review round that lost its point and an approved
+// document all belong in the archive the same way — only an already
+// deprecated one has nothing to retire. A skill manifest still referencing
+// the artifact blocks the transition — the caller names the skills so the
 // operator (or the agent) can fix the manifests first.
 func (s *Store) DeprecateArtifact(ctx context.Context, id, by string) ([]string, error) {
+	var prevStatus string
+	if err := s.pool.QueryRow(ctx, `SELECT status FROM workspace_artifact WHERE id = $1 FOR UPDATE`, id).Scan(&prevStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if prevStatus == ArtifactDeprecated {
+		return nil, fmt.Errorf("%w: the artifact is already deprecated", ErrConflict)
+	}
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-		id, ArtifactDeprecated, ArtifactApproved)
+		`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1`,
+		id, ArtifactDeprecated)
 	if err != nil {
 		return nil, err
 	}
 	if tag.RowsAffected() == 0 {
-		var status string
-		if scanErr := s.pool.QueryRow(ctx, `SELECT status FROM workspace_artifact WHERE id = $1`, id).Scan(&status); scanErr != nil {
-			if errors.Is(scanErr, pgx.ErrNoRows) {
-				return nil, ErrNotFound
-			}
-			return nil, scanErr
-		}
-		return nil, fmt.Errorf("%w: only an approved artifact can be deprecated (this one is %s)", ErrConflict, status)
+		return nil, ErrNotFound
 	}
 	_, _ = s.pool.Exec(ctx,
 		`UPDATE workspace_artifact SET contributors = (SELECT array_agg(DISTINCT x) FROM unnest(contributors || ARRAY[$2]) AS x)
@@ -757,8 +761,8 @@ func (s *Store) DeprecateArtifact(ctx context.Context, id, by string) ([]string,
 		// Roll the transition back: the retirement is not valid while skills
 		// still lean on the document. The error carries the skill ids.
 		if _, rbErr := s.pool.Exec(ctx,
-			`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`,
-			id, ArtifactApproved, ArtifactDeprecated); rbErr != nil {
+			`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1`,
+			id, prevStatus); rbErr != nil {
 			return nil, rbErr
 		}
 		return refs, fmt.Errorf("artifact is referenced by skills %s; remove the manifest references first", strings.Join(refs, ", "))

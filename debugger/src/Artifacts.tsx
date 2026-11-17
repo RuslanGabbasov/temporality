@@ -1495,7 +1495,11 @@ export default function Artifacts({ project }: { project?: string }) {
 						    everyday submit button: the archive box retires the
 						    WHOLE artifact (not a version), the trash deletes it. */}
 						<span style={{ width: '1px', height: '1.6rem', background: 'var(--tm-border)', margin: '0 0.5rem', alignSelf: 'center' }} />
-						{selected.status === 'approved' && (
+						{/* Any live stage can retire: a draft nobody will finish and an
+						    in-review artifact both belong in the archive as much as an
+						    approved one — only the already-archived state swaps the
+						    button for «Вернуть в работу» below. */}
+						{selected.status !== 'deprecated' && (
 							<Button
 								size="sm"
 								kind="ghost"

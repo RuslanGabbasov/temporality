@@ -108,12 +108,19 @@ func TestArtifactDeprecateLive(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.DeleteArtifact(ctx, "deprecate-flow") })
 
-	// A draft cannot be deprecated — only an approved artifact retires.
+	// Any live stage retires now: a draft deparks to deprecated directly
+	// (the old «only approved» rule left unserviceable drafts in the list).
+	_, err = store.DeprecateArtifact(ctx, "deprecate-flow", "op")
+	require.NoError(t, err)
+
+	// The already-retired state has nothing to retire again.
 	_, err = store.DeprecateArtifact(ctx, "deprecate-flow", "op")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "approved")
+	require.Contains(t, err.Error(), "already deprecated")
 
-	// Age the artifact to approved status the way the lifecycle would.
+	// Reopen and age the artifact to approved the way the lifecycle would,
+	// so the skill-manifest guard below runs from an approved state.
+	require.NoError(t, store.ReopenArtifact(ctx, "deprecate-flow", "op"))
 	_, err = store.SubmitArtifactReview(ctx, "deprecate-flow", []string{"user:alice"}, "all", "", "requester")
 	require.NoError(t, err)
 	_, _, err = store.ResolveArtifactReview(ctx, "deprecate-flow", []string{"user:alice"}, "alice", true, "")
