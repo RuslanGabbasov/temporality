@@ -1733,10 +1733,19 @@ export default function Artifacts({ project }: { project?: string }) {
                             setRevisionAgentsBusy(true)
                             setRevisionAgentOpen(true)
                             if (!project) return
-                            void workspaceApi.listAgentsByProject(project)
-                              .then((data) => setRevisionAgents((data.agents ?? []).filter((agent) => agent.enabled !== false).map((agent) => ({ id: agent.id, name: agent.name }))))
-                              .catch(() => setRevisionAgents([]))
-                              .finally(() => setRevisionAgentsBusy(false))
+                            								void workspaceApi.listAgentsByProject(project)
+                              									.then((data) => {
+                              										const agents = (data.agents ?? []).filter((agent) => agent.enabled !== false).map((agent) => ({ id: agent.id, name: agent.name }))
+                              										setRevisionAgents(agents)
+                              										// Default the selection to the first agent: the controlled
+                              										// Select renders an empty value as «the first option»
+                              										// anyway, and the start button stayed disabled until the
+                              										// user cycled the combo to sync the state with what they
+                              										// already saw.
+                              										setRevisionAgentID(agents[0]?.id ?? '')
+                              									})
+                              									.catch(() => setRevisionAgents([]))
+                              									.finally(() => setRevisionAgentsBusy(false))
                           }}>
                             {selected.status === 'approved' ? (t('artifacts.annotation_ai_revision') ?? 'Apply notes and submit a new version') : (t('artifacts.annotation_ai_revision') ?? 'Send notes for rework')}
                           </Button>
