@@ -603,8 +603,8 @@ func RegisterOrgOperationsRoutes(ctx context.Context, deps orgRoutesDeps, activi
 		flow := make([]map[string]any, 0, len(deliveries))
 		for _, delivery := range deliveries {
 			entry := map[string]any{
-				"delivery": delivery,
-				"batch":    nil,
+				"delivery":     delivery,
+				"batch":        nil,
 				"source_event": nil,
 			}
 			if delivery.BatchID != "" {
@@ -732,25 +732,28 @@ func RegisterOrgOperationsRoutes(ctx context.Context, deps orgRoutesDeps, activi
 		writeJSON(w, 200, view)
 	})
 
-	// §13 management action: a task card a human has analyzed and decided
-	// needs no restart leaves the board. Reader-gated like the awareness
-	// dismissal (it changes the shared board, not RBAC), audited. A NEW run
-	// for the task clears the marker automatically (UpsertOrgActiveRun).
-	mux.HandleFunc("POST /v1/org/work/task/{taskID}/dismiss", func(w http.ResponseWriter, r *http.Request) {
+	// §13 management actions on a review-column task: accept the work (the
+	// card moves to «Завершено» until the activity window washes it out) or
+	// dismiss it (analyzed, no action warranted — the card leaves the board).
+	// Reader-gated like the awareness dismissal (it changes the shared board,
+	// not RBAC), audited. A NEW run for the task clears the state automatically
+	// (UpsertOrgActiveRun).
+	mux.HandleFunc("POST /v1/org/work/task/{taskID}/state", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
 		taskID := r.PathValue("taskID")
-		if taskID == "" {
-			writeError(w, 400, errors.New("task id is required"))
+		state := strings.TrimSpace(r.URL.Query().Get("state"))
+		if taskID == "" || state == "" {
+			writeError(w, 400, errors.New("task id and state are required"))
 			return
 		}
-		if err := ws.DismissOrgWorkTask(r.Context(), taskID, requestUserID(r)); err != nil {
-			writeError(w, 500, err)
+		if err := ws.SetOrgWorkTaskState(r.Context(), taskID, state, requestUserID(r)); err != nil {
+			writeError(w, 422, err)
 			return
 		}
-		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), "org_work.task_dismissed", "task", taskID, nil)
-		writeJSON(w, 200, map[string]any{"dismissed": true})
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), "org_work.task_"+state, "task", taskID, nil)
+		writeJSON(w, 200, map[string]any{"state": state})
 	})
 
 	// --- §11: aggregated plan graph (confirmed links only) ---

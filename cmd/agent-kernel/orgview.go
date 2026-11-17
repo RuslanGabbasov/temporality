@@ -22,11 +22,11 @@ import (
 )
 
 const (
-	orgWorkViewRunCap        = 1000
-	orgWorkViewRunsPerCard   = 10
-	orgStaleThreshold        = 24 * time.Hour
-	orgPlanGraphEventCap     = 300
-	orgPlanGraphRunNodeCap   = 500
+	orgWorkViewRunCap      = 1000
+	orgWorkViewRunsPerCard = 10
+	orgStaleThreshold      = 24 * time.Hour
+	orgPlanGraphEventCap   = 300
+	orgPlanGraphRunNodeCap = 500
 )
 
 // Work board columns (§10.3).
@@ -56,10 +56,12 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 	if err != nil {
 		return nil, err
 	}
-	// Tasks a human took off the board (analyzed, no restart warranted) stay
-	// out of the columns, metrics and problems — until a NEW run for the task
-	// clears the marker (UpsertOrgActiveRun).
-	dismissed, err := ws.OrgDismissedWorkTasks(ctx)
+	// Task verdicts a human recorded on review-column cards: 'dismissed'
+	// (analyzed, no action — the card leaves the board) and 'accepted' (the
+	// work is accepted — the card presents as «Завершено» until the activity
+	// window washes it out). A NEW run for the task clears either marker
+	// (UpsertOrgActiveRun).
+	verdicts, err := ws.OrgWorkTaskVerdicts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +74,7 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 			ungrouped = append(ungrouped, run)
 			continue
 		}
-		if _, gone := dismissed[run.TaskID]; gone {
+		if verdicts[run.TaskID] == "dismissed" {
 			continue
 		}
 		byTask[run.TaskID] = append(byTask[run.TaskID], run)
@@ -101,15 +103,15 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 			title = task.Title
 			project = task.ProjectID
 		}
-		column, waitingReason := orgTaskColumn(taskRuns, ws, ctx)
+		column, waitingReason := orgTaskColumn(taskRuns, ws, ctx, verdicts[taskID] == "accepted")
 		card := map[string]any{
-			"task_id":       taskID,
-			"title":         title,
-			"project_id":    project,
-			"column":        column,
-			"actors":        orgRunActors(taskRuns),
-			"org_node_ids":  orgRunNodes(taskRuns),
-			"run_count":     len(taskRuns),
+			"task_id":        taskID,
+			"title":          title,
+			"project_id":     project,
+			"column":         column,
+			"actors":         orgRunActors(taskRuns),
+			"org_node_ids":   orgRunNodes(taskRuns),
+			"run_count":      len(taskRuns),
 			"waiting_reason": waitingReason,
 			"last_event_at":  orgTimeOr(orgActiveRunStamp(taskRuns[0]), now),
 		}
@@ -151,7 +153,7 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 					"run_id": run.RunID, "status": run.Status, "title": run.Title,
 					"urgent": run.Urgent, "actor_id": run.ActorID,
 					"last_event_at": orgTimePtrOr(run.LastEventAt, run.StartedAt),
-					"project_id": run.ProjectID,
+					"project_id":    run.ProjectID,
 					"awareness": map[string]int{
 						"selected": runAwareness.Selected, "delivered": runAwareness.Delivered,
 						"consumed": runAwareness.Consumed, "details": runAwareness.DetailsRequested,
@@ -206,7 +208,7 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 			"run_id": run.RunID, "status": run.Status, "title": run.Title,
 			"urgent": run.Urgent, "actor_id": run.ActorID,
 			"last_event_at": orgTimePtrOr(run.LastEventAt, run.StartedAt),
-			"project_id": run.ProjectID,
+			"project_id":    run.ProjectID,
 			"awareness": map[string]int{
 				"selected": runAwareness.Selected, "delivered": runAwareness.Delivered,
 				"consumed": runAwareness.Consumed, "details": runAwareness.DetailsRequested,
@@ -215,11 +217,11 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 	}
 
 	return map[string]any{
-		"columns": []string{orgColumnPlanned, orgColumnInProgress, orgColumnWaiting, orgColumnReview, orgColumnCompleted},
-		"cards":   cards,
+		"columns":        []string{orgColumnPlanned, orgColumnInProgress, orgColumnWaiting, orgColumnReview, orgColumnCompleted},
+		"cards":          cards,
 		"ungrouped_runs": ungroupedSummaries,
-		"metrics": metrics,
-		"problems": problems,
+		"metrics":        metrics,
+		"problems":       problems,
 	}, nil
 }
 
@@ -227,7 +229,12 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 // latch (raised ONLY by a human/approval request or a run failure) means
 // waiting; live runs mean progress; terminal-only history lands by its
 // outcome. No free-floating status is created (spec §10.3).
-func orgTaskColumn(taskRuns []workspace.OrgActiveRun, ws *workspace.Store, ctx context.Context) (string, string) {
+// orgTaskColumn derives the board column from the task's run statuses, in
+// attention priority: an urgent run waits on its human, a live run is in
+// progress, failed work sits at the quality gate («Ревью») — UNLESS a human
+// already accepted it (accepted=true: the reviewed card presents as
+// «Завершено» and the activity window washes it out later), then completed.
+func orgTaskColumn(taskRuns []workspace.OrgActiveRun, ws *workspace.Store, ctx context.Context, accepted bool) (string, string) {
 	live, urgentRun, failed, completed := 0, (*workspace.OrgActiveRun)(nil), 0, 0
 	for i := range taskRuns {
 		switch taskRuns[i].Status {
@@ -253,12 +260,14 @@ func orgTaskColumn(taskRuns []workspace.OrgActiveRun, ws *workspace.Store, ctx c
 	if live > 0 {
 		return orgColumnInProgress, ""
 	}
-	if failed > 0 {
+	if failed > 0 && !accepted {
 		// Failed work sits at the quality gate for attention — the outcome is
-		// visible in the card flags, the history is untouched.
+		// visible in the card flags, the history is untouched. A human verdict
+		// (accepted) moves it out: the work was reviewed, the board shows it as
+		// completed until the window empties the column.
 		return orgColumnReview, ""
 	}
-	if completed > 0 {
+	if completed > 0 || accepted {
 		return orgColumnCompleted, ""
 	}
 	return orgColumnInProgress, ""

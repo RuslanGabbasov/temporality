@@ -394,8 +394,8 @@ export const orgApi = {
   workView: (filters: OrgScopeFilters) => request<OrgWorkView>('/v1/org/work-view', undefined, { ...filters }),
   // Take a task card off the Work board (analyzed, no restart warranted); a
   // NEW run for the task un-dismisses it automatically.
-  dismissWorkTask: (taskID: string) =>
-    requestSend<{ dismissed: boolean }>(`/v1/org/work/task/${encodeURIComponent(taskID)}/dismiss`, { method: 'POST' }),
+  setWorkTaskState: (taskID: string, state: 'dismissed' | 'accepted') =>
+    requestSend<{ state: string }>(`/v1/org/work/task/${encodeURIComponent(taskID)}/state?state=${state}`, { method: 'POST' }),
   awarenessFlow: (filters: OrgAwarenessFlowFilters) => request<OrgFlowResponse>('/v1/org/awareness-flow', undefined, { ...filters }),
   planGraph: (filters: OrgScopeFilters) => request<OrgPlanGraphResponse>('/v1/org/plan-graph', undefined, { ...filters }),
 

@@ -405,11 +405,13 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const [unit, setUnit] = useState('')
   const [scope, setScope] = useState('subtree')
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
-  // The dismiss button arms with the first click and fires on the second;
-  // switching selection disarms it (the guard belongs to one card only).
-  const [dismissArmed, setDismissArmed] = useState(false)
-  const [dismissBusy, setDismissBusy] = useState(false)
-  useEffect(() => { setDismissArmed(false) }, [selectedTask])
+  // The review-verdict buttons arm with the first click and fire on the
+  // second; switching selection disarms (the guard belongs to one card only).
+  // Shown ONLY on «Ревью» cards: a completed/planned task has nothing to
+  // settle, and hiding the whole board is not a review decision.
+  const [verdictArmed, setVerdictArmed] = useState<'dismiss' | 'accept' | ''>('')
+  const [verdictBusy, setVerdictBusy] = useState(false)
+  useEffect(() => { setVerdictArmed('') }, [selectedTask])
   // Actor ids → display names (the directory loads once; unknown ids —
   // system actors like the supervisor — stay ids, same as the activity board).
   const [actorNames, setActorNames] = useState<Map<string, string>>(new Map())
@@ -579,29 +581,40 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                 </TimeHint>
               )}
               {selectedCard.awareness && <AwarenessBadge awareness={selectedCard.awareness} />}
-              {/* §13 management action: analyzed the failures, decided a restart
-                  is not worth it — the card leaves the board (until a NEW run
-                  for the task clears the dismissal). Two-click guard. */}
+              {/* §13 management verdicts, ONLY on a «Ревью» card: accept the
+                  work (the card moves to «Завершено» and the activity window
+                  washes it out) or take it off the board entirely (analyzed,
+                  no action warranted). A NEW run for the task clears either
+                  verdict. Two-click guard on each. */}
+              {selectedCard.column === 'review' && (
               <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                {dismissArmed ? (
+                {verdictArmed ? (
                   <>
-                    <Button size="sm" kind="danger" disabled={dismissBusy} onClick={async () => {
-                      setDismissBusy(true)
+                    <Button size="sm" kind={verdictArmed === 'accept' ? 'primary' : 'danger'} disabled={verdictBusy} onClick={async () => {
+                      setVerdictBusy(true)
                       try {
-                        await orgApi.dismissWorkTask(selectedCard.task_id)
-                        setDismissArmed(false)
+                        await orgApi.setWorkTaskState(selectedCard.task_id, verdictArmed === 'accept' ? 'accepted' : 'dismissed')
+                        setVerdictArmed('')
                         setSelectedTask(null)
                         await load()
-                      } catch (failure) { setError(message(failure)) } finally { setDismissBusy(false) }
-                    }}>{dismissBusy ? '…' : t('orgwork.dismiss_armed') ?? 'Снять точно?'}</Button>
-                    <Button size="sm" kind="ghost" disabled={dismissBusy} onClick={() => setDismissArmed(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+                      } catch (failure) { setError(message(failure)) } finally { setVerdictBusy(false) }
+                    }}>{verdictBusy ? '…' : (verdictArmed === 'accept'
+                      ? (t('orgwork.accept_confirm') ?? 'Принять точно?')
+                      : (t('orgwork.dismiss_armed') ?? 'Снять точно?'))}</Button>
+                    <Button size="sm" kind="ghost" disabled={verdictBusy} onClick={() => setVerdictArmed('')}>{t('action.cancel') ?? 'Cancel'}</Button>
                   </>
                 ) : (
-                  <Button size="sm" kind="ghost" onClick={() => setDismissArmed(true)} title={t('orgwork.dismiss_hint') ?? undefined}>
-                    {t('orgwork.dismiss') ?? 'Снять с доски'}
-                  </Button>
+                  <>
+                    <Button size="sm" kind="primary" onClick={() => setVerdictArmed('accept')} title={t('orgwork.accept_hint') ?? undefined}>
+                      {t('orgwork.accept') ?? 'Принять: в завершённые'}
+                    </Button>
+                    <Button size="sm" kind="ghost" onClick={() => setVerdictArmed('dismiss')} title={t('orgwork.dismiss_hint') ?? undefined}>
+                      {t('orgwork.dismiss') ?? 'Снять с доски'}
+                    </Button>
+                  </>
                 )}
               </div>
+              )}
               <div style={{ marginTop: '0.5rem' }}>
                 <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', padding: '0.2rem 0' }}>
                   {t('orgwork.runs_title')} <span style={{ textTransform: 'none' }}>({selectedCard.runs.length})</span>

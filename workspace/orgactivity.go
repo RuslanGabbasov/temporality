@@ -22,42 +22,42 @@ import (
 // fields reconciled with the actual observation.Event envelope — see
 // docs/organizational-operations-survey.md).
 type OrgActivityEvent struct {
-	SourceID     string          `json:"source_id"`
-	EventID      string          `json:"event_id"`
-	EventType    string          `json:"event_type"`
-	Category     string          `json:"category"`
-	OccurredAt   time.Time       `json:"occurred_at"`
-	ReceivedAt   *time.Time      `json:"received_at,omitempty"`
-	ProjectID    string          `json:"project_id,omitempty"`
-	RunID        string          `json:"run_id,omitempty"`
-	TaskID       string          `json:"task_id,omitempty"`
-	PlanID       string          `json:"plan_id,omitempty"`
-	ActorID      string          `json:"actor_id,omitempty"`
-	OrgNodeID    string          `json:"org_node_id,omitempty"`
-	OrgNodePath  string          `json:"org_node_path,omitempty"`
-	Summary      string          `json:"summary"`
-	Visibility   string          `json:"visibility_policy"`
-	Refs         json.RawMessage `json:"refs,omitempty"`
-	SourceRef    json.RawMessage `json:"source_ref,omitempty"`
-	SchemaVersion int            `json:"schema_version"`
+	SourceID      string          `json:"source_id"`
+	EventID       string          `json:"event_id"`
+	EventType     string          `json:"event_type"`
+	Category      string          `json:"category"`
+	OccurredAt    time.Time       `json:"occurred_at"`
+	ReceivedAt    *time.Time      `json:"received_at,omitempty"`
+	ProjectID     string          `json:"project_id,omitempty"`
+	RunID         string          `json:"run_id,omitempty"`
+	TaskID        string          `json:"task_id,omitempty"`
+	PlanID        string          `json:"plan_id,omitempty"`
+	ActorID       string          `json:"actor_id,omitempty"`
+	OrgNodeID     string          `json:"org_node_id,omitempty"`
+	OrgNodePath   string          `json:"org_node_path,omitempty"`
+	Summary       string          `json:"summary"`
+	Visibility    string          `json:"visibility_policy"`
+	Refs          json.RawMessage `json:"refs,omitempty"`
+	SourceRef     json.RawMessage `json:"source_ref,omitempty"`
+	SchemaVersion int             `json:"schema_version"`
 }
 
 // OrgActiveRun is the active-run snapshot row (§4: «получение активных Run»).
 type OrgActiveRun struct {
-	ProjectID    string     `json:"project_id"`
-	RunID        string     `json:"run_id"`
-	SourceID     string     `json:"source_id,omitempty"`
-	OrgNodeID    string     `json:"org_node_id,omitempty"`
-	OrgNodePath  string     `json:"org_node_path,omitempty"`
-	ActorID      string     `json:"actor_id,omitempty"`
-	AgentID      string     `json:"agent_id,omitempty"`
-	TaskID       string     `json:"task_id,omitempty"`
-	Title        string     `json:"title,omitempty"`
-	Status       string     `json:"status"`
-	Urgent       bool       `json:"urgent"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	LastEventAt  *time.Time `json:"last_event_at,omitempty"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	ProjectID   string     `json:"project_id"`
+	RunID       string     `json:"run_id"`
+	SourceID    string     `json:"source_id,omitempty"`
+	OrgNodeID   string     `json:"org_node_id,omitempty"`
+	OrgNodePath string     `json:"org_node_path,omitempty"`
+	ActorID     string     `json:"actor_id,omitempty"`
+	AgentID     string     `json:"agent_id,omitempty"`
+	TaskID      string     `json:"task_id,omitempty"`
+	Title       string     `json:"title,omitempty"`
+	Status      string     `json:"status"`
+	Urgent      bool       `json:"urgent"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	LastEventAt *time.Time `json:"last_event_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 }
 
 const orgActivityColumns = `source_id, event_id, event_type, category, occurred_at, received_at,
@@ -243,34 +243,40 @@ func (s *Store) UpsertOrgActiveRun(ctx context.Context, r OrgActiveRun) error {
 	return err
 }
 
-// DismissOrgWorkTask takes a task card off the Work board: the human has
-// analyzed it and decided a restart is not worth it. A NEW run for the task
-// clears the marker (see UpsertOrgActiveRun).
-func (s *Store) DismissOrgWorkTask(ctx context.Context, taskID, by string) error {
+// SetOrgWorkTaskState records the human verdict on a task's review column:
+// 'dismissed' (analyzed, no action warranted — the card leaves the board) or
+// 'accepted' (the work is accepted — the card moves to «Завершено»). A NEW
+// run for the task clears any state (see UpsertOrgActiveRun).
+func (s *Store) SetOrgWorkTaskState(ctx context.Context, taskID, state, by string) error {
+	if state != "dismissed" && state != "accepted" {
+		return fmt.Errorf("unknown org work task state %q", state)
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO org_work_task_state (task_id, state, by, at)
-		 VALUES ($1, 'dismissed', $2, now())
-		 ON CONFLICT (task_id) DO UPDATE SET state = 'dismissed', by = $2, at = now()`,
-		taskID, by)
+		 VALUES ($1, $2, $3, now())
+		 ON CONFLICT (task_id) DO UPDATE SET state = $2, by = $3, at = now()`,
+		taskID, state, by)
 	return err
 }
 
-// OrgDismissedWorkTasks lists the tasks currently taken off the Work board.
-func (s *Store) OrgDismissedWorkTasks(ctx context.Context) (map[string]time.Time, error) {
+// OrgWorkTaskVerdicts lists the task verdicts currently recorded for the
+// board: 'dismissed' (card hidden entirely) and 'accepted' (failed work a
+// human reviewed — the card presents as completed until the activity window
+// washes it out).
+func (s *Store) OrgWorkTaskVerdicts(ctx context.Context) (map[string]string, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT task_id, at FROM org_work_task_state WHERE state = 'dismissed'`)
+		`SELECT task_id, state FROM org_work_task_state`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]time.Time{}
+	out := map[string]string{}
 	for rows.Next() {
-		var taskID string
-		var at time.Time
-		if err := rows.Scan(&taskID, &at); err != nil {
+		var taskID, state string
+		if err := rows.Scan(&taskID, &state); err != nil {
 			return nil, err
 		}
-		out[taskID] = at
+		out[taskID] = state
 	}
 	return out, rows.Err()
 }
