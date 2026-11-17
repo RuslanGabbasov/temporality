@@ -17,7 +17,6 @@ import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
 import OrgActivityBoard from './OrgActivityBoard'
 import OrgWorkBoard from './OrgWorkBoard'
-import OrgAwarenessFlow from './OrgAwarenessFlow'
 import { orgApi, type OrgWorkView } from './orgApi'
 import { SupervisorPanels } from './Supervisor'
 import { workspaceApi, type UserMetricsRow, type UserFact } from './workspaceApi'
@@ -34,12 +33,15 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'work' | 'activity' | 'flow' | 'sagas' | 'supervisor' | 'users'
+type Tab = 'overview' | 'work' | 'activity' | 'sagas' | 'supervisor' | 'users'
 // Every valid tab: the URL param and the last-tab memory validate against this
 // full set (the TAB_KEYS strip above it is only the initial-render order).
 // 'quality' was removed: the eval-loop table rendered all-dashes without
-// evaluation runs (see the tabs comment below).
-const ALL_TABS: Tab[] = ['overview', 'work', 'activity', 'flow', 'sagas', 'supervisor', 'users']
+// evaluation runs (see the tabs comment below). 'flow' moved out too: as a
+// flat tab the delivery list was contextless — awareness now reads ON the
+// timeline (dots + spread links there), and /org/flow stays as the detail
+// page the timeline dots and the work board deep-link into.
+const ALL_TABS: Tab[] = ['overview', 'work', 'activity', 'sagas', 'supervisor', 'users']
 const TAB_KEYS: Tab[] = ['overview', 'sagas']
 // The last open tab survives reloads and revisits: returning to the
 // supervisor triage mid-investigation must not land back on the overview.
@@ -355,7 +357,6 @@ export default function Dashboard({ project, setProject }: Props) {
     // system health.
     { key: 'work', label: t('dashboard.tab_work') ?? 'Work' },
     { key: 'activity', label: t('dashboard.tab_activity') ?? 'Activity' },
-    { key: 'flow', label: t('dashboard.tab_flow') ?? 'Flow' },
     { key: 'sagas', label: t('dashboard.tab_sagas') ?? 'Sagas' },
     // The knowledge observability tab was removed (an atavism next to the
     // Knowledge explorer page): its patterns and historical filters live
@@ -809,8 +810,6 @@ export default function Dashboard({ project, setProject }: Props) {
       {tab === 'work' && <OrgWorkBoard embedded />}
 
       {tab === 'activity' && <OrgActivityBoard embedded />}
-
-      {tab === 'flow' && <OrgAwarenessFlow embedded />}
 
       {tab === 'sagas' && <ProjectOverview project={project} />}
 

@@ -355,7 +355,7 @@ function ActiveRunsSection({ unit, scope, onTrace }: { unit: string; scope: stri
     if (open) void load()
   }, [open, load])
 
-  const openFlow = (runID: string) => navigate(`/dashboard?tab=flow&target_run=${encodeURIComponent(runID)}`)
+  const openFlow = (runID: string) => navigate(`/org/flow?target_run=${encodeURIComponent(runID)}`)
 
   return (
     <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.6rem' }}>
@@ -429,7 +429,7 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const problems = view?.problems ?? []
   const metrics = view?.metrics ?? {}
 
-  const openFlow = (runID: string) => navigate(`/dashboard?tab=flow&target_run=${encodeURIComponent(runID)}`)
+  const openFlow = (runID: string) => navigate(`/org/flow?target_run=${encodeURIComponent(runID)}`)
   // The trace deep-link: the Runs tab opens the run's trace directly (project
   // comes from the run row; the card/problem's project covers rows missing
   // one).

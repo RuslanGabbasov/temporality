@@ -7,6 +7,7 @@ import { runStatusLabel } from './eventPresentation'
 import { stateLabel } from './explorer/shared'
 import { aliveRowAt, buildRunChains, detectMisleads, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type MisleadSignal, type RunChain, type RunInfo } from './experience'
 import { useOrgUnits } from './orgUnits'
+import { orgApi, type OrgDelivery } from './orgApi'
 import { workspaceApi, type User } from './workspaceApi'
 import { queryMatchesText } from './knowledgeQuery'
 
@@ -363,6 +364,20 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   useEffect(() => { void load(project) }, [project, load])
   // Org-unit grouping maps run actors to their unit via the user directory.
   useEffect(() => { void workspaceApi.listUsers().then((data) => setUsers(data.users ?? [])).catch(() => setUsers([])) }, [])
+
+  // Awareness deliveries (docs/temporality-organizational-operations-spec.md
+  // §7-8): what the supervisor routed to which run — the overlay draws dots
+  // on the target runs' lanes and a vertical link per spread. Best-effort:
+  // an older kernel without the org API simply renders no overlay.
+  const [deliveries, setDeliveries] = useState<OrgDelivery[]>([])
+  useEffect(() => {
+    if (!project.trim()) return
+    let cancelled = false
+    void orgApi.awarenessFlow({ limit: 1000 })
+      .then((page) => { if (!cancelled) setDeliveries((page.flow ?? []).map((entry) => entry.delivery)) })
+      .catch(() => { if (!cancelled) setDeliveries([]) })
+    return () => { cancelled = true }
+  }, [project])
 
   // Sync investigation state to URL for shareable links.
   useEffect(() => {
@@ -1085,6 +1100,89 @@ export default function ExperienceTimeline({ project }: { project: string }) {
               })}
             </g>
           })}
+          {/* Awareness overlay (docs/temporality-organizational-operations-
+              spec.md §12 on the timeline): the supervisor's knowledge spreads
+              read as short vertical links from source to target lanes, each
+              target run wears a dot at its delivery moment — glyph = decision
+              (✉ notify, ? recommend_lookup, ⚡ urgent_steer, ↻ update), color
+              = status (teal delivered, green consumed, gray expired, red
+              failed). */}
+          {deliveries.length > 0 && (() => {
+            const laneYOf = (runID: string): number | undefined =>
+              view.runLaneY.get(runID) ?? view.chainLaneY.get(view.rootOf.get(runID) ?? runID)
+            const DECISION_GLYPH: Record<string, string> = {
+              notify: '✉', recommend_lookup: '?', urgent_steer: '⚡', update_awareness: '↻', ignore: '·',
+            }
+            const DECISION_COLOR: Record<string, string> = {
+              notify: '#7aa2f7', recommend_lookup: '#bb9af7', urgent_steer: '#ff9e64', update_awareness: '#e0af68', ignore: '#565f89',
+            }
+            const STATUS_STYLE: Record<string, { fill: string; opacity: number }> = {
+              delivered: { fill: DECISION_COLOR.notify, opacity: 0.9 },
+              consumed: { fill: '#73daca', opacity: 1 },
+              follow_up_requested: { fill: '#73daca', opacity: 0.8 },
+              details_delivered: { fill: '#73daca', opacity: 0.8 },
+              acted_upon: { fill: '#73daca', opacity: 1 },
+              dismissed: { fill: '#565f89', opacity: 0.5 },
+              expired: { fill: '#565f89', opacity: 0.5 },
+              failed: { fill: '#f7768e', opacity: 0.6 },
+              selected: { fill: '#7aa2f7', opacity: 0.4 },
+              queued: { fill: '#7aa2f7', opacity: 0.5 },
+            }
+            const dots: React.ReactNode[] = []
+            // spread groups: one source event fanned out to many runs reads as
+            // one vertical link.
+            const spreads = new Map<string, { at: number; ys: number[]; count: number }>()
+            for (const delivery of deliveries) {
+              const when = delivery.delivered_at ?? delivery.queued_at ?? delivery.created_at
+              if (!when) continue
+              const at = ms(when)
+              const px = x(at)
+              if (px < GUTTER || px > GUTTER + track) continue
+              const status = delivery.status
+              const yLane = laneYOf(delivery.target_run_id)
+              if (yLane !== undefined) {
+                const style = STATUS_STYLE[status] ?? { fill: '#7aa2f7', opacity: 0.6 }
+                const glyph = DECISION_GLYPH[delivery.decision] ?? '✉'
+                const title = [
+                  `${glyph} ${delivery.decision} · ${status}`,
+                  delivery.source_run_id ? `from: ${delivery.source_run_id}` : '',
+                  delivery.reason ? delivery.reason : '',
+                  clock(when),
+                ].filter(Boolean).join('\n')
+                dots.push(
+                  <g key={delivery.id} className="awareness-dot" onClick={(click) => { click.stopPropagation(); window.location.assign(`/org/flow?target_run=${encodeURIComponent(delivery.target_run_id)}`) }} style={{ cursor: 'pointer' }}>
+                    <title>{title}</title>
+                    <circle cx={px} cy={yLane} r={7} fill="transparent" />
+                    <circle cx={px} cy={yLane} r={5} fill={style.fill} opacity={style.opacity} stroke={status === 'consumed' ? '#73daca' : 'transparent'} strokeWidth={status === 'consumed' ? 1.5 : 0} />
+                    <text x={px} y={yLane + 3} textAnchor="middle" fontSize={7} fill="#161b22" pointerEvents="none">{glyph}</text>
+                  </g>,
+                )
+              }
+              // The spread link: same source event, delivered to ≥ 2 lanes.
+              if (delivery.source_event_id && yLane !== undefined && !(status === 'expired' || status === 'failed')) {
+                const spread = spreads.get(delivery.source_event_id) ?? { at: px, ys: [], count: 0 }
+                spread.ys.push(yLane)
+                spread.count += 1
+                spreads.set(delivery.source_event_id, spread)
+              }
+            }
+            const links: React.ReactNode[] = []
+            for (const [sourceEventID, spread] of spreads) {
+              const uniq = [...new Set(spread.ys)]
+              if (uniq.length < 2) continue
+              const top = Math.min(...uniq) - 8
+              const bottom = Math.max(...uniq) + 8
+              links.push(
+                <g key={sourceEventID} className="awareness-spread">
+                  <line x1={spread.at} x2={spread.at} y1={top} y2={bottom} stroke="#73daca" strokeWidth={1.2} opacity={0.4} strokeDasharray="2 3" />
+                  <path d={`M${spread.at} ${top - 4} l4 5 l-4 5 l-4 -5 z`} fill="#73daca" opacity={0.55} />
+                  <title>{t('timeline.awareness_spread', { count: String(spread.count) })}</title>
+                </g>,
+              )
+            }
+            if (!dots.length && !links.length) return null
+            return <g className="awareness-overlay">{links}{dots}</g>
+          })()}
           {lens.experience && (() => {
             // Normalize bar heights against the lane cap: small batches keep
             // the 5px-per-unit look, large ones scale so the tallest bar
