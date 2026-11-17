@@ -3414,7 +3414,6 @@ export const en: Record<string, string> = {
     'orgwork.open_flow_short': 'Flow',
     'orgwork.open_trace': 'Open trace',
     'orgwork.accept': 'Accept: to completed',
-    'orgwork.accept_confirm': 'Accept the work — move to completed for sure?',
     'orgwork.accept_hint': 'The review is done, the work is accepted: the card moves to «Completed» and washes out with the activity window; a new run brings it back',
     'orgwork.ungrouped_title': 'Runs without a task',
     'orgwork.active_title': 'Active runs',

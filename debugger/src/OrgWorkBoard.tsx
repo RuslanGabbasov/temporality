@@ -405,12 +405,10 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const [unit, setUnit] = useState('')
   const [scope, setScope] = useState('subtree')
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
-  // The accept button arms with the first click and fires on the second;
-  // switching selection disarms (the guard belongs to one card only). Shown
-  // ONLY on «Ревью» cards: a completed/planned task has nothing to settle.
-  const [acceptArmed, setAcceptArmed] = useState(false)
+  // The accept verdict fires on one click — nothing is destroyed: the card
+  // moves to the adjacent «Завершенные» column and a new run un-accepts the
+  // task. Only the in-flight busy state guards double submits.
   const [acceptBusy, setAcceptBusy] = useState(false)
-  useEffect(() => { setAcceptArmed(false) }, [selectedTask])
   // Actor ids → display names (the directory loads once; unknown ids —
   // system actors like the supervisor — stay ids, same as the activity board).
   const [actorNames, setActorNames] = useState<Map<string, string>>(new Map())
@@ -587,24 +585,21 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                   verdict. Two-click guard on each. */}
               {selectedCard.column === 'review' && (
               <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                {acceptArmed ? (
-                  <>
-                    <Button size="sm" kind="primary" disabled={acceptBusy} onClick={async () => {
-                      setAcceptBusy(true)
-                      try {
-                        await orgApi.acceptWorkTask(selectedCard.task_id)
-                        setAcceptArmed(false)
-                        setSelectedTask(null)
-                        await load()
-                      } catch (failure) { setError(message(failure)) } finally { setAcceptBusy(false) }
-                    }}>{acceptBusy ? '…' : (t('orgwork.accept_confirm') ?? 'Принять работу — в завершённые точно?')}</Button>
-                    <Button size="sm" kind="ghost" disabled={acceptBusy} onClick={() => setAcceptArmed(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
-                  </>
-                ) : (
-                  <Button size="sm" kind="primary" onClick={() => setAcceptArmed(true)} title={t('orgwork.accept_hint') ?? undefined}>
-                    {t('orgwork.accept') ?? 'Принять: в завершённые'}
-                  </Button>
-                )}
+                <Button
+                  size="sm" kind="primary"
+                  disabled={acceptBusy}
+                  onClick={async () => {
+                    setAcceptBusy(true)
+                    try {
+                      await orgApi.acceptWorkTask(selectedCard.task_id)
+                      setSelectedTask(null)
+                      await load()
+                    } catch (failure) { setError(message(failure)) } finally { setAcceptBusy(false) }
+                  }}
+                  title={t('orgwork.accept_hint') ?? undefined}
+                >
+                  {acceptBusy ? '…' : (t('orgwork.accept') ?? 'Принять: в завершённые')}
+                </Button>
               </div>
               )}
               <div style={{ marginTop: '0.5rem' }}>

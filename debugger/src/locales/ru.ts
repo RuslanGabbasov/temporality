@@ -3414,7 +3414,6 @@ export const ru: Record<string, string> = {
     'orgwork.open_flow_short': 'Поток',
     'orgwork.open_trace': 'Открыть трассу',
     'orgwork.accept': 'Принять: в завершённые',
-    'orgwork.accept_confirm': 'Принять работу — в завершённые точно?',
     'orgwork.accept_hint': 'Разбор окончен, работа принята: карточка уедет в «Завершенные» и вымывается окном активности; вернётся при новом ране',
     'orgwork.ungrouped_title': 'Раны без задачи',
     'orgwork.active_title': 'Активные раны',
