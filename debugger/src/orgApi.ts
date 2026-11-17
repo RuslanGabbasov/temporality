@@ -401,6 +401,13 @@ export const orgApi = {
       method: 'PUT',
       body: JSON.stringify({ [key]: String(value) }),
     }),
+  // Preset application writes several keys in one request (the endpoint takes
+  // a map).
+  putActivitySettings: (unitID: string, values: Record<string, string>) =>
+    requestSend<Record<string, unknown>>(`/v1/org/units/${encodeURIComponent(unitID)}/activity-settings`, {
+      method: 'PUT',
+      body: JSON.stringify(values),
+    }),
   deleteActivitySetting: (unitID: string, key: string) =>
     requestSend<Record<string, unknown>>(`/v1/org/units/${encodeURIComponent(unitID)}/activity-settings/${encodeURIComponent(key)}`, {
       method: 'DELETE',

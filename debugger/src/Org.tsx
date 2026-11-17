@@ -18,7 +18,8 @@ import { whoami } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import PolicyDialog from './PolicyDialog'
-import { flattenUnits } from './orgUnits'
+import { flattenUnits, useOrgUnits } from './orgUnits'
+import OrgActivitySettingsPanel from './OrgActivitySettings'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -158,6 +159,7 @@ const EMPTY_IDENTITY_OPTIONS: IdentityOptions = { agents: [], mcp: [], providers
 
 export default function Org() {
   const t = useT()
+  const org = useOrgUnits()
   const [units, setUnits] = useState<OrgUnit[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -701,6 +703,15 @@ export default function Org() {
                   )}
                 </div>
               )}
+              {/* Activity settings (docs/temporality-organizational-operations-
+                  spec.md §5): ONE preset switch per unit — collection, boards,
+                  awareness; the fine tuning hides in the advanced expander.
+                  They live here, in the org structure, next to policies and
+                  roles — not buried at the bottom of the activity feed. */}
+              <div style={{ marginTop: '1rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
+                <div className="org-section-title">{t('orgops.settings_title') ?? 'Activity settings'}</div>
+                <OrgActivitySettingsPanel unitID={selectedUnit.id} org={org} />
+              </div>
               <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '1rem' }}>
                 {t('org.subtree_hint') ?? 'Everything bound to this unit is also visible in its sub-units.'}
               </p>
