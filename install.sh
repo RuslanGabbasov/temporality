@@ -174,7 +174,11 @@ find_free() { # the next free host port at or after $1 (bounded scan)
   printf '%s' "$p"
 }
 
-# Fails BEFORE any container starts when a host port is taken — the daemon's
+our_port() { # <port>: is it already bound by this stack's running containers?
+  dk ps --filter "label=com.docker.compose.project=$(basename "$PWD")" --format '{{.Ports}}' 2>/dev/null | grep -q ":$1->"
+}
+
+# Fails BEFORE any container starts when a host port is taken by a FOREIGN
 # «address already in use» otherwise surfaces mid-pull after minutes. Asks
 # for a free port right here (Enter accepts the nearest suggestion) and
 # writes the choice into .env. Runs only before the first start: an update
@@ -186,7 +190,7 @@ preflight_ports() {
     var=${pair%%:*}; def=${pair##*:}
     val=$(grep "^$var=" .env 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
     [ -n "$val" ] || val=$def
-    port_busy "$val" && busy="$busy $var:$val"
+    if port_busy "$val" && ! our_port "$val"; then busy="$busy $var:$val"; fi
   done
   [ -z "$busy" ] || say "These ports are already in use on this host:$busy" >&2
   for entry in $busy; do
@@ -212,9 +216,17 @@ wait_stack() { # up --wait and translate the failure into next steps
   say "Starting the stack (first pull can take a few minutes)…"
   if ! dk compose up -d --wait --wait-timeout 300; then
     say ""
-    say "The stack did not become healthy in time. Look at the failing container:"
-    say "  cd $(pwd) && docker compose ps && docker compose logs --tail 30"
-    say "Common causes: a busy port (3000/8080/8090/8233), not enough disk or memory."
+    say "The stack did not become healthy in time. Current state:"
+    dk compose ps 2>/dev/null | sed 's/^/  /'
+    failing=$(dk compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null | awk 'tolower($0) ~ /unhealthy|exited|restarting/ {print $1}')
+    for svc in $failing; do
+      say ""
+      say "── $svc (last 15 log lines) — this is what to send when asking for help:"
+      dk compose logs --tail 15 "$svc" 2>/dev/null | sed 's/^/  /'
+    done
+    if [ -z "$failing" ]; then
+      warn "No failing service detected — the first boot may simply need more time; re-running the installer continues where it stopped."
+    fi
     exit 1
   fi
 }
