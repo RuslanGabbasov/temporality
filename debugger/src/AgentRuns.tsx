@@ -1654,7 +1654,7 @@ export default function AgentRuns({ project }: { project: string }) {
                       const live = hiddenLiveKids.get(row.id) ?? 0
                       if (!live || expandedRuns.has(row.id)) return null
                       return (
-                        <Tag type="blue" size="sm" title={t('runs.hidden_live', { count: String(live) })}>● {live}</Tag>
+                        <Tag type="blue" size="sm" title={t('runs.hidden_live', { count: String(live) })} style={{ marginRight: '0.4rem' }}>● {live}</Tag>
                       )
                     })()}
                     {row.depth > 0 && <span style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}>↳</span>}
