@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<meta name="description" content="What is an AI Organization Runtime — and how Temporality provides durable execution, organizational operations, supervision, governance and learning for organizations of AI agents and people.">
+<title>What is an AI Organization Runtime? — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/en/ai-organization-runtime/">
+<link rel="alternate" hreflang="en" href="https://temporality.tech/en/ai-organization-runtime/">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/ai-organization-runtime/">
+<link rel="alternate" hreflang="x-default" href="https://temporality.tech/ai-organization-runtime/">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="What is an AI Organization Runtime? — Temporality">
+<meta property="og:description" content="An AI organization is a workforce of autonomous agents and people with roles, responsibility and shared context. An AI Organization Runtime is the infrastructure that executes, supervises, governs and improves it.">
+<meta property="og:url" content="https://temporality.tech/en/ai-organization-runtime/">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "What is an AI Organization Runtime?",
+  "description": "An AI organization is a workforce of autonomous agents and people with roles, responsibility and shared context. An AI Organization Runtime is the infrastructure that executes, supervises, governs and improves it.",
+  "inLanguage": "en",
+  "author": { "@type": "Organization", "name": "Temporality" },
+  "mainEntityOfPage": "https://temporality.tech/en/ai-organization-runtime/"
+}
+</script>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700;750&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css">
+</head>
+<body>
+<header class="topbar"><a class="brand" href="../../"><img src="../../assets/temporality-mark.svg" alt=""/><span>Temporality</span></a><nav class="nav"><a href="../../#organization">Organization</a><a href="../../#operations">Operations</a><a href="../../#layers">Four layers</a><a data-docs-link-ru="../../docs/index.html" data-docs-link-en="../../docs/en/index.html" href="../../docs/en/index.html">Docs</a></nav><div class="top-actions"><button class="lang-toggle" id="langToggle" aria-label="Switch language" onclick="window.location.href='../ai-organization-runtime/'">RU</button><a class="github-link" href="https://github.com/RuslanGabbasov/temporality" target="_blank" rel="noreferrer"><span>Source code</span><span class="arrow">↗</span></a></div></header>
+
+<main class="section wrap article-body">
+<div class="eyebrow"><span>AI ORGANIZATION RUNTIME</span></div>
+<h1>What is an AI Organization Runtime?</h1>
+
+<div class="article-lead">
+<p>AI agents are becoming a workforce. A single agent is automation; once there are many, the hard problem shifts from creating them to organizing their work: structure, responsibility, coordination, supervision and accumulated experience. An <strong>AI Organization Runtime</strong> is the infrastructure category that solves exactly this.</p>
+<p>Temporality is an open-source AI Organization Runtime: an environment where an organization of agents and people executes work, is observed, governed, and accumulates verified experience.</p>
+</div>
+
+<h2>How an AI organization differs from a multi-agent system</h2>
+<p>A multi-agent system is several agents cooperating on one task: message passing, orchestration, shared tools. It is about executing a single piece of work. An AI organization is the next level: agents hold roles and responsibilities, work is distributed across departments, participants (including people) interact by rules, results are accepted, and experience survives between tasks. An organization has attention management, escalations, approvals and a history of decisions — things a multi-agent framework normally lacks.</p>
+
+<h2>What breaks when the number of agents grows</h2>
+<p>With a handful of agents, a framework and a shared chat are enough. As agents and tasks multiply, infrastructure questions appear that a framework does not answer:</p>
+<ul>
+<li>durability: work must survive service restarts, deployments and waiting for a human;</li>
+<li>structure: who is responsible for what, who delegates to whom, who accepts the result;</li>
+<li>observation: what is happening in each department right now and why a task stalled;</li>
+<li>control: which actions need approval, which data the agent cannot see, who can change what;</li>
+<li>experience: how verified conclusions from one task reach the next one instead of drowning in chat history.</li>
+</ul>
+
+<h2>How Temporality answers these questions</h2>
+<p>Temporality is an open operating environment (Apache-2.0, self-hosted) for organizations of AI agents and people. The organizational level ties together four architectural layers:</p>
+<ul>
+<li><strong>Execution</strong> — long-lived tasks on Temporal, delegation, plan DAGs, work continues across restarts and deployments;</li>
+<li><strong>Observability</strong> — an event journal, run traces, task-run-result linkage;</li>
+<li><strong>Governance</strong> — org structure, roles and policies, access, secrets, egress rules, approvals and sign-offs;</li>
+<li><strong>Learning</strong> — verified knowledge with provenance and lifecycle, skills with contracts and versions.</li>
+</ul>
+<p>On top — the head's operational tooling: an organizational dashboard, the Work Control Tower, a model supervisor that analyzes problems, and attention-flow management (Activity and Awareness). The principle: AI analyzes, humans decide, agents execute.</p>
+
+<h2>Example organizational scenarios</h2>
+<p>Software engineering (Research, Development, QA, DevOps — tasks with delegation, verification and change sign-off); AI research (Research, Analysis, Validation, Documentation — run studies, test hypotheses, prepare analysis and control the quality of results); enterprise operations (Operations, Compliance, Support, Analytics — recurring processes with approvals and permission control). These are example configurations: departments and roles are assembled for your task.</p>
+
+<h2>Quick start</h2>
+<p>The stack runs with one docker compose on your infrastructure: PostgreSQL, Temporal, the journal and the interface.</p>
+<p><a class="btn btn-primary" href="../../#guide"><span>Quick start</span><span>↗</span></a>
+<a class="btn btn-quiet" href="../../"><span>Back to the overview</span><span>↖</span></a></p>
+</main>
+
+<footer class="footer"><div class="wrap footer-inner"><a class="brand footer-brand" href="../../"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><span>Open-source Runtime for AI Organizations.</span><div class="footer-links"><a href="https://github.com/RuslanGabbasov/temporality" target="_blank" rel="noreferrer">GitHub</a><a href="https://ruslangabbasov.github.io/temporality/docs/en/">Docs</a><a href="../../">temporality.tech</a></div><span class="footer-copy">Apache-2.0</span></div></footer>
+</body>
+</html>

@@ -7,132 +7,161 @@
   </url>
   <url>
     <loc>https://temporality.tech/ai-organization-runtime/</loc>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://temporality.tech/ai-organization-runtime/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/en/ai-organization-runtime/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/ai-organization-runtime/"/>
+    <lastmod>2026-11-17</lastmod>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://temporality.tech/en/ai-organization-runtime/</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.9</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/index.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/index.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/index.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/index.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/index.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/administration.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/administration.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/administration.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/administration.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/administration.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/agents.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/agents.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/agents.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/agents.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/agents.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/artifacts.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/artifacts.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/artifacts.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/artifacts.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/artifacts.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/chat.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/chat.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/chat.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/chat.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/chat.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/evolution.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/evolution.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/evolution.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/evolution.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/evolution.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/external-agents.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/external-agents.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/external-agents.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/external-agents.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/external-agents.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/files.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/files.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/files.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/files.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/files.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/hitl-forms.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/hitl-forms.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/hitl-forms.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/hitl-forms.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/hitl-forms.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/inbound.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/inbound.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/inbound.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/inbound.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/inbound.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/intro.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/intro.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/intro.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/intro.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/intro.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/job-titles.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/job-titles.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/job-titles.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/job-titles.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/job-titles.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/knowledge.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/knowledge.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/knowledge.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/knowledge.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/knowledge.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/observability.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/observability.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/observability.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/observability.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/observability.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/operations.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/operations.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/operations.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/operations.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/operations.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/org-policies.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/org-policies.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/org-policies.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/org-policies.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/org-policies.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/personalization.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/personalization.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/personalization.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/personalization.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/personalization.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/quickstart.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/quickstart.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/quickstart.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/quickstart.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/quickstart.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/reference.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/reference.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/reference.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/reference.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/reference.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/skills.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/skills.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/skills.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/skills.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/skills.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://temporality.tech/docs/triggers.html</loc>
-  <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/triggers.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/triggers.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/triggers.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/triggers.html"/>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>

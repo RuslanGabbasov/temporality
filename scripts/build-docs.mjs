@@ -359,12 +359,19 @@ for (const slug of htmlFiles(enDir)) docUrls.push({ loc: `/docs/en/${slug}.html`
 const techDir = join(ROOT, 'pages', 'docs', 'tech')
 for (const slug of htmlFiles(techDir)) docUrls.push({ loc: `/docs/tech/${slug}.html`, lang: 'ru' })
 const today = new Date().toISOString().slice(0, 10)
-const urlEntries = [{ loc: '/', lang: 'ru', priority: '1.0' }, { loc: '/ai-organization-runtime/', lang: 'ru', priority: '0.9' }, { loc: '/docs/index.html', lang: 'ru', priority: '0.8' },
+const urlEntries = [{ loc: '/', lang: 'ru', priority: '1.0' },
+  { loc: '/ai-organization-runtime/', lang: 'ru', priority: '0.9', en: '/en/ai-organization-runtime/' },
+  { loc: '/en/ai-organization-runtime/', lang: 'en', priority: '0.9' },
+  { loc: '/docs/index.html', lang: 'ru', priority: '0.8' },
   ...docUrls.filter((u) => u.loc !== '/docs/index.html').map((u) => ({ ...u, priority: u.loc.startsWith('/docs/en/') ? '0.6' : '0.7' }))]
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urlEntries.map((u) => {
-  const alts = u.lang === 'ru' && docUrls.some((d) => d.loc === `/docs/en/${u.loc.slice('/docs/'.length, -5)}.html`)
-    ? `\n  <xhtml:link rel="alternate" hreflang="en" href="${siteUrl(`/docs/en/${u.loc.slice('/docs/'.length, -5)}.html`)}"/><xhtml:link rel="alternate" hreflang="x-default" href="${siteUrl(u.loc)}"/>`
-    : ''
+  let alts = ''
+  if (u.en) {
+    // a curated ru/en page pair: each side lists the other plus x-default
+    alts = `\n    <xhtml:link rel="alternate" hreflang="ru" href="${siteUrl('/ai-organization-runtime/')}"/>\n    <xhtml:link rel="alternate" hreflang="en" href="${siteUrl('/en/ai-organization-runtime/')}"/>\n    <xhtml:link rel="alternate" hreflang="x-default" href="${siteUrl('/ai-organization-runtime/')}"/>`
+  } else if (u.lang === 'ru' && docUrls.some((d) => d.loc === `/docs/en/${u.loc.slice('/docs/'.length, -5)}.html`)) {
+    alts = `\n    <xhtml:link rel="alternate" hreflang="en" href="${siteUrl(`/docs/en/${u.loc.slice('/docs/'.length, -5)}.html`)}"/>\n    <xhtml:link rel="alternate" hreflang="x-default" href="${siteUrl(u.loc)}"/>`
+  }
   return `  <url>\n    <loc>${siteUrl(u.loc)}</loc>${alts}\n    <lastmod>${today}</lastmod>\n    <priority>${u.priority}</priority>\n  </url>`
 }).join('\n')}\n</urlset>\n`
 writeFileSync(join(ROOT, 'pages', 'sitemap.xml'), sitemap)
@@ -383,7 +390,8 @@ const llms = [`# Temporality`, '',
   '> Temporality is an open-source Runtime for AI Organizations: build, operate and supervise teams of autonomous agents and people with durable execution, organizational control, human oversight and accumulated experience. Self-hosted on your infrastructure. Go · Temporal · PostgreSQL.',
   '',
   '## AI Organization', '',
-  '- [What is an AI Organization Runtime?](https://temporality.tech/ai-organization-runtime/): how an AI organization differs from a multi-agent system, what breaks at scale, and how Temporality — an open-source runtime with durable execution, organizational operations, supervision, governance and learning — answers it.',
+  '- [Что такое AI Organization Runtime? (RU)](https://temporality.tech/ai-organization-runtime/): чем AI-организация отличается от мультиагентной системы, что ломается при масштабировании агентов и как Temporality это закрывает.',
+  '- [What is an AI Organization Runtime? (EN)](https://temporality.tech/en/ai-organization-runtime/): how an AI organization differs from a multi-agent system, what breaks when the number of agents grows, and how Temporality — durable execution, organizational operations, supervision, governance and learning — answers it.',
   '',
   'Documentation is available in Russian and English; every link below points at the clean Markdown source of the page (the rendered HTML lives at the matching .html path on this site).',
   '',

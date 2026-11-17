@@ -8,6 +8,7 @@
 <title>What is an AI Organization Runtime? — Temporality</title>
 <link rel="canonical" href="https://temporality.tech/ai-organization-runtime/">
 <link rel="alternate" hreflang="ru" href="https://temporality.tech/ai-organization-runtime/">
+<link rel="alternate" hreflang="en" href="https://temporality.tech/en/ai-organization-runtime/">
 <link rel="alternate" hreflang="x-default" href="https://temporality.tech/ai-organization-runtime/">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="Temporality">
@@ -30,29 +31,10 @@
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700;750&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../styles.css">
-<script>
-(() => {
-  const root = document.documentElement;
-  const langToggle = document.getElementById('langToggle');
-  const setLanguage = (lang) => {
-    root.lang = lang;
-    document.querySelectorAll('[data-ru][data-en]').forEach((el) => {
-      const value = el.dataset[lang];
-      if (value !== undefined) el.innerHTML = value;
-    });
-    langToggle.textContent = lang === 'ru' ? 'EN' : 'RU';
-    document.title = lang === 'ru' ? 'Что такое AI Organization Runtime? — Temporality' : 'What is an AI Organization Runtime? — Temporality';
-    try { localStorage.setItem('temporality-site-language', lang); } catch (_) {}
-  };
-  let lang = 'ru';
-  try { lang = localStorage.getItem('temporality-site-language') || 'ru'; } catch (_) {}
-  setLanguage(lang);
-  langToggle.addEventListener('click', () => setLanguage(root.lang === 'ru' ? 'en' : 'ru'));
-})();
-</script>
+
 </head>
 <body>
-<header class="topbar"><a class="brand" href="../"><img src="../assets/temporality-mark.svg" alt=""/><span>Temporality</span></a><nav class="nav"><a href="../#organization" data-ru="Организация" data-en="Organization">Организация</a><a href="../#operations" data-ru="Операции" data-en="Operations">Операции</a><a href="../#layers" data-ru="Четыре слоя" data-en="Four layers">Четыре слоя</a><a data-docs-link-ru="../docs/index.html" data-docs-link-en="../docs/en/index.html" href="../docs/index.html" data-ru="Документация" data-en="Docs">Документация</a></nav><div class="top-actions"><button class="lang-toggle" id="langToggle" aria-label="Switch language">EN</button><a class="github-link" href="https://github.com/RuslanGabbasov/temporality" target="_blank" rel="noreferrer"><span data-ru="Исходный код" data-en="Source code">Исходный код</span><span class="arrow">↗</span></a></div></header>
+<header class="topbar"><a class="brand" href="../"><img src="../assets/temporality-mark.svg" alt=""/><span>Temporality</span></a><nav class="nav"><a href="../#organization" data-ru="Организация" data-en="Organization">Организация</a><a href="../#operations" data-ru="Операции" data-en="Operations">Операции</a><a href="../#layers" data-ru="Четыре слоя" data-en="Four layers">Четыре слоя</a><a data-docs-link-ru="../docs/index.html" data-docs-link-en="../docs/en/index.html" href="../docs/index.html" data-ru="Документация" data-en="Docs">Документация</a></nav><div class="top-actions"><a class="lang-toggle" id="langToggle" href="../en/ai-organization-runtime/" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality" target="_blank" rel="noreferrer"><span data-ru="Исходный код" data-en="Source code">Исходный код</span><span class="arrow">↗</span></a></div></header>
 
 <main class="section wrap article-body">
 <div class="eyebrow"><span data-ru="AI ORGANIZATION RUNTIME" data-en="AI ORGANIZATION RUNTIME">AI ORGANIZATION RUNTIME</span></div>

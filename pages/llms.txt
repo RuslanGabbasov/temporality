@@ -4,7 +4,8 @@
 
 ## AI Organization
 
-- [What is an AI Organization Runtime?](https://temporality.tech/ai-organization-runtime/): how an AI organization differs from a multi-agent system, what breaks at scale, and how Temporality — an open-source runtime with durable execution, organizational operations, supervision, governance and learning — answers it.
+- [Что такое AI Organization Runtime? (RU)](https://temporality.tech/ai-organization-runtime/): чем AI-организация отличается от мультиагентной системы, что ломается при масштабировании агентов и как Temporality это закрывает.
+- [What is an AI Organization Runtime? (EN)](https://temporality.tech/en/ai-organization-runtime/): how an AI organization differs from a multi-agent system, what breaks when the number of agents grows, and how Temporality — durable execution, organizational operations, supervision, governance and learning — answers it.
 
 Documentation is available in Russian and English; every link below points at the clean Markdown source of the page (the rendered HTML lives at the matching .html path on this site).
 
