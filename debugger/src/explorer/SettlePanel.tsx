@@ -27,11 +27,13 @@ function challengeOf(item: KnowledgeItem): { rule: string; reason: string } {
   return { rule: '', reason: '' }
 }
 
-const RULE_LABELS: Record<string, string> = {
-  'aging.v1': 'aging · 14д без подтверждения',
-  'extraction-contradiction.v1': 'противоречие из рана',
-  'hint-outcome.v1': 'вердикт по подсказке',
-  'manual.v1': 'вручную',
+// Localized rule label: every known challenge rule has an
+// explorer.settle_rule_<id> key (dots → underscores); unknown rules fall
+// back to the raw id — a filter option never renders empty.
+function ruleLabel(rule: string, t: (key: string) => string): string {
+  const key = `explorer.settle_rule_${rule.replace(/\./g, '_')}`
+  const label = t(key)
+  return label === key ? rule : label
 }
 
 // Rows rendered at once; «показать ещё» extends by the same step. Thousands
@@ -153,7 +155,7 @@ export default function SettlePanel({ project, onRevision }: { project: string; 
         >
           <option value="">{t('explorer.settle_rule_all') ?? 'все правила'}</option>
           {rules.map(([rule, count]) => (
-            <option key={rule} value={rule}>{(RULE_LABELS[rule] ?? rule)} · {count}</option>
+            <option key={rule} value={rule}>{ruleLabel(rule, t)} · {count}</option>
           ))}
         </select>
         <button className="toolbar-btn" onClick={() => void load()} disabled={loading} title={t('common.refresh')}>↻</button>
@@ -199,8 +201,8 @@ export default function SettlePanel({ project, onRevision }: { project: string; 
                 onChange={() => toggle(item.id)}
                 onClick={(e) => e.stopPropagation()}
               />
-              <Tag size="sm" type="warm-gray" style={{ width: '9rem', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }} title={rule}>
-                {(RULE_LABELS[rule] ?? shortID(rule || '—')).split('·')[0]}
+              <Tag size="sm" type="warm-gray" style={{ width: '9rem', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }} title={ruleLabel(rule, t)}>
+                {ruleLabel(rule, t)}
               </Tag>
               <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }} title={item.id}>{item.proposition}</span>
               <span style={{ width: '16rem', flexShrink: 0, color: 'var(--tm-text-3)', fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={challenge.reason}>
