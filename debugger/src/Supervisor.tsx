@@ -96,6 +96,11 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
   const loose: ClusterRow[] = []
   for (const event of events) {
     const run = String(event.data?.run_id ?? '')
+      // Behavior verdicts published before the payload carried run_id keep
+      // it as the subject's first segment (`runID:kind:pattern`).
+      || (event.data?.case === 'behavior_suspicion' && event.data?.subject
+            ? String(event.data.subject).split(':')[0]
+            : '')
     const cause = String(event.data?.cause_class ?? 'unknown')
     const key = String(event.data?.cluster_key ?? '')
     const row: ClusterRow = {
@@ -195,6 +200,13 @@ function supervisorCaseRow(c: SupervisorQueue['cases'][number]): ClusterRow {
     eventIDs: [c.last_event_id],
     lastAt: c.last_seen,
     status: c.status,
+  }
+  // Behavior suspicions name the audited run in the payload; rows published
+  // before that (no payload.run_id) still carry it as the subject's first
+  // segment (`runID:kind:pattern`) — run ids never contain colons.
+  if (c.family === 'behavior_suspicion') {
+    const run = String(payload.run_id ?? '') || c.subject.split(':')[0]
+    if (run) row.runs = [{ run, at: c.last_seen }]
   }
   if (c.family === 'knowledge_conflict' && payload.knowledge_id && payload.neighbor_id) {
     row.conflict = {

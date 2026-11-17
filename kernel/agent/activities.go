@@ -614,6 +614,10 @@ func (a *Activities) guardScan(ctx context.Context, request ToolRequest, hits []
 		summary := fmt.Sprintf("Поведенческий сигнал (%s) в %s: %s", hit.Kind, request.Name, hit.Detail)
 		_ = a.PublishSupervisorCase(ctx, "supervisor", CaseBehaviorSuspicion, request.RunID+":"+hit.Kind+":"+hit.Pattern, request.Project, summary, "Проверьте эпизод в трейсе рана (события agent.behavior) и закройте кейс.", map[string]any{
 			"guard_kind": hit.Kind, "pattern": hit.Pattern, "tool": request.Name,
+			// The queue row renders a «перейти к рану» link from this — without
+			// it the recommendation said «проверьте эпизод в трейсе» and gave no
+			// way to reach that trace.
+			"run_id": request.RunID,
 		})
 	}
 }
