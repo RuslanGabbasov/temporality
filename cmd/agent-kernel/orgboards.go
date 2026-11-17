@@ -732,6 +732,27 @@ func RegisterOrgOperationsRoutes(ctx context.Context, deps orgRoutesDeps, activi
 		writeJSON(w, 200, view)
 	})
 
+	// §13 management action: a task card a human has analyzed and decided
+	// needs no restart leaves the board. Reader-gated like the awareness
+	// dismissal (it changes the shared board, not RBAC), audited. A NEW run
+	// for the task clears the marker automatically (UpsertOrgActiveRun).
+	mux.HandleFunc("POST /v1/org/work/task/{taskID}/dismiss", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		taskID := r.PathValue("taskID")
+		if taskID == "" {
+			writeError(w, 400, errors.New("task id is required"))
+			return
+		}
+		if err := ws.DismissOrgWorkTask(r.Context(), taskID, requestUserID(r)); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), "org_work.task_dismissed", "task", taskID, nil)
+		writeJSON(w, 200, map[string]any{"dismissed": true})
+	})
+
 	// --- §11: aggregated plan graph (confirmed links only) ---
 
 	mux.HandleFunc("GET /v1/org/plan-graph", func(w http.ResponseWriter, r *http.Request) {

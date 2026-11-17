@@ -210,30 +210,69 @@ func (s *Store) GetOrgActivityEvent(ctx context.Context, sourceID, eventID strin
 // UpsertOrgActiveRun maintains the active-run snapshot. Attribution
 // (org_node_id) is written only when the row is new or was empty — later
 // events of the same run NEVER move it to another node (spec §3: historical
-// attribution is fixed at launch).
+// attribution is fixed at launch). A freshly INSERTED run also clears the
+// Work board's dismissal marker for its task: real work un-dismisses a card
+// a human had taken off the board; updates to existing runs do not.
 func (s *Store) UpsertOrgActiveRun(ctx context.Context, r OrgActiveRun) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO org_active_run (project_id, run_id, source_id, org_node_id, org_node_path,
-		    actor_id, agent_id, task_id, title, status, urgent, started_at, last_event_at, finished_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
-		 ON CONFLICT (project_id, run_id) DO UPDATE SET
-		   source_id = COALESCE(NULLIF(EXCLUDED.source_id, ''), org_active_run.source_id),
-		   org_node_id = CASE WHEN org_active_run.org_node_id = '' THEN EXCLUDED.org_node_id ELSE org_active_run.org_node_id END,
-		   org_node_path = CASE WHEN org_active_run.org_node_path = '' THEN EXCLUDED.org_node_path ELSE org_active_run.org_node_path END,
-		   actor_id = COALESCE(NULLIF(EXCLUDED.actor_id, ''), org_active_run.actor_id),
-		   agent_id = COALESCE(NULLIF(EXCLUDED.agent_id, ''), org_active_run.agent_id),
-		   task_id = COALESCE(NULLIF(EXCLUDED.task_id, ''), org_active_run.task_id),
-		   title = COALESCE(NULLIF(EXCLUDED.title, ''), org_active_run.title),
-		   status = EXCLUDED.status,
-		   urgent = org_active_run.urgent OR EXCLUDED.urgent,
-		   started_at = COALESCE(org_active_run.started_at, EXCLUDED.started_at),
-		   last_event_at = GREATEST(COALESCE(org_active_run.last_event_at, EXCLUDED.last_event_at), COALESCE(EXCLUDED.last_event_at, to_timestamp(0))),
-		   finished_at = EXCLUDED.finished_at,
-		   updated_at = now()`,
+		`WITH ins AS (
+			INSERT INTO org_active_run (project_id, run_id, source_id, org_node_id, org_node_path,
+			    actor_id, agent_id, task_id, title, status, urgent, started_at, last_event_at, finished_at, updated_at)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+			 ON CONFLICT (project_id, run_id) DO UPDATE SET
+			   source_id = COALESCE(NULLIF(EXCLUDED.source_id, ''), org_active_run.source_id),
+			   org_node_id = CASE WHEN org_active_run.org_node_id = '' THEN EXCLUDED.org_node_id ELSE org_active_run.org_node_id END,
+			   org_node_path = CASE WHEN org_active_run.org_node_id = '' THEN EXCLUDED.org_node_path ELSE org_active_run.org_node_path END,
+			   actor_id = COALESCE(NULLIF(EXCLUDED.actor_id, ''), org_active_run.actor_id),
+			   agent_id = COALESCE(NULLIF(EXCLUDED.agent_id, ''), org_active_run.agent_id),
+			   task_id = COALESCE(NULLIF(EXCLUDED.task_id, ''), org_active_run.task_id),
+			   title = COALESCE(NULLIF(EXCLUDED.title, ''), org_active_run.title),
+			   status = EXCLUDED.status,
+			   urgent = org_active_run.urgent OR EXCLUDED.urgent,
+			   started_at = COALESCE(org_active_run.started_at, EXCLUDED.started_at),
+			   last_event_at = GREATEST(COALESCE(org_active_run.last_event_at, EXCLUDED.last_event_at), COALESCE(EXCLUDED.last_event_at, to_timestamp(0))),
+			   finished_at = EXCLUDED.finished_at,
+			   updated_at = now()
+			 RETURNING task_id
+		)
+		DELETE FROM org_work_task_state
+		 WHERE task_id IN (SELECT task_id FROM ins WHERE task_id <> '')`,
 		r.ProjectID, r.RunID, r.SourceID, r.OrgNodeID, r.OrgNodePath,
 		r.ActorID, r.AgentID, r.TaskID, r.Title, r.Status, r.Urgent,
 		r.StartedAt, r.LastEventAt, r.FinishedAt)
 	return err
+}
+
+// DismissOrgWorkTask takes a task card off the Work board: the human has
+// analyzed it and decided a restart is not worth it. A NEW run for the task
+// clears the marker (see UpsertOrgActiveRun).
+func (s *Store) DismissOrgWorkTask(ctx context.Context, taskID, by string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO org_work_task_state (task_id, state, by, at)
+		 VALUES ($1, 'dismissed', $2, now())
+		 ON CONFLICT (task_id) DO UPDATE SET state = 'dismissed', by = $2, at = now()`,
+		taskID, by)
+	return err
+}
+
+// OrgDismissedWorkTasks lists the tasks currently taken off the Work board.
+func (s *Store) OrgDismissedWorkTasks(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT task_id, at FROM org_work_task_state WHERE state = 'dismissed'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var taskID string
+		var at time.Time
+		if err := rows.Scan(&taskID, &at); err != nil {
+			return nil, err
+		}
+		out[taskID] = at
+	}
+	return out, rows.Err()
 }
 
 // OrgActiveRunFilter narrows get_active_runs (spec §15).

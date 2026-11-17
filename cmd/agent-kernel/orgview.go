@@ -56,6 +56,13 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 	if err != nil {
 		return nil, err
 	}
+	// Tasks a human took off the board (analyzed, no restart warranted) stay
+	// out of the columns, metrics and problems — until a NEW run for the task
+	// clears the marker (UpsertOrgActiveRun).
+	dismissed, err := ws.OrgDismissedWorkTasks(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Group runs per task; runs without a task land in the ungrouped lane.
 	byTask := map[string][]workspace.OrgActiveRun{}
@@ -63,6 +70,9 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 	for _, run := range runs {
 		if run.TaskID == "" {
 			ungrouped = append(ungrouped, run)
+			continue
+		}
+		if _, gone := dismissed[run.TaskID]; gone {
 			continue
 		}
 		byTask[run.TaskID] = append(byTask[run.TaskID], run)

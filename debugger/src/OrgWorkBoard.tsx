@@ -405,6 +405,11 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const [unit, setUnit] = useState('')
   const [scope, setScope] = useState('subtree')
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
+  // The dismiss button arms with the first click and fires on the second;
+  // switching selection disarms it (the guard belongs to one card only).
+  const [dismissArmed, setDismissArmed] = useState(false)
+  const [dismissBusy, setDismissBusy] = useState(false)
+  useEffect(() => { setDismissArmed(false) }, [selectedTask])
   // Actor ids → display names (the directory loads once; unknown ids —
   // system actors like the supervisor — stay ids, same as the activity board).
   const [actorNames, setActorNames] = useState<Map<string, string>>(new Map())
@@ -574,6 +579,29 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                 </TimeHint>
               )}
               {selectedCard.awareness && <AwarenessBadge awareness={selectedCard.awareness} />}
+              {/* §13 management action: analyzed the failures, decided a restart
+                  is not worth it — the card leaves the board (until a NEW run
+                  for the task clears the dismissal). Two-click guard. */}
+              <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                {dismissArmed ? (
+                  <>
+                    <Button size="sm" kind="danger" disabled={dismissBusy} onClick={async () => {
+                      setDismissBusy(true)
+                      try {
+                        await orgApi.dismissWorkTask(selectedCard.task_id)
+                        setDismissArmed(false)
+                        setSelectedTask(null)
+                        await load()
+                      } catch (failure) { setError(message(failure)) } finally { setDismissBusy(false) }
+                    }}>{dismissBusy ? '…' : t('orgwork.dismiss_armed') ?? 'Снять точно?'}</Button>
+                    <Button size="sm" kind="ghost" disabled={dismissBusy} onClick={() => setDismissArmed(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+                  </>
+                ) : (
+                  <Button size="sm" kind="ghost" onClick={() => setDismissArmed(true)} title={t('orgwork.dismiss_hint') ?? undefined}>
+                    {t('orgwork.dismiss') ?? 'Снять с доски'}
+                  </Button>
+                )}
+              </div>
               <div style={{ marginTop: '0.5rem' }}>
                 <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', padding: '0.2rem 0' }}>
                   {t('orgwork.runs_title')} <span style={{ textTransform: 'none' }}>({selectedCard.runs.length})</span>
