@@ -111,9 +111,15 @@
 она только фиксирует вердикт в журнале и никогда не трогает workflow.
 Сверка в инциденте была реакцией на зависание, а не причиной.</li>
 </ol>
-<h2 id="2-что-сделано"><a class="anchor" href="#2-что-сделано" aria-label="Section link">#</a>2. Что сделано</h2><h3 id="21-персистентность-temporal-docker-composeyml"><a class="anchor" href="#21-персистентность-temporal-docker-composeyml" aria-label="Section link">#</a>2.1. Персистентность Temporal (docker-compose.yml)</h3><p><code>temporal server start-dev --db-filename /data/temporal-dev.db</code> + volume
-<code>temporality-temporal</code>: история workflow переживает рестарты и пересборки
-контейнера. In-memory остаётся только в transient-окружениях без volume.</p>
+<h2 id="2-что-сделано"><a class="anchor" href="#2-что-сделано" aria-label="Section link">#</a>2. Что сделано</h2><h3 id="21-персистентность-temporal-docker-composeyml"><a class="anchor" href="#21-персистентность-temporal-docker-composeyml" aria-label="Section link">#</a>2.1. Персистентность Temporal (docker-compose.yml)</h3><p><code>temporalio/auto-setup</code> поверх той же Postgres, что использует ядро
+(отдельные БД <code>temporal</code> + <code>temporal_visibility</code>, auto-setup создаёт их сам
+при первом старте; лимиты истории — в <code>temporal-dynamicconfig/</code>): история
+workflow переживает рестарты и пересборки контейнера. Предыдущая ступень —
+<code>server start-dev --db-filename /data/temporal-dev.db</code> на volume — тоже
+переживала рестарты, но деградировала с данными: файл SQLite рос с каждым
+раном, и холодное открытие долгоживущего стека растягивалось на минуты,
+которые wait-цикл ядра превращал во всё более долгие рестарты. In-memory
+остаётся только в transient-окружениях без volume.</p>
 <h3 id="22-orphan-sweep-cmdagent-kernelorphansweepgo"><a class="anchor" href="#22-orphan-sweep-cmdagent-kernelorphansweepgo" aria-label="Section link">#</a>2.2. Orphan sweep (cmd/agent-kernel/orphansweep.go)</h3><p>На старте ядра (асинхронно, не блокирует подъём) свип сравнивает:</p>
 <ul>
 <li>раны со статусом <code>started</code> (<code>workspace.ListStartedRuns</code>, кап 500);</li>
@@ -139,11 +145,13 @@ source, зонд с чужим id не делается.</li>
 <h2 id="3-эксплуатация"><a class="anchor" href="#3-эксплуатация" aria-label="Section link">#</a>3. Эксплуатация</h2><ul>
 <li>Пересборка стека посреди рана больше не оставляет ран незавершённым
 навсегда: история
-workflow живёт в volume, Temporal переигрывает активность на новом воркере,
+workflow живёт в Postgres, Temporal переигрывает активность на новом воркере,
 ран продолжается. Команды песочницы не идемпотентны — переигранная команда
 выполнится повторно (это дешевле, чем потерянный ход).</li>
-<li>После перехода на volume старые in-memory раны остаются незавершёнными —
-первый свип пометит их failed при следующем старте ядра.</li>
+<li>Разовый переход со SQLite-volume на Postgres (2026-11) работает как одна
+большая пересборка: история старого volume не переносится, все
+выполнявшиеся на момент перехода раны первый свип пометит failed. Старый
+volume <code>temporality-temporal</code> можно удалить (<code>docker volume rm</code>).</li>
 <li><code>KERNEL_BUILTIN_SKILLS=off</code> — выключение сидирования скилов, если нужно;
 к свипу отношения не имеет.</li>
 </ul>
