@@ -82,12 +82,31 @@ people&#39;s roles live in a separate layer of facts — see
 <ul>
 <li><strong>Proposed</strong> — extracted from a run, not yet verified.</li>
 <li><strong>Confirmed</strong> — applied and worked (or confirmed by a human).</li>
-<li><strong>Challenged</strong> — a contradiction was found; under review.</li>
+<li><strong>Challenged</strong> — under question: still alive (offered to hints with a
+caution) but awaiting verification.</li>
 <li><strong>Corrected / Superseded / Invalidated</strong> — terminal outcomes with the
 history preserved: who, when and why.</li>
 </ul>
 <p>&quot;Alive&quot; knowledge is what the system is ready to hint to the agent. Stale
 (&quot;at risk&quot;) items are shown with a marker and re-evaluated.</p>
+<p>How knowledge gets challenged, and how it comes back:</p>
+<ul>
+<li><strong>Aging</strong> only touches knowledge surfaced to a run at least once:
+&quot;proposed&quot; unconfirmed and unused for over 14 days, or &quot;confirmed&quot; without
+re-verification for over 28 days, becomes challenged. Never-surfaced items
+are not challenged — absence of demand does not make a fact doubtful.</li>
+<li><strong>Run verdicts</strong>: one harmful verdict only demotes the item in hint
+ranking; two independent unsupported harms challenge it; three invalidate
+it. A helpful verdict confirms a proposal.</li>
+<li><strong>Resurrection</strong>: a new run re-deriving the same fact (verbatim or
+paraphrased) confirms the knowledge automatically — including a challenged
+one. Real use restores trust too.</li>
+<li><strong>Backlog settling</strong> — the &quot;Settle challenged&quot; tab on the knowledge page:
+the challenged list with the challenge rule and reason per row, a rule
+filter, bulk selection and one bulk &quot;Confirm&quot;/&quot;Invalidate&quot; per click.
+Single-item verdicts live in the run trace (⚑ on a knowledge event) and in
+the dossier.</li>
+</ul>
 <h2 id="the-area-map"><a class="anchor" href="#the-area-map" aria-label="Section link">#</a>The area map</h2><p>A treemap groups knowledge by topics and entities: tile size — the amount of
 knowledge, color — the dominant state, a red badge — contradictions. Clicking
 an area applies a sticky filter to the knowledge list.</p>

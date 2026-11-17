@@ -215,8 +215,15 @@ Operating knowledge:
 - Lifecycle: `proposed → verified → (challenged/invalidated/superseded)`.
   Verification is manual or by the judge; unverified knowledge never reaches
   hints.
-- Challenge/invalidate straight from the run trace (⚑ on the event carrying
-  knowledge) and from the dossier.
+- Challenging requires cause: only knowledge surfaced to a run at least once
+  ages (14/28 days without confirmation); a single harmful run verdict only
+  demotes it in ranking, two independent harms challenge it, three invalidate
+  it. A new run re-deriving the same fact confirms it automatically —
+  including a challenged one.
+- Confirm/invalidate/in-challenge in bulk — the "Settle challenged" tab on
+  `/knowledge` (the challenge rule and reason per row, a filter, bulk
+  selection); single-item verdicts live in the run trace (⚑ on the event
+  carrying knowledge) and in the dossier.
 - Priming: before a turn the agent receives hints drawn from similar
   experience (`hint.query` → `memory.read`); usage facts (`hint.used` /
   ignored) are visible in the trace's knowledge group — they are how you

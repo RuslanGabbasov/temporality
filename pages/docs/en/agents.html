@@ -133,6 +133,20 @@ a 1-hour ceiling (<code>timeout_sec</code> up to 3600,
 (<code>KERNEL_TOOL_MAX_SECONDS</code>).</li>
 </ul>
 <p>Details and delivery guarantees — <a href="../tech/agent-async-operations.html">docs/agent-async-operations.md</a>.</p>
+<h2 id="runs-trace-stop-restart"><a class="anchor" href="#runs-trace-stop-restart" aria-label="Section link">#</a>Runs: trace, stop, restart</h2><p>Every run is a row on the Runs page with the full trace: turns, tool calls
+(arguments expand), knowledge and verdicts, delegation trees. Actions:</p>
+<ul>
+<li><strong>Stop</strong> (■) — force-stops a stuck run (two-click guard); the terminal
+event is journaled immediately.</li>
+<li><strong>Restart</strong> (↻, on failed runs that belong to a task) — a new attempt of
+the same task: the input is rebuilt from the task row, the attempt receives
+the interrupted run&#39;s journal tail and continues where it stopped; the
+fresh trace opens right away. Runs without a task (direct API starts) have
+no restart — their input cannot be rebuilt.</li>
+<li>The same restart lives on the Work board (<code>/org/work</code>): in a card&#39;s
+inspector on the failed run; after the start the card moves to &quot;In
+progress&quot; on its own.</li>
+</ul>
 <h2 id="agent-evolution"><a class="anchor" href="#agent-evolution" aria-label="Section link">#</a>Agent evolution</h2><p><img src="../assets/agent-evolution.webp" alt="Evolution: versions, gate, regressions"></p>
 <p>The agent can propose changes to its own configuration (the <code>agent_propose</code>
 tool): the problem with evidence (run ids), the change and the expected

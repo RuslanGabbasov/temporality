@@ -27,12 +27,31 @@ proposed → confirmed → (challenged → corrected | superseded | invalidated)
 
 - **Proposed** — extracted from a run, not yet verified.
 - **Confirmed** — applied and worked (or confirmed by a human).
-- **Challenged** — a contradiction was found; under review.
+- **Challenged** — under question: still alive (offered to hints with a
+  caution) but awaiting verification.
 - **Corrected / Superseded / Invalidated** — terminal outcomes with the
   history preserved: who, when and why.
 
 "Alive" knowledge is what the system is ready to hint to the agent. Stale
 ("at risk") items are shown with a marker and re-evaluated.
+
+How knowledge gets challenged, and how it comes back:
+
+- **Aging** only touches knowledge surfaced to a run at least once:
+  "proposed" unconfirmed and unused for over 14 days, or "confirmed" without
+  re-verification for over 28 days, becomes challenged. Never-surfaced items
+  are not challenged — absence of demand does not make a fact doubtful.
+- **Run verdicts**: one harmful verdict only demotes the item in hint
+  ranking; two independent unsupported harms challenge it; three invalidate
+  it. A helpful verdict confirms a proposal.
+- **Resurrection**: a new run re-deriving the same fact (verbatim or
+  paraphrased) confirms the knowledge automatically — including a challenged
+  one. Real use restores trust too.
+- **Backlog settling** — the "Settle challenged" tab on the knowledge page:
+  the challenged list with the challenge rule and reason per row, a rule
+  filter, bulk selection and one bulk "Confirm"/"Invalidate" per click.
+  Single-item verdicts live in the run trace (⚑ on a knowledge event) and in
+  the dossier.
 
 ## The area map
 

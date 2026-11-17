@@ -300,8 +300,15 @@ huggingface.co. The model cache is on disk; for ownership problems see the log
 <li>Lifecycle: <code>proposed → verified → (challenged/invalidated/superseded)</code>.
 Verification is manual or by the judge; unverified knowledge never reaches
 hints.</li>
-<li>Challenge/invalidate straight from the run trace (⚑ on the event carrying
-knowledge) and from the dossier.</li>
+<li>Challenging requires cause: only knowledge surfaced to a run at least once
+ages (14/28 days without confirmation); a single harmful run verdict only
+demotes it in ranking, two independent harms challenge it, three invalidate
+it. A new run re-deriving the same fact confirms it automatically —
+including a challenged one.</li>
+<li>Confirm/invalidate/in-challenge in bulk — the &quot;Settle challenged&quot; tab on
+<code>/knowledge</code> (the challenge rule and reason per row, a filter, bulk
+selection); single-item verdicts live in the run trace (⚑ on the event
+carrying knowledge) and in the dossier.</li>
 <li>Priming: before a turn the agent receives hints drawn from similar
 experience (<code>hint.query</code> → <code>memory.read</code>); usage facts (<code>hint.used</code> /
 ignored) are visible in the trace&#39;s knowledge group — they are how you

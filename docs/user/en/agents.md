@@ -63,6 +63,22 @@ message in the conversation.
 
 Details and delivery guarantees — [docs/agent-async-operations.md](docs/agent-async-operations.md).
 
+## Runs: trace, stop, restart
+
+Every run is a row on the Runs page with the full trace: turns, tool calls
+(arguments expand), knowledge and verdicts, delegation trees. Actions:
+
+- **Stop** (■) — force-stops a stuck run (two-click guard); the terminal
+  event is journaled immediately.
+- **Restart** (↻, on failed runs that belong to a task) — a new attempt of
+  the same task: the input is rebuilt from the task row, the attempt receives
+  the interrupted run's journal tail and continues where it stopped; the
+  fresh trace opens right away. Runs without a task (direct API starts) have
+  no restart — their input cannot be rebuilt.
+- The same restart lives on the Work board (`/org/work`): in a card's
+  inspector on the failed run; after the start the card moves to "In
+  progress" on its own.
+
 ## Agent evolution
 
 ![Evolution: versions, gate, regressions](../assets/agent-evolution.webp)

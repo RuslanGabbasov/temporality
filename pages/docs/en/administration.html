@@ -180,6 +180,15 @@ asr) — draft wizards (agent, skill, team) pick a model through the chain
 entries (ASR, embedding, image) are filtered out of the candidates. Provider
 keys are stored as secret references. Token prices for cost reporting —
 <code>KERNEL_MODEL_PRICES</code>.</p>
+<p>A Claude subscription (Pro/Max/Ultra/Team) connects through the &quot;Claude
+(subscription)&quot; preset in the provider form: run <code>claude setup-token</code> on your
+machine (it prints a one-year OAuth token) and paste it — the token is stored
+as a secret (<code>secret://claude-subscription-token</code>). Such providers speak the
+native Anthropic <code>/v1/messages</code> wire (bearer + oauth beta), not the
+OpenAI-compatible layer. The model catalog may not open with a subscription
+token — the preset seeds stable models, edit the list manually. Verify with
+&quot;Test generation&quot; on the provider card: it shows the raw request/response of
+the exact wire a run will take.</p>
 <h2 id="secrets"><a class="anchor" href="#secrets" aria-label="Section link">#</a>Secrets</h2><p>The <strong>Secrets</strong> page (<code>/secrets</code>): values are encrypted with AES-256-GCM using
 <code>KERNEL_SECRET_MASTER_KEY</code> and decrypted only inside the kernel. A secret is
 granted to an agent on the agent&#39;s card: the value arrives in <code>run_command</code> as

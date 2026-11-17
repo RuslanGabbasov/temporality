@@ -122,6 +122,16 @@ entries (ASR, embedding, image) are filtered out of the candidates. Provider
 keys are stored as secret references. Token prices for cost reporting —
 `KERNEL_MODEL_PRICES`.
 
+A Claude subscription (Pro/Max/Ultra/Team) connects through the "Claude
+(subscription)" preset in the provider form: run `claude setup-token` on your
+machine (it prints a one-year OAuth token) and paste it — the token is stored
+as a secret (`secret://claude-subscription-token`). Such providers speak the
+native Anthropic `/v1/messages` wire (bearer + oauth beta), not the
+OpenAI-compatible layer. The model catalog may not open with a subscription
+token — the preset seeds stable models, edit the list manually. Verify with
+"Test generation" on the provider card: it shows the raw request/response of
+the exact wire a run will take.
+
 ## Secrets
 
 The **Secrets** page (`/secrets`): values are encrypted with AES-256-GCM using
