@@ -97,7 +97,7 @@
 <div class="docs-eyebrow">Инженерные документы</div>
 <h1>Temporality Roadmap</h1>
 
-<h2 id="status-october-2026"><a class="anchor" href="#status-october-2026" aria-label="Section link">#</a>Status: October 2026</h2><h3 id="done-p0"><a class="anchor" href="#done-p0" aria-label="Section link">#</a>Done (P0)</h3><ul>
+<h2 id="status-november-2026"><a class="anchor" href="#status-november-2026" aria-label="Section link">#</a>Status: November 2026</h2><h3 id="done-p0"><a class="anchor" href="#done-p0" aria-label="Section link">#</a>Done (P0)</h3><ul>
 <li><input checked="" disabled="" type="checkbox"> <strong>Kernel P0</strong> — failure/reconciliation, duplicate mitigation, cost accounting, quotas, secrets, runbook</li>
 <li><input checked="" disabled="" type="checkbox"> <strong>Live MCP E2E</strong> — test-mcp in image, sandbox volume, KERNEL_MCP_TEST_ROOT, approval flow</li>
 <li><input checked="" disabled="" type="checkbox"> <strong>Journal endpoints</strong> — state-at-T, diff, activation chain, run state-at-T, compare runs</li>
@@ -158,6 +158,20 @@
 <li><input checked="" disabled="" type="checkbox"> <strong>Mattermost inbound over WebSocket</strong> — DMs included, outgoing webhooks and <code>OUTGOING_TOKEN</code> removed (see Channel driver layer)</li>
 <li><input checked="" disabled="" type="checkbox"> <strong>Webhook delivery visibility</strong> — trigger deliveries surfaced in the UI</li>
 <li><input checked="" disabled="" type="checkbox"> <strong>Model gateway resilience</strong> — stream idle/no-progress watchdogs, first-token timeout with an adaptive prefill budget and a manual nudge endpoint; runs survive host sleep</li>
+</ul>
+<h3 id="done-org-operations-amp-hitl-wave-nov-2026"><a class="anchor" href="#done-org-operations-amp-hitl-wave-nov-2026" aria-label="Section link">#</a>Done (Org operations &amp; HITL wave, Nov 2026)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Org operations</strong> — activity projection with a dashboard tab, the work control tower dashboard, the work board (kanban by stage with metrics, problem strip and a task inspector; viewport-height split view) and the awareness flow — supervisor batches and triage cases (knowledge hygiene, contradictions, behavior suspicion linking to the audited run&#39;s trace) (<code>docs/org-structure.md</code>, <code>/dashboard</code>, <code>/org/work</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Artifact lifecycle &amp; review</strong> — review rounds with reviewers and all/any modes, human-only approve/reject (kernel identity can never approve), the review inbox, annotations with AI revision, archive from any live stage (<code>docs/artifact-lifecycle.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>HITL forms</strong> — <code>ask_human</code> carries a JSON-Schema form (typed fields, enums, patterns, date ranges) the human fills in a real form instead of free text (<code>docs/interactive-HITL.md</code>, <code>docs/user/hitl-forms.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Presentation engine</strong> — structured visual answers for agents (<code>docs/presentation-engine.md</code>)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Behavior monitoring</strong> — oversight judge reviewing every completed turn for escape/exfil/tamper/deception patterns, suspicion cases surface to the supervisor (<code>docs/agent-behavior-monitoring.md</code>)</li>
+</ul>
+<h3 id="done-memory-reliability-amp-subscriptions-wave-nov-2026"><a class="anchor" href="#done-memory-reliability-amp-subscriptions-wave-nov-2026" aria-label="Section link">#</a>Done (Memory, reliability &amp; subscriptions wave, Nov 2026)</h3><ul>
+<li><input checked="" disabled="" type="checkbox"> <strong>Knowledge hygiene v2</strong> — the false-challenge flood stopped: aging judges only knowledge surfaced to a run (91% of the 2289-item challenged backlog was never offered), one harmful verdict demotes instead of challenging (2 → challenged, 3 → invalidated), paraphrase re-derivation resurrects challenged nodes (full-projection matching — the old loop measured «strengthened 0» over 1073 extraction passes), and a «Разбор оспоренных» settle tab applies bulk confirm/invalidate (<code>docs/knowledge-evolution.md</code> §14)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Failed-run restart</strong> — ↻ in the runs list and on the work board card inspector: the new attempt rebuilds its input from the surviving task row, inherits the interrupted run&#39;s journal tail and continues where it stopped; direct API runs without a task stay non-restartable</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Claude subscription providers</strong> — the «Claude (подписка)» preset: <code>claude setup-token</code> → one-year OAuth token stored as a secret; the provider speaks the native Anthropic <code>/v1/messages</code> wire (bearer + oauth beta) instead of betting on the compat layer; seeded model list + test-generation riding the same wire</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Trace: bulk-memory preview</strong> — remember_many rows expand to the whole proposition list (a dedicated preview replaced the 500-char compact that turned a 50-item batch into two ellipsized fragments); the completed event carries the recorded/skipped summary</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Dev-stack durability</strong> — Temporal persistence moved from dev SQLite to the shared Postgres, the dynamic config ships mounted in the constrained format Temporal 1.24+ requires, bounded shutdown drain (<code>stop_grace_period</code>), fast boot without the full-sandbox chown, the orphan sweep closes journal-only zombies, <code>/livez</code>/<code>/healthz</code> answer without a token</li>
 </ul>
 <hr>
 <h2 id="p0-living-skills-mvp"><a class="anchor" href="#p0-living-skills-mvp" aria-label="Section link">#</a>P0 — Living Skills MVP</h2><p>Source spec: <code>docs/living-skills.md</code> (§43 MVP).</p>
@@ -310,9 +324,9 @@ Status: Phase 1 <strong>complete</strong> — all original plan items done (2026
 <h2 id="p2-advanced"><a class="anchor" href="#p2-advanced" aria-label="Section link">#</a>P2 — Advanced</h2><ul>
 <li><input disabled="" type="checkbox"> <strong>Read-after-write probes</strong> — operation → observable trace → probe → hint to operator. Probe gives a hint, does NOT automatically issue authoritative verdict. Первая реализация удалена как нерабочая по предпосылкам; вернуться к идее — с дизайном от реальной формы аргументов и внешних следов.</li>
 <li><input disabled="" type="checkbox"> <strong>Cost accounting v2</strong> — cost per run / per project / per task / per saga ✅ (в Done выше); остаются org-уровневые токен-квоты</li>
-<li><input disabled="" type="checkbox"> <strong>Memory population overview</strong> — active/stale/invalidated counts over time</li>
-<li><input disabled="" type="checkbox"> <strong>Cross-project knowledge</strong> — knowledge that spans multiple projects</li>
-<li><input disabled="" type="checkbox"> <strong>Embeddings infrastructure</strong> — if lexical clustering proves insufficient</li>
+<li><input disabled="" type="checkbox"> <strong>Memory population overview</strong> — counts over time; частично сделано: распределение состояний на странице знаний (lifecycle bar), метрики борда (<code>/org/work</code>) — остались тайм-серии</li>
+<li><input disabled="" type="checkbox"> <strong>Cross-project knowledge</strong> — knowledge that spans multiple projects (scope promotion org_unit/organization есть; cross-project ноды — не делали)</li>
+<li><input checked="" disabled="" type="checkbox"> <strong>Embeddings infrastructure</strong> — shipped beyond the original scope: in-process model (rembed, <code>KERNEL_EMBEDDINGS_MODEL</code>), knowledge embeddings store, semantic hint tier, semantic search and the map in the knowledge explorer; lexical matching остался как дешёвый первый эшелон</li>
 <li><input disabled="" type="checkbox"> <strong>Graph-based experience relations</strong> — when timeline is not enough</li>
 </ul>
 <hr>
