@@ -60,9 +60,10 @@ const NAV_ITEMS = [
   { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/storage', label: 'nav.storage' },
   { path: '/experience', label: 'nav.timeline' },
-  // The learning center (docs/ai-guided-onboarding-and-learning.md §12.4):
-  // the mentor's home surface — program, lessons, factual mastery.
-  { path: '/learning', label: 'nav.learning' },
+  // NOTE: /learning (docs/ai-guided-onboarding-and-learning.md §12.4) is
+  // deliberately NOT in the nav — the main bar has no room to spare and the
+  // learning center matters mostly at the start; its entry point is the
+  // onboarding wizard's final step, the /learning route stays for deep links.
 ]
 
 // Configuration surfaces — grouped under the Settings dropdown. Groups are

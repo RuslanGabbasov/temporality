@@ -2969,6 +2969,7 @@ export const ru: Record<string, string> = {
     'onboarding.agent_desc': 'Шаблоны уже содержат контракт, права и роль — выберите профиль и назовите агента.',
     'onboarding.done_title': 'Всё готово!',
     'onboarding.done_desc': 'Рабочее пространство настроено. Начните разговор с агентом.',
+    'onboarding.take_lessons': 'Пройти уроки',
     'onboarding.open_workspace': 'Открыть рабочее пространство',
     'onboarding.create_project': 'Создать проект',
     'onboarding.project_name': 'Название проекта',
@@ -3489,7 +3490,6 @@ export const ru: Record<string, string> = {
     'orgflow.batch_decisions_empty': 'В этом батче решений нет',
 
     // Learning center (docs/ai-guided-onboarding-and-learning.md §12)
-    'nav.learning': 'Обучение',
     'learning.title': 'Центр обучения',
     'learning.subtitle': 'Наставник ведёт по вашей организации: программа, уроки и освоение возможностей, проверенное по фактической конфигурации.',
     'learning.program.title': 'Программа обучения',

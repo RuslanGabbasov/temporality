@@ -574,6 +574,19 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 {supervisorModel && <li>{t('onboarding.summary_supervisor') ?? 'Supervisor model'}: {supervisorModel}</li>}
               </ul>
               <div className="onboarding-actions">
+                {/* The learning center is the mentor's home surface; the main
+                    nav has no room for it, so the wizard's final step is the
+                    entry point (docs/ai-guided-onboarding-and-learning.md
+                    §12.4). Finish onboarding first: the wizard owns the
+                    screen until the project list reloads. */}
+                <Button
+                  kind="secondary"
+                  onClick={() => {
+                    onComplete()
+                    window.history.pushState(null, '', '/learning')
+                    window.dispatchEvent(new PopStateEvent('popstate'))
+                  }}
+                >{t('onboarding.take_lessons') ?? 'Take the lessons'}</Button>
                 <Button onClick={onComplete}>{t('onboarding.open_workspace')}</Button>
               </div>
             </>

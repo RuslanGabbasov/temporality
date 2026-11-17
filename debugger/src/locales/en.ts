@@ -2969,7 +2969,8 @@ export const en: Record<string, string> = {
     'onboarding.agent_desc': 'Configure how your agent behaves and which model it uses.',
     'onboarding.done_title': 'You\'re all set!',
     'onboarding.done_desc': 'Your workspace is ready. Start a conversation with your agent.',
-    'onboarding.open_workspace': 'Open workspace',
+    'onboarding.take_lessons': 'Take the lessons',
+    'onboarding.open_workspace': 'Open Workspace',
     'onboarding.create_project': 'Create project',
     'onboarding.project_name': 'Project name',
     'onboarding.project_placeholder': 'e.g. my-team, backend-agents',
@@ -3489,7 +3490,6 @@ export const en: Record<string, string> = {
     'orgflow.batch_decisions_empty': 'No decisions in this batch',
 
     // Learning center (docs/ai-guided-onboarding-and-learning.md §12)
-    'nav.learning': 'Learning',
     'learning.title': 'Learning center',
     'learning.subtitle': 'The mentor walks your organization: a program, lessons and capability mastery verified against the factual configuration.',
     'learning.program.title': 'Learning program',
