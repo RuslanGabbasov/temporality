@@ -79,63 +79,55 @@ services:
     stop_grace_period: 40s
 
   temporal:
-    image: temporalio/temporal:${TEMPORALITY_TEMPORAL_VERSION:-latest}
+    # Real Temporal server over the SAME Postgres instance the kernel uses
+    # (dedicated databases temporal + temporal_visibility, auto-created by
+    # auto-setup on first boot) — the dev-server SQLite (`server start-dev
+    # --db-filename`) degraded with data: its file grew with every run and a
+    # long-lived stack's cold open stretched past minutes, which the kernel's
+    # dial wait-loop (ca96d01) turned into ever-longer kernel restarts. The
+    # history itself now lives in the temporality-postgres volume and survives
+    # stack rebuilds; see docs/dev-stack-runs.md §2.
+    image: temporalio/auto-setup:${TEMPORALITY_TEMPORAL_VERSION:-latest}
     container_name: temporality-dev
     depends_on:
-      temporal-data-init:
-        condition: service_completed_successfully
-    # File-backed persistence (docs/dev-stack-runs.md §2): the start-dev default is
-    # in-memory, and a stack rebuild (docker compose up --build) then recreates
-    # this container and erases every in-flight workflow — the kernel's runs
-    # stay "started" forever while their executions are gone (the 2026-10-26
-    # orphaned-turn incident). The SQLite file survives restarts and rebuilds;
-    # the orphan sweep (kernel startup) covers whatever still slips through.
-    #
-    # History-size ceiling: every call_model activity input (the full message
-    # array, screenshots included) is part of the workflow history, so a long
-    # run crosses the default 50 MB limit and the history service TERMINATES
-    # it mid-work (the 2026-11-09 incident: four delegated children killed,
-    # «Workflow history size exceeds limit»). 500 MiB keeps such runs alive;
-    # the structural fix (ContinueAsNew at compaction boundaries) is tracked
-    # in docs/context-compaction.md.
-    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal-dev.db",
-              "--dynamic-config-value", "limit.historySize.error=524288000",
-              "--dynamic-config-value", "limit.historySize.warn=104857600"]
-    volumes:
-      - temporality-temporal:/data
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporality
+      POSTGRES_PWD: temporality
+      POSTGRES_SEEDS: postgres
+      # The two start-dev history ceilings (see temporal-dynamicconfig/).
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/temporality.yaml
+    restart: unless-stopped
+    ports:
+      - "7233:7233"
     # The kernel hard-depends on Temporal but waits for it itself (ca96d01);
     # this healthcheck is for humans and other observers — compose ordering
     # does not depend on it anymore (see agent-kernel's depends_on note).
-    # The server takes tens of seconds over its SQLite init.
-    # Alpine image: nc (busybox) probes the gRPC port.
-    # Alpine image: nc (busybox) probes the gRPC port. The budget is generous
-    # on purpose: on a slow disk the SQLite dev db of a long-lived stack can
-    # take minutes to open, and giving up early fails every dependent's
-    # health condition.
+    # First boot runs the schema auto-setup over the network — give it room;
+    # later boots only re-check and answer in seconds. Alpine image: nc
+    # (busybox) probes the gRPC port.
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 7233 || exit 1"]
       interval: 3s
       timeout: 3s
       retries: 90
       start_period: 30s
-    restart: unless-stopped
-    ports:
-      - "7233:7233"
-      - "8233:8233"
 
-  # The named volume lands root-owned (the image has no /data to inherit from)
-  # while the server runs as uid 1000 — SQLite cannot create its file and the
-  # server crash-loops (unable to open database file 14). One-shot chown fixes
-  # the ownership once, then stays out of the way. on-failure: a transient
-  # chown hiccup must retry instead of blocking the whole chain forever
-  # (service_completed_successfully below waits for the final exit).
-  temporal-data-init:
-    image: temporalio/temporal:${TEMPORALITY_TEMPORAL_VERSION:-latest}
-    user: root
-    entrypoint: ["sh", "-c", "chown -R 1000:1000 /data"]
-    volumes:
-      - temporality-temporal:/data
-    restart: on-failure:2
+  # Web UI over the same server: the start-dev mode used to serve one itself
+  # on :8233, so the published port stays the same for muscle memory.
+  temporal-ui:
+    image: temporalio/ui:${TEMPORALITY_TEMPORAL_UI_VERSION:-latest}
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "8233:8080"
+    depends_on:
+      temporal:
+        condition: service_started
+    restart: unless-stopped
 
   # Self-hosted meta-search backing the agents' web_search tool. JSON output
   # must stay enabled in searxng-settings.yml — the kernel parses format=json.
@@ -311,11 +303,12 @@ services:
       - browser
     # The kernel self-waits for Temporal since ca96d01 (its dial retries every
     # 2s with a warn instead of exiting), so compose must NOT hard-block the
-    # start on Temporal's health: a slow SQLite init on a cold host then
-    # surfaces as the flaky «dependency agent-kernel failed to start» cascade
-    # (debugger → agent-kernel → temporal) instead of a healthy kernel that is
-    # simply waiting. service_started + the kernel's own retry loop is the
-    # same contract the journal honors with Postgres.
+    # start on Temporal's health: the first boot's schema auto-setup over the
+    # local Postgres once surfaced as the flaky «dependency agent-kernel
+    # failed to start» cascade (debugger → agent-kernel → temporal) instead
+    # of a healthy kernel that is simply waiting. service_started + the
+    # kernel's own retry loop is the same contract the journal honors with
+    # Postgres.
     depends_on:
       postgres:
         condition: service_healthy
@@ -337,6 +330,13 @@ services:
       retries: 20
       start_period: 30s
     restart: unless-stopped
+    # Above the kernel's own bounded exit: ≤8s HTTP drain (SSE streams cut,
+    # clients reconnect) + ≤30s Temporal worker drain cap. Without this the
+    # docker default 10s SIGKILLed the worker mid-drain — in-flight activities
+    # then re-ran on the next worker anyway, but uncleanly (no ctx unwind).
+    # A grace period is a ceiling, not a delay: a clean exit still stops the
+    # container the moment it exits.
+    stop_grace_period: 45s
 
   # Egress proxy (docs/agent-behavior-monitoring.md §7): the only container
   # attached to both the internal sandbox network (no internet route) and the
@@ -398,7 +398,6 @@ services:
 volumes:
   rembed_cache:
   temporality-postgres:
-  temporality-temporal:
 
 networks:
   # The browser backend must not see the internal services (journal, postgres,

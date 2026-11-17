@@ -1,0 +1,10 @@
+# Temporal dynamic config of the temporality stack (docker-compose.yml mounts
+# this directory). Carries over, 1:1, the two --dynamic-config-value flags the
+# start-dev command used to set: every call_model activity input (the full
+# message array, screenshots included) is part of the workflow history, so a
+# long agentic run crosses the default 50 MB limit and the server TERMINATES
+# it mid-work (the 2026-11-09 incident). The ceilings here keep such runs
+# alive; the structural fix (ContinueAsNew at compaction boundaries) is
+# tracked in docs/context-compaction.md.
+limit.historySize.error: 524288000
+limit.historySize.warn: 104857600
