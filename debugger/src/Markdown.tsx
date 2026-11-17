@@ -7,15 +7,21 @@ import { IN_APP_STORAGE_PATH, resolveImageSource, useResolvedImage } from './ima
 
 const FILES_URL_PREFIX = '/kernel-api/v1/workspace/projects/'
 
-// Segments that must never be linkified: fenced code blocks, inline code
-// spans — and markdown links/images. A `![alt](/workspace/x.png)` or
-// `[text](docs/x.md)` is ALREADY a link: wrapping the path inside its
-// parentheses nests one markdown link inside another, the renderer decodes
-// it as literal text (the «картинки перестали рендериться» regression of the
-// artifacts linkify pass) — so link syntax splits out untouched, exactly
-// like code does.
-const CODE_SEGMENT_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g
+// Segments that must never be linkified: fenced code blocks and markdown
+// links/images. A `![alt](/workspace/x.png)` or `[text](docs/x.md)` is ALREADY
+// a link: wrapping the path inside its parentheses nests one markdown link
+// inside another, the renderer decodes it as literal text (the «картинки
+// перестали рендериться» regression of the artifacts linkify pass) — so link
+// syntax splits out untouched. Fenced blocks stay code — their paths are
+// examples, not references.
+const FENCED_SEGMENT_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g
 const MARKDOWN_LINK_SEGMENT_RE = /(!\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\([^)]*\))/g
+// Inline code spans are the OPPOSITE: «файл в `docs/spec.md`» and "как код
+// оформил" are exactly how people and agents point at files — a span whose
+// content contains a workspace path is unwrapped and its paths linkified
+// (a markdown link INSIDE the backticks would render as literal text, so the
+// span loses its ticks around the link). Spans without a path stay verbatim.
+const INLINE_CODE_SEGMENT_RE = /(`[^`\n]+`)/g
 
 // ```mermaid fenced blocks render as diagrams, not as code — agents emit
 // them in artifacts and answers (ER charts, sequences, state machines).
@@ -56,11 +62,12 @@ function fileApiPath(path: string): string {
   return path.replace(/^\/?workspace\//, '')
 }
 
-// Turns workspace paths outside code segments and markdown links into real
-// download links.
+// Turns workspace paths outside fenced blocks and markdown links into real
+// download/preview links — including inside inline code spans, the form
+// people and agents use most («как код оформил»).
 export function linkifyWorkspacePaths(content: string, projectId: string): string {
 	return content
-		.split(CODE_SEGMENT_RE)
+		.split(FENCED_SEGMENT_RE)
 		.map((segment, index) => {
 			if (index % 2 === 1) return segment
 			return segment
@@ -71,9 +78,45 @@ export function linkifyWorkspacePaths(content: string, projectId: string): strin
 		.join('')
 }
 
-// The inner transform: wrap bare workspace paths of one plain-text piece.
+// The outer transform of one plain-text piece: wrap bare workspace paths, and
+// unwrap inline code spans that contain a FILE path (the span's backticks
+// would render a markdown link as literal text). A code span with a pathless
+// object (`ls /workspace/out` — a directory, a command) stays verbatim.
 function linkifyPlainPaths(segment: string, projectId: string): string {
-	return segment.replace(WORKSPACE_PATH_RE, (_match, lead: string, rawPath: string) => {
+	return segment
+		.split(INLINE_CODE_SEGMENT_RE)
+		.map((chunk, index) => {
+			if (index % 2 === 1) {
+				const inner = chunk.slice(1, -1)
+				if (containsFilePath(inner)) {
+					WORKSPACE_PATH_RE.lastIndex = 0
+					return wrapPaths(inner, projectId)
+				}
+				return chunk
+			}
+			return wrapPaths(chunk, projectId)
+		})
+		.join('')
+}
+
+// containsFilePath reports whether the text holds a workspace path that ends
+// in a file (the last segment carries an extension): those are references a
+// reader can open. Directory-ish and command-like spans stay code.
+function containsFilePath(text: string): boolean {
+	const re = new RegExp(WORKSPACE_PATH_RE.source, 'g')
+	let match: RegExpExecArray | null
+	while ((match = re.exec(text)) !== null) {
+		const last = (match[2].split('/').pop() ?? '')
+		if (/\.[A-Za-z0-9]{2,12}$/.test(last)) return true
+	}
+	return false
+}
+
+// wrapPaths wraps every bare workspace path of one plain-text piece into a
+// markdown link. Trailing punctuation (a sentence dot, an underscore run)
+// stays outside the link.
+function wrapPaths(text: string, projectId: string): string {
+	return text.replace(WORKSPACE_PATH_RE, (_match, lead: string, rawPath: string) => {
 		const path = rawPath.replace(/[._-]+$/, '')
 		const trail = rawPath.slice(path.length)
 		const url = `${FILES_URL_PREFIX}${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(fileApiPath(path))}`

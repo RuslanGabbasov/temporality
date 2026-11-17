@@ -465,10 +465,12 @@ function ChatStreamLines({ lines }: { lines: ChatStreamLine[] }) {
  * a one-line outcome. With a form schema the card renders the shared form
  * instead of the free-text input. Local input state keeps typing from
  * re-rendering the whole conversation. */
-function ChatQuestionCard({ question, busy, onAnswer }: {
+function ChatQuestionCard({ question, busy, onAnswer, project, onFile }: {
   question: ChatQuestion
   busy: boolean
   onAnswer: (response: string, approved: boolean, values?: Record<string, unknown>) => void
+  project: string
+  onFile: (path: string) => void
 }) {
   const { t } = useI18n()
   const [answer, setAnswer] = useState('')
@@ -488,11 +490,11 @@ function ChatQuestionCard({ question, busy, onAnswer }: {
         ❓ {t('runs.human_question') ?? 'Agent asks'}
       </div>
       <div className="chat-question-body" style={{ fontSize: '0.85rem' }}>
-        <Markdown content={question.question} />
+        <Markdown content={linkifyWorkspacePaths(question.question, project)} project={project} onFile={onFile} />
       </div>
       {question.context && (
         <div className="chat-question-context" style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginTop: '0.25rem' }}>
-          <Markdown content={question.context} />
+          <Markdown content={linkifyWorkspacePaths(question.context, project)} project={project} onFile={onFile} />
         </div>
       )}
       {question.schema && Object.keys(question.schema.properties ?? {}).length > 0 ? (
@@ -2193,10 +2195,19 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       </div>
                     )}
 
-                    {msg.content && msg.role === 'assistant' ? (
-                      <Markdown content={linkifyWorkspacePaths(stripPresentationFences(msg.content), project)} project={project} onFile={onFileLink} />
-                    ) : msg.content ? (
-                      <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                    {msg.content ? (
+                      <Markdown
+                        content={linkifyWorkspacePaths(
+                          // Presentation fences exist on assistant answers only,
+                          // but linkify applies to BOTH roles: a user pasting a
+                          // workspace path into their own message gets a working
+                          // link too (the old plain-text render never did).
+                          msg.role === 'assistant' ? stripPresentationFences(msg.content) : msg.content,
+                          project,
+                        )}
+                        project={project}
+                        onFile={onFileLink}
+                      />
                     ) : null}
 
                     {/* Presentation Engine (docs/presentation-engine.md): the
@@ -2287,6 +2298,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         <ChatQuestionCard
                           question={msg.question}
                           busy={!!msg.question.busy}
+                          project={project}
+                          onFile={(path) => { void onFileLink(path) }}
                           onAnswer={(response, approved, values) => { void answerQuestion(activeConv.id, msg.runId!, msg.question!, response, approved, values) }}
                         />
                       </div>

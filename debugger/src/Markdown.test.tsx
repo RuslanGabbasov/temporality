@@ -202,11 +202,19 @@ describe('linkifyWorkspacePaths', () => {
       .toBe(`([${'/workspace/a.zip'}](${URL_FOR('p1', 'a.zip')})),`)
   })
 
-  it('does not touch fenced code blocks or inline code', () => {
+  it('does not touch fenced code blocks', () => {
     const fenced = '```\n/workspace/out/report.md\n```'
     expect(linkifyWorkspacePaths(fenced, 'p1')).toBe(fenced)
-    const inline = 'run `ls /workspace/out` first'
-    expect(linkifyWorkspacePaths(inline, 'p1')).toBe(inline)
+  })
+
+  // Inline code is exactly how people point at files («как код оформил»):
+  // a span holding a FILE path unwraps into a working link; a span with a
+  // directory or a command stays code.
+  it('unwraps inline code spans that hold a file path', () => {
+    expect(linkifyWorkspacePaths('документ `docs/client-vulns-inventory.md` в воркспейсе', 'p1'))
+      .toBe(`документ [${'docs/client-vulns-inventory.md'}](${URL_FOR('p1', 'docs/client-vulns-inventory.md')}) в воркспейсе`)
+    expect(linkifyWorkspacePaths('run `ls /workspace/out` first', 'p1'))
+      .toBe('run `ls /workspace/out` first')
   })
 
   it('linkifies prose around code segments', () => {
