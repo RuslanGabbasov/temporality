@@ -3,8 +3,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import MermaidDiagram from './MermaidDiagram'
-import { IN_APP_STORAGE_PATH, normalizeImageSrc, resolveImageSource, useResolvedImage } from './imageResolution'
-import { storageDownloadFile } from './kernelApi'
+import { IN_APP_STORAGE_PATH, resolveImageSource, useResolvedImage } from './imageResolution'
 
 const FILES_URL_PREFIX = '/kernel-api/v1/workspace/projects/'
 
@@ -151,35 +150,27 @@ function MarkdownBase({ content, onFile, project }: { content: string; onFile?: 
   return <div className="markdown-body"><MarkdownSegment content={normalized} onFile={onFile} project={project} /></div>
 }
 
-// A markdown image. In-app references (`/workspace/<rel>`, `/cache/<rel>` and
-// the files-API URL form agents paste from chat) sit behind the kernel
-// storage API, which wants the auth header — a bare <img> 404s/401s on this
-// origin — so they are fetched through useResolvedImage and shown from a blob
-// URL (the same pattern the presentation engine uses, PresentationView
-// ImageView). While the fetch is in flight — and after a failed one — the
-// fallback chip stays visible; clicking it downloads through the authed API
-// (a bare link to the storage URL would 401 in the browser, which cannot
-// attach the header on navigation), and the tooltip carries the real failure
-// reason. http(s) images render as plain <img>.
+// A markdown image. In-app references (`/workspace/<rel>`, `/cache/<rel>`) sit
+// behind the kernel storage API, which wants the auth header — a bare <img>
+// 404s on this origin — so they are fetched through useResolvedImage and shown
+// from a blob URL (the same pattern the presentation engine uses, PresentationView
+// ImageView). Until the fetch settles — and after a failed one — the old link
+// fallback stays, pointing at the real storage endpoint instead of the raw
+// sandbox path. http(s) images render as plain <img>.
 function MarkdownImage({ src = '', alt, project }: { src?: string; alt?: string; project?: string }) {
-  const normalized = src ? normalizeImageSrc(src) : ''
-  const ref = normalized ? resolveImageSource(normalized, project) : undefined
-  const { src: resolved, error } = useResolvedImage(normalized || undefined, project)
-  if (!normalized || !ref) return null
+  // A bare relative src ("design-mockups/x.png") is a sandbox workspace path,
+  // same convention linkifyWorkspacePaths uses — normalize it so it resolves
+  // through the storage API instead of 404-ing on the debugger origin.
+  const normalized = !src ? '' : /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src) ? src : `/workspace/${src}`
+  const ref = resolveImageSource(normalized, project)
+  const resolved = useResolvedImage(normalized, project)
+  if (!src) return null
   const label = alt || src
   if (ref.storage) {
-    if (resolved && resolved !== ref.src) {
-      return <img src={resolved} alt={label} loading="lazy" />
+    if (!resolved || resolved === ref.src) {
+      return <a className="markdown-image-link" href={ref.storage.url} target="_blank" rel="noopener noreferrer">Image: {label}</a>
     }
-    const storage = ref.storage
-    return (
-      <a
-        className="markdown-image-link"
-        href={storage.url}
-        title={error ? `${label} — ${error}` : label}
-        onClick={(e) => { e.preventDefault(); void storageDownloadFile(storage.project, storage.area, storage.path).catch(() => {}) }}
-      >Image: {label}</a>
-    )
+    return <img src={resolved} alt={label} loading="lazy" />
   }
   if (IN_APP_STORAGE_PATH.test(normalized)) {
     // In-app path but no project to resolve it against — a plain <img> would

@@ -16,42 +16,12 @@ export interface ResolvedImageRef {
 
 export const IN_APP_STORAGE_PATH = /^\/(workspace|cache)\/(.+)$/
 
-// The kernel files-API URL — the exact form linkifyWorkspacePaths and the
-// chat render for every workspace path. Agents paste it into artifact bodies
-// verbatim (`![](​/kernel-api/v1/workspace/projects/<id>/files?path=…)`), so
-// it classifies as a storage reference: the project id rides in the URL
-// itself, no selection context needed.
-const FILES_API_URL_RE = /^\/(?:kernel-api)?\/v1\/workspace\/projects\/([A-Za-z0-9][A-Za-z0-9._-]*)\/files\?(.+)$/
-
-/** Bare relative paths ("design/x.png") and the sandbox-absolute form
- *  without the leading slash ("workspace/design/x.png") resolve to the
- *  in-app "/workspace/<rel>" reference; scheme-relative, absolute and URL
- *  forms pass through. The old naive prepend produced
- *  /workspace/workspace/... for the second form — a silent 404. */
-export function normalizeImageSrc(src: string): string {
-  if (/^\/?workspace\//i.test(src)) return '/workspace/' + src.replace(/^\/?workspace\//i, '')
-  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src)) return src
-  return '/workspace/' + src
-}
-
 export function resolveImageSource(raw: string, project?: string): ResolvedImageRef {
-  const filesApi = FILES_API_URL_RE.exec(raw)
-  if (filesApi) {
-    const params = new URLSearchParams(filesApi[2])
-    const path = params.get('path') ?? ''
-    if (path) {
-      const area = params.get('area') === 'cache' ? 'cache' : 'workspace'
-      // The URL names the owning project — the current selection is irrelevant.
-      return { src: raw, storage: { project: filesApi[1], area, path, url: raw } }
-    }
-  }
   const match = IN_APP_STORAGE_PATH.exec(raw)
-  if (match && project) {
-    const area = match[1] as 'workspace' | 'cache'
-    const path = match[2]
-    return { src: raw, storage: { project, area, path, url: storageFileURL(project, area, path) } }
-  }
-  return { src: raw }
+  if (!match || !project) return { src: raw }
+  const area = match[1] as 'workspace' | 'cache'
+  const path = match[2]
+  return { src: raw, storage: { project, area, path, url: storageFileURL(project, area, path) } }
 }
 
 // Blobs are cached per src+project so repeated renders of the same artifact
@@ -59,28 +29,18 @@ export function resolveImageSource(raw: string, project?: string): ResolvedImage
 // URLs are revoked on unmount — every mount creates and revokes its own.
 const imageBlobCache = new Map<string, Promise<Blob>>()
 
-export interface ResolvedImage {
-  /** <img src> once resolved: a blob object URL for storage references, the
-   *  raw src for pass-through ones — and the raw src again on failure (a
-   *  visible fallback, never silent). */
-  src?: string
-  /** Human-readable fetch failure (status + the kernel's error text): the
-   *  fallback link carries it as the tooltip, so «why is this a link» has an
-   *  answer on hover. */
-  error?: string
-}
-
 /** Resolve an image src for <img>: http(s) passes through untouched; in-app
  *  storage paths become blob object URLs (fetched with the auth header,
- *  revoked on unmount). Undefined while a storage image is in flight. */
-export function useResolvedImage(src: string | undefined, project?: string): ResolvedImage {
+ *  revoked on unmount). Undefined while a storage image is in flight; on
+ *  failure the raw path stays as the src — a visible fallback, never silent. */
+export function useResolvedImage(src: string | undefined, project?: string): string | undefined {
   const ref = useMemo(() => (src ? resolveImageSource(src, project) : undefined), [src, project])
-  const [state, setState] = useState<ResolvedImage>({})
+  const [resolved, setResolved] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const storage = ref?.storage
     if (!storage) return
-    setState({})
+    setResolved(undefined)
     const key = `${storage.project}|${ref.src}`
     let entry = imageBlobCache.get(key)
     if (!entry) {
@@ -95,16 +55,14 @@ export function useResolvedImage(src: string | undefined, project?: string): Res
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob)
         if (cancelled) URL.revokeObjectURL(objectUrl)
-        else setState({ src: objectUrl })
+        else setResolved(objectUrl)
       })
-      .catch((failure) => { if (!cancelled) setState({ src: ref.src, error: failure instanceof Error ? failure.message : String(failure) }) })
+      .catch(() => { if (!cancelled) setResolved(ref.src) })
     return () => {
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [ref])
 
-  if (!ref) return {}
-  if (!ref.storage) return { src: ref.src }
-  return state
+  return ref ? (ref.storage ? resolved : ref.src) : undefined
 }
