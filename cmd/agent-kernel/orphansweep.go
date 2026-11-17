@@ -32,10 +32,13 @@ import (
 	"github.com/temporality-project/temporality/workspace"
 )
 
-// orphanRunCap bounds one sweep pass — a startup job must not hammer Temporal
-// with thousands of describes. Anything beyond the cap waits for the next
-// restart (rare by construction).
-const orphanRunCap = 500
+// orphanRunCap bounds one sweep pass — a startup job must not hammer
+// Temporal with unbounded describes. 2000 covers a full zombie backlog
+// (the 2026-11 zombie cleanup) in one pass: a probe against a gone workflow
+// is a cheap not-found, and the fresh-Postgres Temporal knows none of the
+// old executions at all. In steady state the candidate list holds only the
+// few runs genuinely in flight, so the cap rarely bites.
+const orphanRunCap = 2000
 
 // orphanStore is the store face the sweep needs (a *workspace.Store subset).
 type orphanStore interface {
@@ -61,12 +64,12 @@ type runOutcome struct {
 }
 
 // orphanSweepInterval is the periodic cycle of runOrphanSweepLoop. The
-// startup pass stays immediate; later passes only see runs whose journal
-// lost its terminal event AFTER boot (out-of-band terminates, wedged
-// kernels, journal outages), so the describe cost stays tiny in steady
-// state. The interval is the phantom-run detection window: how long a
-// killed run can keep ticking as «live» in the UI before the sweep closes
-// it with a derived terminal event.
+// startup pass stays immediate; later passes chew through whatever remains:
+// an accumulated backlog (oldest first — see RunsMissingTerminal) and runs
+// whose journal lost its terminal event AFTER boot (out-of-band terminates,
+// wedged kernels, journal outages). The interval is the phantom-run
+// detection window: how long a killed run can keep ticking as «live» in the
+// UI before the sweep closes it with a derived terminal event.
 const orphanSweepInterval = 5 * time.Minute
 
 // runOrphanSweepLoop runs sweepOrphanedRuns at boot and then on a ticker.

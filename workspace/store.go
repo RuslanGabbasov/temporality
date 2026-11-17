@@ -1105,6 +1105,12 @@ func (s *Store) RunsMissingTerminal(ctx context.Context, limit int) ([]RunRef, e
 	if limit <= 0 {
 		limit = 500
 	}
+	// Oldest first, symmetric with ListStartedRuns: the sweep's describe
+	// budget should chew through the accumulated backlog of dead runs before
+	// it re-probes the (few, Running-skipped) in-flight ones. The newest-first
+	// order optimized phantom detection for fresh runs, but a backlog older
+	// than the window then never surfaced at all — the October zombies sat
+	// below the newest-500 line forever.
 	rows, err := s.pool.Query(ctx,
 		`SELECT r.run_id, r.project_id FROM observation_events r
 		 WHERE r.type IN ('run.started', 'run.restarted')
@@ -1113,7 +1119,7 @@ func (s *Store) RunsMissingTerminal(ctx context.Context, limit int) ([]RunRef, e
 		       WHERE t.run_id = r.run_id
 		         AND t.type IN ('run.completed', 'run.failed', 'run.cancelled'))
 		 GROUP BY r.run_id, r.project_id
-		 ORDER BY MAX(r.occurred_at) DESC LIMIT $1`, limit)
+		 ORDER BY MAX(r.occurred_at) ASC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
