@@ -1,6 +1,10 @@
 # Temporality
 
-> Temporality is an open-source runtime and control plane for AI agent systems: it runs long-lived tasks, keeps an evidence-backed history of every action, governs permissions and oversight, and turns verified experience into knowledge and skills. Self-hosted on your infrastructure. Go · Temporal · PostgreSQL.
+> Temporality is an open-source Runtime for AI Organizations: build, operate and supervise teams of autonomous agents and people with durable execution, organizational control, human oversight and accumulated experience. Self-hosted on your infrastructure. Go · Temporal · PostgreSQL.
+
+## AI Organization
+
+- [What is an AI Organization Runtime?](https://temporality.tech/ai-organization-runtime/): how an AI organization differs from a multi-agent system, what breaks at scale, and how Temporality — an open-source runtime with durable execution, organizational operations, supervision, governance and learning — answers it.
 
 Documentation is available in Russian and English; every link below points at the clean Markdown source of the page (the rendered HTML lives at the matching .html path on this site).
 

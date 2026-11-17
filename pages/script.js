@@ -12,7 +12,7 @@
       el.href = lang === 'en' ? el.dataset.docsLinkEn : el.dataset.docsLinkRu;
     });
     langToggle.textContent = lang === 'ru' ? 'EN' : 'RU';
-    document.title = lang === 'ru' ? 'Temporality — среда исполнения и контур управления для агентских систем' : 'Temporality — a runtime and control plane for agent systems';
+    document.title = lang === 'ru' ? 'Temporality — Open-source Runtime for AI Organizations' : 'Temporality — Open-source Runtime for AI Organizations';
     try { localStorage.setItem('temporality-site-language', lang); } catch (_) {}
   };
   let lang = 'ru';

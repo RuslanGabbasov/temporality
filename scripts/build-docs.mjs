@@ -359,7 +359,7 @@ for (const slug of htmlFiles(enDir)) docUrls.push({ loc: `/docs/en/${slug}.html`
 const techDir = join(ROOT, 'pages', 'docs', 'tech')
 for (const slug of htmlFiles(techDir)) docUrls.push({ loc: `/docs/tech/${slug}.html`, lang: 'ru' })
 const today = new Date().toISOString().slice(0, 10)
-const urlEntries = [{ loc: '/', lang: 'ru', priority: '1.0' }, { loc: '/docs/index.html', lang: 'ru', priority: '0.8' },
+const urlEntries = [{ loc: '/', lang: 'ru', priority: '1.0' }, { loc: '/ai-organization-runtime/', lang: 'ru', priority: '0.9' }, { loc: '/docs/index.html', lang: 'ru', priority: '0.8' },
   ...docUrls.filter((u) => u.loc !== '/docs/index.html').map((u) => ({ ...u, priority: u.loc.startsWith('/docs/en/') ? '0.6' : '0.7' }))]
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urlEntries.map((u) => {
   const alts = u.lang === 'ru' && docUrls.some((d) => d.loc === `/docs/en/${u.loc.slice('/docs/'.length, -5)}.html`)
@@ -380,7 +380,10 @@ console.log(`✓ sitemap.xml (${urlEntries.length} urls) + robots.txt`)
 // the site root and under .well-known/ — because project sites cannot
 // write to the origin's root well-known directory.
 const llms = [`# Temporality`, '',
-  '> Temporality is an open-source runtime and control plane for AI agent systems: it runs long-lived tasks, keeps an evidence-backed history of every action, governs permissions and oversight, and turns verified experience into knowledge and skills. Self-hosted on your infrastructure. Go · Temporal · PostgreSQL.',
+  '> Temporality is an open-source Runtime for AI Organizations: build, operate and supervise teams of autonomous agents and people with durable execution, organizational control, human oversight and accumulated experience. Self-hosted on your infrastructure. Go · Temporal · PostgreSQL.',
+  '',
+  '## AI Organization', '',
+  '- [What is an AI Organization Runtime?](https://temporality.tech/ai-organization-runtime/): how an AI organization differs from a multi-agent system, what breaks at scale, and how Temporality — an open-source runtime with durable execution, organizational operations, supervision, governance and learning — answers it.',
   '',
   'Documentation is available in Russian and English; every link below points at the clean Markdown source of the page (the rendered HTML lives at the matching .html path on this site).',
   '',

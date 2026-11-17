@@ -6,6 +6,11 @@
     <priority>1.0</priority>
   </url>
   <url>
+    <loc>https://temporality.tech/ai-organization-runtime/</loc>
+    <lastmod>2026-11-17</lastmod>
+    <priority>0.9</priority>
+  </url>
+  <url>
     <loc>https://temporality.tech/docs/index.html</loc>
   <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/index.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/index.html"/>
     <lastmod>2026-11-17</lastmod>

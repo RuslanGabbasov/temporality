@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<meta name="description" content="What is an AI Organization Runtime — and how Temporality provides durable execution, organizational operations, supervision, governance and learning for organizations of AI agents and people.">
+<title>What is an AI Organization Runtime? — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/ai-organization-runtime/">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/ai-organization-runtime/">
+<link rel="alternate" hreflang="x-default" href="https://temporality.tech/ai-organization-runtime/">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="What is an AI Organization Runtime? — Temporality">
+<meta property="og:description" content="An AI organization is a workforce of autonomous agents and people with roles, responsibility and shared context. An AI Organization Runtime is the infrastructure that executes, supervises, governs and improves it.">
+<meta property="og:url" content="https://temporality.tech/ai-organization-runtime/">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "What is an AI Organization Runtime?",
+  "description": "An AI organization is a workforce of autonomous agents and people with roles, responsibility and shared context. An AI Organization Runtime is the infrastructure that executes, supervises, governs and improves it.",
+  "inLanguage": ["ru", "en"],
+  "author": { "@type": "Organization", "name": "Temporality" },
+  "mainEntityOfPage": "https://temporality.tech/ai-organization-runtime/"
+}
+</script>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700;750&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css">
+<script>
+(() => {
+  const root = document.documentElement;
+  const langToggle = document.getElementById('langToggle');
+  const setLanguage = (lang) => {
+    root.lang = lang;
+    document.querySelectorAll('[data-ru][data-en]').forEach((el) => {
+      const value = el.dataset[lang];
+      if (value !== undefined) el.innerHTML = value;
+    });
+    langToggle.textContent = lang === 'ru' ? 'EN' : 'RU';
+    document.title = lang === 'ru' ? 'Что такое AI Organization Runtime? — Temporality' : 'What is an AI Organization Runtime? — Temporality';
+    try { localStorage.setItem('temporality-site-language', lang); } catch (_) {}
+  };
+  let lang = 'ru';
+  try { lang = localStorage.getItem('temporality-site-language') || 'ru'; } catch (_) {}
+  setLanguage(lang);
+  langToggle.addEventListener('click', () => setLanguage(root.lang === 'ru' ? 'en' : 'ru'));
+})();
+</script>
+</head>
+<body>
+<header class="topbar"><a class="brand" href="../"><img src="../assets/temporality-mark.svg" alt=""/><span>Temporality</span></a><nav class="nav"><a href="../#organization" data-ru="Организация" data-en="Organization">Организация</a><a href="../#operations" data-ru="Операции" data-en="Operations">Операции</a><a href="../#layers" data-ru="Четыре слоя" data-en="Four layers">Четыре слоя</a><a data-docs-link-ru="../docs/index.html" data-docs-link-en="../docs/en/index.html" href="../docs/index.html" data-ru="Документация" data-en="Docs">Документация</a></nav><div class="top-actions"><button class="lang-toggle" id="langToggle" aria-label="Switch language">EN</button><a class="github-link" href="https://github.com/RuslanGabbasov/temporality" target="_blank" rel="noreferrer"><span data-ru="Исходный код" data-en="Source code">Исходный код</span><span class="arrow">↗</span></a></div></header>
+
+<main class="section wrap article-body">
+<div class="eyebrow"><span data-ru="AI ORGANIZATION RUNTIME" data-en="AI ORGANIZATION RUNTIME">AI ORGANIZATION RUNTIME</span></div>
+<h1 data-ru="Что такое AI Organization Runtime?" data-en="What is an AI Organization Runtime?">Что такое AI Organization Runtime?</h1>
+
+<div class="article-lead" data-ru="<p>AI-агенты превращаются в рабочую силу. Отдельный агент — автоматизация; когда агентов много, центральная проблема смещается с их создания на организацию совместной работы: структура, ответственность, координация, надзор и накопление опыта. <strong>AI Organization Runtime</strong> — категория инфраструктуры, которая закрывает именно эту задачу.</p><p>Temporality — open-source AI Organization Runtime: среда, в которой организация из агентов и людей исполняет работу, наблюдается, управляется и накапливает проверенный опыт.</p>" data-en="<p>AI agents are becoming a workforce. A single agent is automation; once there are many, the hard problem shifts from creating them to organizing their work: structure, responsibility, coordination, supervision and accumulated experience. An <strong>AI Organization Runtime</strong> is the infrastructure category that solves exactly this.</p><p>Temporality is an open-source AI Organization Runtime: an environment where an organization of agents and people executes work, is observed, governed, and accumulates verified experience.</p>">
+
+<h2 data-ru="Чем AI-организация отличается от мультиагентной системы" data-en="How an AI organization differs from a multi-agent system">Чем AI-организация отличается от мультиагентной системы</h2>
+<p data-ru="Мультиагентная система — это несколько агентов, совместно решающих одну задачу: обмен сообщениями, оркестрация, общие инструменты. Это про выполнение отдельной работы. AI-организация — следующий уровень: за агентами закреплены роли и ответственность, работа распределена между подразделениями, участники (в том числе люди) взаимодействуют по правилам, результаты принимаются, а опыт сохраняется между задачами. В организации есть управление вниманием, эскалации, согласования и история решений — то, что в мультиагентном фреймворке обычно отсутствует." data-en="A multi-agent system is several agents cooperating on one task: message passing, orchestration, shared tools. It is about executing a single piece of work. An AI organization is the next level: agents hold roles and responsibilities, work is distributed across departments, participants (including people) interact by rules, results are accepted, and experience survives between tasks. An organization has attention management, escalations, approvals and a history of decisions — things a multi-agent framework normally lacks.">Мультиагентная система — это несколько агентов, совместно решающих одну задачу: обмен сообщениями, оркестрация, общие инструменты. Это про выполнение отдельной работы. AI-организация — следующий уровень: за агентами закреплены роли и ответственность, работа распределена между подразделениями, участники (в том числе люди) взаимодействуют по правилам, результаты принимаются, а опыт сохраняется между задачами. В организации есть управление вниманием, эскалации, согласования и история решений — то, что в мультиагентном фреймворке обычно отсутствует.</p>
+
+<h2 data-ru="Что ломается при масштабировании количества агентов" data-en="What breaks when the number of agents grows">Что ломается при масштабировании количества агентов</h2>
+<p data-ru="Когда агентов единицы, хватает фреймворка и общего чата. С ростом числа агентов и задач появляются инфраструктурные вопросы, которые фреймворк не решает:" data-en="With a handful of agents, a framework and a shared chat are enough. As agents and tasks multiply, infrastructure questions appear that a framework does not answer:">Когда агентов единицы, хватает фреймворка и общего чата. С ростом числа агентов и задач появляются инфраструктурные вопросы, которые фреймворк не решает:</p>
+<ul>
+<li data-ru="устойчивость: работа не должна теряться при перезапуске сервисов, деплоях и ожидании человека;" data-en="durability: work must survive service restarts, deployments and waiting for a human;">устойчивость: работа не должна теряться при перезапуске сервисов, деплоях и ожидании человека;</li>
+<li data-ru="структура: кто за что отвечает, кто кому делегирует, кто принимает результат;" data-en="structure: who is responsible for what, who delegates to whom, who accepts the result;">структура: кто за что отвечает, кто кому делегирует, кто принимает результат;</li>
+<li data-ru="наблюдение: что происходит в каждом подразделении прямо сейчас и почему задача встала;" data-en="observation: what is happening in each department right now and why a task stalled;">наблюдение: что происходит в каждом подразделении прямо сейчас и почему задача встала;</li>
+<li data-ru="контроль: какие действия требуют подтверждения, какие данные агенту недоступны, кто может что менять;" data-en="control: which actions need approval, which data the agent cannot see, who can change what;">контроль: какие действия требуют подтверждения, какие данные агенту недоступны, кто может что менять;</li>
+<li data-ru="опыт: как проверенные выводы одной задачи доходят до следующей, а не теряются в истории чатов." data-en="experience: how verified conclusions from one task reach the next one instead of drowning in chat history.">опыт: как проверенные выводы одной задачи доходят до следующей, а не теряются в истории чатов.</li>
+</ul>
+
+<h2 data-ru="Как Temporality решает эти задачи" data-en="How Temporality answers these questions">Как Temporality решает эти задачи</h2>
+<p data-ru="Temporality — открытая операционная среда (Apache-2.0, self-hosted) для организаций из AI-агентов и людей. Организационный уровень объединяет четыре архитектурных слоя:" data-en="Temporality is an open operating environment (Apache-2.0, self-hosted) for organizations of AI agents and people. The organizational level ties together four architectural layers:">Temporality — открытая операционная среда (Apache-2.0, self-hosted) для организаций из AI-агентов и людей. Организационный уровень объединяет четыре архитектурных слоя:</p>
+<ul>
+<li data-ru="<strong>Execution</strong> — долгоживущие задачи на Temporal, делегирование, планы-графы, работа продолжается после перезапусков и деплоев;" data-en="<strong>Execution</strong> — long-lived tasks on Temporal, delegation, plan DAGs, work continues across restarts and deployments;">Execution — долгоживущие задачи на Temporal, делегирование, планы-графы, работа продолжается после перезапусков и деплоев;</li>
+<li data-ru="<strong>Observability</strong> — событийный журнал, трассы запусков, связь задач, запусков и результатов;" data-en="<strong>Observability</strong> — an event journal, run traces, task-run-result linkage;">Observability — событийный журнал, трассы запусков, связь задач, запусков и результатов;</li>
+<li data-ru="<strong>Governance</strong> — оргструктура, роли и политики, права, секреты, сетевые ограничения, подтверждения и согласования;" data-en="<strong>Governance</strong> — org structure, roles and policies, access, secrets, egress rules, approvals and sign-offs;">Governance — оргструктура, роли и политики, права, секреты, сетевые ограничения, подтверждения и согласования;</li>
+<li data-ru="<strong>Learning</strong> — проверенные знания с происхождением и жизненным циклом, навыки с контрактами и версиями." data-en="<strong>Learning</strong> — verified knowledge with provenance and lifecycle, skills with contracts and versions;">Learning — проверенные знания с происхождением и жизненным циклом, навыки с контрактами и версиями.</li>
+</ul>
+<p data-ru="Сверху — операционные инструменты руководителя: организационный дашборд, Work Control Tower, модельный Supervisor для анализа проблем и управление потоками внимания (Activity and Awareness). Принцип: AI анализирует, человек решает, агенты исполняют." data-en="On top — the head's operational tooling: an organizational dashboard, the Work Control Tower, a model supervisor that analyzes problems, and attention-flow management (Activity and Awareness). The principle: AI analyzes, humans decide, agents execute.">Сверху — операционные инструменты руководителя: организационный дашборд, Work Control Tower, модельный Supervisor для анализа проблем и управление потоками внимания (Activity and Awareness). Принцип: AI анализирует, человек решает, агенты исполняют.</p>
+
+<h2 data-ru="Примеры организационных сценариев" data-en="Example organizational scenarios">Примеры организационных сценариев</h2>
+<p data-ru="Разработка ПО (Research, Development, QA, DevOps — задачи с делегированием, проверкой и согласованием изменений); AI-исследования (Research, Analysis, Validation, Documentation — гипотезы, аналитика, контроль качества); операционные процессы предприятия (Operations, Compliance, Support, Analytics — регулярные процессы с согласованиями и контролем полномочий). Это примеры конфигураций: подразделения и роли собираются под задачу." data-en="Software engineering (Research, Development, QA, DevOps — tasks with delegation, verification and change sign-off); AI research (Research, Analysis, Validation, Documentation — hypotheses, analysis, quality control); enterprise operations (Operations, Compliance, Support, Analytics — recurring processes with approvals and permission control). These are example configurations: departments and roles are assembled for your task.">Разработка ПО (Research, Development, QA, DevOps — задачи с делегированием, проверкой и согласованием изменений); AI-исследования (Research, Analysis, Validation, Documentation — гипотезы, аналитика, контроль качества); операционные процессы предприятия (Operations, Compliance, Support, Analytics — регулярные процессы с согласованиями и контролем полномочий). Это примеры конфигураций: подразделения и роли собираются под задачу.</p>
+
+<h2 data-ru="Быстрый запуск" data-en="Quick start">Быстрый запуск</h2>
+<p data-ru="Стек поднимается одним docker compose на вашей инфраструктуре: PostgreSQL, Temporal, журнал и интерфейс." data-en="The stack runs with one docker compose on your infrastructure: PostgreSQL, Temporal, the journal and the interface.">Стек поднимается одним docker compose на вашей инфраструктуре: PostgreSQL, Temporal, журнал и интерфейс.</p>
+<p><a class="btn btn-primary" href="../#guide"><span data-ru="Быстрый старт" data-en="Quick start">Быстрый старт</span><span>↗</span></a>
+<a class="btn btn-quiet" href="../"><span data-ru="К главной странице" data-en="Back to the overview">К главной странице</span><span>↖</span></a></p>
+</div></main>
+
+<footer class="footer"><div class="wrap footer-inner"><a class="brand footer-brand" href="../"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><span data-ru="Open-source Runtime for AI Organizations." data-en="Open-source Runtime for AI Organizations.">Open-source Runtime for AI Organizations.</span><div class="footer-links"><a href="https://github.com/RuslanGabbasov/temporality" target="_blank" rel="noreferrer">GitHub</a><a href="https://ruslangabbasov.github.io/temporality/docs/">Docs</a><a href="../">temporality.tech</a></div><span class="footer-copy">Apache-2.0</span></div></footer>
+</body>
+</html>
