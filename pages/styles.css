@@ -91,3 +91,12 @@ button.real-shot { font: inherit; text-align: left; }
 .article-body p,.article-body li{font-size:14.5px;line-height:1.85;color:var(--tm-text-2)}
 .article-body ul{padding-left:1.2rem;display:flex;flex-direction:column;gap:.5rem;margin:14px 0}
 .article-lead p:first-child{font-size:16px;color:var(--tm-text)}
+
+/* ── Contextual learning indicator (docs/ai-guided-onboarding-and-learning.md §6.1) ── */
+.learn-indicator{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--tm-border-strong);background:var(--tm-surface);color:var(--tm-text-2);font:600 10px var(--font);cursor:pointer;flex-shrink:0;vertical-align:middle;transition:color .18s,border-color .18s,background .18s}
+.learn-indicator:hover{color:var(--tm-cream);border-color:var(--tm-amber)}
+.learn-indicator-recommended{border-color:var(--tm-amber);color:var(--tm-amber);animation:learn-pulse 2.4s ease-in-out infinite}
+.learn-indicator-new{border-color:var(--tm-amber);background:rgba(224,155,90,.12);color:var(--tm-amber);animation:learn-pulse 2.4s ease-in-out infinite}
+.learn-indicator-resumed{border-color:var(--tm-teal);color:#8eb9a8}
+.learn-indicator-completed{opacity:.55}
+@keyframes learn-pulse{0%,100%{box-shadow:0 0 0 0 rgba(224,155,90,.28)}50%{box-shadow:0 0 0 5px rgba(224,155,90,.06)}}
