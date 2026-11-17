@@ -41,9 +41,11 @@ export function splitMermaidSegments(content: string): Array<{ kind: 'markdown';
 // a bare relative path ("scripts/fetch-mcp-secrets.mjs") — the second needs
 // at least one directory step and a real extension, so prose like "v1.2.3",
 // "/etc/hosts", "and/or" or "github.com/org/repo" stays untouched. The
-// leading boundary avoids mid-word matches; a URL never matches because ":"
-// is neither a boundary nor a path character.
-const WORKSPACE_PATH_RE = /(^|[\s(\[<"«'])(\/?workspace\/[A-Za-z0-9][A-Za-z0-9._/-]*|[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{2,12})/g
+// leading boundary avoids mid-word matches; markdown emphasis characters
+// (* _ ~ = +) are boundaries too — bolded file names ("**docs/spec.md**",
+// the most common shape in agent answers and artifact bodies) must linkify;
+// a URL never matches because ":" is neither a boundary nor a path character.
+const WORKSPACE_PATH_RE = /(^|[\s(\[<"«'*_~=+])(\/?workspace\/[A-Za-z0-9][A-Za-z0-9._/-]*|[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{2,12})/g
 
 // The path the file API resolves inside the project's workspace area: it is
 // always area-relative ("out/report.md"). The API strips a leading

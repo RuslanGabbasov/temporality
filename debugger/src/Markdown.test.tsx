@@ -173,6 +173,28 @@ describe('linkifyWorkspacePaths', () => {
     expect(linkifyWorkspacePaths(prose, 'p1')).toBe(prose)
   })
 
+  // Markdown emphasis around a file name is the most common shape in agent
+  // answers and artifact bodies («**docs/spec.md** — главный документ»): the
+  // emphasis characters are boundaries, so the path inside linkifies while
+  // the markers stay outside the link.
+  it('linkifies paths inside markdown emphasis', () => {
+    expect(linkifyWorkspacePaths('**docs/spec.md** — главный документ', 'p1'))
+      .toBe(`**[${'docs/spec.md'}](${URL_FOR('p1', 'docs/spec.md')})** — главный документ`)
+    expect(linkifyWorkspacePaths('*docs/spec.md*', 'p1'))
+      .toBe(`*[${'docs/spec.md'}](${URL_FOR('p1', 'docs/spec.md')})*`)
+    expect(linkifyWorkspacePaths('~~docs/other.md~~ и *docs/spec.md*', 'p1'))
+      .toBe(`~~[${'docs/other.md'}](${URL_FOR('p1', 'docs/other.md')})~~ и *[${'docs/spec.md'}](${URL_FOR('p1', 'docs/spec.md')})*`)
+    // An underscore is a PATH character first: _docs/spec.md matches as a file
+    // whose name starts with the underscore (a legal name) — the italic
+    // _emphasis_ form loses here, and that is the honest trade-off: real
+    // files with leading underscores are common, italic file names are not.
+    expect(linkifyWorkspacePaths('_docs/spec.md остаётся целым', 'p1'))
+      .toBe(`[_docs/spec.md](${URL_FOR('p1', '_docs/spec.md')}) остаётся целым`)
+    // A snake_case path must not split mid-name at its underscores.
+    expect(linkifyWorkspacePaths('snake_case/file.md остаётся целым', 'p1'))
+      .toBe(`[snake_case/file.md](${URL_FOR('p1', 'snake_case/file.md')}) остаётся целым`)
+  })
+
   it('leaves trailing punctuation outside the link', () => {
     expect(linkifyWorkspacePaths('done: /workspace/out/report.md.', 'p1'))
       .toBe(`done: [${'/workspace/out/report.md'}](${URL_FOR('p1', 'out/report.md')}).`)
