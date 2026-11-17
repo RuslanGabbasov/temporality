@@ -124,18 +124,23 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			case "harmful":
 				item.HarmfulOutcomes++
 				switch {
-				case item.HarmfulOutcomes >= 2 && item.HelpfulOutcomes == 0:
-					// Two independent refutations and zero support: the run
+				case item.HarmfulOutcomes >= 3 && item.HelpfulOutcomes == 0:
+					// Three independent refutations and zero support: the run
 					// feedback loop kills the item. Re-proposing the fact later
 					// creates a fresh node — no tombstones (docs/knowledge-
 					// evolution.md).
 					item.State = "invalidated"
-				case item.State != "invalidated" && item.State != "superseded" && item.State != "corrected":
-					// One refutation — or conflicting verdicts — challenges: the
-					// hint block keeps offering it with the recorded reason as
-					// caution until a later verdict or a human settles it.
+				case item.HarmfulOutcomes >= 2 && item.State != "invalidated" && item.State != "superseded" && item.State != "corrected":
+					// Two independent refutations: under review — the hint block
+					// keeps offering it with the recorded reason as caution until a
+					// later verdict or a human settles it.
 					item.State = "challenged"
 				}
+				// A single harmful verdict changes nothing: one LLM judgment over
+				// one run's 2 KB window is not a verdict, and the B4 ranking
+				// (usefulTier) already demotes harmful-dominant items. The old
+				// one-verdict challenge was the second-largest source of false
+				// «оспорено» on a live installation.
 			}
 		}
 		appendKnowledgeTransition(item, event)

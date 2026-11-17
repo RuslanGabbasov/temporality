@@ -132,6 +132,11 @@ export const observationApi = {
     }),
   invalidate: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; /** Successor knowledge: turns the invalidation into a correction (knowledge.superseded). */ replacement_id?: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/invalidate', body),
+  // Human settle verdicts (the challenged-backlog queue): one bulk call
+  // applies confirm|invalidate to many items — unknown/retired ids are named
+  // per-item. A single id is the per-item form of the same verdict.
+  bulkKnowledge: (body: { project: string; actor: ObservationActor; action: 'confirm' | 'invalidate'; reason?: string; ids: string[] }) =>
+    post<{ recorded: number; results: Array<{ knowledge_id: string; ok: boolean; error?: string }> }>('/v1/observations/knowledge/bulk', body),
   /** Manual knowledge creation (the supervisor's generalize action): the
    *  projection builds knowledge from knowledge.proposed events, so appending
    *  one through the regular ingest endpoint creates the item — the same

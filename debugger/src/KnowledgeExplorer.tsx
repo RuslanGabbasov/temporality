@@ -15,6 +15,7 @@ import AgentResearch from './explorer/AgentResearch'
 import HintsPreview from './explorer/HintsPreview'
 import SessionsPanel from './explorer/SessionsPanel'
 import EvidenceLink from './explorer/EvidenceLink'
+import SettlePanel from './explorer/SettlePanel'
 import { applySessionPayload, type SessionSnapshot } from './explorer/sessions'
 import Dossier from './Dossier'
 import KnowledgeMap from './KnowledgeMap'
@@ -48,7 +49,7 @@ const STATE_TAG: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'>
 const EMPTY_FILTERS = { state: '', scope: '', topic: '', entity: '', origin: '', kind: '' }
 type Filters = typeof EMPTY_FILTERS
 
-type View = 'search' | 'map' | 'conflicts' | 'agent'
+type View = 'search' | 'map' | 'conflicts' | 'agent' | 'settle'
 
 export default function KnowledgeExplorer({ project }: { project: string }) {
   const t = useT()
@@ -69,7 +70,8 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const [view, setView] = useState<View>(
     initParams.get('view') === 'conflicts' ? 'conflicts'
       : initParams.get('view') === 'agent' ? 'agent'
-        : initParams.get('view') === 'search' ? 'search' : 'map')
+        : initParams.get('view') === 'search' ? 'search'
+          : initParams.get('view') === 'settle' ? 'settle' : 'map')
   const [dossierID, setDossierID] = useState(initParams.get('dossier') ?? '')
 
   const [areas, setAreas] = useState<ExploreArea[]>([])
@@ -126,7 +128,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(params.get('q') ?? '')
     setQuestion(params.get('q') ?? '')
     setSelectedAreaKey(params.get('area') ?? '')
-    setView(params.get('view') === 'conflicts' ? 'conflicts' : params.get('view') === 'agent' ? 'agent' : params.get('view') === 'search' ? 'search' : 'map')
+    setView(params.get('view') === 'conflicts' ? 'conflicts' : params.get('view') === 'agent' ? 'agent' : params.get('view') === 'search' ? 'search' : params.get('view') === 'settle' ? 'settle' : 'map')
     setDossierID(params.get('dossier') ?? '')
     setFilters({
       state: params.get('state') ?? '',
@@ -280,7 +282,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(state.searchInput)
     setFilters(state.filters)
     setSelectedAreaKey(state.areaKey)
-    setView(state.view === 'conflicts' || state.view === 'agent' || state.view === 'map' ? state.view : 'search')
+    setView(state.view === 'conflicts' || state.view === 'agent' || state.view === 'map' || state.view === 'settle' ? state.view : 'search')
     setDossierID(state.dossierID)
   }, [])
 
@@ -435,7 +437,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
       {/* Research view tabs: map, search, contradiction discovery and the
           agent's own research calls (ТЗ §10, §12). */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', borderBottom: '1px solid var(--tm-border)', marginBottom: '0.75rem' }}>
-        {(['map', 'search', 'conflicts', 'agent'] as View[]).map((key) => (
+        {(['map', 'search', 'conflicts', 'agent', 'settle'] as View[]).map((key) => (
           <button
             key={key}
             onClick={() => switchView(key)}
@@ -448,10 +450,17 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
             key === 'map' ? (t('explorer.tab_map') ?? 'Карта')
               : key === 'search' ? (t('explorer.tab_search') ?? 'Search')
                 : key === 'conflicts' ? (t('explorer.tab_conflicts') ?? 'Contradictions')
-                  : (t('explorer.tab_agent') ?? 'Agent research')
+                  : key === 'settle' ? (t('explorer.tab_settle') ?? 'Разбор')
+                    : (t('explorer.tab_agent') ?? 'Agent research')
           }</button>
         ))}
       </div>
+
+      {view === 'settle' && !dossierID && (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <SettlePanel project={project} onRevision={() => setRevision((r) => r + 1)} />
+        </div>
+      )}
 
       {view === 'map' && !dossierID && (
         /* The semantic map wants the whole content area: proximity reads as

@@ -1542,6 +1542,108 @@ func TestKnowledgeManualChallenge(t *testing.T) {
 	}
 }
 
+// The settle queue: one bulk call confirms and invalidates a batch of
+// challenged items — unknown and already-retired ids are named per-item
+// without aborting the batch, and the projection reflects every verdict.
+func TestBulkKnowledgeVerdicts(t *testing.T) {
+	handler := newTestServer(t)
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{
+			proposedEvent("lighthouse", "evt-b1", "K1", "gatekeeper v2 authenticates via .token-file"),
+			proposedEvent("lighthouse", "evt-b2", "K2", "the report command writes to out/report.txt"),
+			proposedEvent("lighthouse", "evt-b3", "K3", "deploys run through the make deploy target"),
+		},
+	}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// One challenged item in the mix: a bulk confirm settles it (the whole
+	// point of the queue — challenged items need a human verdict too).
+	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/challenge", map[string]any{
+		"knowledge_id": "K2", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "aged",
+	}); res.StatusCode != http.StatusCreated {
+		t.Fatalf("challenge setup status = %d", res.StatusCode)
+	}
+
+	res, body := doJSON(t, handler, "POST", "/v1/observations/knowledge/bulk", map[string]any{
+		"project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"},
+		"action": "confirm", "reason": "проверено на стенде", "ids": []string{"K1", "K2"},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("bulk confirm status = %d, body = %v", res.StatusCode, body)
+	}
+	if recorded := asInt(body["recorded"]); recorded != 2 {
+		t.Fatalf("bulk confirm must record both, got %v", body)
+	}
+
+	// A mixed batch: the retired item is named, the unknown too, the rest land.
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/bulk", map[string]any{
+		"project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"},
+		"action": "invalidate", "ids": []string{"K3", "K1", "K404"},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("bulk invalidate status = %d, body = %v", res.StatusCode, body)
+	}
+	if recorded := asInt(body["recorded"]); recorded != 2 {
+		t.Fatalf("K3 lands (proposed→invalidated), K1 lands (confirmed is recoverable, invalidation applies), K404 is named — got %v", body)
+	}
+	for _, raw := range asSlice(body["results"]) {
+		result := raw.(map[string]any)
+		if result["knowledge_id"] == "K404" {
+			if ok, _ := result["ok"].(bool); ok {
+				t.Fatalf("unknown id must not land: %v", result)
+			}
+		}
+	}
+
+	// Projection check: K2 confirmed; K1 confirmed-then-invalidated; K3 invalidated.
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&state=confirmed", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("knowledge list status = %d", res.StatusCode)
+	}
+	states := map[string]string{}
+	for _, raw := range asSlice(body["knowledge"]) {
+		item := raw.(map[string]any)
+		states[item["id"].(string)] = item["state"].(string)
+	}
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&state=invalidated", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("knowledge invalidated list status = %d", res.StatusCode)
+	}
+	for _, raw := range asSlice(body["knowledge"]) {
+		item := raw.(map[string]any)
+		states[item["id"].(string)] = item["state"].(string)
+	}
+	if states["K2"] != "confirmed" || states["K1"] != "invalidated" || states["K3"] != "invalidated" {
+		t.Fatalf("projection must reflect the verdicts, got %+v", states)
+	}
+
+	// A bad action is rejected up front.
+	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/bulk", map[string]any{
+		"project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"},
+		"action": "supersede", "ids": []string{"K1"},
+	}); res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown action status = %d, want 422", res.StatusCode)
+	}
+}
+
+func asInt(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	}
+	return 0
+}
+
+func asSlice(value any) []any {
+	if list, ok := value.([]any); ok {
+		return list
+	}
+	return nil
+}
+
 // The pair verdict «not a contradiction» is recorded and sticky: the pair
 // leaves every future candidate pool (pairDismissed), so heuristic noise
 // drains with one click instead of resurfacing on every visit.

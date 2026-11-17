@@ -278,6 +278,7 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 		return result, err
 	}
 	accepted, duplicates, invalid := validateExtractionCandidates(completion.Candidates, knownEvents, existing, states, request.Project)
+	accepted = resurrectChallenged(accepted, knowledge)
 	result.Candidates = accepted
 	result.Duplicates = duplicates
 	result.Invalid = invalid
@@ -568,6 +569,10 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 			continue
 		}
 		id := extractionKnowledgeID(project, proposition)
+		confidence := item.Confidence
+		if confidence < 0 || confidence > 1 {
+			confidence = 0
+		}
 		contradicts := strings.TrimSpace(item.Contradicts)
 		if contradicts != "" && (contradicts == id || !existingIDs[contradicts] || terminalKnowledgeState(states[contradicts])) {
 			// Self-contradiction, a hallucinated id, or a terminal node the
@@ -575,24 +580,52 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 			contradicts = ""
 		}
 		duplicate := false
-		for _, item := range existing {
-			if contradicts == item.ID {
+		rewired := false
+		for _, ex := range existing {
+			if contradicts == ex.ID {
 				// An explicit contradiction carries the corrected fact — it is
 				// the replacement, not a restatement.
 				continue
 			}
-			if id == item.ID && !item.FromRun {
+			if id == ex.ID && !ex.FromRun {
 				// Exact re-derivation of prior project knowledge is not a
 				// duplicate: the Existing flag below routes it to strengthening
 				// so re-confirmation reinforces the node (§14).
-				continue
+				break
 			}
-			if id == item.ID || propositionSimilar(proposition, item.Proposition) {
+			if id == ex.ID || propositionSimilar(proposition, ex.Proposition) {
+				if !ex.FromRun && recoverableKnowledgeState(states[ex.ID]) {
+					// A paraphrase re-derivation of prior project knowledge in a
+					// recoverable state: the id hash cannot see the paraphrase,
+					// but the fact is the same — rewire the candidate onto that
+					// node so the workflow's confirm (extraction-reverification)
+					// strengthens it and resets its aging clock. Dropping it as a
+					// duplicate starved exactly the nodes waiting for evidence —
+					// challenged nodes never recovered, and «strengthened 0» was
+					// the measured result on a live installation.
+					accepted = append(accepted, KnowledgeCandidate{
+						KnowledgeID: ex.ID,
+						Kind:        kind,
+						Proposition: proposition,
+						Topics:      normalizeAreaLabels(item.Topics),
+						Entities:    normalizeAreaLabels(item.Entities),
+						Confidence:  confidence,
+						Evidence:    evidence,
+						Existing:    true,
+					})
+					seen[ex.ID] = true
+					rewired = true
+					break
+				}
 				// A this-run restatement (the run already recorded it via
-				// remember) or a near-duplicate: skipped, no second node.
+				// remember) or a near-duplicate of terminal/unknown knowledge:
+				// skipped, no second node.
 				duplicate = true
 				break
 			}
+		}
+		if rewired {
+			continue
 		}
 		if duplicate {
 			duplicates++
@@ -606,10 +639,6 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 			continue
 		}
 		seen[id] = true
-		confidence := item.Confidence
-		if confidence < 0 || confidence > 1 {
-			confidence = 0
-		}
 		accepted = append(accepted, KnowledgeCandidate{
 			KnowledgeID: id,
 			Kind:        kind,
@@ -623,6 +652,59 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 		})
 	}
 	return accepted, duplicates, invalid
+}
+
+// recoverableKnowledgeState reports whether a knowledge node may still move
+// through the lifecycle: re-derivation confirmations (exact or rewired
+// paraphrases) are refused on terminal states by the projection anyway, so
+// the rewiring path skips them up front.
+func recoverableKnowledgeState(state string) bool {
+	switch state {
+	case "", "proposed", "confirmed", "challenged":
+		return true
+	}
+	return false
+}
+
+// resurrectChallenged rewires a freshly re-derived candidate onto an existing
+// CHALLENGED node with a near-identical proposition. The re-derivation is
+// exactly the evidence a challenge waits for: the workflow's emit turns the
+// candidate into knowledge.confirmed (rule extraction-reverification.v1) and
+// the node leaves the dead corner — challenged ranks last in hints, so it
+// can rarely earn a confirming verdict by being offered, and the exact-id
+// hash never sees a paraphrase. The whole project projection is in scope, so
+// a challenge that never made it into the hint window still gets its chance.
+func resurrectChallenged(accepted []KnowledgeCandidate, knowledge []observation.Knowledge) []KnowledgeCandidate {
+	var challenged []observation.Knowledge
+	for _, item := range knowledge {
+		if item.State == "challenged" {
+			challenged = append(challenged, item)
+		}
+	}
+	if len(challenged) == 0 {
+		return accepted
+	}
+	for i := range accepted {
+		if accepted[i].Existing || accepted[i].Contradicts != "" {
+			continue // strengthened nodes and explicit contradictions already route
+		}
+		for _, item := range challenged {
+			if propositionSimilar(accepted[i].Proposition, item.Proposition) {
+				accepted[i] = KnowledgeCandidate{
+					KnowledgeID: item.ID,
+					Kind:        accepted[i].Kind,
+					Proposition: accepted[i].Proposition,
+					Topics:      accepted[i].Topics,
+					Entities:    accepted[i].Entities,
+					Confidence:  accepted[i].Confidence,
+					Evidence:    accepted[i].Evidence,
+					Existing:    true,
+				}
+				break
+			}
+		}
+	}
+	return accepted
 }
 
 // terminalKnowledgeState reports whether a knowledge state admits no further
@@ -656,16 +738,24 @@ func normalizeAreaLabels(values []string) []string {
 }
 
 // agingCandidates selects stale knowledge for the aging sweep (rule
-// aging.v1): proposals unconfirmed and unused past AgingThreshold, and
-// CONFIRMED items nothing re-verified past ConfirmedAgingThreshold —
-// «подтверждённое когда-то» не делает знание истинным навсегда, и вопрос
-// «а не устарело ли?» должен задаваться всем типам знаний. The clock resets on
-// confirming evidence only (re-derivation, use, a judged hint outcome) — hint
-// offers do not reset it: an item that keeps being offered but never
-// exercised is exactly the noise the sweep retires. Oldest first.
+// aging.v1): OFFERED proposals unconfirmed and unused past AgingThreshold,
+// and OFFERED confirmed items nothing re-verified past
+// ConfirmedAgingThreshold — «подтверждённое когда-то» не делает знание
+// истинным навсегда, и вопрос «а не устарело ли?» должен задаваться всем
+// типам знаний. Items never OFFERED to any run are skipped: «не
+// использовано» без шанса быть использованным — не сигнал сомнения, а
+// отсутствие спроса; карать их за неиспользование — значит переводить в
+// challenged весь сток памяти (the 91% never-offered backlog measured on a
+// live installation). The clock resets on confirming evidence only
+// (re-derivation, use, a judged hint outcome) — hint offers do not reset it:
+// an item that keeps being offered but never exercised is exactly the noise
+// the sweep retires. Oldest first.
 func agingCandidates(knowledge []observation.Knowledge, now time.Time) []AgingCandidate {
 	var candidates []AgingCandidate
 	for _, item := range knowledge {
+		if item.HintOffers == 0 {
+			continue // never surfaced: no usage signal exists to judge
+		}
 		threshold := AgingThreshold
 		switch item.State {
 		case "proposed":

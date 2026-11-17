@@ -189,6 +189,7 @@ func NewServer(store observation.Store, log *slog.Logger, gate *controlplane.Gat
 	mux.HandleFunc("GET /v1/observations/runs/compare", s.compareRuns)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/challenge", s.challengeObservationKnowledge)
+	mux.HandleFunc("POST /v1/observations/knowledge/bulk", s.bulkObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/relations/dismiss", s.dismissKnowledgeRelation)
 	mux.HandleFunc("POST /v1/observations/knowledge/promote", s.promoteObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/explore", s.exploreObservationKnowledge)
@@ -1520,6 +1521,124 @@ func (s *Server) challengeObservationKnowledge(w http.ResponseWriter, r *http.Re
 	}
 	s.invalidateKnowledge(input.Project)
 	writeJSON(w, http.StatusCreated, event)
+}
+
+// bulkObservationKnowledgeCap bounds one bulk call: the UI batch dialogs page
+// their selections, and an unbounded id list could hold the journal append
+// loop hostage.
+const bulkObservationKnowledgeCap = 500
+
+type bulkObservationRequest struct {
+	Project string            `json:"project"`
+	Actor   observation.Actor `json:"actor"`
+	Action  string            `json:"action"` // confirm | invalidate
+	Reason  string            `json:"reason,omitempty"`
+	IDs     []string          `json:"ids"`
+	Run     string            `json:"run,omitempty"`
+}
+
+type bulkObservationResult struct {
+	KnowledgeID string `json:"knowledge_id"`
+	OK          bool   `json:"ok"`
+	Error       string `json:"error,omitempty"`
+}
+
+// bulkObservationKnowledge applies one verdict (confirm | invalidate) to many
+// knowledge items in one call — the settle queue for a backlog of challenges
+// (a live installation accumulated 2289). One projection load serves the
+// whole batch: each id is checked against the same snapshot, the verdict
+// events append sequentially, and the projection cache invalidates once at
+// the end. Per-item errors (unknown id, already retired) do not abort the
+// batch — the response names them, the UI shows what landed.
+func (s *Server) bulkObservationKnowledge(w http.ResponseWriter, r *http.Request) {
+	var input bulkObservationRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.Project = strings.TrimSpace(input.Project)
+	input.Actor.ID = strings.TrimSpace(input.Actor.ID)
+	input.Action = strings.TrimSpace(input.Action)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.Project == "" || input.Actor.ID == "" || len(input.IDs) == 0 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("project, actor.id, and ids are required"))
+		return
+	}
+	if input.Action != "confirm" && input.Action != "invalidate" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("action must be confirm or invalidate"))
+		return
+	}
+	if len(input.IDs) > bulkObservationKnowledgeCap {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("at most %d ids per call", bulkObservationKnowledgeCap))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleOperator, input.Project) {
+		return
+	}
+	projectEvents, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
+		return
+	}
+	knowledge, err := observation.ProjectKnowledge(projectEvents)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
+	byID := make(map[string]observation.Knowledge, len(knowledge))
+	for _, item := range knowledge {
+		byID[item.ID] = item
+	}
+
+	reason := input.Reason
+	if reason == "" {
+		reason = "bulk human verdict (no comment)"
+	}
+	results := make([]bulkObservationResult, 0, len(input.IDs))
+	recorded := 0
+	for _, id := range input.IDs {
+		id = strings.TrimSpace(id)
+		result := bulkObservationResult{KnowledgeID: id}
+		item, ok := byID[id]
+		switch {
+		case id == "":
+			result.Error = "empty id"
+		case !ok:
+			result.Error = "not found"
+		case item.State == "corrected" || item.State == "superseded" || item.State == "invalidated":
+			result.Error = "already retired"
+		}
+		if result.Error == "" {
+			eventType := "knowledge.invalidated"
+			if input.Action == "confirm" {
+				eventType = "knowledge.confirmed"
+			}
+			event := observation.Event{
+				Schema: observation.Schema, EventID: newUUID(), OccurredAt: s.now().UTC(),
+				Source:   observation.Source{ID: "temporality-manual", Integration: "temporality", Version: "1"},
+				Context:  observation.Context{Project: input.Project, Run: input.Run, Actor: input.Actor},
+				Type:     eventType,
+				Data:     map[string]any{"knowledge_id": id, "reason": reason, "method": "manual"},
+			}
+			if err := event.Validate(); err != nil {
+				result.Error = err.Error()
+			} else {
+				event.ReceivedAt = s.now().UTC()
+				if _, err := s.store.AppendObservation(r.Context(), event); err != nil {
+					result.Error = "append failed"
+				} else {
+					result.OK = true
+					recorded++
+				}
+			}
+		}
+		results = append(results, result)
+	}
+	if recorded > 0 {
+		s.invalidateKnowledge(input.Project)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results, "recorded": recorded})
 }
 
 type knowledgeRelationVerdictRequest struct {

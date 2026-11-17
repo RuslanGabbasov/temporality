@@ -118,15 +118,18 @@ func TestValidateExtractionCandidatesContract(t *testing.T) {
 		{Kind: "opinion", Proposition: "The build system is unpleasant to work with.", Evidence: []string{"r/event/000007"}},
 		// Too short — dropped.
 		{Kind: "claim", Proposition: "too short", Evidence: []string{"r/event/000007"}},
-		// Duplicate of existing knowledge — counted, skipped.
+		// Restatement of existing knowledge — rewired onto that node: the run
+		// just re-derived the same fact with fresh evidence, which is exactly
+		// the re-verification a proposal waits for (was: dropped as a duplicate,
+		// which starved the nodes and aged them into challenged).
 		{Kind: "observation", Proposition: "The report command writes its output to out/report.txt.", Evidence: []string{"r/event/000007"}},
 		// Empty kind defaults to claim.
 		{Kind: "", Proposition: "The migration runner requires network access to succeed.", Evidence: []string{"r/event/000009"}},
 	}
 	accepted, duplicates, invalid := validateExtractionCandidates(raw, known, existing, states, "repo")
 
-	require.Len(t, accepted, 3)
-	require.Equal(t, 2, duplicates)
+	require.Len(t, accepted, 4)
+	require.Equal(t, 1, duplicates)
 	require.Equal(t, 3, invalid)
 
 	require.Equal(t, "observation", accepted[0].Kind)
@@ -138,7 +141,11 @@ func TestValidateExtractionCandidatesContract(t *testing.T) {
 	require.Equal(t, []string{"r/event/000009"}, accepted[1].Evidence, "hallucinated refs must be filtered out")
 	require.Equal(t, 0.4, accepted[1].Confidence)
 
-	require.Equal(t, "claim", accepted[2].Kind, "empty kind defaults to claim")
+	// The restatement was rewired onto the existing node, in order.
+	require.Equal(t, "ext/known", accepted[2].KnowledgeID)
+	require.True(t, accepted[2].Existing)
+
+	require.Equal(t, "claim", accepted[3].Kind, "empty kind defaults to claim")
 }
 
 func TestValidateExtractionCandidatesMarksExisting(t *testing.T) {
@@ -177,6 +184,61 @@ func TestValidateExtractionCandidatesStrengthensExactReDerivation(t *testing.T) 
 	accepted, duplicates, _ = validateExtractionCandidates(raw, known, fromRun, states, "repo")
 	require.Equal(t, 1, duplicates, "this-run restatement must be skipped")
 	require.Empty(t, accepted)
+}
+
+// A paraphrase re-derivation of a CHALLENGED node is exactly the evidence the
+// challenge waits for: the candidate is rewired onto the challenged node (the
+// id hash cannot see the paraphrase), and the workflow confirms it with the
+// re-verification rule. The old behavior dropped the restatement as a
+// duplicate — challenged nodes never recovered and aged forever.
+func TestValidateExtractionCandidatesResurrectsChallengedParaphrase(t *testing.T) {
+	known := map[string]bool{"r/event/000001": true}
+	oldProposition := "The fetch command accepts a -limit flag, not --count."
+	paraphrase := "The fetch command accepts a -limit flag and not --count."
+	existing := []existingKnowledge{{ID: "ext/old", Proposition: oldProposition}}
+	states := map[string]string{"ext/old": "challenged"}
+	raw := []extractionCandidate{{Kind: "observation", Proposition: paraphrase, Evidence: []string{"r/event/000001"}}}
+
+	accepted, duplicates, _ := validateExtractionCandidates(raw, known, existing, states, "repo")
+	require.Equal(t, 0, duplicates, "a paraphrase re-derivation of recoverable knowledge strengthens it")
+	require.Len(t, accepted, 1)
+	require.Equal(t, "ext/old", accepted[0].KnowledgeID, "the candidate must be rewired onto the challenged node")
+	require.True(t, accepted[0].Existing)
+
+	// A terminal node admits no transitions: the restatement stays a plain
+	// duplicate, no rewiring.
+	terminal := map[string]string{"ext/old": "invalidated"}
+	accepted, duplicates, _ = validateExtractionCandidates(raw, known, existing, terminal, "repo")
+	require.Equal(t, 1, duplicates)
+	require.Empty(t, accepted)
+}
+
+// The same resurrection for challenged nodes OUTSIDE the extraction's
+// existing-knowledge window: the full project projection is in scope, so a
+// challenge that never surfaced in hints still gets re-derived back to life.
+func TestResurrectChallengedMatchesFullProjection(t *testing.T) {
+	knowledge := []observation.Knowledge{
+		{ID: "ext/challenged", Proposition: "The fetch command accepts a -limit flag, not --count.", State: "challenged"},
+		{ID: "ext/proposed", Proposition: "The indexer skips vendored directories.", State: "proposed"},
+	}
+	accepted := []KnowledgeCandidate{{
+		Kind: "observation", Proposition: "The fetch command accepts a -limit flag and not --count.",
+		Evidence: []string{"r/event/000001"}, Confidence: 0.7,
+	}}
+	result := resurrectChallenged(accepted, knowledge)
+	require.Equal(t, "ext/challenged", result[0].KnowledgeID, "a paraphrase of a challenged node resurrects it")
+	require.True(t, result[0].Existing)
+	require.Equal(t, []string{"r/event/000001"}, result[0].Evidence, "the fresh evidence travels with the rewired candidate")
+
+	// Already-strengthened candidates and explicit contradictions keep their
+	// own routing: the resurrection only serves fresh proposals.
+	already := []KnowledgeCandidate{
+		{Kind: "observation", Proposition: "The fetch command accepts a -limit flag and not --count.", Evidence: []string{"r/e"}, Existing: true},
+		{Kind: "observation", Proposition: "The fetch command accepts a -limit flag and not --count.", Evidence: []string{"r/e"}, Contradicts: "ext/other"},
+	}
+	result = resurrectChallenged(already, knowledge)
+	require.NotEqual(t, "ext/challenged", result[0].KnowledgeID, "an already-strengthened candidate keeps its own id")
+	require.NotEqual(t, "ext/challenged", result[1].KnowledgeID, "an explicit contradiction keeps its own id")
 }
 
 func TestValidateExtractionCandidatesCapsBatch(t *testing.T) {
@@ -224,16 +286,33 @@ func TestAgingCandidatesSelectsStaleProposals(t *testing.T) {
 	recentlyUsed := now.Add(-30 * 24 * time.Hour)
 	usedAt := now.Add(-1 * 24 * time.Hour)
 	knowledge := []observation.Knowledge{
-		{ID: "ext/stale", Proposition: "Old unconfirmed fact.", State: "proposed", CreatedAt: old},
-		{ID: "ext/fresh", Proposition: "Recent proposal.", State: "proposed", CreatedAt: fresh},
-		{ID: "ext/confirmed", Proposition: "Confirmed fact.", State: "confirmed", CreatedAt: old},
-		{ID: "ext/used", Proposition: "Used but unconfirmed.", State: "proposed", CreatedAt: recentlyUsed, LastUsedAt: &usedAt},
-		{ID: "ext/challenged", Proposition: "Already challenged.", State: "challenged", CreatedAt: old},
+		{ID: "ext/stale", Proposition: "Old unconfirmed fact.", State: "proposed", CreatedAt: old, HintOffers: 2},
+		{ID: "ext/fresh", Proposition: "Recent proposal.", State: "proposed", CreatedAt: fresh, HintOffers: 2},
+		{ID: "ext/confirmed", Proposition: "Confirmed fact.", State: "confirmed", CreatedAt: old, HintOffers: 2},
+		{ID: "ext/used", Proposition: "Used but unconfirmed.", State: "proposed", CreatedAt: recentlyUsed, LastUsedAt: &usedAt, HintOffers: 2},
+		{ID: "ext/challenged", Proposition: "Already challenged.", State: "challenged", CreatedAt: old, HintOffers: 2},
 	}
 	candidates := agingCandidates(knowledge, now)
 	require.Len(t, candidates, 1)
 	require.Equal(t, "ext/stale", candidates[0].KnowledgeID)
 	require.InDelta(t, 21.0, candidates[0].AgeDays, 0.1)
+}
+
+// Aging never judges items no run ever SAW: «не использовано» without the
+// chance to be used is absence of demand, not doubt. The 91% never-offered
+// backlog measured on a live installation was exactly this blind spot — the
+// whole memory stock aged into challenged without a single surfacing.
+func TestAgingCandidatesSkipsNeverOffered(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-60 * 24 * time.Hour)
+	knowledge := []observation.Knowledge{
+		{ID: "ext/never-offered-proposed", Proposition: "Old and never surfaced.", State: "proposed", CreatedAt: old},
+		{ID: "ext/never-offered-confirmed", Proposition: "Old confirmed, never surfaced.", State: "confirmed", CreatedAt: old},
+		{ID: "ext/offered-stale", Proposition: "Offered once, never used, stale.", State: "proposed", CreatedAt: old, HintOffers: 1},
+	}
+	candidates := agingCandidates(knowledge, now)
+	require.Len(t, candidates, 1)
+	require.Equal(t, "ext/offered-stale", candidates[0].KnowledgeID)
 }
 
 // Confirmed knowledge ages too (re-verification clock): nothing re-verified
@@ -247,9 +326,9 @@ func TestAgingCandidatesAgesConfirmedKnowledge(t *testing.T) {
 	refreshed := now.Add(-60 * 24 * time.Hour)
 	verifiedAt := now.Add(-3 * 24 * time.Hour)
 	knowledge := []observation.Knowledge{
-		{ID: "ext/stale-confirmed", Proposition: "Old confirmed fact.", State: "confirmed", CreatedAt: staleConfirmed},
-		{ID: "ext/fresh-confirmed", Proposition: "Recently confirmed fact.", State: "confirmed", CreatedAt: freshEnough},
-		{ID: "ext/re-verified", Proposition: "Old but re-verified fact.", State: "confirmed", CreatedAt: refreshed,
+		{ID: "ext/stale-confirmed", Proposition: "Old confirmed fact.", State: "confirmed", CreatedAt: staleConfirmed, HintOffers: 2},
+		{ID: "ext/fresh-confirmed", Proposition: "Recently confirmed fact.", State: "confirmed", CreatedAt: freshEnough, HintOffers: 2},
+		{ID: "ext/re-verified", Proposition: "Old but re-verified fact.", State: "confirmed", CreatedAt: refreshed, HintOffers: 2,
 			History: []observation.KnowledgeTransition{{Type: "knowledge.confirmed", At: verifiedAt}}},
 	}
 	candidates := agingCandidates(knowledge, now)
@@ -264,7 +343,7 @@ func TestAgingCandidatesCapsAndOrdersOldestFirst(t *testing.T) {
 	knowledge := make([]observation.Knowledge, 0, agingMaxPerPass+2)
 	for i := 0; i < agingMaxPerPass+2; i++ {
 		knowledge = append(knowledge, observation.Knowledge{
-			ID: fmt.Sprintf("ext/old-%02d", i), State: "proposed",
+			ID: fmt.Sprintf("ext/old-%02d", i), State: "proposed", HintOffers: 1,
 			CreatedAt: now.Add(time.Duration(-20-i) * 24 * time.Hour),
 		})
 	}
@@ -379,7 +458,7 @@ func TestExtractKnowledgeProposesCandidatesFromTrajectory(t *testing.T) {
 	require.GreaterOrEqual(t, result.DurationMs, int64(0))
 }
 
-func TestExtractKnowledgeDropsDuplicatesOfExistingKnowledge(t *testing.T) {
+func TestExtractKnowledgeRewiresRestatementsOfExistingKnowledge(t *testing.T) {
 	events := extractionRunEvents("run-2")
 	duplicate := "The report command requires a pre-existing out directory and fails with exit 1 otherwise."
 	llmStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -399,8 +478,14 @@ func TestExtractKnowledgeDropsDuplicatesOfExistingKnowledge(t *testing.T) {
 
 	result, err := activities.ExtractKnowledge(context.Background(), KnowledgeExtractRequest{Project: "repo", RunID: "run-2", Prompt: "run the report", ExtractionID: extractionIdentity("run-2")})
 	require.NoError(t, err)
-	require.Empty(t, result.Candidates)
-	require.Equal(t, 1, result.Duplicates)
+	// A restatement of existing knowledge is a re-derivation, not a duplicate:
+	// the candidate is rewired onto the existing node so the workflow's confirm
+	// strengthens it and resets the re-verification clock (the old behavior
+	// dropped it, and confirmed nodes decayed despite being re-proven).
+	require.Len(t, result.Candidates, 1)
+	require.Equal(t, "ext/old", result.Candidates[0].KnowledgeID)
+	require.True(t, result.Candidates[0].Existing)
+	require.Equal(t, 0, result.Duplicates)
 }
 
 func TestRenderExtractionContextCitesEventIDs(t *testing.T) {

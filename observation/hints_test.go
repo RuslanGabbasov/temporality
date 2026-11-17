@@ -44,22 +44,28 @@ func hintVerdictEvent(eventID, knowledgeID, outcome, reason string, at time.Time
 }
 
 // Run verdicts drive the knowledge lifecycle (docs/knowledge-evolution.md):
-// a judged-helpful hint confirms a proposal, one harmful verdict challenges
-// it with the run's reason recorded in history, two unsupported harmful
-// verdicts invalidate it — and a later re-proposal creates a fresh node, no
-// tombstones.
+// a judged-helpful hint confirms a proposal, a single harmful verdict only
+// demotes the item in ranking (one LLM judgment over one run's narrow window
+// is not a verdict — the reason is still recorded in history), two unsupported
+// harmful verdicts challenge it for review, three invalidate it — and a later
+// re-proposal creates a fresh node, no tombstones.
 func TestHintOutcomesDriveLifecycle(t *testing.T) {
 	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
 	events := []Event{
 		hintProposalEvent("e1", "k-helpful", "claim", "Редкое правило про penpot-сервер", nil, base),
 		hintVerdictEvent("e2", "k-helpful", "helpful", "повторилось на практике", base.Add(time.Hour)),
 
-		hintProposalEvent("e3", "k-challenged", "claim", "Правило про botaccount-справочник", nil, base),
-		hintVerdictEvent("e4", "k-challenged", "harmful", "не сработало: rm теперь блокируется", base.Add(2*time.Hour)),
+		hintProposalEvent("e3", "k-doubted", "claim", "Правило про botaccount-справочник", nil, base),
+		hintVerdictEvent("e4", "k-doubted", "harmful", "не сработало: rm теперь блокируется", base.Add(2*time.Hour)),
 
-		hintProposalEvent("e5", "k-dead", "claim", "Правило про ветку rnd/ai", nil, base),
-		hintVerdictEvent("e6", "k-dead", "harmful", "опровергнуто первым раном", base.Add(time.Hour)),
-		hintVerdictEvent("e7", "k-dead", "harmful", "опровергнуто вторым раном", base.Add(2*time.Hour)),
+		hintProposalEvent("e5", "k-challenged", "claim", "Правило про ветку rnd/ai", nil, base),
+		hintVerdictEvent("e6", "k-challenged", "harmful", "опровергнуто первым раном", base.Add(time.Hour)),
+		hintVerdictEvent("e7", "k-challenged", "harmful", "опровергнуто вторым раном", base.Add(2*time.Hour)),
+
+		hintProposalEvent("e12", "k-dead", "claim", "Правило про устаревший протокол продакшена", nil, base),
+		hintVerdictEvent("e13", "k-dead", "harmful", "опровергнуто первым раном", base.Add(time.Hour)),
+		hintVerdictEvent("e14", "k-dead", "harmful", "опровергнуто вторым раном", base.Add(2*time.Hour)),
+		hintVerdictEvent("e15", "k-dead", "harmful", "опровергнуто третьим раном", base.Add(3*time.Hour)),
 
 		hintProposalEvent("e8", "k-mixed", "claim", "Правило про дедупликацию отчётов", nil, base),
 		hintVerdictEvent("e9", "k-mixed", "harmful", "в одном ране навредило", base.Add(time.Hour)),
@@ -74,15 +80,18 @@ func TestHintOutcomesDriveLifecycle(t *testing.T) {
 	if byID["k-helpful"].State != "confirmed" {
 		t.Errorf("helpful verdict must confirm a proposal, got %q", byID["k-helpful"].State)
 	}
-	challenged := byID["k-challenged"]
-	if challenged.State != "challenged" {
-		t.Errorf("one harmful verdict must challenge, got %q", challenged.State)
+	doubted := byID["k-doubted"]
+	if doubted.State != "proposed" {
+		t.Errorf("a single harmful verdict must not change the state, got %q", doubted.State)
 	}
-	if n := len(challenged.History); n == 0 || challenged.History[n-1].Reason != "не сработало: rm теперь блокируется" || challenged.History[n-1].State != "challenged" {
-		t.Errorf("the refutation reason must be recorded in history, got %+v", challenged.History)
+	if n := len(doubted.History); n == 0 || doubted.History[n-1].Reason != "не сработало: rm теперь блокируется" {
+		t.Errorf("the refutation reason must still be recorded in history, got %+v", doubted.History)
+	}
+	if byID["k-challenged"].State != "challenged" {
+		t.Errorf("two unsupported harmful verdicts must challenge, got %q", byID["k-challenged"].State)
 	}
 	if byID["k-dead"].State != "invalidated" {
-		t.Errorf("two unsupported harmful verdicts must invalidate, got %q", byID["k-dead"].State)
+		t.Errorf("three unsupported harmful verdicts must invalidate, got %q", byID["k-dead"].State)
 	}
 	if byID["k-mixed"].State != "challenged" {
 		t.Errorf("conflicting verdicts must stay challenged for review, got %q", byID["k-mixed"].State)
