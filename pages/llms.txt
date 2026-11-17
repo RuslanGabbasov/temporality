@@ -31,6 +31,7 @@ Documentation is available in Russian and English; every link below points at th
 - [Файлы](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/files.md): Как агент передаёт человеку файлы — в чат, в мессенджер — и где их забрать.
 - [Эволюция и качество](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/evolution.md): Как агенты предлагают изменения своей конфигурации, как оценочный гейт проверяет их эффект, как откатить версию — и откуда берутся оценочные кейсы.
 - [Должности и группы](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/job-titles.md): Должность сотрудника — естественный адрес для групповых вопросов: позови всех тестировщиков, отправь разработчикам инструкцию.
+- [Обучение и наставник](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/learning.md): Как Temporality учит людей: контекстные подсказки «?», центр обучения, интерактивные уроки и освоение возможностей, проверенное по фактической конфигурации.
 
 ## User guide (English)
 - [Temporality — User Guide](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/index.md)
@@ -54,6 +55,7 @@ Documentation is available in Russian and English; every link below points at th
 - [Files](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/files.md): How the agent hands files to a human — into the chat, into your messenger — and where to pick them up.
 - [Evolution & quality](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/evolution.md): How agents propose changes to their own configuration, how the evaluation gate verifies the effect, how to roll a version back — and where evaluation cases come from without hand-writing them.
 - [Job titles & groups](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/job-titles.md): A job title is the natural group address — invite every QA engineer to a call, or send the new instructions to all developers.
+- [Learning and the mentor](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/user/en/learning.md): How Temporality teaches people: contextual «?» hints, the learning center, interactive lessons and capability mastery verified against the factual configuration.
 
 ## Engineering reference (русский)
 - [Temporality — Инженерные документы](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/index.md)
@@ -68,6 +70,7 @@ Documentation is available in Russian and English; every link below points at th
 - [Контур качества агентов (Quality Loop)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-quality-loop.md)
 - [Команды агентов](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-teams.md)
 - [Автопродолжение при упоре в лимит ходов (turn_limit_restarts)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/agent-turn-limit-restarts.md)
+- [Техническое задание: AI-Guided Onboarding & Learning](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/ai-guided-onboarding-and-learning.md)
 - [Approval model (Phase 2)](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/approval-model.md)
 - [Agent Kernel and Temporality architecture](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/architecture.md)
 - [Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком](https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docs/artifact-lifecycle.md)

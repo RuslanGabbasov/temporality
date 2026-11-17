@@ -84,6 +84,10 @@
 - [x] **Trace: bulk-memory preview** — remember_many rows expand to the whole proposition list (a dedicated preview replaced the 500-char compact that turned a 50-item batch into two ellipsized fragments); the completed event carries the recorded/skipped summary
 - [x] **Dev-stack durability** — Temporal persistence moved from dev SQLite to the shared Postgres, the dynamic config ships mounted in the constrained format Temporal 1.24+ requires, bounded shutdown drain (`stop_grace_period`), fast boot without the full-sandbox chown, the orphan sweep closes journal-only zombies, `/livez`/`/healthz` answer without a token
 
+### Done (Onboarding & learning wave, Nov 2026)
+
+- [x] **AI-Guided Onboarding & Learning** — the supervisor doubles as the mentor, P0–P4 complete: contextual guidance (semantic `data-learn` targets, spotlight overlay, «?» indicators), the learning center `/learning` (planner-built program with a deterministic fallback, lesson catalog, capability mastery as FACTUAL badges — unknown/introduced/practiced/verified checked against the live configuration, completion never implies mastery and earned levels never downgrade), interactive lessons as a floating cross-page runner with server-side sessions (pause/resume/abort survive restarts), verification steps the kernel checks against the real config, P3 proactive needs pass on its own slow cadence (≤20 capped suggestions per pass, dismissible, audited), ru/en (`docs/ai-guided-onboarding-and-learning.md`, `docs/user/learning.md`)
+
 ---
 
 ## P0 — Living Skills MVP

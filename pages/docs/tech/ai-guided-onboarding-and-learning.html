@@ -1,0 +1,1158 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>Техническое задание: AI-Guided Onboarding & Learning — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/ai-guided-onboarding-and-learning.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/ai-guided-onboarding-and-learning.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="Техническое задание: AI-Guided Onboarding & Learning — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/ai-guided-onboarding-and-learning.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Техническое задание: AI-Guided Onboarding & Learning — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/ai-guided-onboarding-and-learning.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row active" href="ai-guided-onboarding-and-learning.html">Техническое задание: AI-Guided Onboarding & Learning</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="organizational-operations-implementation.html">Реализация: Organizational Operations</a>
+<a class="docs-nav-row" href="organizational-operations-survey.html">Техническое обследование: Organizational Operations</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="runtime-for-ai-org.html">ТЗ: Обновление сайта Temporality — Runtime for AI Organizations</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="subscription-providers-claude-codex.html">Подписки Claude Code и Codex как провайдеры моделей</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Техническое задание: AI-Guided Onboarding & Learning</h1>
+
+<h2 id="1-цель-проекта"><a class="anchor" href="#1-цель-проекта" aria-label="Section link">#</a>1. Цель проекта</h2><p>Реализовать в Temporality механизм персонального интерактивного обучения пользователей возможностям платформы на основе существующего агента Supervisor.</p>
+<p>Система должна позволять Supervisor самостоятельно:</p>
+<ol>
+<li>Анализировать конфигурацию организации и определять потребности пользователя в обучении.</li>
+<li>Формировать индивидуальную программу первоначального освоения Temporality.</li>
+<li>Проводить пользователя через интерактивные уроки непосредственно в интерфейсе приложения.</li>
+<li>Показывать контекстные подсказки и демонстрации возможностей на конкретных страницах и элементах интерфейса.</li>
+<li>Объяснять назначение настроек с учетом реальных условий эксплуатации организации.</li>
+<li>Помогать пользователю выполнять настройку, предлагать значения и проверять результат.</li>
+<li>Планировать следующие занятия и возвращаться к обучению через заданные интервалы времени.</li>
+<li>Знакомить пользователей с новыми возможностями Temporality, появляющимися в последующих версиях.</li>
+<li>Отслеживать не только просмотренные материалы, но и фактическое освоение возможностей продукта.</li>
+</ol>
+<h3 id="11-продуктовая-идея"><a class="anchor" href="#11-продуктовая-идея" aria-label="Section link">#</a>1.1. Продуктовая идея</h3><p>Temporality должна не просто предоставлять пользователю инструменты для создания и управления агентной организацией, но и помогать ему научиться правильно организовывать ее работу.</p>
+<p>Supervisor становится персональным наставником администратора.</p>
+<p>В отличие от традиционного onboarding, который представляет собой фиксированную последовательность экранов и инструкций, новый механизм должен учитывать:</p>
+<ul>
+<li>структуру организации;</li>
+<li>количество и назначение агентов;</li>
+<li>существующие роли и политики;</li>
+<li>используемые интеграции;</li>
+<li>настроенные процессы;</li>
+<li>фактические сценарии эксплуатации;</li>
+<li>опыт и действия конкретного пользователя;</li>
+<li>появление новых возможностей платформы.</li>
+</ul>
+<p>Обучение должно быть адаптивным: Supervisor сам определяет, что имеет смысл объяснить конкретному пользователю и в какой момент это лучше сделать.</p>
+<h2 id="2-основные-сценарии-использования"><a class="anchor" href="#2-основные-сценарии-использования" aria-label="Section link">#</a>2. Основные сценарии использования</h2><h3 id="21-первоначальное-знакомство-с-temporality"><a class="anchor" href="#21-первоначальное-знакомство-с-temporality" aria-label="Section link">#</a>2.1. Первоначальное знакомство с Temporality</h3><p>После создания организации или первого входа администратора Supervisor проводит первичный анализ конфигурации.</p>
+<p>На основании анализа формируется индивидуальная программа освоения платформы.</p>
+<p>Пример:</p>
+<p>Организация:</p>
+<ul>
+<li>3 команды разработки;</li>
+<li>8 агентов;</li>
+<li>роли Lead, Coder, Reviewer;</li>
+<li>подключен GitHub;</li>
+<li>нет настроенных Human-in-the-loop процессов;</li>
+<li>отсутствуют формализованные критерии приемки результатов.</li>
+</ul>
+<p>Supervisor определяет, что пользователю целесообразно освоить:</p>
+<ol>
+<li>Организационную структуру и наследование политик.</li>
+<li>Механизмы делегирования между агентами.</li>
+<li>Организацию контроля качества и Reviewer.</li>
+<li>Работу с артефактами и критериями приемки.</li>
+<li>Human-in-the-loop.</li>
+<li>Мониторинг работы подразделений.</li>
+</ol>
+<p>Вместо выдачи большого списка документации Supervisor предлагает последовательное обучение.</p>
+<p>Программа может занимать 2–3 дня или более продолжительный период в зависимости от сложности организации и активности пользователя.</p>
+<p>Обучение не должно блокировать работу с приложением.</p>
+<h3 id="22-обучение-в-процессе-эксплуатации"><a class="anchor" href="#22-обучение-в-процессе-эксплуатации" aria-label="Section link">#</a>2.2. Обучение в процессе эксплуатации</h3><p>Supervisor продолжает анализировать конфигурацию и состояние организации.</p>
+<p>При обнаружении недостаточно освоенных возможностей он может предложить соответствующее обучение.</p>
+<p>Примеры:</p>
+<ul>
+<li>Пользователь создал несколько агентов, но не использует делегирование.</li>
+<li>Пользователь настроил Reviewer, но не определил критерии приемки.</li>
+<li>Пользователь создал несколько команд, но не использует организационные политики.</li>
+<li>Пользователь активно использует артефакты, но не настроил процесс согласования.</li>
+<li>Пользователь создает планы, но не использует возможности контроля выполнения.</li>
+</ul>
+<p>Supervisor должен не просто сообщать о наличии функции, а объяснять, какую конкретную пользу она принесет в существующей конфигурации.</p>
+<h3 id="23-знакомство-с-новыми-возможностями"><a class="anchor" href="#23-знакомство-с-новыми-возможностями" aria-label="Section link">#</a>2.3. Знакомство с новыми возможностями</h3><p>При выпуске новой версии Temporality появляются новые возможности.</p>
+<p>Для каждой новой возможности может быть подготовлен обучающий сценарий.</p>
+<p>Supervisor анализирует:</p>
+<ul>
+<li>доступна ли функция в текущей версии;</li>
+<li>включена ли она для организации;</li>
+<li>соответствует ли она текущему сценарию эксплуатации;</li>
+<li>использует ли пользователь аналогичную функциональность;</li>
+<li>проходил ли пользователь соответствующее обучение ранее.</li>
+</ul>
+<p>Если функция актуальна, Supervisor предлагает короткое знакомство с ней.</p>
+<p>Пример:</p>
+<p>Появилась новая возможность мониторинга работы подразделений.</p>
+<p>Supervisor обнаруживает, что в организации есть несколько подразделений, но пользователь еще не знаком с новым механизмом.</p>
+<p>При следующем посещении соответствующего раздела интерфейса появляется индикатор нового материала.</p>
+<p>По нажатию Supervisor открывает нужную страницу и демонстрирует новую возможность на примере текущей организации.</p>
+<h3 id="24-контекстная-помощь-непосредственно-в-интерфейсе"><a class="anchor" href="#24-контекстная-помощь-непосредственно-в-интерфейсе" aria-label="Section link">#</a>2.4. Контекстная помощь непосредственно в интерфейсе</h3><p>На отдельных страницах и функциональных блоках интерфейса появляется иконка наставника.</p>
+<p>Она сигнализирует о наличии дополнительного объяснения, рекомендации или обучающего сценария.</p>
+<p>Пользователь может самостоятельно запустить обучение в любой момент.</p>
+<p>Supervisor получает информацию о текущей странице и конкретном элементе интерфейса и проводит пользователя через соответствующий сценарий.</p>
+<p>Контекстная помощь должна работать независимо от общей программы обучения.</p>
+<h2 id="3-архитектурная-концепция"><a class="anchor" href="#3-архитектурная-концепция" aria-label="Section link">#</a>3. Архитектурная концепция</h2><h3 id="31-supervisor-остается-единственным-интеллектуальным-наставником"><a class="anchor" href="#31-supervisor-остается-единственным-интеллектуальным-наставником" aria-label="Section link">#</a>3.1. Supervisor остается единственным интеллектуальным наставником</h3><p>Не создавать отдельного AI-агента для обучения.</p>
+<p>Использовать существующего Supervisor с расширенным набором инструментов и дополнительным контекстом.</p>
+<p>Supervisor отвечает за:</p>
+<ul>
+<li>анализ потребностей в обучении;</li>
+<li>выбор подходящей темы;</li>
+<li>формирование последовательности занятий;</li>
+<li>адаптацию объяснений;</li>
+<li>взаимодействие с пользователем;</li>
+<li>выбор элементов интерфейса для демонстрации;</li>
+<li>проверку результатов;</li>
+<li>принятие решения о завершении обучения;</li>
+<li>планирование следующих занятий.</li>
+</ul>
+<p>Не переносить логику принятия решений в отдельный жестко запрограммированный Learning Engine.</p>
+<p>Приложение предоставляет Supervisor фактическое состояние организации, доступные обучающие материалы и инструменты взаимодействия с UI.</p>
+<h3 id="32-основные-компоненты"><a class="anchor" href="#32-основные-компоненты" aria-label="Section link">#</a>3.2. Основные компоненты</h3><p>Предполагается следующая логическая структура:</p>
+<p><strong>Supervisor</strong></p>
+<ul>
+<li>Learning Context;</li>
+<li>Learning Planner;</li>
+<li>Lesson Execution;</li>
+<li>Learning Progress;</li>
+<li>Feature Adoption.</li>
+</ul>
+<p><strong>Backend</strong></p>
+<ul>
+<li>API управления обучающими материалами;</li>
+<li>API состояния обучения;</li>
+<li>API контекстных подсказок;</li>
+<li>механизм запуска и продолжения учебных сессий;</li>
+<li>механизм планирования следующих занятий.</li>
+</ul>
+<p><strong>Frontend</strong></p>
+<ul>
+<li>Contextual Guidance;</li>
+<li>Spotlight Overlay;</li>
+<li>Interactive Walkthrough;</li>
+<li>Learning Indicator;</li>
+<li>Learning Notifications;</li>
+<li>взаимодействие с Supervisor.</li>
+</ul>
+<p><strong>Temporality Runtime</strong></p>
+<ul>
+<li>существующие механизмы запуска Supervisor;</li>
+<li>существующие инструменты и политики доступа;</li>
+<li>существующая инфраструктура долговременных процессов;</li>
+<li>существующие механизмы хранения знаний, артефактов и истории выполнения.</li>
+</ul>
+<h3 id="33-принцип-минимального-дублирования"><a class="anchor" href="#33-принцип-минимального-дублирования" aria-label="Section link">#</a>3.3. Принцип минимального дублирования</h3><p>Не создавать параллельные механизмы:</p>
+<ul>
+<li>управления задачами;</li>
+<li>управления знаниями;</li>
+<li>хранения истории взаимодействия;</li>
+<li>планирования длительных процессов;</li>
+<li>управления правами доступа;</li>
+<li>управления уведомлениями.</li>
+</ul>
+<p>По возможности использовать существующие сущности и механизмы Temporality.</p>
+<p>Новые сущности вводить только там, где требуется отдельное предметное состояние обучения.</p>
+<h2 id="4-модель-обучающего-процесса"><a class="anchor" href="#4-модель-обучающего-процесса" aria-label="Section link">#</a>4. Модель обучающего процесса</h2><h3 id="41-learning-program"><a class="anchor" href="#41-learning-program" aria-label="Section link">#</a>4.1. Learning Program</h3><p>Учебная программа конкретного пользователя в рамках организации.</p>
+<p>Содержит:</p>
+<ul>
+<li>идентификатор;</li>
+<li>организацию;</li>
+<li>пользователя;</li>
+<li>инициатора создания;</li>
+<li>тип программы;</li>
+<li>цель;</li>
+<li>описание;</li>
+<li>список учебных тем;</li>
+<li>порядок и зависимости между темами;</li>
+<li>состояние;</li>
+<li>дату создания;</li>
+<li>дату последней актуализации;</li>
+<li>параметры расписания.</li>
+</ul>
+<p>Типы программ:</p>
+<ul>
+<li>Initial Onboarding;</li>
+<li>Feature Introduction;</li>
+<li>Contextual Learning;</li>
+<li>Recommended Learning;</li>
+<li>User Initiated.</li>
+</ul>
+<p>Состояния:</p>
+<ul>
+<li>Draft;</li>
+<li>Active;</li>
+<li>Paused;</li>
+<li>Completed;</li>
+<li>Cancelled.</li>
+</ul>
+<p>Программа может пересобираться Supervisor при существенном изменении конфигурации организации.</p>
+<p>При пересборке необходимо сохранять историю завершенных уроков и подтвержденного освоения возможностей.</p>
+<h3 id="42-lesson"><a class="anchor" href="#42-lesson" aria-label="Section link">#</a>4.2. Lesson</h3><p>Отдельная учебная тема внутри программы.</p>
+<p>Содержит:</p>
+<ul>
+<li>идентификатор;</li>
+<li>название;</li>
+<li>описание;</li>
+<li>учебную цель;</li>
+<li>условия применимости;</li>
+<li>предварительные требования;</li>
+<li>последовательность шагов;</li>
+<li>связанные страницы интерфейса;</li>
+<li>критерии успешного завершения;</li>
+<li>способ проверки результата;</li>
+<li>рекомендуемую продолжительность;</li>
+<li>приоритет;</li>
+<li>версию обучающего материала.</li>
+</ul>
+<p>Состояния:</p>
+<ul>
+<li>Pending;</li>
+<li>Scheduled;</li>
+<li>Available;</li>
+<li>In Progress;</li>
+<li>Completed;</li>
+<li>Skipped;</li>
+<li>Not Applicable.</li>
+</ul>
+<p>Урок должен быть самостоятельной единицей, которую можно запустить:</p>
+<ul>
+<li>из общей программы;</li>
+<li>из контекстной иконки;</li>
+<li>из уведомления;</li>
+<li>по прямому запросу пользователя.</li>
+</ul>
+<h3 id="43-lesson-step"><a class="anchor" href="#43-lesson-step" aria-label="Section link">#</a>4.3. Lesson Step</h3><p>Отдельный шаг урока.</p>
+<p>Типы шагов:</p>
+<ul>
+<li>Explain — объяснение концепции;</li>
+<li>Navigate — переход к странице;</li>
+<li>Highlight — подсветка элемента;</li>
+<li>Demonstrate — демонстрация возможности;</li>
+<li>Example — показ примера;</li>
+<li>User Action — действие пользователя;</li>
+<li>Configuration — настройка параметра;</li>
+<li>Verification — проверка результата;</li>
+<li>Summary — подведение итогов.</li>
+</ul>
+<p>Шаг может содержать:</p>
+<ul>
+<li>текст объяснения;</li>
+<li>ссылку на страницу;</li>
+<li>идентификатор UI-элемента;</li>
+<li>пример заполнения;</li>
+<li>ожидаемое действие;</li>
+<li>условия перехода;</li>
+<li>критерии проверки;</li>
+<li>дополнительные сведения для Supervisor.</li>
+</ul>
+<p>Не следует жестко ограничивать обучение заранее заданной последовательностью шагов.</p>
+<p>Supervisor может адаптировать сценарий в процессе выполнения, пропускать уже освоенные этапы и добавлять объяснения в зависимости от вопросов пользователя.</p>
+<h3 id="44-learning-session"><a class="anchor" href="#44-learning-session" aria-label="Section link">#</a>4.4. Learning Session</h3><p>Конкретный запуск обучения.</p>
+<p>Содержит:</p>
+<ul>
+<li>пользователя;</li>
+<li>организацию;</li>
+<li>программу или урок;</li>
+<li>текущий шаг;</li>
+<li>историю действий;</li>
+<li>сообщения пользователя;</li>
+<li>действия Supervisor;</li>
+<li>состояние выполнения;</li>
+<li>время начала и завершения.</li>
+</ul>
+<p>Состояния:</p>
+<ul>
+<li>Created;</li>
+<li>Active;</li>
+<li>WaitingForUser;</li>
+<li>Paused;</li>
+<li>Completed;</li>
+<li>Aborted.</li>
+</ul>
+<p>Учебная сессия должна поддерживать длительные перерывы.</p>
+<p>Если пользователь закрыл браузер или перешел на другую страницу, при возвращении можно продолжить обучение с последнего актуального шага.</p>
+<p>Необходимо сохранять состояние не только в клиенте, но и на сервере.</p>
+<h3 id="45-learning-progress"><a class="anchor" href="#45-learning-progress" aria-label="Section link">#</a>4.5. Learning Progress</h3><p>Необходимо разделить факт прохождения урока и фактическое освоение возможности.</p>
+<p>Предусмотреть два независимых показателя:</p>
+<p><strong>Lesson Completion</strong></p>
+<p>Пользователь просмотрел объяснения и прошел предусмотренные шаги.</p>
+<p><strong>Capability Mastery</strong></p>
+<p>Пользователь действительно освоил соответствующую возможность.</p>
+<p>Примеры:</p>
+<ul>
+<li>Урок по настройке Reviewer завершен, но критерии приемки не настроены.</li>
+<li>Урок по делегированию завершен, но пользователь еще не применял делегирование.</li>
+<li>Пользователь самостоятельно настроил возможность без прохождения урока.</li>
+</ul>
+<p>В последнем случае Supervisor может зафиксировать освоение на основании проверенного состояния системы.</p>
+<p>Состояние освоения:</p>
+<ul>
+<li>Unknown;</li>
+<li>Introduced;</li>
+<li>Practiced;</li>
+<li>Verified;</li>
+<li>Needs Refresh.</li>
+</ul>
+<p>Для каждой возможности необходимо хранить источник подтверждения и дату последней проверки.</p>
+<p>Не считать просмотр материала достаточным подтверждением освоения.</p>
+<h2 id="5-learning-planner"><a class="anchor" href="#5-learning-planner" aria-label="Section link">#</a>5. Learning Planner</h2><h3 id="51-назначение"><a class="anchor" href="#51-назначение" aria-label="Section link">#</a>5.1. Назначение</h3><p>Learning Planner — логическая функция Supervisor, отвечающая за определение потребностей пользователя и формирование программы обучения.</p>
+<p>Это не отдельный планировщик исполнения задач и не самостоятельный агент.</p>
+<h3 id="52-анализ-конфигурации"><a class="anchor" href="#52-анализ-конфигурации" aria-label="Section link">#</a>5.2. Анализ конфигурации</h3><p>Supervisor получает актуальную информацию об организации:</p>
+<ul>
+<li>организационная структура;</li>
+<li>роли;</li>
+<li>агенты;</li>
+<li>политики;</li>
+<li>интеграции;</li>
+<li>планы;</li>
+<li>задачи;</li>
+<li>процессы делегирования;</li>
+<li>артефакты;</li>
+<li>механизмы согласования;</li>
+<li>доступные функции платформы.</li>
+</ul>
+<p>Анализ должен учитывать только данные, доступные конкретному пользователю и Supervisor в соответствии с политиками доступа.</p>
+<h3 id="53-определение-потребностей"><a class="anchor" href="#53-определение-потребностей" aria-label="Section link">#</a>5.3. Определение потребностей</h3><p>Для каждой возможности Temporality Supervisor должен иметь возможность определить:</p>
+<ul>
+<li>применима ли она к организации;</li>
+<li>настроена ли она;</li>
+<li>используется ли она;</li>
+<li>насколько хорошо освоена;</li>
+<li>какие предпосылки отсутствуют;</li>
+<li>какую практическую пользу даст ее освоение.</li>
+</ul>
+<p>Пример:</p>
+<p>Возможность: Human-in-the-loop.</p>
+<p>Условия применимости:</p>
+<ul>
+<li>организация использует делегирование;</li>
+<li>существуют операции, требующие участия человека;</li>
+<li>имеются пользователи, способные выполнять согласование.</li>
+</ul>
+<p>Текущее состояние:</p>
+<ul>
+<li>делегирование настроено;</li>
+<li>процессы согласования отсутствуют.</li>
+</ul>
+<p>Вывод Supervisor:</p>
+<p>Возможность актуальна, рекомендуется обучение.</p>
+<h3 id="54-приоритизация"><a class="anchor" href="#54-приоритизация" aria-label="Section link">#</a>5.4. Приоритизация</h3><p>При формировании программы учитывать:</p>
+<ol>
+<li>Критичность отсутствующей настройки.</li>
+<li>Практическую пользу для организации.</li>
+<li>Наличие необходимых предпосылок.</li>
+<li>Текущий уровень освоения.</li>
+<li>Активность пользователя.</li>
+<li>Предыдущие рекомендации.</li>
+<li>Доступное время пользователя.</li>
+</ol>
+<p>Не предлагать пользователю изучать возможности, которые не имеют смысла в его текущем сценарии эксплуатации.</p>
+<p>Не повторять рекомендации, которые пользователь отклонил или отложил, без появления существенных новых обстоятельств.</p>
+<h3 id="55-адаптивность"><a class="anchor" href="#55-адаптивность" aria-label="Section link">#</a>5.5. Адаптивность</h3><p>Learning Planner должен пересматривать программу при следующих событиях:</p>
+<ul>
+<li>изменение структуры организации;</li>
+<li>создание новых команд;</li>
+<li>добавление новых ролей;</li>
+<li>подключение интеграции;</li>
+<li>включение новой функциональности;</li>
+<li>изменение настроек;</li>
+<li>завершение важного урока;</li>
+<li>появление новой версии обучающего материала.</li>
+</ul>
+<p>Не требуется пересчитывать всю программу после каждого события.</p>
+<p>Использовать накопление изменений и периодическую актуализацию.</p>
+<h2 id="6-контекстная-помощь-в-интерфейсе"><a class="anchor" href="#6-контекстная-помощь-в-интерфейсе" aria-label="Section link">#</a>6. Контекстная помощь в интерфейсе</h2><h3 id="61-contextual-guidance-indicator"><a class="anchor" href="#61-contextual-guidance-indicator" aria-label="Section link">#</a>6.1. Contextual Guidance Indicator</h3><p>На страницах и отдельных функциональных блоках приложения должна появиться возможность отображения иконки наставника.</p>
+<p>Иконка обозначает наличие контекстного объяснения или обучающего сценария.</p>
+<p>Возможные состояния:</p>
+<ul>
+<li>Нет дополнительного материала — иконка не отображается.</li>
+<li>Есть доступное объяснение — спокойный статичный индикатор.</li>
+<li>Есть персональная рекомендация — дополнительный визуальный акцент.</li>
+<li>Появилась новая возможность — индикатор нового материала.</li>
+<li>Урок уже начат — отображается возможность продолжения.</li>
+<li>Урок завершен — индикатор может отображаться без анимации либо скрываться.</li>
+</ul>
+<p>Иконка не должна создавать визуальный шум.</p>
+<p>Анимация должна быть ненавязчивой и использоваться только при появлении действительно новой или актуальной информации.</p>
+<h3 id="62-размещение"><a class="anchor" href="#62-размещение" aria-label="Section link">#</a>6.2. Размещение</h3><p>Поддержать два уровня размещения:</p>
+<p><strong>Page Level</strong></p>
+<p>Индикатор рядом с заголовком страницы или в ее контекстной панели.</p>
+<p>Открывает общий сценарий обучения по текущему разделу.</p>
+<p><strong>Element Level</strong></p>
+<p>Индикатор рядом с конкретным полем, настройкой или функциональным блоком.</p>
+<p>Открывает объяснение именно этого элемента.</p>
+<p>Необходимо предусмотреть возможность размещения индикаторов через декларативную разметку интерфейса.</p>
+<h3 id="63-семантическая-идентификация-элементов"><a class="anchor" href="#63-семантическая-идентификация-элементов" aria-label="Section link">#</a>6.3. Семантическая идентификация элементов</h3><p>Не использовать координаты экрана для поиска и подсветки элементов.</p>
+<p>Каждый элемент, доступный для обучения, должен иметь устойчивый семантический идентификатор.</p>
+<p>Примеры:</p>
+<p><code>organization.roles.reviewer</code></p>
+<p><code>organization.policies.inheritance</code></p>
+<p><code>agent.delegation.configuration</code></p>
+<p><code>artifact.approval.rules</code></p>
+<p><code>plan.execution.strategy</code></p>
+<p><code>supervisor.settings</code></p>
+<p>Идентификаторы должны быть независимы от:</p>
+<ul>
+<li>расположения элемента;</li>
+<li>CSS-классов;</li>
+<li>локализованного текста;</li>
+<li>текущего размера окна;</li>
+<li>DOM-структуры, насколько это возможно.</li>
+</ul>
+<p>Предусмотреть централизованный каталог идентификаторов.</p>
+<p>Если элемент отсутствует или недоступен, Supervisor должен получить соответствующий результат и выбрать альтернативный сценарий.</p>
+<h3 id="64-декларативное-описание-обучаемых-элементов"><a class="anchor" href="#64-декларативное-описание-обучаемых-элементов" aria-label="Section link">#</a>6.4. Декларативное описание обучаемых элементов</h3><p>Предусмотреть возможность объявления обучаемых элементов непосредственно в компонентах интерфейса.</p>
+<p>Концептуальный пример:</p>
+<pre><code class="language-jsx">&lt;LearningTarget
+  id=&quot;organization.roles.reviewer&quot;
+  helpAvailable={true}
+  featureId=&quot;quality-control&quot;
+&gt;
+  &lt;ReviewerSettings /&gt;
+&lt;/LearningTarget&gt;
+</code></pre>
+<p>Это пример контракта, а не требование использовать именно такой компонент.</p>
+<p>Разработать единый frontend API для:</p>
+<ul>
+<li>регистрации элемента;</li>
+<li>получения контекстных материалов;</li>
+<li>отображения индикатора;</li>
+<li>передачи контекста Supervisor;</li>
+<li>выполнения spotlight;</li>
+<li>обработки событий взаимодействия.</li>
+</ul>
+<h3 id="65-spotlight-overlay"><a class="anchor" href="#65-spotlight-overlay" aria-label="Section link">#</a>6.5. Spotlight Overlay</h3><p>Реализовать универсальный механизм визуальной подсветки элементов интерфейса.</p>
+<p>Возможности:</p>
+<ul>
+<li>затемнение остальной части страницы;</li>
+<li>выделение целевого элемента;</li>
+<li>позиционирование объяснения рядом с элементом;</li>
+<li>автоматическая прокрутка к элементу;</li>
+<li>поддержка динамических страниц;</li>
+<li>корректная работа при изменении размеров окна;</li>
+<li>закрытие и переход к следующему шагу;</li>
+<li>обработка отсутствующего элемента.</li>
+</ul>
+<p>Подсветка не должна блокировать действия пользователя, если текущий шаг не требует обязательного взаимодействия.</p>
+<p>Предусмотреть режимы:</p>
+<ul>
+<li>Informational — пользователь может свободно взаимодействовать с интерфейсом;</li>
+<li>Guided — пользователь выполняет конкретное действие;</li>
+<li>Focused — временная фиксация внимания на элементе.</li>
+</ul>
+<h3 id="66-пример-заполнения"><a class="anchor" href="#66-пример-заполнения" aria-label="Section link">#</a>6.6. Пример заполнения</h3><p>Supervisor должен иметь возможность демонстрировать правильное заполнение полей.</p>
+<p>Пример:</p>
+<p>Пользователь настраивает роль Reviewer.</p>
+<p>Supervisor:</p>
+<ol>
+<li>Подсвечивает поле критериев проверки.</li>
+<li>Объясняет назначение.</li>
+<li>Показывает пример.</li>
+<li>Объясняет, почему этот пример подходит текущей организации.</li>
+<li>Предлагает применить его.</li>
+<li>Дожидается подтверждения пользователя.</li>
+<li>Проверяет результат.</li>
+</ol>
+<p>Важно:</p>
+<ul>
+<li>Пример не должен автоматически становиться рабочей настройкой.</li>
+<li>Автоматическое заполнение допускается только после явного согласия пользователя.</li>
+<li>Изменения конфигурации должны проходить через существующие API и механизмы авторизации.</li>
+<li>Нельзя обходить существующие политики безопасности ради удобства обучения.</li>
+</ul>
+<h2 id="7-инструменты-supervisor"><a class="anchor" href="#7-инструменты-supervisor" aria-label="Section link">#</a>7. Инструменты Supervisor</h2><p>Расширить набор инструментов существующего Supervisor.</p>
+<p>Названия ниже являются предлагаемым контрактом. Их необходимо адаптировать к принятой в проекте системе регистрации и именования tools.</p>
+<h3 id="71-навигация"><a class="anchor" href="#71-навигация" aria-label="Section link">#</a>7.1. Навигация</h3><p><code>navigate_to</code></p>
+<p>Назначение: открыть страницу или раздел приложения.</p>
+<p>Параметры:</p>
+<ul>
+<li>route;</li>
+<li>targetId (опционально);</li>
+<li>reason.</li>
+</ul>
+<p>Результат:</p>
+<ul>
+<li>Navigated;</li>
+<li>AlreadyThere;</li>
+<li>NotFound;</li>
+<li>AccessDenied.</li>
+</ul>
+<p>Переход должен осуществляться через штатный frontend router.</p>
+<h3 id="72-подсветка-элемента"><a class="anchor" href="#72-подсветка-элемента" aria-label="Section link">#</a>7.2. Подсветка элемента</h3><p><code>highlight_element</code></p>
+<p>Параметры:</p>
+<ul>
+<li>targetId;</li>
+<li>message;</li>
+<li>mode;</li>
+<li>placement;</li>
+<li>dismissible.</li>
+</ul>
+<p>Результат:</p>
+<ul>
+<li>Highlighted;</li>
+<li>TargetNotFound;</li>
+<li>TargetUnavailable.</li>
+</ul>
+<h3 id="73-объяснение-элемента"><a class="anchor" href="#73-объяснение-элемента" aria-label="Section link">#</a>7.3. Объяснение элемента</h3><p><code>explain_element</code></p>
+<p>Параметры:</p>
+<ul>
+<li>targetId;</li>
+<li>explanation;</li>
+<li>context;</li>
+<li>example.</li>
+</ul>
+<p>Назначение: показать объяснение в непосредственной близости от элемента интерфейса.</p>
+<h3 id="74-демонстрация-примера"><a class="anchor" href="#74-демонстрация-примера" aria-label="Section link">#</a>7.4. Демонстрация примера</h3><p><code>show_example</code></p>
+<p>Параметры:</p>
+<ul>
+<li>targetId;</li>
+<li>example;</li>
+<li>explanation;</li>
+<li>expectedOutcome.</li>
+</ul>
+<p>Пример может включать:</p>
+<ul>
+<li>текст;</li>
+<li>JSON;</li>
+<li>структурированные значения;</li>
+<li>примеры конфигурации;</li>
+<li>последовательность действий.</li>
+</ul>
+<h3 id="75-заполнение-поля"><a class="anchor" href="#75-заполнение-поля" aria-label="Section link">#</a>7.5. Заполнение поля</h3><p><code>fill_field</code></p>
+<p>Параметры:</p>
+<ul>
+<li>targetId;</li>
+<li>value;</li>
+<li>explanation;</li>
+<li>requiresConfirmation.</li>
+</ul>
+<p>Назначение: предложить заполнение поля или выполнить его после подтверждения пользователя.</p>
+<p>Инструмент не должен самостоятельно сохранять настройки.</p>
+<p>Сохранение выполняется штатными механизмами приложения.</p>
+<h3 id="76-ожидание-действия-пользователя"><a class="anchor" href="#76-ожидание-действия-пользователя" aria-label="Section link">#</a>7.6. Ожидание действия пользователя</h3><p><code>wait_for_action</code></p>
+<p>Параметры:</p>
+<ul>
+<li>actionType;</li>
+<li>targetId;</li>
+<li>expectedCondition;</li>
+<li>timeout.</li>
+</ul>
+<p>Supervisor должен получать событие о выполнении действия либо об отказе пользователя продолжать.</p>
+<p>Ожидание не должно блокировать поток выполнения без необходимости.</p>
+<h3 id="77-проверка-конфигурации"><a class="anchor" href="#77-проверка-конфигурации" aria-label="Section link">#</a>7.7. Проверка конфигурации</h3><p><code>verify_configuration</code></p>
+<p>Параметры:</p>
+<ul>
+<li>capabilityId;</li>
+<li>verificationCriteria;</li>
+<li>expectedState.</li>
+</ul>
+<p>Результат:</p>
+<ul>
+<li>Verified;</li>
+<li>PartiallyVerified;</li>
+<li>NotVerified;</li>
+<li>VerificationUnavailable.</li>
+</ul>
+<p>Проверка должна выполняться по фактическому состоянию системы, а не по ответу пользователя.</p>
+<h3 id="78-завершение-урока"><a class="anchor" href="#78-завершение-урока" aria-label="Section link">#</a>7.8. Завершение урока</h3><p><code>complete_lesson</code></p>
+<p>Параметры:</p>
+<ul>
+<li>lessonId;</li>
+<li>completionStatus;</li>
+<li>evidence;</li>
+<li>masteryStatus;</li>
+<li>summary.</li>
+</ul>
+<p>Завершение урока и подтверждение освоения возможности должны обрабатываться отдельно.</p>
+<h3 id="79-планирование-занятия"><a class="anchor" href="#79-планирование-занятия" aria-label="Section link">#</a>7.9. Планирование занятия</h3><p><code>schedule_lesson</code></p>
+<p>Параметры:</p>
+<ul>
+<li>lessonId;</li>
+<li>userId;</li>
+<li>scheduledAt;</li>
+<li>reason.</li>
+</ul>
+<p>Инструмент должен использовать существующий механизм планирования и уведомлений Temporality.</p>
+<p>Не создавать независимый scheduler только ради обучения.</p>
+<h3 id="710-получение-контекста-обучения"><a class="anchor" href="#710-получение-контекста-обучения" aria-label="Section link">#</a>7.10. Получение контекста обучения</h3><p><code>get_learning_context</code></p>
+<p>Возвращает:</p>
+<ul>
+<li>текущую страницу пользователя;</li>
+<li>доступные обучающие материалы;</li>
+<li>активную учебную сессию;</li>
+<li>текущий шаг;</li>
+<li>доступные контекстные элементы;</li>
+<li>состояние освоения соответствующих возможностей.</li>
+</ul>
+<h2 id="8-сценарий-выполнения-урока"><a class="anchor" href="#8-сценарий-выполнения-урока" aria-label="Section link">#</a>8. Сценарий выполнения урока</h2><h3 id="81-запуск"><a class="anchor" href="#81-запуск" aria-label="Section link">#</a>8.1. Запуск</h3><p>Урок может быть запущен:</p>
+<ul>
+<li>автоматически по расписанию;</li>
+<li>по инициативе Supervisor;</li>
+<li>по нажатию на контекстную иконку;</li>
+<li>из списка учебной программы;</li>
+<li>по прямому запросу пользователя.</li>
+</ul>
+<h3 id="82-начало-занятия"><a class="anchor" href="#82-начало-занятия" aria-label="Section link">#</a>8.2. Начало занятия</h3><p>Supervisor:</p>
+<ol>
+<li>Определяет текущий контекст.</li>
+<li>Проверяет актуальность урока.</li>
+<li>Проверяет доступность необходимых страниц и элементов.</li>
+<li>Проверяет предварительные условия.</li>
+<li>Объясняет пользователю цель занятия.</li>
+<li>Предлагает начать.</li>
+</ol>
+<p>Необходимо учитывать, что пользователь может быть занят другой операцией.</p>
+<p>Автоматически начинать полноэкранный обучающий сценарий без согласия пользователя нельзя.</p>
+<h3 id="83-выполнение"><a class="anchor" href="#83-выполнение" aria-label="Section link">#</a>8.3. Выполнение</h3><p>В ходе урока Supervisor управляет последовательностью шагов.</p>
+<p>Пример:</p>
+<p>Урок: настройка контроля качества.</p>
+<ol>
+<li>Объяснить, зачем нужен Reviewer.</li>
+<li>Открыть раздел ролей.</li>
+<li>Подсветить существующую роль Reviewer.</li>
+<li>Объяснить ее назначение.</li>
+<li>Перейти к настройке критериев приемки.</li>
+<li>Показать пример.</li>
+<li>Предложить адаптировать пример.</li>
+<li>Дождаться подтверждения.</li>
+<li>Проверить сохраненную конфигурацию.</li>
+<li>Подвести итог.</li>
+</ol>
+<p>В любой момент пользователь может:</p>
+<ul>
+<li>задать вопрос;</li>
+<li>попросить дополнительное объяснение;</li>
+<li>пропустить шаг;</li>
+<li>отложить урок;</li>
+<li>завершить занятие.</li>
+</ul>
+<p>Supervisor должен учитывать вопросы и изменять последовательность обучения, если это помогает достижению цели.</p>
+<h3 id="84-завершение"><a class="anchor" href="#84-завершение" aria-label="Section link">#</a>8.4. Завершение</h3><p>После выполнения урока Supervisor:</p>
+<ul>
+<li>подводит итог;</li>
+<li>показывает, что было изучено;</li>
+<li>указывает, какие изменения действительно применены;</li>
+<li>фиксирует подтвержденные результаты;</li>
+<li>определяет уровень освоения;</li>
+<li>предлагает следующий шаг.</li>
+</ul>
+<p>Если пользователь посмотрел объяснение, но не выполнил практическое действие, урок может считаться завершенным, однако Capability Mastery не должен автоматически становиться Verified.</p>
+<h2 id="9-планирование-обучения"><a class="anchor" href="#9-планирование-обучения" aria-label="Section link">#</a>9. Планирование обучения</h2><h3 id="91-первоначальная-программа"><a class="anchor" href="#91-первоначальная-программа" aria-label="Section link">#</a>9.1. Первоначальная программа</h3><p>После первого входа администратора запускается первичная оценка конфигурации.</p>
+<p>Supervisor формирует программу на несколько дней.</p>
+<p>Пример:</p>
+<p><strong>День 1</strong></p>
+<ul>
+<li>Организационная структура.</li>
+<li>Роли и политики.</li>
+<li>Основы делегирования.</li>
+</ul>
+<p><strong>День 2</strong></p>
+<ul>
+<li>Контроль качества.</li>
+<li>Артефакты.</li>
+<li>Проверка результатов.</li>
+</ul>
+<p><strong>День 3</strong></p>
+<ul>
+<li>Human-in-the-loop.</li>
+<li>Мониторинг подразделений.</li>
+<li>Практические сценарии эксплуатации.</li>
+</ul>
+<p>Это пример, а не фиксированная программа.</p>
+<p>Количество и порядок занятий определяет Supervisor.</p>
+<h3 id="92-расписание"><a class="anchor" href="#92-расписание" aria-label="Section link">#</a>9.2. Расписание</h3><p>Предусмотреть:</p>
+<ul>
+<li>рекомендованное время следующего занятия;</li>
+<li>интервал между занятиями;</li>
+<li>возможность переноса;</li>
+<li>паузу в обучении;</li>
+<li>продолжение незавершенного урока.</li>
+</ul>
+<p>Частота обучения должна быть ограничена.</p>
+<p>Не отправлять несколько обучающих уведомлений подряд.</p>
+<p>Если пользователь не реагирует на рекомендации, Supervisor должен увеличивать интервал между повторными предложениями.</p>
+<h3 id="93-триггеры"><a class="anchor" href="#93-триггеры" aria-label="Section link">#</a>9.3. Триггеры</h3><p>Предусмотреть следующие события:</p>
+<ul>
+<li>первый вход пользователя;</li>
+<li>создание организации;</li>
+<li>изменение организационной структуры;</li>
+<li>подключение новой интеграции;</li>
+<li>появление новой функциональности;</li>
+<li>завершение предыдущего урока;</li>
+<li>обнаружение существенного пробела в конфигурации;</li>
+<li>прямой запрос пользователя.</li>
+</ul>
+<p>Обычные события могут обрабатываться пакетно.</p>
+<p>Не запускать полноценный анализ Supervisor после каждого изменения интерфейса или каждого действия пользователя.</p>
+<h3 id="94-взаимодействие-с-существующим-планированием"><a class="anchor" href="#94-взаимодействие-с-существующим-планированием" aria-label="Section link">#</a>9.4. Взаимодействие с существующим планированием</h3><p>Использовать существующие механизмы долговременного исполнения и расписания Temporality.</p>
+<p>Если для учебных процессов используется Temporal, применять его для:</p>
+<ul>
+<li>ожидания запланированного времени;</li>
+<li>продолжения незавершенного процесса;</li>
+<li>обработки событий;</li>
+<li>повторных попыток;</li>
+<li>восстановления после перезапуска.</li>
+</ul>
+<p>Не создавать собственный механизм таймеров и планирования.</p>
+<h2 id="10-обучение-новым-функциям"><a class="anchor" href="#10-обучение-новым-функциям" aria-label="Section link">#</a>10. Обучение новым функциям</h2><h3 id="101-каталог-возможностей"><a class="anchor" href="#101-каталог-возможностей" aria-label="Section link">#</a>10.1. Каталог возможностей</h3><p>Необходимо предусмотреть каталог обучаемых возможностей Temporality.</p>
+<p>Для каждой возможности хранить:</p>
+<ul>
+<li>capabilityId;</li>
+<li>название;</li>
+<li>описание;</li>
+<li>доступную версию;</li>
+<li>условия доступности;</li>
+<li>условия применимости;</li>
+<li>связанные страницы;</li>
+<li>связанные UI-элементы;</li>
+<li>обучающие материалы;</li>
+<li>критерии освоения.</li>
+</ul>
+<p>Каталог должен быть частью поставки соответствующей функциональности.</p>
+<h3 id="102-описание-новой-возможности"><a class="anchor" href="#102-описание-новой-возможности" aria-label="Section link">#</a>10.2. Описание новой возможности</h3><p>При добавлении новой функции разработчик должен иметь возможность определить:</p>
+<ul>
+<li>что появилось;</li>
+<li>какую проблему решает;</li>
+<li>кому это полезно;</li>
+<li>как включить;</li>
+<li>как использовать;</li>
+<li>как проверить результат;</li>
+<li>где в интерфейсе находится функциональность.</li>
+</ul>
+<p>На основании этих сведений создается обучающий сценарий.</p>
+<p>Материалы должны иметь версионность.</p>
+<p>Изменение функциональности должно позволять актуализировать существующие уроки без потери истории их прохождения.</p>
+<h3 id="103-определение-целевой-аудитории"><a class="anchor" href="#103-определение-целевой-аудитории" aria-label="Section link">#</a>10.3. Определение целевой аудитории</h3><p>Supervisor самостоятельно определяет, кому стоит предложить знакомство с новой возможностью.</p>
+<p>Например:</p>
+<ul>
+<li>новая функция управления ролями интересна администраторам;</li>
+<li>новые возможности делегирования интересны пользователям, управляющим агентными командами;</li>
+<li>новые механизмы согласования интересны владельцам процессов;</li>
+<li>новые инструменты мониторинга интересны руководителям подразделений.</li>
+</ul>
+<p>Не показывать новые функции всем пользователям без учета их полномочий и сценариев работы.</p>
+<h3 id="104-контекстное-знакомство"><a class="anchor" href="#104-контекстное-знакомство" aria-label="Section link">#</a>10.4. Контекстное знакомство</h3><p>При наличии обучающего материала и подходящего элемента интерфейса показывать индикатор новой возможности.</p>
+<p>По нажатию запускается короткий сценарий:</p>
+<ol>
+<li>Что появилось.</li>
+<li>Какую задачу решает.</li>
+<li>Почему это может быть полезно пользователю.</li>
+<li>Где находится.</li>
+<li>Как попробовать.</li>
+<li>Как проверить результат.</li>
+</ol>
+<h2 id="11-хранение-обучающих-материалов"><a class="anchor" href="#11-хранение-обучающих-материалов" aria-label="Section link">#</a>11. Хранение обучающих материалов</h2><h3 id="111-формат"><a class="anchor" href="#111-формат" aria-label="Section link">#</a>11.1. Формат</h3><p>Обучающие материалы должны быть доступны Supervisor в структурированном виде.</p>
+<p>Предпочтительно использовать существующую систему артефактов и знаний Temporality.</p>
+<p>Не создавать отдельную систему хранения документации.</p>
+<p>Материал должен поддерживать:</p>
+<ul>
+<li>Markdown-описание;</li>
+<li>структурированные метаданные;</li>
+<li>шаги обучения;</li>
+<li>ссылки на UI-элементы;</li>
+<li>примеры конфигурации;</li>
+<li>критерии проверки;</li>
+<li>версию;</li>
+<li>область применимости.</li>
+</ul>
+<h3 id="112-разделение-содержания-и-исполнения"><a class="anchor" href="#112-разделение-содержания-и-исполнения" aria-label="Section link">#</a>11.2. Разделение содержания и исполнения</h3><p>Необходимо разделить:</p>
+<p><strong>Learning Definition</strong></p>
+<p>Описание того, чему и как нужно учить.</p>
+<p><strong>Learning Execution</strong></p>
+<p>Фактический ход конкретного занятия.</p>
+<p><strong>Learning Evidence</strong></p>
+<p>Подтверждения того, что пользователь выполнил действие и достиг результата.</p>
+<p>Это позволит использовать один учебный материал для разных пользователей и организаций, не смешивая общую методику с персональной историей.</p>
+<h3 id="113-версионность"><a class="anchor" href="#113-версионность" aria-label="Section link">#</a>11.3. Версионность</h3><p>При изменении функциональности:</p>
+<ul>
+<li>старые материалы не должны незаметно применяться к новой версии;</li>
+<li>активные уроки должны проверять актуальность;</li>
+<li>при необходимости Supervisor должен предложить обновленный сценарий;</li>
+<li>подтвержденные результаты освоения должны сохраняться, если смысл возможности не изменился.</li>
+</ul>
+<h2 id="12-ui-и-ux"><a class="anchor" href="#12-ui-и-ux" aria-label="Section link">#</a>12. UI и UX</h2><h3 id="121-общие-требования"><a class="anchor" href="#121-общие-требования" aria-label="Section link">#</a>12.1. Общие требования</h3><p>Обучение должно быть органичной частью интерфейса Temporality.</p>
+<p>Не создавать отдельный портал обучения, который требует переключения между приложением и документацией.</p>
+<p>Основное взаимодействие происходит в том же интерфейсе, где пользователь настраивает организацию.</p>
+<h3 id="122-визуальное-представление"><a class="anchor" href="#122-визуальное-представление" aria-label="Section link">#</a>12.2. Визуальное представление</h3><p>Предусмотреть:</p>
+<ul>
+<li>иконку наставника;</li>
+<li>ненавязчивую анимацию появления;</li>
+<li>spotlight;</li>
+<li>всплывающие объяснения;</li>
+<li>примеры заполнения;</li>
+<li>индикатор прогресса урока;</li>
+<li>переход к следующему шагу;</li>
+<li>возможность остановить обучение.</li>
+</ul>
+<h3 id="123-общение-с-supervisor"><a class="anchor" href="#123-общение-с-supervisor" aria-label="Section link">#</a>12.3. Общение с Supervisor</h3><p>Пользователь должен иметь возможность задавать вопросы в естественной форме непосредственно в ходе обучения.</p>
+<p>Пример:</p>
+<p>«Почему ты предлагаешь именно такую конфигурацию?»</p>
+<p>«А что будет, если у нас появится еще одна команда?»</p>
+<p>«Покажи, как это будет работать на моем примере».</p>
+<p>Supervisor должен отвечать с учетом текущего урока, конфигурации организации и конкретного элемента интерфейса.</p>
+<p>Не создавать отдельную чат-систему.</p>
+<p>Использовать существующий интерфейс взаимодействия с Supervisor.</p>
+<h3 id="124-общий-центр-обучения"><a class="anchor" href="#124-общий-центр-обучения" aria-label="Section link">#</a>12.4. Общий центр обучения</h3><p>Предусмотреть страницу или раздел, где пользователь может увидеть:</p>
+<ul>
+<li>текущую учебную программу;</li>
+<li>доступные занятия;</li>
+<li>завершенные уроки;</li>
+<li>отложенные рекомендации;</li>
+<li>новые возможности;</li>
+<li>освоенные возможности;</li>
+<li>текущий прогресс.</li>
+</ul>
+<p>Этот раздел не должен превращаться в отдельную LMS.</p>
+<p>Его задача — дать пользователю возможность управлять собственным процессом знакомства с Temporality.</p>
+<h2 id="13-многопользовательская-модель"><a class="anchor" href="#13-многопользовательская-модель" aria-label="Section link">#</a>13. Многопользовательская модель</h2><p>Обучение привязывается к конкретному пользователю, а не только к организации.</p>
+<p>У разных пользователей одной организации могут быть разные программы.</p>
+<p>Пример:</p>
+<ul>
+<li>Администратор изучает организационную структуру, политики и интеграции.</li>
+<li>Руководитель подразделения изучает планы, контроль выполнения и мониторинг.</li>
+<li>Пользователь, работающий с артефактами, изучает согласование и проверку результатов.</li>
+</ul>
+<p>Supervisor должен учитывать роль пользователя и доступные ему операции.</p>
+<p>Необходимо разделять:</p>
+<ul>
+<li>общие знания об организации;</li>
+<li>индивидуальный прогресс обучения;</li>
+<li>персональные рекомендации;</li>
+<li>подтвержденные организационные настройки.</li>
+</ul>
+<p>Если другой администратор уже настроил определенную возможность, Supervisor должен учитывать фактическое состояние организации, но не считать автоматически, что текущий пользователь ее освоил.</p>
+<h2 id="14-безопасность-и-контроль-действий"><a class="anchor" href="#14-безопасность-и-контроль-действий" aria-label="Section link">#</a>14. Безопасность и контроль действий</h2><h3 id="141-авторизация"><a class="anchor" href="#141-авторизация" aria-label="Section link">#</a>14.1. Авторизация</h3><p>Все операции Supervisor выполняются в пределах существующих полномочий.</p>
+<p>Инструменты навигации, подсветки и объяснения не должны предоставлять доступ к закрытым страницам или данным.</p>
+<h3 id="142-изменение-конфигурации"><a class="anchor" href="#142-изменение-конфигурации" aria-label="Section link">#</a>14.2. Изменение конфигурации</h3><p>Обучение не должно обходить существующие механизмы изменения конфигурации.</p>
+<p>Для любых операций, влияющих на работу организации:</p>
+<ol>
+<li>Supervisor объясняет предлагаемое изменение.</li>
+<li>Показывает ожидаемый результат.</li>
+<li>Запрашивает подтверждение пользователя.</li>
+<li>Выполняет действие через штатный API.</li>
+<li>Проверяет результат.</li>
+</ol>
+<p>Не допускается автоматическое изменение рабочих настроек только на основании того, что пользователь начал обучающий сценарий.</p>
+<h3 id="143-изоляция-организаций"><a class="anchor" href="#143-изоляция-организаций" aria-label="Section link">#</a>14.3. Изоляция организаций</h3><p>Все программы, сессии, материалы с организационным контекстом и результаты обучения должны соблюдать существующую модель tenant isolation.</p>
+<p>Не допускать использования конфигурации или учебного контекста одной организации в другой.</p>
+<h3 id="144-аудит"><a class="anchor" href="#144-аудит" aria-label="Section link">#</a>14.4. Аудит</h3><p>Фиксировать:</p>
+<ul>
+<li>запуск урока;</li>
+<li>действия Supervisor;</li>
+<li>действия пользователя;</li>
+<li>предложения по изменению настроек;</li>
+<li>подтверждения;</li>
+<li>результаты проверки;</li>
+<li>завершение или отмену урока.</li>
+</ul>
+<p>Не дублировать существующий Trace.</p>
+<p>Историю взаимодействия следует связывать с соответствующими Run/Trace, а предметный прогресс обучения хранить отдельно.</p>
+<h2 id="15-события-и-аналитика"><a class="anchor" href="#15-события-и-аналитика" aria-label="Section link">#</a>15. События и аналитика</h2><p>Предусмотреть события:</p>
+<ul>
+<li>LearningProgramCreated;</li>
+<li>LearningProgramUpdated;</li>
+<li>LessonScheduled;</li>
+<li>LessonStarted;</li>
+<li>LessonPaused;</li>
+<li>LessonResumed;</li>
+<li>LessonCompleted;</li>
+<li>LessonSkipped;</li>
+<li>GuidanceDisplayed;</li>
+<li>GuidanceOpened;</li>
+<li>GuidanceDismissed;</li>
+<li>UserActionCompleted;</li>
+<li>ConfigurationVerified;</li>
+<li>CapabilityMastered;</li>
+<li>FeatureIntroductionCreated.</li>
+</ul>
+<p>Использовать существующую систему событий и наблюдаемости Temporality.</p>
+<h3 id="151-метрики"><a class="anchor" href="#151-метрики" aria-label="Section link">#</a>15.1. Метрики</h3><p>Необходимо иметь возможность оценивать:</p>
+<ul>
+<li>долю пользователей, завершивших первоначальное обучение;</li>
+<li>долю пользователей, выполнивших практические задания;</li>
+<li>долю освоенных возможностей;</li>
+<li>конверсию контекстных подсказок в запуск урока;</li>
+<li>конверсию уроков в фактическое применение функциональности;</li>
+<li>долю отложенных и отклоненных рекомендаций;</li>
+<li>среднюю продолжительность занятий;</li>
+<li>количество повторных обращений по одной теме.</li>
+</ul>
+<p>Главная метрика — не количество просмотренных уроков, а доля пользователей, которые начали эффективно использовать соответствующие возможности Temporality.</p>
+<h2 id="16-нефункциональные-требования"><a class="anchor" href="#16-нефункциональные-требования" aria-label="Section link">#</a>16. Нефункциональные требования</h2><ol>
+<li>Отображение контекстных индикаторов не должно заметно ухудшать производительность интерфейса.</li>
+<li>Регистрация обучаемых UI-элементов не должна требовать тяжелого периодического сканирования DOM.</li>
+<li>Подсветка должна работать в SPA-навигации.</li>
+<li>Учебные сессии должны восстанавливаться после перезапуска браузера и backend.</li>
+<li>Обучение не должно блокировать обычную работу пользователя.</li>
+<li>Ошибки обучения не должны влиять на выполнение рабочих Run.</li>
+<li>Отсутствие обучающего материала не должно создавать ошибки в интерфейсе.</li>
+<li>Система должна поддерживать локализацию.</li>
+<li>Обучение должно быть доступно с учетом прав пользователя.</li>
+<li>Должна существовать возможность отключения проактивных обучающих уведомлений.</li>
+<li>Должна поддерживаться адаптация под разные размеры экрана.</li>
+<li>При отсутствии соединения с Supervisor интерфейс должен корректно завершать или приостанавливать интерактивный сценарий.</li>
+</ol>
+<h2 id="17-этапы-реализации"><a class="anchor" href="#17-этапы-реализации" aria-label="Section link">#</a>17. Этапы реализации</h2><h3 id="p0-инфраструктура-контекстной-помощи"><a class="anchor" href="#p0-инфраструктура-контекстной-помощи" aria-label="Section link">#</a>P0. Инфраструктура контекстной помощи</h3><p>Цель: получить возможность запускать интерактивные объяснения из любого места интерфейса.</p>
+<p>Реализовать:</p>
+<ul>
+<li>единый каталог семантических UI-идентификаторов;</li>
+<li>регистрацию обучаемых элементов;</li>
+<li>Contextual Guidance Indicator;</li>
+<li>Spotlight Overlay;</li>
+<li>позиционирование объяснений;</li>
+<li>навигацию к элементам;</li>
+<li>базовые инструменты Supervisor для работы с UI;</li>
+<li>передачу контекста текущей страницы.</li>
+</ul>
+<p>Критерий готовности:</p>
+<p>Supervisor может открыть страницу, подсветить конкретный элемент и объяснить его назначение в контексте текущей организации.</p>
+<h3 id="p1-интерактивные-уроки"><a class="anchor" href="#p1-интерактивные-уроки" aria-label="Section link">#</a>P1. Интерактивные уроки</h3><p>Цель: научить Supervisor проводить пользователя через практические сценарии.</p>
+<p>Реализовать:</p>
+<ul>
+<li>Learning Definition;</li>
+<li>Lesson Steps;</li>
+<li>Learning Session;</li>
+<li>сохранение прогресса;</li>
+<li>ожидание действий пользователя;</li>
+<li>демонстрацию примеров;</li>
+<li>предложение заполнения полей;</li>
+<li>проверку результата;</li>
+<li>разделение Completion и Mastery.</li>
+</ul>
+<p>Критерий готовности:</p>
+<p>Supervisor может провести полноценный урок от объяснения до проверки фактического результата настройки.</p>
+<h3 id="p2-персональная-программа-обучения"><a class="anchor" href="#p2-персональная-программа-обучения" aria-label="Section link">#</a>P2. Персональная программа обучения</h3><p>Цель: автоматизировать первоначальное погружение в Temporality.</p>
+<p>Реализовать:</p>
+<ul>
+<li>анализ конфигурации организации;</li>
+<li>определение учебных потребностей;</li>
+<li>формирование Learning Program;</li>
+<li>приоритизацию уроков;</li>
+<li>персональное расписание;</li>
+<li>общий центр обучения;</li>
+<li>возобновление незавершенных занятий.</li>
+</ul>
+<p>Критерий готовности:</p>
+<p>После первого входа администратор получает индивидуальную программу обучения, сформированную на основании реальной конфигурации организации.</p>
+<h3 id="p3-проактивное-обучение"><a class="anchor" href="#p3-проактивное-обучение" aria-label="Section link">#</a>P3. Проактивное обучение</h3><p>Цель: превратить Supervisor в постоянного наставника.</p>
+<p>Реализовать:</p>
+<ul>
+<li>периодический анализ потребностей;</li>
+<li>реакцию на существенные изменения конфигурации;</li>
+<li>рекомендации по освоению возможностей;</li>
+<li>управление частотой предложений;</li>
+<li>отложенные занятия;</li>
+<li>учет отказов и предыдущих рекомендаций.</li>
+</ul>
+<p>Критерий готовности:</p>
+<p>Supervisor самостоятельно предлагает обучение при возникновении обоснованной потребности, не создавая избыточных уведомлений.</p>
+<h3 id="p4-автоматическое-внедрение-новых-возможностей"><a class="anchor" href="#p4-автоматическое-внедрение-новых-возможностей" aria-label="Section link">#</a>P4. Автоматическое внедрение новых возможностей</h3><p>Цель: использовать Supervisor как механизм распространения новых возможностей Temporality.</p>
+<p>Реализовать:</p>
+<ul>
+<li>каталог возможностей;</li>
+<li>привязку обучающих материалов к версиям;</li>
+<li>определение целевой аудитории;</li>
+<li>проверку актуальности;</li>
+<li>контекстные индикаторы новых возможностей;</li>
+<li>короткие сценарии знакомства;</li>
+<li>проверку фактического использования новых возможностей.</li>
+</ul>
+<p>Критерий готовности:</p>
+<p>Разработчик добавляет новую возможность и ее обучающий сценарий. После обновления Temporality Supervisor самостоятельно определяет подходящих пользователей и предлагает им знакомство с функцией.</p>
+<h2 id="18-демонстрационные-сценарии-для-приемки"><a class="anchor" href="#18-демонстрационные-сценарии-для-приемки" aria-label="Section link">#</a>18. Демонстрационные сценарии для приемки</h2><h3 id="сценарий-a-первоначальный-онбординг"><a class="anchor" href="#сценарий-a-первоначальный-онбординг" aria-label="Section link">#</a>Сценарий A. Первоначальный онбординг</h3><ol>
+<li>Создается новая организация.</li>
+<li>Администратор входит в систему.</li>
+<li>Supervisor анализирует конфигурацию.</li>
+<li>Создает индивидуальную программу.</li>
+<li>Предлагает первое занятие.</li>
+<li>Пользователь запускает урок.</li>
+<li>Supervisor открывает нужный раздел.</li>
+<li>Подсвечивает конкретный элемент.</li>
+<li>Объясняет назначение.</li>
+<li>Показывает пример.</li>
+<li>Пользователь выполняет действие.</li>
+<li>Supervisor проверяет результат.</li>
+<li>Фиксирует прогресс.</li>
+<li>Планирует следующее занятие.</li>
+</ol>
+<p>Ожидаемый результат: программа обучения работает сквозным образом, а прогресс сохраняется.</p>
+<h3 id="сценарий-b-контекстное-обучение"><a class="anchor" href="#сценарий-b-контекстное-обучение" aria-label="Section link">#</a>Сценарий B. Контекстное обучение</h3><ol>
+<li>Пользователь открывает страницу настройки роли.</li>
+<li>Рядом с определенным блоком видит иконку наставника.</li>
+<li>Нажимает на нее.</li>
+<li>Supervisor объясняет назначение настройки.</li>
+<li>Подсвечивает соответствующее поле.</li>
+<li>Показывает пример.</li>
+<li>Отвечает на уточняющий вопрос.</li>
+</ol>
+<p>Ожидаемый результат: пользователь получает объяснение непосредственно в контексте текущего интерфейса.</p>
+<h3 id="сценарий-c-практическое-обучение"><a class="anchor" href="#сценарий-c-практическое-обучение" aria-label="Section link">#</a>Сценарий C. Практическое обучение</h3><ol>
+<li>Supervisor предлагает настроить критерии приемки.</li>
+<li>Пользователь запускает урок.</li>
+<li>Supervisor показывает подходящий пример.</li>
+<li>Пользователь соглашается применить его.</li>
+<li>Настройка сохраняется штатным механизмом.</li>
+<li>Supervisor проверяет фактическое состояние.</li>
+<li>Фиксирует освоение возможности.</li>
+</ol>
+<p>Ожидаемый результат: система отличает просмотр объяснения от реального освоения функции.</p>
+<h3 id="сценарий-d-новая-возможность"><a class="anchor" href="#сценарий-d-новая-возможность" aria-label="Section link">#</a>Сценарий D. Новая возможность</h3><ol>
+<li>В новой версии появляется функциональность.</li>
+<li>Для нее опубликован обучающий материал.</li>
+<li>Supervisor анализирует применимость к существующим организациям.</li>
+<li>Выбирает подходящих пользователей.</li>
+<li>При посещении соответствующего раздела появляется индикатор.</li>
+<li>Пользователь запускает знакомство.</li>
+<li>Supervisor показывает новую возможность.</li>
+<li>Пользователь пробует ее на своей организации.</li>
+<li>Результат фиксируется.</li>
+</ol>
+<p>Ожидаемый результат: новая функциональность получает встроенный механизм распространения и освоения.</p>
+<h3 id="сценарий-e-прерывание-обучения"><a class="anchor" href="#сценарий-e-прерывание-обучения" aria-label="Section link">#</a>Сценарий E. Прерывание обучения</h3><ol>
+<li>Пользователь начинает урок.</li>
+<li>Проходит несколько шагов.</li>
+<li>Закрывает браузер.</li>
+<li>Возвращается позднее.</li>
+<li>Открывает обучение.</li>
+<li>Продолжает с последнего актуального шага.</li>
+</ol>
+<p>Ожидаемый результат: учебная сессия корректно восстанавливается.</p>
+<h3 id="сценарий-f-неактуальная-рекомендация"><a class="anchor" href="#сценарий-f-неактуальная-рекомендация" aria-label="Section link">#</a>Сценарий F. Неактуальная рекомендация</h3><ol>
+<li>Supervisor предлагает освоить определенную функцию.</li>
+<li>Пользователь самостоятельно настраивает ее без обучения.</li>
+<li>Supervisor обнаруживает изменение конфигурации.</li>
+<li>Проверяет результат.</li>
+<li>Не предлагает повторно пройти уже ненужный урок.</li>
+<li>Фиксирует подтвержденное освоение, если имеются достаточные доказательства.</li>
+</ol>
+<p>Ожидаемый результат: обучение учитывает реальные действия пользователя и не превращается в обязательное прохождение формальных уроков.</p>
+<h2 id="19-ограничения-и-принципы-реализации"><a class="anchor" href="#19-ограничения-и-принципы-реализации" aria-label="Section link">#</a>19. Ограничения и принципы реализации</h2><ol>
+<li>Не создавать отдельного обучающего агента.</li>
+<li>Не создавать отдельную LMS.</li>
+<li>Не дублировать существующие механизмы знаний, артефактов, Trace и долговременного планирования.</li>
+<li>Не использовать координаты экрана для идентификации элементов интерфейса.</li>
+<li>Не привязывать обучающие сценарии к CSS-классам и локализованным текстам.</li>
+<li>Не заставлять пользователя проходить фиксированную программу.</li>
+<li>Не запускать обучение без учета текущей занятости пользователя.</li>
+<li>Не менять рабочую конфигурацию без подтверждения.</li>
+<li>Не считать просмотр урока подтверждением освоения.</li>
+<li>Не предлагать возможности, которые не имеют практической применимости.</li>
+<li>Не создавать отдельную систему уведомлений.</li>
+<li>Не допускать влияния обучения на стабильность обычных рабочих Run.</li>
+</ol>
+<h2 id="20-ожидаемый-результат"><a class="anchor" href="#20-ожидаемый-результат" aria-label="Section link">#</a>20. Ожидаемый результат</h2><p>После реализации Temporality получает встроенный механизм AI-Guided Onboarding &amp; Learning.</p>
+<p>Пользователь не должен самостоятельно изучать всю документацию и разбираться во всех возможностях платформы.</p>
+<p>Вместо этого Supervisor:</p>
+<ul>
+<li>знакомится с организацией;</li>
+<li>понимает реальные условия эксплуатации;</li>
+<li>определяет, чему стоит научить пользователя;</li>
+<li>проводит обучение непосредственно в интерфейсе;</li>
+<li>помогает выполнять настройки;</li>
+<li>проверяет результат;</li>
+<li>запоминает освоенные возможности;</li>
+<li>возвращается к обучению в подходящий момент;</li>
+<li>знакомит с новыми функциями по мере их появления.</li>
+</ul>
+<p>Таким образом, Supervisor становится не только управляющим и наблюдающим компонентом агентной организации, но и персональным наставником человека, который этой организацией управляет.</p>
+<p><strong>Ключевой принцип: Temporality должна не просто предоставлять пользователю возможности, а помогать ему научиться извлекать из них практическую пользу.</strong></p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="agent-turn-limit-restarts.html"><small>← Назад</small><strong>Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</strong></a>
+    <a class="pager-next" href="approval-model.html"><small>Далее →</small><strong>Approval model (Phase 2)</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

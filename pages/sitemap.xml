@@ -110,6 +110,13 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://temporality.tech/docs/learning.html</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/learning.html"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/learning.html"/>
+    <lastmod>2026-11-17</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://temporality.tech/docs/observability.html</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://temporality.tech/docs/en/observability.html"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/observability.html"/>
@@ -231,6 +238,11 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://temporality.tech/docs/en/learning.html</loc>
+    <lastmod>2026-11-17</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://temporality.tech/docs/en/observability.html</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.6</priority>
@@ -322,6 +334,11 @@
   </url>
   <url>
     <loc>https://temporality.tech/docs/tech/agent-turn-limit-restarts.html</loc>
+    <lastmod>2026-11-17</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://temporality.tech/docs/tech/ai-guided-onboarding-and-learning.html</loc>
     <lastmod>2026-11-17</lastmod>
     <priority>0.7</priority>
   </url>
