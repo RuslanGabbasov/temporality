@@ -3382,6 +3382,8 @@ export const ru: Record<string, string> = {
     'orgwork.runs_empty': 'Ранов по этой задаче пока нет',
     'orgwork.select_hint': 'Выберите задачу на доске — её прогоны и осведомлённость появятся здесь. Пока ничего не выбрано: живые прогоны, прогоны без задачи и граф планов.',
     'orgwork.open_flow': 'Поток осведомлённости',
+    'orgwork.open_flow_short': 'Поток',
+    'orgwork.open_trace': 'Открыть трассу',
     'orgwork.ungrouped_title': 'Раны без задачи',
     'orgwork.active_title': 'Активные раны',
     'orgwork.active_empty': 'Сейчас в этом охвате раны не выполняются',

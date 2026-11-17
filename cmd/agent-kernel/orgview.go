@@ -133,10 +133,19 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 				metrics["completed_runs_24h"]++
 			}
 			if len(runSummaries) < orgWorkViewRunsPerCard {
+				// Per-run project (the trace deep-link needs it) and per-run
+				// awareness counters (the flow entry shows only where signals
+				// actually exist — a bare button on every row was noise).
+				runAwareness := counts[run.RunID]
 				summary := map[string]any{
 					"run_id": run.RunID, "status": run.Status, "title": run.Title,
 					"urgent": run.Urgent, "actor_id": run.ActorID,
 					"last_event_at": orgTimePtrOr(run.LastEventAt, run.StartedAt),
+					"project_id": run.ProjectID,
+					"awareness": map[string]int{
+						"selected": runAwareness.Selected, "delivered": runAwareness.Delivered,
+						"consumed": runAwareness.Consumed, "details": runAwareness.DetailsRequested,
+					},
 				}
 				runSummaries = append(runSummaries, summary)
 			}
@@ -177,10 +186,28 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 		}
 	}
 
+	// Ungrouped runs travel as the same per-run summaries the cards carry
+	// (the old payload was a bare count — the inspector could not render a
+	// single row of them).
+	ungroupedSummaries := make([]map[string]any, 0, len(ungrouped))
+	for _, run := range ungrouped {
+		runAwareness := counts[run.RunID]
+		ungroupedSummaries = append(ungroupedSummaries, map[string]any{
+			"run_id": run.RunID, "status": run.Status, "title": run.Title,
+			"urgent": run.Urgent, "actor_id": run.ActorID,
+			"last_event_at": orgTimePtrOr(run.LastEventAt, run.StartedAt),
+			"project_id": run.ProjectID,
+			"awareness": map[string]int{
+				"selected": runAwareness.Selected, "delivered": runAwareness.Delivered,
+				"consumed": runAwareness.Consumed, "details": runAwareness.DetailsRequested,
+			},
+		})
+	}
+
 	return map[string]any{
 		"columns": []string{orgColumnPlanned, orgColumnInProgress, orgColumnWaiting, orgColumnReview, orgColumnCompleted},
 		"cards":   cards,
-		"ungrouped_runs": len(ungrouped),
+		"ungrouped_runs": ungroupedSummaries,
 		"metrics": metrics,
 		"problems": problems,
 	}, nil

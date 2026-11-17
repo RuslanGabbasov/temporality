@@ -3382,6 +3382,8 @@ export const en: Record<string, string> = {
     'orgwork.runs_empty': 'No runs on this task yet',
     'orgwork.select_hint': 'Select a task on the board — its runs and awareness badges appear here. With nothing selected: live runs, ungrouped runs and the plan graph.',
     'orgwork.open_flow': 'Awareness flow',
+    'orgwork.open_flow_short': 'Flow',
+    'orgwork.open_trace': 'Open trace',
     'orgwork.ungrouped_title': 'Runs without a task',
     'orgwork.active_title': 'Active runs',
     'orgwork.active_empty': 'No runs executing in this scope right now',

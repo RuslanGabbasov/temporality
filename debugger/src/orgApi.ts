@@ -65,6 +65,8 @@ export interface OrgCardRun {
   urgent?: boolean
   actor_id?: string
   last_event_at?: string
+  project_id?: string
+  awareness?: OrgAwarenessSummary
 }
 
 /** What the target runs know about this task's context: the awareness

@@ -5,6 +5,7 @@ import { orgApi, type OrgAwarenessSummary, type OrgCardRun, type OrgPlanGraphRes
 import { OrgUnitSelect, useOrgUnits, type OrgUnitsState } from './orgUnits'
 import { pluralT, useI18n, useT } from './i18n'
 import { briefDateTime, TimeHint } from './timeHint'
+import { workspaceApi } from './workspaceApi'
 
 // Work board (docs/org-work.md management view): every task of the unit (and
 // its subtree) as a kanban card, positioned by the stage the server reports —
@@ -22,6 +23,24 @@ type TagType = 'red' | 'magenta' | 'purple' | 'blue' | 'cyan' | 'teal' | 'green'
 function shortId(value?: string) {
   if (!value) return '—'
   return value.length > 14 ? `${value.slice(0, 13)}…` : value
+}
+
+// Localized status label for the board's vocabulary: run lifecycle (the
+// status.* keys), board columns, awareness pipeline states (orgflow.status_*).
+// The raw value stays visible for anything unknown — never an empty chip.
+function statusLabel(t: (key: string) => string, status?: string): string {
+  const value = String(status ?? '').trim()
+  if (!value) return ''
+  const key = value === 'running' ? 'status.running'
+    : value === 'completed' ? 'status.completed'
+      : value === 'failed' ? 'status.failed'
+        : value === 'cancelled' ? 'status.cancelled'
+          : value === 'pending' || value === 'waiting' ? 'status.pending'
+            : value === 'planned' ? 'orgwork.col_planned'
+              : value === 'in_progress' ? 'orgwork.col_in_progress'
+                : `orgflow.status_${value}`
+  const label = t(key)
+  return label === key ? value : label
 }
 
 function statusTag(status?: string): TagType {
@@ -123,7 +142,7 @@ function AwarenessBadge({ awareness }: { awareness: OrgAwarenessSummary }) {
   )
 }
 
-function WorkCard({ card, selected, onOpen }: { card: OrgWorkCard; selected: boolean; onOpen: () => void }) {
+function WorkCard({ card, selected, onOpen, actorNameOf }: { card: OrgWorkCard; selected: boolean; onOpen: () => void; actorNameOf: (id: string) => string }) {
   const { t, locale } = useI18n()
   return (
     <div
@@ -149,9 +168,10 @@ function WorkCard({ card, selected, onOpen }: { card: OrgWorkCard; selected: boo
             {pluralT(t, locale, 'orgwork.runs_n', card.run_count)}
           </span>
         )}
-        {card.actors.slice(0, 3).map((actor) => (
-          <Tag key={actor} type="cool-gray" size="sm" title={actor}>{shortId(actor)}</Tag>
-        ))}
+        		{card.actors.slice(0, 3).map((actor) => {
+        			const name = actorNameOf(actor)
+        			return <Tag key={actor} type="cool-gray" size="sm" title={actor}>{name !== actor ? name : shortId(actor)}</Tag>
+        		})}
         {card.actors.length > 3 && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>+{card.actors.length - 3}</span>}
       </div>
       {card.awareness && <AwarenessBadge awareness={card.awareness} />}
@@ -159,12 +179,21 @@ function WorkCard({ card, selected, onOpen }: { card: OrgWorkCard; selected: boo
   )
 }
 
-function RunRow({ run, onFlow }: { run: OrgCardRun; onFlow: (runID: string) => void }) {
+function RunRow({ run, onFlow, onTrace }: { run: OrgCardRun; onFlow: (runID: string) => void; onTrace: (run: OrgCardRun) => void }) {
   const t = useT()
+  const awarenessTotal = (run.awareness?.selected ?? 0) + (run.awareness?.delivered ?? 0)
+    + (run.awareness?.consumed ?? 0) + (run.awareness?.details ?? 0)
   return (
-    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', padding: '0.3rem 0', borderTop: '1px solid var(--tm-border)', fontSize: '0.76rem', flexWrap: 'wrap' }}>
+    // The row itself opens the run's trace — that is what a reader reaches
+    // for on every row; the awareness flow hides behind its own compact
+    // entry and only exists where signals actually accumulated.
+    <div
+      onClick={() => onTrace(run)}
+      title={t('orgwork.open_trace')}
+      style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', padding: '0.3rem 0', borderTop: '1px solid var(--tm-border)', fontSize: '0.76rem', flexWrap: 'wrap', cursor: 'pointer' }}
+    >
       {run.urgent && <span title={t('orgwork.urgent')}>⚡</span>}
-      <Tag type={statusTag(run.status)} size="sm">{run.status}</Tag>
+      <Tag type={statusTag(run.status)} size="sm">{statusLabel(t, run.status)}</Tag>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '12rem' }} title={run.title ?? run.run_id}>{run.title || run.run_id}</span>
       <span className="mono" style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }} title={run.run_id}>{shortId(run.run_id)}</span>
       {run.actor_id && <span className="mono" style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }} title={run.actor_id}>{shortId(run.actor_id)}</span>}
@@ -173,9 +202,15 @@ function RunRow({ run, onFlow }: { run: OrgCardRun; onFlow: (runID: string) => v
           {briefDateTime(run.last_event_at)}
         </TimeHint>
       )}
-      <button className="toolbar-btn" onClick={() => onFlow(run.run_id)} title={t('orgwork.open_flow')}>
-        {t('orgwork.open_flow')}
-      </button>
+      {awarenessTotal > 0 && (
+        <button
+          className="toolbar-btn"
+          onClick={(e) => { e.stopPropagation(); onFlow(run.run_id) }}
+          title={`${t('orgwork.open_flow')} · ${awarenessTotal}`}
+        >
+          {t('orgwork.open_flow_short')} {awarenessTotal}
+        </button>
+      )}
     </div>
   )
 }
@@ -243,7 +278,7 @@ function PlanGraphSection({ unit, scope, org }: { unit: string; scope: string; o
                             size="sm"
                             title={`${node.id}${node.org_node_id ? ` · ${org.nameOf(node.org_node_id)}` : ''}`}
                           >
-                            {node.label}{node.status ? ` · ${node.status}` : ''}
+                            {node.label}{node.status ? ` · ${statusLabel(t, node.status)}` : ''}
                           </Tag>
                         ))}
                       </div>
@@ -286,7 +321,7 @@ function PlanGraphSection({ unit, scope, org }: { unit: string; scope: string; o
 /** The live strip: runs currently executing in scope (docs/org-activity.md
  *  active-runs). The kanban groups work by task — this lists the raw runs,
  *  urgent first, each with the flow entry point. */
-function ActiveRunsSection({ unit, scope }: { unit: string; scope: string }) {
+function ActiveRunsSection({ unit, scope, onTrace }: { unit: string; scope: string; onTrace: (run: OrgCardRun) => void }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -305,6 +340,7 @@ function ActiveRunsSection({ unit, scope }: { unit: string; scope: string }) {
         urgent: run.urgent,
         actor_id: run.actor_id,
         last_event_at: run.last_event_at,
+        project_id: run.project_id,
       }))
       rows.sort((a, b) => Number(b.urgent ?? false) - Number(a.urgent ?? false))
       setRuns(rows)
@@ -342,7 +378,7 @@ function ActiveRunsSection({ unit, scope }: { unit: string; scope: string }) {
             {runs.length === 0 && !error && (
               <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', padding: '0.5rem 0' }}>{t('orgwork.active_empty')}</div>
             )}
-            {runs.map((run) => <RunRow key={run.run_id} run={run} onFlow={openFlow} />)}
+            {runs.map((run) => <RunRow key={run.run_id} run={run} onFlow={openFlow} onTrace={onTrace} />)}
           </>
         )
       )}
@@ -361,6 +397,17 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const [unit, setUnit] = useState('')
   const [scope, setScope] = useState('subtree')
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
+  // Actor ids → display names (the directory loads once; unknown ids —
+  // system actors like the supervisor — stay ids, same as the activity board).
+  const [actorNames, setActorNames] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    let cancelled = false
+    void workspaceApi.listUsers()
+      .then((page) => { if (!cancelled) setActorNames(new Map((page.users ?? []).map((u) => [u.id, u.name]))) })
+      .catch(() => { /* ids remain the fallback */ })
+    return () => { cancelled = true }
+  }, [])
+  const actorNameOf = useCallback((id: string) => actorNames.get(id) ?? id, [actorNames])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -383,6 +430,13 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const metrics = view?.metrics ?? {}
 
   const openFlow = (runID: string) => navigate(`/dashboard?tab=flow&target_run=${encodeURIComponent(runID)}`)
+  // The trace deep-link: the Runs tab opens the run's trace directly (project
+  // comes from the run row; the card/problem's project covers rows missing
+  // one).
+  const openTrace = (run: Pick<OrgCardRun, 'run_id' | 'project_id'>, projectID?: string) => {
+    const query = new URLSearchParams({ project: run.project_id || projectID || '', run: run.run_id })
+    navigate(`/agents?${query.toString()}`)
+  }
   return (
     <div style={{ padding: embedded ? 0 : '1rem' }}>
       {error && (
@@ -438,12 +492,13 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                     </div>
                     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                       {columnCards.map((card) => (
-                        <WorkCard
-                          key={card.task_id}
-                          card={card}
-                          selected={card.task_id === selectedTask}
-                          onOpen={() => setSelectedTask((prev) => (prev === card.task_id ? null : card.task_id))}
-                        />
+                        							<WorkCard
+                        								key={card.task_id}
+                        								card={card}
+                        								selected={card.task_id === selectedTask}
+                        								onOpen={() => setSelectedTask((prev) => (prev === card.task_id ? null : card.task_id))}
+                        								actorNameOf={actorNameOf}
+                        							/>
                       ))}
                       {columnCards.length === 0 && (
                         <div style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', padding: '0.4rem 0.2rem' }}>{t('orgwork.col_empty')}</div>
@@ -477,7 +532,10 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
               <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '0.35rem', fontSize: '0.74rem' }}>
                 <Tag type="gray" size="sm">{COLUMN_KEYS[selectedCard.column] ? t(COLUMN_KEYS[selectedCard.column]) : selectedCard.column}</Tag>
                 {selectedCard.project_id && <span className="mono" style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }} title={selectedCard.project_id}>{shortId(selectedCard.project_id)}</span>}
-                {selectedCard.actors.map((actor) => <Tag key={actor} type="cool-gray" size="sm" title={actor}>{shortId(actor)}</Tag>)}
+                				{selectedCard.actors.map((actor) => {
+                					const name = actorNameOf(actor)
+                					return <Tag key={actor} type="cool-gray" size="sm" title={actor}>{name !== actor ? name : shortId(actor)}</Tag>
+                				})}
                 {(selectedCard.org_node_ids ?? []).map((nodeID) => (
                   <Tag key={nodeID} type="cyan" size="sm" title={nodeID}>{org.nameOf(nodeID)}</Tag>
                 ))}
@@ -495,7 +553,7 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                 <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', padding: '0.2rem 0' }}>
                   {t('orgwork.runs_title')} <span style={{ textTransform: 'none' }}>({selectedCard.runs.length})</span>
                 </div>
-                {selectedCard.runs.map((run) => <RunRow key={run.run_id} run={run} onFlow={openFlow} />)}
+                				{selectedCard.runs.map((run) => <RunRow key={run.run_id} run={run} onFlow={openFlow} onTrace={(row) => openTrace(row, selectedCard.project_id)} />)}
                 {selectedCard.runs.length === 0 && (
                   <div style={{ color: 'var(--tm-text-3)', fontSize: '0.74rem', padding: '0.3rem 0' }}>{t('orgwork.runs_empty')}</div>
                 )}
@@ -509,24 +567,31 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                     {t('orgwork.problems_title')} <span style={{ textTransform: 'none' }}>({problems.length})</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                    {problems.map((problem, i) => (
-                      <div key={`${problem.kind}-${problem.run_id ?? problem.task_id ?? i}`} style={{ display: 'flex', gap: '0.4rem', alignItems: 'baseline', fontSize: '0.74rem', flexWrap: 'wrap' }}>
-                        <Tag type={PROBLEM_TAGS[problem.kind] ?? 'gray'} size="sm">{t(PROBLEM_KEYS[problem.kind] ?? problem.kind)}</Tag>
-                        {problem.title && <span style={{ fontWeight: 600 }}>{problem.title}</span>}
-                        {problem.task_id && <span className="mono" style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }} title={problem.task_id}>{shortId(problem.task_id)}</span>}
-                        {problem.reason && <span style={{ color: 'var(--tm-text-2)' }}>{problem.reason}</span>}
-                        {problem.since && (
-                          <TimeHint value={problem.since} style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem' }}>
-                            {briefDateTime(problem.since)}
-                          </TimeHint>
-                        )}
-                        {problem.run_id && (
-                          <button className="toolbar-btn" onClick={() => openFlow(problem.run_id!)} title={t('orgwork.open_flow')}>
-                            {t('orgwork.open_flow')}
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                    					{problems.map((problem, i) => (
+                    						<div key={`${problem.kind}-${problem.run_id ?? problem.task_id ?? i}`} style={{ display: 'flex', gap: '0.4rem', alignItems: 'baseline', fontSize: '0.74rem', flexWrap: 'wrap' }}>
+                    							<Tag type={PROBLEM_TAGS[problem.kind] ?? 'gray'} size="sm">{t(PROBLEM_KEYS[problem.kind] ?? problem.kind)}</Tag>
+                    							{problem.title && <span style={{ fontWeight: 600 }}>{problem.title}</span>}
+                    							{problem.task_id && <span className="mono" style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }} title={problem.task_id}>{shortId(problem.task_id)}</span>}
+                    							{problem.reason && <span style={{ color: 'var(--tm-text-2)' }}>{problem.reason}</span>}
+                    							{problem.since && (
+                    								<TimeHint value={problem.since} style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem' }}>
+                    									{briefDateTime(problem.since)}
+                    								</TimeHint>
+                    							)}
+							{problem.run_id && (() => {
+								const runID = problem.run_id
+								return (
+									<button
+										className="toolbar-btn"
+										onClick={() => openTrace({ run_id: runID }, cards.find((card) => card.task_id === problem.task_id)?.project_id)}
+										title={t('orgwork.open_trace')}
+									>
+										{t('orgwork.open_trace')}
+									</button>
+								)
+							})()}
+                    						</div>
+                    					))}
                   </div>
                 </div>
               )}
@@ -538,10 +603,10 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                   <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', padding: '0.2rem 0' }}>
                     {t('orgwork.ungrouped_title')} <span style={{ textTransform: 'none' }}>({(view?.ungrouped_runs ?? []).length})</span>
                   </div>
-                  {(view?.ungrouped_runs ?? []).map((run) => <RunRow key={run.run_id} run={run} onFlow={openFlow} />)}
+                  					{(view?.ungrouped_runs ?? []).map((run) => <RunRow key={run.run_id} run={run} onFlow={openFlow} onTrace={(row) => openTrace(row)} />)}
                 </div>
               )}
-              <ActiveRunsSection unit={unit} scope={scope} />
+              <ActiveRunsSection unit={unit} scope={scope} onTrace={(row) => openTrace(row)} />
               <PlanGraphSection unit={unit} scope={scope} org={org} />
             </>
           )}
