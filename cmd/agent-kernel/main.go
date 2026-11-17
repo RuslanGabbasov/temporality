@@ -8223,6 +8223,11 @@ func main() {
 	// the awareness steer delivery and the board APIs. ORG_OPERATIONS=off
 	// disables the supervisor + delivery loops (the projection keeps folding
 	// — the boards read it).
+	// Contextual learning (docs/ai-guided-onboarding-and-learning.md, P0):
+	// the semantic UI-target catalog and the supervisor explain endpoint.
+	RegisterLearningRoutes(mux, gate, ws, visibleUnits, func(ctx context.Context) (*llm.Client, error) {
+		return judgeModelClient(ctx, ws, secretMasterKey)
+	}, log)
 	RegisterOrgOperationsRoutes(ctx, orgRoutesDeps{
 		mux: mux, gate: gate, ws: ws, visibleUnits: visibleUnits,
 		observationURL: observationURL, journalToken: func() string { return journalToken }, log: log,

@@ -6,6 +6,8 @@ import { OrgUnitSelect, useOrgUnits, type OrgUnitsState } from './orgUnits'
 import { pluralT, useI18n, useT } from './i18n'
 import { briefDateTime, TimeHint } from './timeHint'
 import { workspaceApi } from './workspaceApi'
+import { explainLearningTarget } from './learning/SpotlightClient'
+import { Spotlight, type SpotlightPlan, type SpotlightMode } from './learning/Spotlight'
 
 // Work board (docs/org-work.md management view): every task of the unit (and
 // its subtree) as a kanban card, positioned by the stage the server reports —
@@ -409,6 +411,9 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   // moves to the adjacent «Завершенные» column and a new run un-accepts the
   // task. Only the in-flight busy state guards double submits.
   const [acceptBusy, setAcceptBusy] = useState(false)
+  // The page-level mentor (docs/ai-guided-onboarding-and-learning.md §6.2):
+  // ?-индикатор рядом с заголовком — объясняет доску в контексте организации.
+  const [spotlightPlan, setSpotlightPlan] = useState<SpotlightPlan | null>(null)
   // Actor ids → display names (the directory loads once; unknown ids —
   // system actors like the supervisor — stay ids, same as the activity board).
   const [actorNames, setActorNames] = useState<Map<string, string>>(new Map())
@@ -481,7 +486,21 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
         <div style={{ flex: '4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem', flexShrink: 0 }}>
             {!embedded && (
+              <>
               <Heading style={{ fontSize: '1.05rem', marginRight: '0.25rem' }}>{t('orgwork.title')}</Heading>
+              <button
+                type="button"
+                className="learn-indicator learn-indicator-available"
+                title="?"
+                onClick={async () => {
+                  try {
+                    const plan = await explainLearningTarget('', 'plan.execution.strategy', '/org/work')
+                    setSpotlightPlan({ ...plan, mode: (plan.mode as SpotlightMode) ?? 'informational' })
+                  } catch { /* the mentor degrades: §16.7 */ }
+                }}
+              >?</button>
+              {spotlightPlan && <Spotlight plan={spotlightPlan} onClose={() => setSpotlightPlan(null)} />}
+              </>
             )}
             <OrgUnitSelect id="orgwork-unit" compact value={unit} onChange={(v) => { setUnit(v); setSelectedTask(null) }} org={org} />
             <label className={`lens-toggle ${scope === 'subtree' ? 'on' : ''}`} title={t('orgops.scope_subtree')}>
