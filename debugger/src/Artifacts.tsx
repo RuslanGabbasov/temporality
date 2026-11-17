@@ -214,6 +214,7 @@ export default function Artifacts({ project }: { project?: string }) {
   const [directory, setDirectory] = useState<User[]>([])
   const [revisionAgentID, setRevisionAgentID] = useState('')
   const [revisionAgents, setRevisionAgents] = useState<Array<{ id: string; name: string }>>([])
+  const [revisionAgentsBusy, setRevisionAgentsBusy] = useState(false)
   const [revisionAgentOpen, setRevisionAgentOpen] = useState(false)
   // The directory feeds the unified search's author suggestions; it is small
   // (a company roster), one load on mount is fine.
@@ -1716,7 +1717,17 @@ export default function Artifacts({ project }: { project?: string }) {
                       )}
                       {annotationsForVersion.length > 0 && selected.status !== 'in_review' && (
                         <div>
-                          <Button size="sm" kind="secondary" disabled={busy} onClick={() => setRevisionAgentOpen(true)}>
+                          <Button size="sm" kind="secondary" disabled={busy} onClick={() => {
+                            setRevisionAgentID('')
+                            setRevisionAgents([])
+                            setRevisionAgentsBusy(true)
+                            setRevisionAgentOpen(true)
+                            if (!project) return
+                            void workspaceApi.listAgentsByProject(project)
+                              .then((data) => setRevisionAgents((data.agents ?? []).filter((agent) => agent.enabled !== false).map((agent) => ({ id: agent.id, name: agent.name }))))
+                              .catch(() => setRevisionAgents([]))
+                              .finally(() => setRevisionAgentsBusy(false))
+                          }}>
                             {selected.status === 'approved' ? (t('artifacts.annotation_ai_revision') ?? 'Apply notes and submit a new version') : (t('artifacts.annotation_ai_revision') ?? 'Send notes for rework')}
                           </Button>
                           <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
@@ -2242,11 +2253,15 @@ export default function Artifacts({ project }: { project?: string }) {
           <Heading>{selected.status === 'approved' ? (t('artifacts.annotation_ai_revision') ?? 'Apply notes and submit a new version') : (t('artifacts.annotation_ai_revision') ?? 'Send notes for rework')}</Heading>
           <Stack gap={3}>
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.82rem' }}>{selected.title}</p>
+            {/* The project's agents load when the dialog opens — the prompt
+                hands the artifact rework to one of them. */}
             {revisionAgents.length > 0 ? (
               <Select id="artifact-revision-agent" labelText={t('artifacts.annotation_agent') ?? 'Agent'} value={revisionAgentID} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setRevisionAgentID(e.target.value)}>
                 {revisionAgents.map((agent) => <SelectItem key={agent.id} value={agent.id} text={agent.name} />)}
               </Select>
-            ) : <InlineNotification kind="warning" lowContrast title={t('artifacts.annotation_no_agent') ?? 'No agents are available in this project'} />}
+            ) : (
+              <InlineNotification kind="warning" lowContrast title={revisionAgentsBusy ? (t('common.loading') ?? 'Loading…') : (t('artifacts.annotation_no_agent') ?? 'No agents are available in this project')} />
+            )}
             <Button disabled={busy || !revisionAgentID} onClick={async () => {
               setBusy(true)
               try {
