@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,10 +19,15 @@ import (
 
 func TestProjectBudgetHandlerFetchesSagaDeleted(t *testing.T) {
 	base := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	// The budget fetch runs the per-type queries concurrently now — the hit
+	// recorder needs the same protection the parallel workers imply.
+	var requestedMu sync.Mutex
 	requested := map[string]bool{}
 	journal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		eventType := r.URL.Query().Get("type")
+		requestedMu.Lock()
 		requested[eventType] = true
+		requestedMu.Unlock()
 		events := []observation.Event{}
 		switch eventType {
 		case "saga.registered":

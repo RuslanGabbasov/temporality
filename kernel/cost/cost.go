@@ -387,6 +387,10 @@ type CostAPI struct {
 	token      string
 	now        func() time.Time
 	factors    HumanFactors
+	// Per-project budget rollup cache (single-flight + short TTL): the Sagas
+	// tab's full-history scan runs once per TTL window instead of per load.
+	budgetMu sync.Mutex
+	budgets  map[string]*budgetCacheEntry
 }
 
 // NewCostAPI creates a cost API handler.
@@ -504,19 +508,81 @@ func (a *CostAPI) ProjectBudgetHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "project is required")
 		return
 	}
-	events, err := a.queryEventsFiltered(r, project, "", "",
-		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
-		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted", "human.answered",
-		// saga.deleted must be fetched, not just folded: the projection below
-		// knows how to forget a saga, but the handler never asked the journal
-		// for the deletions — deleted sagas stayed in the budget rollup and the
-		// UI list forever.
-		"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged", "saga.deleted")
+	budget, err := a.projectBudget(r.Context(), project)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, a.aggregateProjectBudget(project, events))
+	writeJSON(w, 200, budget)
+}
+
+// budgetEventTypes is the full-history scan set of the project budget rollup.
+// saga.deleted must be fetched, not just folded: the projection knows how to
+// forget a saga, but a handler that never asks the journal for the deletions
+// keeps every deleted saga in the rollup (and the UI saga list) forever.
+var budgetEventTypes = []string{
+	"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
+	"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted", "human.answered",
+	"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged", "saga.deleted",
+}
+
+// The budget rollup scans the project's WHOLE journal history — for a
+// long-lived project that is tens of thousands of events across ~200 journal
+// round-trips, and the dashboard's Sagas tab pays it on every load. Two
+// measures tame that without trading away the exact full-replay semantics:
+//
+//  1. the per-type pages fetch concurrently (the fold is order-tolerant —
+//     the sequential feed was already arbitrary: one type block after
+//     another), which turns the 18s worst case into a couple of seconds;
+//  2. a per-project cache with single-flight and a short TTL collapses the
+//     repeated tab loads: concurrent readers wait for one computation and
+//     then share its result. The TTL only has to cover human refresh
+//     cadence — it is a latency bound, not a consistency contract.
+const (
+	budgetCacheTTL      = 60 * time.Second
+	budgetFetchWorkers  = 6
+)
+
+type budgetCacheEntry struct {
+	mu        sync.Mutex
+	budget    ProjectBudget
+	fetchedAt time.Time
+	ok        bool
+}
+
+// projectBudget computes (or serves from cache) the rollup of one project.
+// The per-entry mutex is the single-flight: concurrent requests for the same
+// project serialize behind one computation instead of hammering the journal
+// in duplicate.
+func (a *CostAPI) projectBudget(ctx context.Context, project string) (ProjectBudget, error) {
+	entry := a.budgetEntry(project)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.ok && time.Since(entry.fetchedAt) < budgetCacheTTL {
+		return entry.budget, nil
+	}
+	events, err := a.queryEventsFilteredParallel(ctx, project, "", "", budgetEventTypes...)
+	if err != nil {
+		return ProjectBudget{}, err
+	}
+	budget := a.aggregateProjectBudget(project, events)
+	entry.budget, entry.fetchedAt, entry.ok = budget, a.now(), true
+	return budget, nil
+}
+
+// budgetEntry returns (creating as needed) the cache slot of one project.
+func (a *CostAPI) budgetEntry(project string) *budgetCacheEntry {
+	a.budgetMu.Lock()
+	defer a.budgetMu.Unlock()
+	if a.budgets == nil {
+		a.budgets = map[string]*budgetCacheEntry{}
+	}
+	entry := a.budgets[project]
+	if entry == nil {
+		entry = &budgetCacheEntry{}
+		a.budgets[project] = entry
+	}
+	return entry
 }
 
 // TeamRunCost is the honest rollup of one team program run: every event of
@@ -1589,6 +1655,49 @@ func (a *CostAPI) queryEventsFilteredSince(ctx context.Context, project, runID, 
 		if err := a.queryOneType(ctx, project, runID, taskID, eventType, &all, since); err != nil {
 			return nil, err
 		}
+	}
+	return all, nil
+}
+
+// queryEventsFilteredCtx pages through journal events like
+// queryEventsFilteredCtx but fetches the per-type paginations CONCURRENTLY
+// (bounded worker pool). The fold is order-tolerant — the sequential feed was
+// already arbitrary (one whole type block after another), and each type's own
+// page order is untouched — so the merged result feeds the same aggregates.
+// A full-history budget scan is ~200 journal round-trips; the concurrency
+// turns its wall time from the sum into roughly the max.
+func (a *CostAPI) queryEventsFilteredParallel(ctx context.Context, project, runID, taskID string, eventTypes ...string) ([]observation.Event, error) {
+	perType := make([][]observation.Event, len(eventTypes))
+	indices := make(chan int)
+	errs := make(chan error, len(eventTypes))
+	workers := budgetFetchWorkers
+	if workers > len(eventTypes) {
+		workers = len(eventTypes)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range indices {
+				if err := a.queryOneType(ctx, project, runID, taskID, eventTypes[index], &perType[index], nil); err != nil {
+					errs <- err
+				}
+			}
+		}()
+	}
+	for index := range eventTypes {
+		indices <- index
+	}
+	close(indices)
+	wg.Wait()
+	close(errs)
+	if err := <-errs; err != nil {
+		return nil, err
+	}
+	var all []observation.Event
+	for _, part := range perType {
+		all = append(all, part...)
 	}
 	return all, nil
 }
