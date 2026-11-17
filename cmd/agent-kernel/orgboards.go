@@ -732,28 +732,26 @@ func RegisterOrgOperationsRoutes(ctx context.Context, deps orgRoutesDeps, activi
 		writeJSON(w, 200, view)
 	})
 
-	// §13 management actions on a review-column task: accept the work (the
-	// card moves to «Завершено» until the activity window washes it out) or
-	// dismiss it (analyzed, no action warranted — the card leaves the board).
-	// Reader-gated like the awareness dismissal (it changes the shared board,
-	// not RBAC), audited. A NEW run for the task clears the state automatically
-	// (UpsertOrgActiveRun).
-	mux.HandleFunc("POST /v1/org/work/task/{taskID}/state", func(w http.ResponseWriter, r *http.Request) {
+	// §13 management action on a review-column task: the human reviewed the
+	// failed work and accepts it — the card moves to «Завершено» until the
+	// activity window washes it out. Reader-gated like the awareness
+	// dismissal (it changes the shared board, not RBAC), audited. A NEW run
+	// for the task clears the state automatically (UpsertOrgActiveRun).
+	mux.HandleFunc("POST /v1/org/work/task/{taskID}/accept", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
 		taskID := r.PathValue("taskID")
-		state := strings.TrimSpace(r.URL.Query().Get("state"))
-		if taskID == "" || state == "" {
-			writeError(w, 400, errors.New("task id and state are required"))
+		if taskID == "" {
+			writeError(w, 400, errors.New("task id is required"))
 			return
 		}
-		if err := ws.SetOrgWorkTaskState(r.Context(), taskID, state, requestUserID(r)); err != nil {
+		if err := ws.SetOrgWorkTaskState(r.Context(), taskID, "accepted", requestUserID(r)); err != nil {
 			writeError(w, 422, err)
 			return
 		}
-		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), "org_work.task_"+state, "task", taskID, nil)
-		writeJSON(w, 200, map[string]any{"state": state})
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), "org_work.task_accepted", "task", taskID, nil)
+		writeJSON(w, 200, map[string]any{"state": "accepted"})
 	})
 
 	// --- §11: aggregated plan graph (confirmed links only) ---

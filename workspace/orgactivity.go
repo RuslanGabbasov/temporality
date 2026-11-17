@@ -244,11 +244,11 @@ func (s *Store) UpsertOrgActiveRun(ctx context.Context, r OrgActiveRun) error {
 }
 
 // SetOrgWorkTaskState records the human verdict on a task's review column:
-// 'dismissed' (analyzed, no action warranted — the card leaves the board) or
-// 'accepted' (the work is accepted — the card moves to «Завершено»). A NEW
-// run for the task clears any state (see UpsertOrgActiveRun).
+// 'accepted' — the work was reviewed and accepted, the card presents as
+// «Завершено» until the activity window washes it out. A NEW run for the
+// task clears the state (see UpsertOrgActiveRun).
 func (s *Store) SetOrgWorkTaskState(ctx context.Context, taskID, state, by string) error {
-	if state != "dismissed" && state != "accepted" {
+	if state != "accepted" {
 		return fmt.Errorf("unknown org work task state %q", state)
 	}
 	_, err := s.pool.Exec(ctx,

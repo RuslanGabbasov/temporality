@@ -393,9 +393,9 @@ export const orgApi = {
     request<OrgActiveRunsResponse>('/v1/org/active-runs', undefined, { ...filters }),
   workView: (filters: OrgScopeFilters) => request<OrgWorkView>('/v1/org/work-view', undefined, { ...filters }),
   // Take a task card off the Work board (analyzed, no restart warranted); a
-  // NEW run for the task un-dismisses it automatically.
-  setWorkTaskState: (taskID: string, state: 'dismissed' | 'accepted') =>
-    requestSend<{ state: string }>(`/v1/org/work/task/${encodeURIComponent(taskID)}/state?state=${state}`, { method: 'POST' }),
+  // NEW run for the task clears the verdict automatically.
+  acceptWorkTask: (taskID: string) =>
+    requestSend<{ state: string }>(`/v1/org/work/task/${encodeURIComponent(taskID)}/accept`, { method: 'POST' }),
   awarenessFlow: (filters: OrgAwarenessFlowFilters) => request<OrgFlowResponse>('/v1/org/awareness-flow', undefined, { ...filters }),
   planGraph: (filters: OrgScopeFilters) => request<OrgPlanGraphResponse>('/v1/org/plan-graph', undefined, { ...filters }),
 

@@ -405,13 +405,12 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
   const [unit, setUnit] = useState('')
   const [scope, setScope] = useState('subtree')
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
-  // The review-verdict buttons arm with the first click and fire on the
-  // second; switching selection disarms (the guard belongs to one card only).
-  // Shown ONLY on «Ревью» cards: a completed/planned task has nothing to
-  // settle, and hiding the whole board is not a review decision.
-  const [verdictArmed, setVerdictArmed] = useState<'dismiss' | 'accept' | ''>('')
-  const [verdictBusy, setVerdictBusy] = useState(false)
-  useEffect(() => { setVerdictArmed('') }, [selectedTask])
+  // The accept button arms with the first click and fires on the second;
+  // switching selection disarms (the guard belongs to one card only). Shown
+  // ONLY on «Ревью» cards: a completed/planned task has nothing to settle.
+  const [acceptArmed, setAcceptArmed] = useState(false)
+  const [acceptBusy, setAcceptBusy] = useState(false)
+  useEffect(() => { setAcceptArmed(false) }, [selectedTask])
   // Actor ids → display names (the directory loads once; unknown ids —
   // system actors like the supervisor — stay ids, same as the activity board).
   const [actorNames, setActorNames] = useState<Map<string, string>>(new Map())
@@ -588,30 +587,23 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                   verdict. Two-click guard on each. */}
               {selectedCard.column === 'review' && (
               <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                {verdictArmed ? (
+                {acceptArmed ? (
                   <>
-                    <Button size="sm" kind={verdictArmed === 'accept' ? 'primary' : 'danger'} disabled={verdictBusy} onClick={async () => {
-                      setVerdictBusy(true)
+                    <Button size="sm" kind="primary" disabled={acceptBusy} onClick={async () => {
+                      setAcceptBusy(true)
                       try {
-                        await orgApi.setWorkTaskState(selectedCard.task_id, verdictArmed === 'accept' ? 'accepted' : 'dismissed')
-                        setVerdictArmed('')
+                        await orgApi.acceptWorkTask(selectedCard.task_id)
+                        setAcceptArmed(false)
                         setSelectedTask(null)
                         await load()
-                      } catch (failure) { setError(message(failure)) } finally { setVerdictBusy(false) }
-                    }}>{verdictBusy ? '…' : (verdictArmed === 'accept'
-                      ? (t('orgwork.accept_confirm') ?? 'Принять точно?')
-                      : (t('orgwork.dismiss_armed') ?? 'Снять точно?'))}</Button>
-                    <Button size="sm" kind="ghost" disabled={verdictBusy} onClick={() => setVerdictArmed('')}>{t('action.cancel') ?? 'Cancel'}</Button>
+                      } catch (failure) { setError(message(failure)) } finally { setAcceptBusy(false) }
+                    }}>{acceptBusy ? '…' : (t('orgwork.accept_confirm') ?? 'Принять работу — в завершённые точно?')}</Button>
+                    <Button size="sm" kind="ghost" disabled={acceptBusy} onClick={() => setAcceptArmed(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
                   </>
                 ) : (
-                  <>
-                    <Button size="sm" kind="primary" onClick={() => setVerdictArmed('accept')} title={t('orgwork.accept_hint') ?? undefined}>
-                      {t('orgwork.accept') ?? 'Принять: в завершённые'}
-                    </Button>
-                    <Button size="sm" kind="ghost" onClick={() => setVerdictArmed('dismiss')} title={t('orgwork.dismiss_hint') ?? undefined}>
-                      {t('orgwork.dismiss') ?? 'Снять с доски'}
-                    </Button>
-                  </>
+                  <Button size="sm" kind="primary" onClick={() => setAcceptArmed(true)} title={t('orgwork.accept_hint') ?? undefined}>
+                    {t('orgwork.accept') ?? 'Принять: в завершённые'}
+                  </Button>
                 )}
               </div>
               )}
