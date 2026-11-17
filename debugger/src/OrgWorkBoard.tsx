@@ -179,7 +179,7 @@ function WorkCard({ card, selected, onOpen, actorNameOf }: { card: OrgWorkCard; 
   )
 }
 
-function RunRow({ run, onFlow, onTrace }: { run: OrgCardRun; onFlow: (runID: string) => void; onTrace: (run: OrgCardRun) => void }) {
+function RunRow({ run, onFlow, onTrace, onRestart, restarting }: { run: OrgCardRun; onFlow: (runID: string) => void; onTrace: (run: OrgCardRun) => void; onRestart?: (run: OrgCardRun) => void; restarting?: boolean }) {
   const t = useT()
   const awarenessTotal = (run.awareness?.selected ?? 0) + (run.awareness?.delivered ?? 0)
     + (run.awareness?.consumed ?? 0) + (run.awareness?.details ?? 0)
@@ -210,6 +210,14 @@ function RunRow({ run, onFlow, onTrace }: { run: OrgCardRun; onFlow: (runID: str
         >
           {t('orgwork.open_flow_short')} {awarenessTotal}
         </button>
+      )}
+      {run.status === 'failed' && onRestart && (
+        <button
+          className="toolbar-btn"
+          onClick={(e) => { e.stopPropagation(); onRestart(run) }}
+          disabled={restarting}
+          title={t('runs.restart_hint') ?? 'Запустить новую попытку этой задачи — продолжит с места остановки'}
+        >{restarting ? '…' : '↻'}</button>
       )}
     </div>
   )
@@ -437,6 +445,23 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
     const query = new URLSearchParams({ project: run.project_id || projectID || '', run: run.run_id })
     navigate(`/agents?${query.toString()}`)
   }
+  // Restart a failed run of this task: startRun rebuilds the run input from
+  // the surviving task row (the workflow input died with the execution) and
+  // the fresh attempt inherits the interrupted journal tail. The board just
+  // refreshes — the new running run moves the card to «В работе» on its own.
+  const [restarting, setRestarting] = useState('')
+  const restartRun = async (taskID: string, runID: string) => {
+    setError('')
+    setRestarting(runID)
+    try {
+      await workspaceApi.startRun(taskID)
+      await load()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setRestarting('')
+    }
+  }
   return (
     <div style={{ padding: embedded ? 0 : '1rem' }}>
       {error && (
@@ -553,7 +578,7 @@ export default function OrgWorkBoard({ embedded }: { embedded?: boolean }) {
                 <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', padding: '0.2rem 0' }}>
                   {t('orgwork.runs_title')} <span style={{ textTransform: 'none' }}>({selectedCard.runs.length})</span>
                 </div>
-                				{selectedCard.runs.map((run) => <RunRow key={run.run_id} run={run} onFlow={openFlow} onTrace={(row) => openTrace(row, selectedCard.project_id)} />)}
+                				{selectedCard.runs.map((run) => <RunRow key={run.run_id} run={run} onFlow={openFlow} onTrace={(row) => openTrace(row, selectedCard.project_id)} onRestart={(row) => void restartRun(selectedCard.task_id, row.run_id)} restarting={restarting === run.run_id} />)}
                 {selectedCard.runs.length === 0 && (
                   <div style={{ color: 'var(--tm-text-3)', fontSize: '0.74rem', padding: '0.3rem 0' }}>{t('orgwork.runs_empty')}</div>
                 )}

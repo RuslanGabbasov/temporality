@@ -967,6 +967,7 @@ export const en: Record<string, string> = {
     'runs.stop': 'Stop',
     'runs.stop_hint': 'Force-stop the run workflow — for runs stuck without signs of life',
     'runs.stop_confirm': 'Stop for sure?',
+    'runs.restart_hint': 'Start a new attempt of this task — the input is rebuilt from the task, the attempt continues where the failed one stopped',
     'runs.expand_children': 'Show child runs ({{count}})',
     'runs.collapse_children': 'Collapse child runs',
     'runs.hidden_live': '{{count}} child runs still running inside — expand to see them',

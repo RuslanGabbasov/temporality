@@ -49,6 +49,9 @@ import { SkeletonTiles } from './Skeleton'
 import type { ConsoleState } from './consoleStream'
 
 const KERNEL_API = '/kernel-api'
+// Same navigation primitive the other pages use: pushState + a synthetic
+// popstate — the self-made router repaints the route.
+const navigate = (path: string) => { window.history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function json(value: unknown) { return JSON.stringify(value, null, 2) }
 function runID(event: ObservationEvent) { return event.context?.run ?? '' }
@@ -238,12 +241,17 @@ interface RunRow {
    *  ops/cost subtree walks still need it) but never rendered as a row. */
   folded: boolean
   /** Project attribution of the run (docs/activity-scoping.md §4): global
-   * listings span projects, so every row carries its own project — detail
-   * calls (result, cost, nudge) must use it, not the header filter. */
+   *  listings span projects, so every row carries its own project — detail
+   *  calls (result, cost, nudge) must use it, not the header filter. */
   project?: string
   /** Who started the run: the event context actor (user id for API/chat
-   * starts, trigger id for automated ones). */
+   *  starts, trigger id for automated ones). */
   actor?: string
+  /** Owning task id (run.started context): the restart action re-launches
+   *  the task — the only durable record of the run's input (the prompt lives
+   *  in the task row, the workflow input dies with the execution). Missing
+   *  for direct API runs without a task — those cannot be restarted. */
+  taskId?: string
 }
 
 /** The attempt number of a rerun, for the «× N» badge. Turn-limit
@@ -305,6 +313,7 @@ export function buildRunRows(started: ObservationEvent[], statuses: Map<string, 
       folded: false,
       project: event.context?.project || undefined,
       actor: event.context?.actor?.id || undefined,
+      taskId: event.context?.task || undefined,
     })
     for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1)
   }
@@ -1062,6 +1071,28 @@ export default function AgentRuns({ project }: { project: string }) {
     await loadRuns(true, true)
     setBusy(false)
   }
+  // Restart a failed run (the orphan-sweep verdict, a provider collapse, …):
+  // the run's own workflow input died with the execution, but the owning
+  // task survives and startRun rebuilds the input from it — the new attempt
+  // even inherits the interrupted journal tail as its prior-tail block. The
+  // new run id arrives in the response; selecting it lands the reader in the
+  // fresh trace immediately.
+  const [restarting, setRestarting] = useState('')
+  const restartRun = async (row: RunRow) => {
+    if (!row.taskId) return
+    setBusy(true); setRestarting(row.id); setError('')
+    try {
+      const started = await workspaceApi.startRun(row.taskId)
+      await loadRuns(true, true)
+      const query = new URLSearchParams({ project: row.project ?? '', run: started.run_id })
+      navigate(`/agents?${query.toString()}`)
+    } catch (failure) {
+      setError(message(failure))
+      await loadRuns(true, true)
+    } finally {
+      setRestarting(''); setBusy(false)
+    }
+  }
 
   const loadRuns = useCallback(async (autoSelect = false, silent = false) => {
     if (!autoSelect && !silent) setBusy(true)
@@ -1701,6 +1732,20 @@ export default function AgentRuns({ project }: { project: string }) {
                           style={{ marginLeft: 'auto', flexShrink: 0, background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '3px', lineHeight: 1.4 }}
                         >■</button>
                       )
+                    )}
+                    {/* Restart a failed run of a task: the new attempt rebuilds
+                        its input from the surviving task row (the workflow
+                        input died with the execution) and inherits the
+                        interrupted journal tail as its prior-tail block. A
+                        direct API run without a task has nothing to restart
+                        from — no button. */}
+                    {row.status === 'failed' && row.taskId && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void restartRun(row) }}
+                        disabled={busy}
+                        title={t('runs.restart_hint') ?? 'Запустить новую попытку этой задачи — продолжит с места остановки'}
+                        style={{ marginLeft: 'auto', flexShrink: 0, background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-2)', cursor: busy ? 'wait' : 'pointer', fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '3px', lineHeight: 1.4 }}
+                      >{restarting === row.id ? '…' : '↻'}</button>
                     )}
                     {row.status === 'cancelled' && <Tag type="warm-gray" size="sm">{t('status.cancelled')}</Tag>}
                     {/* The ask badge only on a still-running row: a terminal run's
