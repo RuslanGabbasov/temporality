@@ -5,6 +5,7 @@ import { orgApi, type OrgActivityEvent, type OrgActivityFilters } from './orgApi
 import { OrgUnitSelect, useOrgUnits, type OrgUnitsState } from './orgUnits'
 import { pluralT, useI18n } from './i18n'
 import { briefDateTime, TimeHint } from './timeHint'
+import { workspaceApi } from './workspaceApi'
 
 // Activity board (docs/org-activity.md): what happened across the
 // organization — run/progress/plan/task/artifact/quality/human events scoped
@@ -12,6 +13,8 @@ import { briefDateTime, TimeHint } from './timeHint'
 // thread. The per-unit activity settings (GET/PUT/DELETE activity-settings)
 // live here as a collapsible section: the board is where someone notices
 // «why do we not see X» and the switch is one click away.
+
+const navigate = (path: string) => { window.history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -154,9 +157,16 @@ function GridHead({ children }: { children: ReactNode }) {
   )
 }
 
-function EventRow({ event }: { event: OrgActivityEvent }) {
+function EventRow({ event, userNameOf, onRun, onTask }: {
+  event: OrgActivityEvent
+  userNameOf: (id?: string) => string
+  onRun: (runID: string) => void
+  onTask: (taskID: string) => void
+}) {
   const { t, locale } = useI18n()
   const { label, summary } = localizedEventText(event, t)
+  const actor = event.actor_id
+  const actorName = userNameOf(actor)
   return (
     <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: '0.25rem 0.6rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)', fontSize: '0.78rem' }}>
       <TimeHint value={event.occurred_at} style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
@@ -167,9 +177,23 @@ function EventRow({ event }: { event: OrgActivityEvent }) {
         <span title={event.event_type}>{label}</span>
       </span>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${event.event_type}: ${event.summary}`}>{summary}</span>
-      <span className="mono" style={{ fontSize: '0.7rem' }} title={event.actor_id ?? ''}>{shortId(event.actor_id)}</span>
-      <span className="mono" style={{ fontSize: '0.7rem' }} title={event.run_id ?? ''}>{shortId(event.run_id)}</span>
-      <span className="mono" style={{ fontSize: '0.7rem' }} title={event.task_id ?? ''}>{shortId(event.task_id)}</span>
+      <span className="mono" style={{ fontSize: '0.7rem' }} title={actor ?? ''}>{actorName !== actor ? actorName : shortId(actor)}</span>
+      {event.run_id ? (
+        <button
+          className="toolbar-btn"
+          style={{ fontSize: '0.68rem', padding: '0.05rem 0.4rem', justifySelf: 'start' }}
+          title={event.run_id}
+          onClick={() => onRun(event.run_id!)}
+        >{shortId(event.run_id)}</button>
+      ) : <span style={{ color: 'var(--tm-text-3)' }}>—</span>}
+      {event.task_id ? (
+        <button
+          className="toolbar-btn"
+          style={{ fontSize: '0.68rem', padding: '0.05rem 0.4rem', justifySelf: 'start' }}
+          title={event.task_id}
+          onClick={() => onTask(event.task_id!)}
+        >{shortId(event.task_id)}</button>
+      ) : <span style={{ color: 'var(--tm-text-3)' }}>—</span>}
       <span className="mono" style={{ fontSize: '0.7rem' }} title={event.project_id ?? ''}>{shortId(event.project_id)}</span>
     </div>
   )
@@ -184,6 +208,23 @@ export default function OrgActivityBoard({ embedded }: { embedded?: boolean }) {
   const [error, setError] = useState('')
   const [events, setEvents] = useState<OrgActivityEvent[]>([])
   const [count, setCount] = useState(0)
+  // Actor ids → display names (the directory loads once; unknown ids stay ids
+  // — system actors like the supervisor have no directory row).
+  const [userNames, setUserNames] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    let cancelled = false
+    void workspaceApi.listUsers()
+      .then((page) => { if (!cancelled) setUserNames(new Map((page.users ?? []).map((u) => [u.id, u.name]))) })
+      .catch(() => { /* ids remain the fallback */ })
+    return () => { cancelled = true }
+  }, [])
+  const userNameOf = useCallback((id?: string) => (id ? userNames.get(id) ?? id : ''), [userNames])
+
+  // A run opens in the runs console (AgentRuns reads ?run=), a task filters
+  // the feed itself — tasks have no dedicated page, and the filtered feed IS
+  // the task view.
+  const openRun = useCallback((runID: string) => navigate(`/agents?run=${encodeURIComponent(runID)}`), [])
+  const openTask = useCallback((taskID: string) => { setTaskFilter(taskID); setOffset(0) }, [])
 
   // Filters (all server-side; an empty unit means the whole installation).
   const [unit, setUnit] = useState('')
@@ -335,11 +376,11 @@ export default function OrgActivityBoard({ embedded }: { embedded?: boolean }) {
                       <span style={{ color: 'var(--tm-text-3)' }}>{collapsed ? '▸' : '▾'}</span>
                       <span>{pluralT(t, locale, 'orgops.group_n', rows.length, { run: runID })}</span>
                     </button>
-                    {!collapsed && rows.map((event) => <EventRow key={event.event_id} event={event} />)}
+                    {!collapsed && rows.map((event) => <EventRow key={event.event_id} event={event} userNameOf={userNameOf} onRun={openRun} onTask={openTask} />)}
                   </div>
                 )
               })}
-              {groups.standalone.map((event) => <EventRow key={event.event_id} event={event} />)}
+              {groups.standalone.map((event) => <EventRow key={event.event_id} event={event} userNameOf={userNameOf} onRun={openRun} onTask={openTask} />)}
             </div>
           )}
 
