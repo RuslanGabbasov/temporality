@@ -1,6 +1,6 @@
 # Temporality Roadmap
 
-## Status: October 2026
+## Status: November 2026
 
 ### Done (P0)
 
@@ -67,6 +67,22 @@
 - [x] **Mattermost inbound over WebSocket** — DMs included, outgoing webhooks and `OUTGOING_TOKEN` removed (see Channel driver layer)
 - [x] **Webhook delivery visibility** — trigger deliveries surfaced in the UI
 - [x] **Model gateway resilience** — stream idle/no-progress watchdogs, first-token timeout with an adaptive prefill budget and a manual nudge endpoint; runs survive host sleep
+
+### Done (Org operations & HITL wave, Nov 2026)
+
+- [x] **Org operations** — activity projection with a dashboard tab, the work control tower dashboard, the work board (kanban by stage with metrics, problem strip and a task inspector; viewport-height split view) and the awareness flow — supervisor batches and triage cases (knowledge hygiene, contradictions, behavior suspicion linking to the audited run's trace) (`docs/org-structure.md`, `/dashboard`, `/org/work`)
+- [x] **Artifact lifecycle & review** — review rounds with reviewers and all/any modes, human-only approve/reject (kernel identity can never approve), the review inbox, annotations with AI revision, archive from any live stage (`docs/artifact-lifecycle.md`)
+- [x] **HITL forms** — `ask_human` carries a JSON-Schema form (typed fields, enums, patterns, date ranges) the human fills in a real form instead of free text (`docs/interactive-HITL.md`, `docs/user/hitl-forms.md`)
+- [x] **Presentation engine** — structured visual answers for agents (`docs/presentation-engine.md`)
+- [x] **Behavior monitoring** — oversight judge reviewing every completed turn for escape/exfil/tamper/deception patterns, suspicion cases surface to the supervisor (`docs/agent-behavior-monitoring.md`)
+
+### Done (Memory, reliability & subscriptions wave, Nov 2026)
+
+- [x] **Knowledge hygiene v2** — the false-challenge flood stopped: aging judges only knowledge surfaced to a run (91% of the 2289-item challenged backlog was never offered), one harmful verdict demotes instead of challenging (2 → challenged, 3 → invalidated), paraphrase re-derivation resurrects challenged nodes (full-projection matching — the old loop measured «strengthened 0» over 1073 extraction passes), and a «Разбор оспоренных» settle tab applies bulk confirm/invalidate (`docs/knowledge-evolution.md` §14)
+- [x] **Failed-run restart** — ↻ in the runs list and on the work board card inspector: the new attempt rebuilds its input from the surviving task row, inherits the interrupted run's journal tail and continues where it stopped; direct API runs without a task stay non-restartable
+- [x] **Claude subscription providers** — the «Claude (подписка)» preset: `claude setup-token` → one-year OAuth token stored as a secret; the provider speaks the native Anthropic `/v1/messages` wire (bearer + oauth beta) instead of betting on the compat layer; seeded model list + test-generation riding the same wire
+- [x] **Trace: bulk-memory preview** — remember_many rows expand to the whole proposition list (a dedicated preview replaced the 500-char compact that turned a 50-item batch into two ellipsized fragments); the completed event carries the recorded/skipped summary
+- [x] **Dev-stack durability** — Temporal persistence moved from dev SQLite to the shared Postgres, the dynamic config ships mounted in the constrained format Temporal 1.24+ requires, bounded shutdown drain (`stop_grace_period`), fast boot without the full-sandbox chown, the orphan sweep closes journal-only zombies, `/livez`/`/healthz` answer without a token
 
 ---
 
@@ -254,9 +270,9 @@ Source spec: `docs/inbound-messages.md`.
 
 - [ ] **Read-after-write probes** — operation → observable trace → probe → hint to operator. Probe gives a hint, does NOT automatically issue authoritative verdict. Первая реализация удалена как нерабочая по предпосылкам; вернуться к идее — с дизайном от реальной формы аргументов и внешних следов.
 - [ ] **Cost accounting v2** — cost per run / per project / per task / per saga ✅ (в Done выше); остаются org-уровневые токен-квоты
-- [ ] **Memory population overview** — active/stale/invalidated counts over time
-- [ ] **Cross-project knowledge** — knowledge that spans multiple projects
-- [ ] **Embeddings infrastructure** — if lexical clustering proves insufficient
+- [ ] **Memory population overview** — counts over time; частично сделано: распределение состояний на странице знаний (lifecycle bar), метрики борда (`/org/work`) — остались тайм-серии
+- [ ] **Cross-project knowledge** — knowledge that spans multiple projects (scope promotion org_unit/organization есть; cross-project ноды — не делали)
+- [x] **Embeddings infrastructure** — shipped beyond the original scope: in-process model (rembed, `KERNEL_EMBEDDINGS_MODEL`), knowledge embeddings store, semantic hint tier, semantic search and the map in the knowledge explorer; lexical matching остался как дешёвый первый эшелон
 - [ ] **Graph-based experience relations** — when timeline is not enough
 
 ---
