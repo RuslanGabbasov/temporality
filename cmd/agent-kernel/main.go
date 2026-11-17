@@ -850,6 +850,11 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true, "version": buildVersion})
 	})
+	// Liveness on the REAL mux too: the boot listener answers /livez only
+	// until the socket swap — after that the healthcheck (and any orchestrator)
+	// probes this one. Both probes are registered OUTSIDE the bearer gate (see
+	// kernelRootHandler): compose/k8s probes carry no tokens, a 401 here read
+	// as a dead kernel and flapped the container health forever.
 	mux.HandleFunc("GET /v1/agent/whoami", func(w http.ResponseWriter, r *http.Request) {
 		// Identity for UI clients: the token's subject, role and project scope.
 		// Any authenticated role may see its own identity.
@@ -8398,47 +8403,7 @@ func main() {
 	// routing decision. The strip is a no-op when the prefix is absent (vite
 	// dev proxy and direct :8090 calls), and idempotent when present.
 	authed := gate.Authenticate(mux)
-	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		stripKernelAPIProxyPrefix(r)
-		if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/login" {
-			mux.ServeHTTP(w, r)
-			return
-		}
-		// Federation login surface (docs/auth-federation.md §5): methods feed
-		// the login screen, start/callback drive the OIDC redirect flow, logout
-		// must work with a stale cookie. None can exist behind the bearer gate.
-		if r.Method == http.MethodGet && r.URL.Path == "/v1/auth/methods" {
-			mux.ServeHTTP(w, r)
-			return
-		}
-		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/auth/oidc/") {
-			mux.ServeHTTP(w, r)
-			return
-		}
-		if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/logout" {
-			mux.ServeHTTP(w, r)
-			return
-		}
-		// Webhook trigger deliveries authorize against the matched trigger's
-		// own token (or fall back to the writer gate inside the handler), so
-		// they enter the mux directly — an unknown per-trigger token must
-		// reach the handler, not die in the Authenticate middleware.
-		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/workspace/webhook/") {
-			mux.ServeHTTP(w, r)
-			return
-		}
-		// R1 (kernel-wedge-2026-10-21): /nudge rides the temporal RPC deadline.
-		// Its handler lives in nudge.go (a parallel working-tree change
-		// outside this fix's radius), so the deadline and the 503 translation
-		// are installed here, at the wiring point — see nudgeWithRPCDeadline.
-		// The match is the exact route pattern (matchesNudgeRPCRoute), so the
-		// rewrite can only ever fire for POST /v1/agent/runs/{runID}/nudge.
-		if matchesNudgeRPCRoute(r) {
-			nudgeWithRPCDeadline(w, r, authed)
-			return
-		}
-		authed.ServeHTTP(w, r)
-	})
+	root := kernelRootHandler(mux, authed)
 	// Boot complete: hand the socket from the liveness bootstrap to the real
 	// API. Close first — the listener goroutine releases :8090, then the full
 	// server binds it; a brief connection-refused window between the two is
@@ -8474,6 +8439,68 @@ func main() {
 		os.Exit(1)
 	}
 	drainWorker()
+}
+
+// kernelRootHandler is the real server's top handler: strip the nginx proxy
+// prefix, let the small set of gate-exempt routes through to the mux, rewrite
+// /nudge onto its RPC deadline, and hand everything else to the bearer gate.
+// The exemptions live here (not in the gate) because they are wiring-level
+// facts about this process's surfaces, not auth-policy decisions:
+//
+//   - /livez and /healthz — liveness/readiness probes (compose healthcheck,
+//     orchestrators) carry no tokens; a 401 here read as a dead kernel and
+//     flapped the container health forever. Both endpoints expose nothing
+//     beyond ok/version, and the boot listener already answered them
+//     publicly from the first second — the real server just keeps that
+//     contract after the socket swap.
+//   - /v1/auth/login, /v1/auth/methods, /v1/auth/oidc/*, /v1/auth/logout —
+//     the login surfaces an unauthenticated caller must reach by definition.
+//   - /v1/workspace/webhook/* — deliveries authorize against the matched
+//     trigger's own token inside the handler.
+//
+// /nudge is not an exemption: it rides authed, but through the R1 deadline
+// wrapper (kernel-wedge-2026-10-21) installed at this wiring point —
+// see nudgeWithRPCDeadline and matchesNudgeRPCRoute.
+func kernelRootHandler(mux http.Handler, authed http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		stripKernelAPIProxyPrefix(r)
+		if r.Method == http.MethodGet && (r.URL.Path == "/livez" || r.URL.Path == "/healthz") {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/login" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		// Federation login surface (docs/auth-federation.md §5): methods feed
+		// the login screen, start/callback drive the OIDC redirect flow, logout
+		// must work with a stale cookie. None can exist behind the bearer gate.
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/auth/methods" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/auth/oidc/") {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/logout" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		// Webhook trigger deliveries authorize against the matched trigger's
+		// own token (or fall back to the writer gate inside the handler), so
+		// they enter the mux directly — an unknown per-trigger token must
+		// reach the handler, not die in the Authenticate middleware.
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/workspace/webhook/") {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if matchesNudgeRPCRoute(r) {
+			nudgeWithRPCDeadline(w, r, authed)
+			return
+		}
+		authed.ServeHTTP(w, r)
+	}
 }
 
 // stripKernelAPIProxyPrefix removes the leading "/kernel-api" proxy prefix
