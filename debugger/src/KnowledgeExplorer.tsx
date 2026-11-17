@@ -457,6 +457,8 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
       </div>
 
       {view === 'settle' && !dossierID && (
+        /* The settle queue owns the whole content area: thousands of rows need
+           the full viewport height, not a share of a split. */
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <SettlePanel project={project} onRevision={() => setRevision((r) => r + 1)} />
         </div>
@@ -470,7 +472,8 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
         </div>
       )}
 
-      <div style={view === 'map' && !dossierID ? { display: 'none' } : { display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
+      {(view !== 'settle' && view !== 'map') || dossierID ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Left: the area map — one widget: header with the filter and sort
             that used to live in the list below, then the treemap. The list was
             the same data in a second shape, so it is gone (ТЗ §4). The card
@@ -660,6 +663,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
           )}
         </div>
       </div>
+      ) : null}
     </div>
   )
 }
