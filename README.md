@@ -28,7 +28,8 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 ```sh
 mkdir -p temporality/temporal-dynamicconfig && cd temporality
-curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
 curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
 docker compose up -d
 ```

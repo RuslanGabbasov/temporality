@@ -79,13 +79,17 @@ Ollama и т.д.) — понадобится в мастере онбордин�
 <h2 id="запуск"><a class="anchor" href="#запуск" aria-label="Section link">#</a>Запуск</h2><p>Готовые образы из GHCR — рекомендуемый путь, ничего клонировать и собирать
 не нужно:</p>
 <pre><code class="language-sh">mkdir -p temporality/temporal-dynamicconfig &amp;&amp; cd temporality
-curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
 curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
 docker compose up -d
 </code></pre>
-<p>Второй файл — динамический конфиг Temporal (потолки истории длинных ранов);
-без него сервер Temporal не стартует. Оба файла скачиваются из того же
-репозитория и той же ветки <code>main</code>.</p>
+<p>Два конфига обязательны: <code>temporal-dynamicconfig/temporality.yaml</code> —
+динамический конфиг Temporal (потолки истории длинных ранов; без него сервер
+Temporal не стартует), <code>searxng-settings.yml</code> — настройки метапоиска SearXNG
+(включает JSON-формат, без которого <code>web_search</code> агента не работает; если
+файла нет, Docker подставит вместо него пустую директорию и контейнер
+упадёт). Все файлы скачиваются из того же репозитория и той же ветки <code>main</code>.</p>
 <p>По умолчанию поднимается последний опубликованный релиз (образы — из
 <a href="https://github.com/RuslanGabbasov/temporality/releases" target="_blank" rel="noreferrer">релизов&nbsp;<span class="ext">↗</span></a>). Для
 контролируемого обновления версию можно закрепить:

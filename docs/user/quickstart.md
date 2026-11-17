@@ -24,14 +24,18 @@ description: От нуля до первой задачи агента — ус�
 
 ```sh
 mkdir -p temporality/temporal-dynamicconfig && cd temporality
-curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
 curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
 docker compose up -d
 ```
 
-Второй файл — динамический конфиг Temporal (потолки истории длинных ранов);
-без него сервер Temporal не стартует. Оба файла скачиваются из того же
-репозитория и той же ветки `main`.
+Два конфига обязательны: `temporal-dynamicconfig/temporality.yaml` —
+динамический конфиг Temporal (потолки истории длинных ранов; без него сервер
+Temporal не стартует), `searxng-settings.yml` — настройки метапоиска SearXNG
+(включает JSON-формат, без которого `web_search` агента не работает; если
+файла нет, Docker подставит вместо него пустую директорию и контейнер
+упадёт). Все файлы скачиваются из того же репозитория и той же ветки `main`.
 
 По умолчанию поднимается последний опубликованный релиз (образы — из
 [релизов](https://github.com/RuslanGabbasov/temporality/releases)). Для

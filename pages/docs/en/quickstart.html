@@ -77,10 +77,19 @@ etc.) — the onboarding wizard asks for it on step three.</li>
 <p>That is all: the model, the first agent, the sandbox and the supervisor model
 are configured in the first-run wizard — no <code>.env</code> needed for that.</p>
 <h2 id="run-it"><a class="anchor" href="#run-it" aria-label="Section link">#</a>Run it</h2><p>Prebuilt images from GHCR — the recommended path, nothing to clone or build:</p>
-<pre><code class="language-sh">mkdir temporality &amp;&amp; cd temporality
-curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+<pre><code class="language-sh">mkdir -p temporality/temporal-dynamicconfig &amp;&amp; cd temporality
+curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
+curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
 docker compose up -d
 </code></pre>
+<p>Two configs are required: <code>temporal-dynamicconfig/temporality.yaml</code> — the
+Temporal dynamic config (long-run history ceilings; without it the Temporal
+server will not start) and <code>searxng-settings.yml</code> — the SearXNG metasearch
+settings (enables the JSON format the agent&#39;s <code>web_search</code> parses; when the
+file is missing Docker substitutes an empty directory and the container
+dies). All files are fetched from the same repository and the same <code>main</code>
+branch.</p>
 <p>The latest published release comes up by default (images from the
 <a href="https://github.com/RuslanGabbasov/temporality/releases" target="_blank" rel="noreferrer">releases page&nbsp;<span class="ext">↗</span></a>). For
 controlled upgrades pin a version:

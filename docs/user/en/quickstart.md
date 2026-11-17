@@ -22,10 +22,20 @@ are configured in the first-run wizard — no `.env` needed for that.
 Prebuilt images from GHCR — the recommended path, nothing to clone or build:
 
 ```sh
-mkdir temporality && cd temporality
-curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+mkdir -p temporality/temporal-dynamicconfig && cd temporality
+curl -O https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o searxng-settings.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/searxng-settings.yml
+curl -o temporal-dynamicconfig/temporality.yaml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/temporal-dynamicconfig/temporality.yaml
 docker compose up -d
 ```
+
+Two configs are required: `temporal-dynamicconfig/temporality.yaml` — the
+Temporal dynamic config (long-run history ceilings; without it the Temporal
+server will not start) and `searxng-settings.yml` — the SearXNG metasearch
+settings (enables the JSON format the agent's `web_search` parses; when the
+file is missing Docker substitutes an empty directory and the container
+dies). All files are fetched from the same repository and the same `main`
+branch.
 
 The latest published release comes up by default (images from the
 [releases page](https://github.com/RuslanGabbasov/temporality/releases)). For
