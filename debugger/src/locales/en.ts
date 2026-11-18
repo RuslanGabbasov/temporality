@@ -663,6 +663,7 @@ export const en: Record<string, string> = {
     'chat.delegation.completed': 'completed',
     'chat.delegation.failed': 'failed',
     'chat.delegation.running': 'running',
+    'chat.delegation.round_title': 'Rework: review round {{round}}',
     'chat.delegation.turns': '{{count}} turns',
     'chat.delegation.loading': 'Loading…',
     'chat.delegation.no_answer': 'No answer recorded',

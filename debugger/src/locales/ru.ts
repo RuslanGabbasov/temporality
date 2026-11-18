@@ -663,6 +663,7 @@ export const ru: Record<string, string> = {
     'chat.delegation.completed': 'завершено',
     'chat.delegation.failed': 'ошибка',
     'chat.delegation.running': 'выполняется',
+    'chat.delegation.round_title': 'Доработка: раунд {{round}} ревью',
     'chat.delegation.turns': '{{count}} ходов',
     'chat.delegation.loading': 'Загрузка…',
     'chat.delegation.no_answer': 'Ответ не сохранён',

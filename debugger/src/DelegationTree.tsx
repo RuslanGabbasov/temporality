@@ -156,15 +156,22 @@ interface DelegationNodeProps {
   info: DelegationNodeInfo
   agents: Agent[]
   depth: number
+  /** Expansion is owned by the tree (one Set of run ids): collapsing a
+   *  parent deterministically collapses the whole branch, and the 10 s
+   *  refresh (which re-creates info objects) can never resurrect or drop a
+   *  child's expansion state. The expanded set + toggle come down so nested
+   *  children register in the SAME set. */
+  expanded: ReadonlySet<string>
+  toggleNode: (id: string) => void
   onOpenRun?: (runId: string) => void
 }
 
-function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationNodeProps) {
+function DelegationNode({ project, info, agents, depth, expanded, toggleNode, onOpenRun }: DelegationNodeProps) {
   const { t, locale } = useI18n()
-  const [open, setOpen] = useState(false)
   const [payload, setPayload] = useState<ChildPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const traceRef = useRef<HTMLDivElement | null>(null)
+  const open = expanded.has(info.childRunId)
 
   const agent = agents.find((a) => a.id === info.agentId)
   const agentTitle = agent?.name ?? info.agentId ?? t('chat.delegation.unknown_agent')
@@ -198,7 +205,7 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
     if (el && live) el.scrollTop = el.scrollHeight
   }, [payload, live])
 
-  const toggle = useCallback(() => { setOpen((prev) => !prev) }, [])
+  const traceEvents = collapseRouteMarkers((payload?.events ?? []).filter((event) => !TRACE_SKIP.has(event.type)))
 
   const statusTag = status === 'completed'
     ? <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>
@@ -216,23 +223,24 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
     else window.location.assign(`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(info.childRunId)}`)
   }
 
-  const traceEvents = collapseRouteMarkers((payload?.events ?? []).filter((event) => !TRACE_SKIP.has(event.type)))
-
   return (
     <div className={depth > 0 ? 'chat-delegation-nested' : undefined}>
       <div
         className="chat-delegation-row"
         role="button"
         tabIndex={0}
-        onClick={toggle}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+        onClick={() => toggleNode(info.childRunId)}
+        onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNode(info.childRunId) } }}
       >
         <span className="chat-delegation-arrow"><ChevronRight size={12} className={open ? 'chevron-open' : ''} /></span>
         {info.taskId && <span className="chat-delegation-task">{info.taskId}</span>}
         <span className="chat-delegation-agent">{agentTitle}</span>
         {statusTag}
+        {/* The rework round the task is in (kernel plan events): ↺3 reads
+            «reworked in review round 3» — a bare ×3 looked like a copy
+            count. */}
         {typeof info.round === 'number' && info.round > 1 && (
-          <span className="chat-delegation-meta">×{info.round}</span>
+          <span className="chat-delegation-meta" title={t('chat.delegation.round_title', { round: String(info.round) })}>↺{info.round}</span>
         )}
         {info.verdict === 'rework' && <span className="chat-delegation-meta" title={t('runs.event.plan_task_rejected')}>↺</span>}
         {info.verdict === 'accept' && <span className="chat-delegation-meta" title={t('runs.event.plan_task_completed')}>✓</span>}
@@ -283,7 +291,8 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
             </div>
           )}
           {payload?.children.map((child) => (
-            <DelegationNode key={child.childRunId} project={project} info={child} agents={agents} depth={depth + 1} onOpenRun={onOpenRun} />
+            <DelegationNode key={child.childRunId} project={project} info={child} agents={agents} depth={depth + 1}
+              expanded={expanded} toggleNode={toggleNode} onOpenRun={onOpenRun} />
           ))}
         </div>
       )}
@@ -305,6 +314,20 @@ export default function DelegationTree({ project, runId, agents, live = false, o
 }) {
   const t = useT()
   const [nodes, setNodes] = useState<DelegationNodeInfo[] | null>(null)
+  // Expansion lives HERE, one Set of child-run ids. Collapsing a parent then
+  // deterministically collapses its whole branch, and the 10 s refresh (which
+  // re-creates the info objects) can never resurrect a child's expansion
+  // state — the flaky «остался развернутым ран с QA» came from per-node open
+  // state racing the refresh.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const toggleNode = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   const refresh = useCallback(() => fetchDelegations(project, runId).then(setNodes).catch(() => setNodes([])), [project, runId])
   const hasRunning = Boolean(nodes?.some((node) => node.status === 'running'))
@@ -322,7 +345,8 @@ export default function DelegationTree({ project, runId, agents, live = false, o
     <div className="chat-delegation">
       <div className="chat-delegation-title">{t('chat.delegation.title')}</div>
       {nodes.map((info) => (
-        <DelegationNode key={info.childRunId} project={project} info={info} agents={agents} depth={0} onOpenRun={onOpenRun} />
+        <DelegationNode key={info.childRunId} project={project} info={info} agents={agents} depth={0}
+          expanded={expanded} toggleNode={toggleNode} onOpenRun={onOpenRun} />
       ))}
     </div>
   )
