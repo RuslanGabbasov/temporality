@@ -1,9 +1,10 @@
-import { memo } from 'react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import MermaidDiagram from './MermaidDiagram'
 import { IN_APP_STORAGE_PATH, resolveImageSource, useResolvedImage } from './imageResolution'
+import { workspaceFileExists, type FileExistence } from './fileExistence'
 
 const FILES_URL_PREFIX = '/kernel-api/v1/workspace/projects/'
 
@@ -237,6 +238,57 @@ function MarkdownImage({ src = '', alt, project }: { src?: string; alt?: string;
   return <img src={normalized} alt={label} loading="lazy" />
 }
 
+// A workspace-path link is only clickable when the file is actually THERE:
+// agents invent paths, and a dead link that ends in a download-error toast
+// is noise, not navigation. 'missing' downgrades to plain text (muted, with
+// the path on hover for diagnostics); 'unknown' (listing failed, empty dir,
+// check still running) fail-opens as a link. One delayed recheck covers the
+// race where an agent references a file it is still writing.
+const MISSING_RECHECK_MS = 10_000
+
+function useWorkspaceFileExists(project: string | undefined, filePath: string): FileExistence {
+  const [state, setState] = useState<FileExistence>('unknown')
+  useEffect(() => {
+    if (!project) return
+    let alive = true
+    let timer = 0
+    const verify = (withRecheck: boolean) => {
+      workspaceFileExists(project, filePath).then((result) => {
+        if (!alive) return
+        setState(result)
+        if (withRecheck && result === 'missing') {
+          timer = window.setTimeout(() => { if (alive) verify(false) }, MISSING_RECHECK_MS)
+        }
+      })
+    }
+    verify(true)
+    return () => { alive = false; window.clearTimeout(timer) }
+  }, [project, filePath])
+  // No project — nothing to verify against; fail-open.
+  return project ? state : 'exists'
+}
+
+function WorkspaceFileLink({ href, filePath, project, onFile, children }: {
+  href?: string
+  filePath: string
+  project?: string
+  onFile: (path: string) => void
+  children: ReactNode
+}) {
+  const existence = useWorkspaceFileExists(project, filePath)
+  if (existence === 'missing') {
+    return <span style={{ color: 'var(--tm-text-3)', borderBottom: '1px dashed var(--tm-border-strong)', cursor: 'default' }} title={`${filePath} — файла нет в хранилище`}>{children}</span>
+  }
+  return (
+    <a
+      href={href}
+      className="workspace-file-link"
+      title={filePath}
+      onClick={(e) => { e.preventDefault(); onFile(filePath) }}
+    >{children}</a>
+  )
+}
+
 const MarkdownSegment = memo(function MarkdownSegment({ content, onFile, project }: { content: string; onFile?: (path: string) => void; project?: string }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm, remarkBreaks]}
@@ -246,12 +298,7 @@ const MarkdownSegment = memo(function MarkdownSegment({ content, onFile, project
         const filePath = href ? pathFromFilesUrl(href) : null
         if (filePath && onFile) {
           return (
-            <a
-              href={href}
-              className="workspace-file-link"
-              title={filePath}
-              onClick={(e) => { e.preventDefault(); onFile(filePath) }}
-            >{children}</a>
+            <WorkspaceFileLink href={href} filePath={filePath} project={project} onFile={onFile}>{children}</WorkspaceFileLink>
           )
         }
         // Anchors (#section, footnote refs/backrefs) and artifact: links open

@@ -2,8 +2,17 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import Markdown, { linkifyWorkspacePaths, splitMermaidSegments } from './Markdown'
+import { workspaceFileExists, type FileExistence } from './fileExistence'
+
+vi.mock('./fileExistence', () => ({
+  workspaceFileExists: vi.fn(() => Promise.resolve('unknown' as FileExistence)),
+}))
+
+const mockExists = (result: FileExistence) => {
+  (workspaceFileExists as ReturnType<typeof vi.fn>).mockResolvedValue(result)
+}
 
 // React act() support flag for the jsdom environment.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -146,6 +155,60 @@ describe('Markdown images', () => {
       URL.createObjectURL = createObjectURL
       URL.revokeObjectURL = revokeObjectURL
     }
+  })
+})
+
+describe('workspace file links (existence-gated)', () => {
+  const FILE_LINK = `see [docs/plan.md](${URL_FOR('p1', 'docs/plan.md')})`
+
+  beforeEach(() => mockExists('unknown'))
+
+  const renderLink = async (): Promise<HTMLDivElement> => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let root: Root | undefined
+    await act(async () => {
+      root = createRoot(container)
+      root!.render(<Markdown content={FILE_LINK} project="p1" onFile={() => {}} />)
+    })
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    // Leaked roots are fine here: the file-local container keeps assertions
+    // simple, jsdom tears down with the test file.
+    return container
+  }
+
+  it('keeps the link clickable while the existence check is undecided', async () => {
+    mockExists('unknown')
+    const container = await renderLink()
+    expect(container.querySelector('a.workspace-file-link')).not.toBeNull()
+  })
+
+  it('keeps the link clickable when the file exists in the workspace', async () => {
+    mockExists('exists')
+    const container = await renderLink()
+    expect(container.querySelector('a.workspace-file-link')).not.toBeNull()
+  })
+
+  it('downgrades the link to plain text when the file does not exist', async () => {
+    // Hallucinated paths used to render as confident links that dead-ended
+    // in a download-error toast.
+    mockExists('missing')
+    const container = await renderLink()
+    expect(container.querySelector('a.workspace-file-link')).toBeNull()
+    const span = container.querySelector('span[title]')
+    expect(span?.getAttribute('title')).toContain('docs/plan.md')
+    expect(span?.textContent).toBe('docs/plan.md')
+  })
+
+  it('does not gate links without a project — nothing to verify against', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await act(async () => {
+      createRoot(container).render(<Markdown content={FILE_LINK} onFile={() => {}} />)
+    })
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(container.querySelector('a.workspace-file-link')).not.toBeNull()
+    expect(workspaceFileExists).not.toHaveBeenCalled()
   })
 })
 
