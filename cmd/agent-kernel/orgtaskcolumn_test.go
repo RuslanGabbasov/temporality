@@ -51,3 +51,32 @@ func TestOrgTaskColumnFailedVsAccepted(t *testing.T) {
 		t.Fatalf("mixed failed+completed with a verdict must complete, got %q", column)
 	}
 }
+
+// Cancelled runs are terminal outcomes: a task whose only run was cancelled
+// used to fall through every bucket and land back in «В работе» forever —
+// the operator saw dead work as live work. Cancelled counts as completed on
+// the board; a failed sibling still holds the review gate, and a live run
+// still outranks cancelled history (a restart is in progress).
+func TestOrgTaskColumnCancelled(t *testing.T) {
+	cancelled := []workspace.OrgActiveRun{
+		{RunID: "r1", Status: "cancelled"},
+	}
+	cancelledAndFailed := []workspace.OrgActiveRun{
+		{RunID: "r1", Status: "cancelled"},
+		{RunID: "r2", Status: "failed"},
+	}
+	cancelledAndLive := []workspace.OrgActiveRun{
+		{RunID: "r1", Status: "cancelled"},
+		{RunID: "r3", Status: "running"},
+	}
+
+	if column, _ := orgTaskColumn(cancelled, nil, nil, false); column != orgColumnCompleted {
+		t.Fatalf("a cancelled-only task must present as completed, got %q", column)
+	}
+	if column, _ := orgTaskColumn(cancelledAndFailed, nil, nil, false); column != orgColumnReview {
+		t.Fatalf("a cancelled run must not wash a failure out of the gate, got %q", column)
+	}
+	if column, _ := orgTaskColumn(cancelledAndLive, nil, nil, false); column != orgColumnInProgress {
+		t.Fatalf("a live run must outrank cancelled history, got %q", column)
+	}
+}

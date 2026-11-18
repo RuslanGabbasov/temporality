@@ -235,7 +235,7 @@ func buildOrgWorkView(ctx context.Context, ws *workspace.Store, scope []string) 
 // already accepted it (accepted=true: the reviewed card presents as
 // «Завершено» and the activity window washes it out later), then completed.
 func orgTaskColumn(taskRuns []workspace.OrgActiveRun, ws *workspace.Store, ctx context.Context, accepted bool) (string, string) {
-	live, urgentRun, failed, completed := 0, (*workspace.OrgActiveRun)(nil), 0, 0
+	live, urgentRun, failed, completed, cancelled := 0, (*workspace.OrgActiveRun)(nil), 0, 0, 0
 	for i := range taskRuns {
 		switch taskRuns[i].Status {
 		case "running":
@@ -248,6 +248,11 @@ func orgTaskColumn(taskRuns []workspace.OrgActiveRun, ws *workspace.Store, ctx c
 			failed++
 		case "completed":
 			completed++
+		case "cancelled":
+			// A cancelled run is a finished outcome, not work in progress —
+			// without this bucket the task fell through every check and
+			// landed back in «В работе» forever.
+			cancelled++
 		}
 	}
 	if len(taskRuns) == 0 {
@@ -264,10 +269,11 @@ func orgTaskColumn(taskRuns []workspace.OrgActiveRun, ws *workspace.Store, ctx c
 		// Failed work sits at the quality gate for attention — the outcome is
 		// visible in the card flags, the history is untouched. A human verdict
 		// (accepted) moves it out: the work was reviewed, the board shows it as
-		// completed until the window empties the column.
+		// completed until the window empties the column. A cancelled sibling
+		// run does not wash the failure out — the failure still needs a verdict.
 		return orgColumnReview, ""
 	}
-	if completed > 0 || accepted {
+	if completed > 0 || cancelled > 0 || accepted {
 		return orgColumnCompleted, ""
 	}
 	return orgColumnInProgress, ""
