@@ -20,7 +20,22 @@
     try { localStorage.setItem('temporality-site-language', lang); } catch (_) {}
   };
   let lang = 'ru';
-  try { lang = localStorage.getItem('temporality-site-language') || 'ru'; } catch (_) {}
+  // First visit (no saved choice): follow the browser culture — ru* gets
+  // Russian, everything else (en*, and any third language) gets English,
+  // the lingua franca of the audience this site addresses. The detection
+  // is NOT persisted: the browser stays authoritative until the reader
+  // picks a language with the toggle (setLanguage saves that choice).
+  const detectLanguage = () => {
+    const tags = [...(navigator.languages || [])];
+    if (navigator.language) tags.push(navigator.language);
+    for (const tag of tags) {
+      const lower = String(tag).toLowerCase();
+      if (lower.startsWith('ru')) return 'ru';
+      if (lower.startsWith('en')) return 'en';
+    }
+    return 'en';
+  };
+  try { lang = localStorage.getItem('temporality-site-language') || detectLanguage(); } catch (_) { lang = detectLanguage(); }
   setLanguage(lang);
   langToggle.addEventListener('click', () => setLanguage(root.lang === 'ru' ? 'en' : 'ru'));
 
