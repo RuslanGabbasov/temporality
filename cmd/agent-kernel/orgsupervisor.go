@@ -76,7 +76,9 @@ func startOrgSupervisorLoop(ctx context.Context, log *slog.Logger, ws *workspace
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				runOrgSupervisorPass(ctx, deps)
+				runPassGuarded(log, "org-supervisor", ctx, func(pctx context.Context) {
+					runOrgSupervisorPass(pctx, deps)
+				})
 			}
 		}
 	}()
@@ -604,7 +606,9 @@ func startOrgAwarenessDeliveryLoop(ctx context.Context, log *slog.Logger, ws *wo
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				runOrgDeliveryPass(ctx, log, ws, signaler)
+				runPassGuarded(log, "org-delivery", ctx, func(pctx context.Context) {
+					runOrgDeliveryPass(pctx, log, ws, signaler)
+				})
 			}
 		}
 	}()

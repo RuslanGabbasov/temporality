@@ -188,18 +188,26 @@ func startOrgActivityLoop(ctx context.Context, log *slog.Logger, ws *workspace.S
 		defer ticker.Stop()
 		defer pruneTicker.Stop()
 		defer consumeTicker.Stop()
-		runOrgActivityPass(ctx, log, ws, observationURL, journalToken, pass)
+		runPassGuarded(log, "org-activity", ctx, func(pctx context.Context) {
+			runOrgActivityPass(pctx, log, ws, observationURL, journalToken, pass)
+		})
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				pass++
-				runOrgActivityPass(ctx, log, ws, observationURL, journalToken, pass)
+				runPassGuarded(log, "org-activity", ctx, func(pctx context.Context) {
+					runOrgActivityPass(pctx, log, ws, observationURL, journalToken, pass)
+				})
 			case <-consumeTicker.C:
-				sweepOrgAwarenessConsumption(ctx, log, ws, observationURL, journalToken)
+				runPassGuarded(log, "org-consumption", ctx, func(pctx context.Context) {
+					sweepOrgAwarenessConsumption(pctx, log, ws, observationURL, journalToken)
+				})
 			case <-pruneTicker.C:
-				runOrgActivityPrune(ctx, log, ws)
+				runPassGuarded(log, "org-prune", ctx, func(pctx context.Context) {
+					runOrgActivityPrune(pctx, log, ws)
+				})
 			}
 		}
 	}()

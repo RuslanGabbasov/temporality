@@ -361,6 +361,12 @@ func supervisorTypedEventPage(ctx context.Context, observationURL, token string,
 	return page.Events, page.NextCursor, nil
 }
 
+// journalReadClient bounds journal reads from background loops: a hung
+// connection (half-open TCP after a journal restart) must not park the loop
+// goroutine forever — the 2026-11-18 fold stall sat on a headerless request
+// with no deadline for hours.
+var journalReadClient = &http.Client{Timeout: 60 * time.Second}
+
 func supervisorGetJSON(ctx context.Context, observationURL, token string, params url.Values, into any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimRight(observationURL, "/")+"/v1/observations/events?"+params.Encode(), nil)
@@ -370,7 +376,7 @@ func supervisorGetJSON(ctx context.Context, observationURL, token string, params
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := http.DefaultClient.Do(req)
+	response, err := journalReadClient.Do(req)
 	if err != nil {
 		return err
 	}
