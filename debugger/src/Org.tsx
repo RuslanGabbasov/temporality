@@ -508,7 +508,7 @@ export default function Org() {
             placeholder="Acme Corp"
             autoFocus
           />
-          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+          <div className="form-actions" style={{ justifyContent: 'center', marginTop: '0.75rem' }}>
             <Button onClick={() => { setFormKind('organization'); void saveUnit() }} disabled={!formName.trim() || !isAdmin}>
               {t('org.create_root') ?? 'Create organization'}
             </Button>
