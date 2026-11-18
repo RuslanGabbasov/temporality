@@ -265,6 +265,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
   // Project management
   const [editProject, setEditProject] = useState<Project | null>(null)
   const [newProjectName, setNewProjectName] = useState('')
+  // The project id is its OWN field: binding it to newProjectName made the ID
+  // and the Name overwrite each other («rnd» typed into the ID became the
+  // name's draft and vice versa). Until the user edits the ID by hand, a slug
+  // of the name suggests itself.
+  const [newProjectID, setNewProjectID] = useState('')
+  const [newProjectIDTouched, setNewProjectIDTouched] = useState(false)
   const [newProjectDesc, setNewProjectDesc] = useState('')
   const [newProjectOrgUnits, setNewProjectOrgUnits] = useState<string[]>([])
   const [allUsers, setAllUsers] = useState<{ id: string; name: string }[]>([])
@@ -563,7 +569,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   }
 
   const saveProject = async () => {
-    const id = editProject?.id ?? newProjectName.trim().toLowerCase().replace(/\s+/g, '-')
+    const id = editProject?.id ?? newProjectID.trim().toLowerCase().replace(/\s+/g, '-')
     const body = {
       id,
       name: editProject ? editProject.name : newProjectName.trim(),
@@ -591,7 +597,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
         }
       }
     }
-    setEditProject(null); setNewProjectName(''); setNewProjectDesc(''); setNewProjectOrgUnits([])
+    setEditProject(null); setNewProjectName(''); setNewProjectID(''); setNewProjectIDTouched(false); setNewProjectDesc(''); setNewProjectOrgUnits([])
     setProjectMembers([]); setMemberDraft([]); setNewMemberUser(''); setNewMemberRole('viewer')
     void loadProjects()
   }
@@ -761,7 +767,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       )
                     })}
                     <div
-                      onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setNewProjectOrgUnits([]); setShowProjectPanel(false); setShowNewProject(true) }}
+                      onClick={() => { setNewProjectName(''); setNewProjectID(''); setNewProjectIDTouched(false); setNewProjectDesc(''); setNewProjectOrgUnits([]); setShowProjectPanel(false); setShowNewProject(true) }}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: 'var(--tm-teal)', borderRadius: '4px' }}
                     >
                       <Add size={20} /> {t('new.project')}
@@ -948,14 +954,14 @@ export default function Layout({ children, activePage }: LayoutProps) {
 
       {/* Project edit/create modal */}
       {(!!editProject || showNewProject) && (
-        <AppModal onClose={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }} panelStyle={{ width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto' }}>
+        <AppModal onClose={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectID(''); setNewProjectIDTouched(false); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }} panelStyle={{ width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{editProject ? (t('action.edit') ?? 'Edit') + ' ' + (t('nav.projects') ?? 'project') : (t('new.project') ?? 'New project')}</Heading>
             {!editProject && (
               <TextInput
                 id="project-id"
                 labelText={t('projects.id') ?? 'Project ID'}
-                value={newProjectName}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewProjectName(e.target.value)}
+                value={newProjectID}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setNewProjectID(e.target.value); setNewProjectIDTouched(true) }}
                 placeholder="my-project"
               />
             )}
@@ -965,7 +971,14 @@ export default function Layout({ children, activePage }: LayoutProps) {
               value={editProject?.name ?? newProjectName}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 if (editProject) setEditProject({ ...editProject, name: e.target.value })
-                else setNewProjectName(e.target.value)
+                else {
+                  setNewProjectName(e.target.value)
+                  // Auto-suggest the id slug until the user edits it by hand:
+                  // «Research & Development» → research-development.
+                  if (!newProjectIDTouched) {
+                    setNewProjectID(e.target.value.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))
+                  }
+                }
               }}
               placeholder="My Project"
             />
@@ -1096,8 +1109,8 @@ export default function Layout({ children, activePage }: LayoutProps) {
               </>
             )}
             <div className="form-actions">
-              <Button kind="secondary" onClick={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
-              <Button onClick={() => void saveProject()}>{editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+              <Button kind="secondary" onClick={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectID(''); setNewProjectIDTouched(false); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button onClick={() => void saveProject()} disabled={!editProject && !newProjectID.trim()}>{editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
             </div>
         </AppModal>
       )}
