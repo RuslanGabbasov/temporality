@@ -55,7 +55,7 @@ function TracePreviewInner({ project, kind, path, content }: {
         ) : (
           <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{t('trace.preview_loading') ?? 'loading…'}</span>
         )}
-        {viewer && <MediaViewer payload={viewer} onClose={() => setViewer(null)} />}
+        {viewer && <MediaViewer payload={viewer} onClose={() => setViewer(null)} project={project} />}
       </div>
     )
   }

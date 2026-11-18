@@ -251,7 +251,7 @@ const MarkdownSegment = memo(function MarkdownSegment({ content, onFile, project
               className="workspace-file-link"
               title={filePath}
               onClick={(e) => { e.preventDefault(); onFile(filePath) }}
-            >{children} ⬇</a>
+            >{children}</a>
           )
         }
         // Anchors (#section, footnote refs/backrefs) and artifact: links open

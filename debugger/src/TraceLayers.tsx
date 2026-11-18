@@ -148,7 +148,7 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
           />
         </div>
       )}
-      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} />}
+      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} project={project} />}
       {reasoning && (
         <details className="run-model-reasoning">
           <summary>💭 {t('runs.reasoning')}</summary>

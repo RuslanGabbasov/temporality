@@ -12,7 +12,10 @@ describe('previewKindFor', () => {
   })
 
   it('previews the plain text and image documents', () => {
-    expect(previewKindFor('docs/plan.md')).toBe('text')
+    // Markdown renders as markdown — the same surface the storage preview
+    // uses — not as a highlighted code pane.
+    expect(previewKindFor('docs/plan.md')).toBe('markdown')
+    expect(previewKindFor('docs/plan.markdown')).toBe('markdown')
     expect(previewKindFor('out/report.txt')).toBe('text')
     expect(previewKindFor('out/chart.png')).toBe('image')
   })

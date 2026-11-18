@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from './i18n'
 import { highlightCode, languageForFile } from './syntax'
+import Markdown from './Markdown'
 
 /** Fullscreen media viewer for trace previews: an image with wheel-zoom and
- *  drag-pan, or a text blob in a scrollable monospace pane. Esc/click-out
- *  closes. One component, two payloads — trace rows open it for image tools
- *  (view_image screenshots) and file tools (write_file content). */
+ *  drag-pan, or a document pane (markdown renders as markdown — identical to
+ *  the storage preview — everything else as highlighted code). Esc/click-out
+ *  closes. One component, three payloads — trace rows open it for image tools
+ *  (view_image screenshots), file tools (write_file content) and workspace
+ *  file links in artifacts/versions. */
 export interface MediaViewerPayload {
-  kind: 'image' | 'text'
-  /** image: an object URL; text: the raw content. */
+  kind: 'image' | 'text' | 'markdown'
+  /** image: an object URL; text/markdown: the raw content. */
   src: string
   title: string
 }
 
-export default function MediaViewer({ payload, onClose }: { payload: MediaViewerPayload; onClose: () => void }) {
+export default function MediaViewer({ payload, onClose, project }: { payload: MediaViewerPayload; onClose: () => void; project?: string }) {
   const t = useT()
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -30,7 +33,7 @@ export default function MediaViewer({ payload, onClose }: { payload: MediaViewer
     return () => window.removeEventListener('keydown', onKey)
   }, [close])
 
-  if (payload.kind === 'text') {
+  if (payload.kind === 'text' || payload.kind === 'markdown') {
     return (
       <div role="dialog" aria-modal onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 10001, background: 'rgba(0,0,0,0.75)', display: 'flex', flexDirection: 'column' }}>
         <div onClick={(e) => e.stopPropagation()} style={{ flex: 1, display: 'flex', flexDirection: 'column', margin: '2rem', background: 'var(--tm-surface, #142522)', border: '1px solid var(--tm-border)', borderRadius: '10px', overflow: 'hidden' }}>
@@ -38,7 +41,15 @@ export default function MediaViewer({ payload, onClose }: { payload: MediaViewer
             <span style={{ fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{payload.title}{textLanguage ? ` · ${textLanguage}` : ''}</span>
             <button onClick={close} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}>✕</button>
           </div>
-          <pre className="code-preview hljs" style={{ flex: 1, margin: 0, padding: '0.9rem', overflow: 'auto', color: 'var(--tm-text)', fontSize: '0.75rem', lineHeight: 1.5, fontFamily: '"SFMono-Regular", Consolas, monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }} dangerouslySetInnerHTML={{ __html: html }} />
+          {payload.kind === 'markdown' ? (
+            // Markdown renders as markdown — the SAME surface the storage
+            // preview uses (same component, same styles), not a code pane.
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0.9rem 1.1rem' }}>
+              <div className="artifact-body"><Markdown content={payload.src} project={project} /></div>
+            </div>
+          ) : (
+            <pre className="code-preview hljs" style={{ flex: 1, margin: 0, padding: '0.9rem', overflow: 'auto', color: 'var(--tm-text)', fontSize: '0.75rem', lineHeight: 1.5, fontFamily: '"SFMono-Regular", Consolas, monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }} dangerouslySetInnerHTML={{ __html: html }} />
+          )}
         </div>
       </div>
     )

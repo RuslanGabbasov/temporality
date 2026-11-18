@@ -2339,7 +2339,7 @@ export default function Artifacts({ project }: { project?: string }) {
       {loading && <PageLoading />}
 
       {/* Inline workspace file preview (file-path links in the artifact body) */}
-      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} />}
+      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} project={project} />}
     </div>
   )
 }
@@ -2441,7 +2441,7 @@ function VersionHistory({ artifactID, project }: { artifactID: string; project?:
           ))}
       </div>
 
-      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} />}
+      {fileViewer && <MediaViewer payload={fileViewer} onClose={closeFileViewer} project={project} />}
     </div>
   )
 }
