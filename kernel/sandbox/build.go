@@ -1,14 +1,17 @@
 package sandbox
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -459,6 +462,8 @@ func BuildEmbedded(ctx context.Context, binary string) (string, error) {
 
 // BuildDefinition builds one profile recipe: same preflight, stdin-only
 // context, digest pinning and --pull=never verification as the base build.
+// Every output line feeds the package-level progress registry (the status
+// endpoint renders it while the build runs).
 func BuildDefinition(ctx context.Context, binary string, def ProfileDefinition) (string, error) {
 	if strings.TrimSpace(def.Dockerfile) == "" || strings.TrimSpace(def.Tag) == "" {
 		return "", fmt.Errorf("sandbox profile definition is incomplete")
@@ -468,11 +473,41 @@ func BuildDefinition(ctx context.Context, binary string, def ProfileDefinition) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
-	build := exec.CommandContext(ctx, binary, "build", "-t", def.Tag, "-")
+	// --progress=plain pins the machine-readable "#N [k/total]" step lines the
+	// progress parser keys on (a tty would emit the animated variant).
+	build := exec.CommandContext(ctx, binary, "build", "--progress=plain", "-t", def.Tag, "-")
 	build.Stdin = strings.NewReader(def.Dockerfile)
 	var output limitedBuffer
-	build.Stdout, build.Stderr = &output, &output
-	if err := build.Run(); err != nil {
+	stdout, pipeErr := build.StdoutPipe()
+	if pipeErr != nil {
+		return "", pipeErr
+	}
+	stderr, pipeErr := build.StderrPipe()
+	if pipeErr != nil {
+		return "", pipeErr
+	}
+	if err := build.Start(); err != nil {
+		return "", fmt.Errorf("sandbox image build: %w", err)
+	}
+	// Docker writes the build narrative to stderr; stdout carries the tagged
+	// digests. Both feed the capture buffer (errors) and the live progress.
+	var wg sync.WaitGroup
+	scan := func(r io.Reader) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		for scanner.Scan() {
+			line := scanner.Text()
+			output.WriteString(line + "\n")
+			recordBuildLine(line)
+		}
+	}
+	wg.Add(2)
+	go scan(stdout)
+	go scan(stderr)
+	waitErr := build.Wait()
+	wg.Wait()
+	if waitErr != nil {
 		ctxErr := ctx.Err()
 		if ctxErr != nil {
 			return "", fmt.Errorf("sandbox image build timed out after %s: %w", buildTimeout, ctxErr)
@@ -481,9 +516,9 @@ func BuildDefinition(ctx context.Context, binary string, def ProfileDefinition) 
 		// both error formats below only ever see the sanitized text.
 		log := sanitizeDockerOutput(output.String())
 		if actionable := packageInstallFailure(def, log); actionable != nil {
-			return "", fmt.Errorf("sandbox image build: %w: %s", err, actionable.Error())
+			return "", fmt.Errorf("sandbox image build: %w: %s", waitErr, actionable.Error())
 		}
-		return "", fmt.Errorf("sandbox image build: %w: %s", err, log)
+		return "", fmt.Errorf("sandbox image build: %w: %s", waitErr, log)
 	}
 	ref, err := pinnedRef(ctx, binary, def.Tag)
 	if err != nil {
@@ -493,6 +528,143 @@ func BuildDefinition(ctx context.Context, binary string, def ProfileDefinition) 
 		return "", err
 	}
 	return ref, nil
+}
+
+// ── Build progress registry ─────────────────────────────────────────────────
+//
+// A cold sandbox build downloads the base image and runs for minutes while
+// the UI showed only a silent «Building…». One build runs at a time (the
+// docker daemon serializes them anyway), so the registry is a single global
+// slot: TryBeginBuild gates new starts, BuildDefinition's output lines feed
+// the parser, FinishBuild closes the slot. The status endpoint snapshots it;
+// the client polls and renders a progress bar with the log tail.
+
+type BuildProgress struct {
+	Running   bool      `json:"running"`
+	StartedAt time.Time `json:"started_at,omitempty"`
+	Done      bool      `json:"done"`
+	Failed    bool      `json:"failed,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	Image     string    `json:"image,omitempty"`
+	// Phase: pull (downloading the base image — the slow part), build (the
+	// dockerfile steps), export (writing and pinning the layers).
+	Phase     string `json:"phase,omitempty"`
+	Step      int    `json:"step,omitempty"`
+	Total     int    `json:"total,omitempty"`
+	LastLine  string `json:"last_line,omitempty"`
+	ElapsedMS int64  `json:"elapsed_ms,omitempty"`
+}
+
+const buildLogTail = 30
+
+var (
+	buildProgressMu sync.Mutex
+	buildProgress   = struct {
+		running bool
+		started time.Time
+		done    bool
+		failed  bool
+		err     string
+		image   string
+		phase   string
+		step    int
+		total   int
+		lastLine string
+		tail    []string
+	}{}
+)
+
+// TryBeginBuild claims the single build slot; false = a build is running.
+func TryBeginBuild() bool {
+	buildProgressMu.Lock()
+	defer buildProgressMu.Unlock()
+	if buildProgress.running {
+		return false
+	}
+	buildProgress.running = true
+	buildProgress.started = time.Now().UTC()
+	buildProgress.done, buildProgress.failed, buildProgress.err = false, false, ""
+	buildProgress.image, buildProgress.phase = "", "pull"
+	buildProgress.step, buildProgress.total = 0, 0
+	buildProgress.tail = nil
+	return true
+}
+
+// FinishBuild closes the slot. Safe to call twice — only the first finish
+// after a begin records the outcome.
+func FinishBuild(image string, buildErr error) {
+	buildProgressMu.Lock()
+	defer buildProgressMu.Unlock()
+	if !buildProgress.running {
+		return
+	}
+	buildProgress.running = false
+	buildProgress.done = true
+	buildProgress.failed = buildErr != nil
+	if buildErr != nil {
+		buildProgress.err = buildErr.Error()
+	} else {
+		buildProgress.image = image
+	}
+}
+
+// recordBuildLine folds one docker output line into the progress: phase
+// transitions, "#N [k/total]" step markers and the log tail.
+func recordBuildLine(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	buildProgressMu.Lock()
+	defer buildProgressMu.Unlock()
+	buildProgress.tail = append(buildProgress.tail, line)
+	if len(buildProgress.tail) > buildLogTail {
+		buildProgress.tail = buildProgress.tail[len(buildProgress.tail)-buildLogTail:]
+	}
+	buildProgress.lastLine = line
+	// A dockerfile step line dominates: it names the phase the build is in
+	// right now. Pull/export lines never overwrite a step phase — the base
+	// image pull happens BEFORE the steps, the export AFTER them; re-detecting
+	// a late pull inside a step phase would flip the bar backwards.
+	if m := buildStepRe.FindStringSubmatch(line); m != nil {
+		buildProgress.phase = "build"
+		buildProgress.step, _ = strconv.Atoi(m[1])
+		if total, err := strconv.Atoi(m[2]); err == nil && total > buildProgress.total {
+			buildProgress.total = total
+		}
+		return
+	}
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "exporting") || strings.Contains(lower, "naming to") {
+		buildProgress.phase = "export"
+		return
+	}
+	if strings.Contains(lower, "pull") || strings.Contains(lower, "downloading") || strings.Contains(lower, "extracting") {
+		if buildProgress.phase == "" || buildProgress.phase == "pull" {
+			buildProgress.phase = "pull"
+		}
+	}
+}
+
+// buildStepRe matches buildkit's step lines: "#12 [2/4] RUN apk add …".
+var buildStepRe = regexp.MustCompile(`^#\d+ \[(\d+)/(\d+)\]`)
+
+// BuildProgressSnapshot copies the current progress for the status endpoint;
+// elapsed is computed here so the client renders a clock without math.
+func BuildProgressSnapshot() BuildProgress {
+	buildProgressMu.Lock()
+	defer buildProgressMu.Unlock()
+	out := BuildProgress{
+		Running: buildProgress.running, StartedAt: buildProgress.started,
+		Done: buildProgress.done, Failed: buildProgress.failed, Error: buildProgress.err,
+		Image: buildProgress.image, Phase: buildProgress.phase,
+		Step: buildProgress.step, Total: buildProgress.total,
+		LastLine: buildProgress.lastLine,
+	}
+	if !buildProgress.started.IsZero() {
+		out.ElapsedMS = time.Since(buildProgress.started).Milliseconds()
+	}
+	return out
 }
 
 // ImageAvailable reports whether the local Docker store holds the exact

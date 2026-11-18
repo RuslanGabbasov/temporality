@@ -4,6 +4,7 @@ import { Add, Checkmark } from '@carbon/icons-react'
 import { useT } from './i18n'
 import { authHeaders, authToken, TOKEN_STORAGE_KEY } from './api'
 import { setupStatus, login as apiLogin, type SetupStatus } from './kernelApi'
+import { SandboxBuildProgress, useSandboxBuild } from './useSandboxBuild'
 import { workspaceApi, type SandboxProfile } from './workspaceApi'
 import type { BuiltinAgentSpec } from './workspaceApi'
 
@@ -53,6 +54,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [profiles, setProfiles] = useState<SandboxProfile[]>([])
   const [sandboxProfile, setSandboxProfile] = useState('')
   const [buildBusy, setBuildBusy] = useState('')
+  const buildTracker = useSandboxBuild()
   // Agent: a curated template + a name; the definition comes from the template.
   const [templates, setTemplates] = useState<BuiltinAgentSpec[]>([])
   const [templateSlug, setTemplateSlug] = useState('')
@@ -214,23 +216,25 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     if (!sandboxProfile) return
     setBuildBusy(sandboxProfile); setError('')
     try {
-      await workspaceApi.buildSandboxProfile(sandboxProfile)
-      const fresh = await setupStatus().catch(() => null)
-      setStatus(fresh)
+      // The POST waits for the build (timeout 15m), but the progress poll
+      // below renders the live state meanwhile — and the build itself
+      // survives this page closing: the status endpoint is the truth.
+      const post = workspaceApi.buildSandboxProfile(sandboxProfile)
+      buildTracker.start(() => post)
+      const freshNow = await setupStatus().catch(() => null)
+      setStatus(freshNow)
+      await post
+      // Built: refresh the readiness chip and the profile list.
+      const freshAfter = await setupStatus().catch(() => null)
+      setStatus(freshAfter)
       const list = await workspaceApi.listSandboxProfiles().catch(() => ({ profiles: [] as SandboxProfile[] }))
       setProfiles(list.profiles ?? [])
     } catch (e) {
-      // A client timeout does not stop the build: the server finishes it in
-      // the background and the profile flips to «image ready» shortly.
-      const timeout = e instanceof Error && e.message.includes('timed out')
-      setError(timeout
-        ? (t('onboarding.sandbox_timeout') ?? 'The build keeps running on the server — re-check the status in a minute.')
-        : e instanceof Error ? e.message : 'Failed')
-      if (timeout) {
-        window.setTimeout(() => {
-          void workspaceApi.listSandboxProfiles().then((data) => setProfiles(data.profiles ?? [])).catch(() => {})
-        }, 60_000)
-      }
+      // 409 = another build already owns the slot (another tab, or a rerun):
+      // attach the tracker to the running build instead of failing the click.
+      const already = e instanceof Error && e.message.includes('already running')
+      if (already) buildTracker.start(async () => {})
+      else setError(e instanceof Error ? e.message : 'Failed')
     }
     finally { setBuildBusy('') }
   }
@@ -475,11 +479,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               </div>
               {selectedProfile && !selectedProfile.image && (
                 <div className="onboarding-actions" style={{ marginTop: 0 }}>
-                  <Button size="sm" kind="secondary" disabled={buildBusy !== ''} onClick={() => void buildProfile()}>
-                    {buildBusy === sandboxProfile ? (t('onboarding.sandbox_building') ?? 'Building…') : (t('onboarding.sandbox_build') ?? 'Build image')}
+                  <Button size="sm" kind="secondary" disabled={buildBusy !== '' || buildTracker.busy} onClick={() => void buildProfile()}>
+                    {buildTracker.busy || buildBusy === sandboxProfile ? (t('onboarding.sandbox_building') ?? 'Building…') : (t('onboarding.sandbox_build') ?? 'Build image')}
                   </Button>
                   <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>{t('onboarding.sandbox_build_note')}</span>
                 </div>
+              )}
+              {(buildTracker.busy || buildTracker.status?.done || buildTracker.status?.failed) && (
+                <SandboxBuildProgress status={buildTracker.status} />
               )}
               {status?.sandbox.pinned_by_env && (
                 <p className="onboarding-hint">{t('onboarding.sandbox_pinned_hint')}</p>

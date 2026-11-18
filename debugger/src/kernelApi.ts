@@ -179,8 +179,28 @@ export function setupStatus(): Promise<SetupStatus> {
   return request('/v1/setup/status')
 }
 
-export function buildSandbox(): Promise<{ image: string }> {
+/** Live progress of the running (or last) sandbox build: phases pull →
+ *  build → export, the dockerfile step counter and the build log tail. */
+export interface SandboxBuildStatus {
+  running?: boolean
+  done?: boolean
+  failed?: boolean
+  error?: string
+  image?: string
+  phase?: 'pull' | 'build' | 'export' | string
+  step?: number
+  total?: number
+  last_line?: string
+  elapsed_ms?: number
+  started_at?: string
+}
+
+export function buildSandbox(): Promise<{ started: boolean }> {
   return request('/v1/setup/sandbox/build', { method: 'POST' })
+}
+
+export function buildSandboxStatus(): Promise<SandboxBuildStatus> {
+  return request('/v1/setup/sandbox/build/status')
 }
 
 // Password login: exchanges name-or-email + password for the user's bearer

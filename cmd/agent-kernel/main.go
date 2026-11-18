@@ -2327,27 +2327,56 @@ func main() {
 			writeError(w, 500, errors.New("sandbox runner is not swappable"))
 			return
 		}
-		ref, err := sandbox.BuildEmbedded(r.Context(), env("KERNEL_DOCKER_BINARY", "docker"))
-		if err != nil {
-			writeError(w, 500, err)
+		// One build at a time; the build OUTLIVES the request (clients time out
+		// in seconds, a cold base-image pull runs minutes — WithoutCancel keeps
+		// it alive and the status endpoint carries the progress). The runner
+		// swap and the settings pin happen inside the goroutine: the next
+		// status poll / re-check flips to ready.
+		if !sandbox.TryBeginBuild() {
+			writeError(w, 409, errors.New("a sandbox image build is already running"))
 			return
 		}
-		root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
-		if root == "" {
-			root = ".sandbox"
-		}
-		runner, err := sandbox.New(ref, root)
-		if err != nil {
-			writeError(w, 500, err)
+		buildCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Minute)
+		go func() {
+			defer cancel()
+			var buildErr error
+			var ref string
+			defer func() { sandbox.FinishBuild(ref, buildErr) }()
+			ref, buildErr = sandbox.BuildEmbedded(buildCtx, env("KERNEL_DOCKER_BINARY", "docker"))
+			if buildErr != nil {
+				log.Error("sandbox image build failed", "error", buildErr)
+				return
+			}
+			root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+			if root == "" {
+				root = ".sandbox"
+			}
+			runner, runnerErr := sandbox.New(ref, root)
+			if runnerErr != nil {
+				ref, buildErr = "", runnerErr
+				log.Error("sandbox runner construction failed", "error", runnerErr)
+				return
+			}
+			bgCtx := context.WithoutCancel(r.Context())
+			if err := ws.SetSetting(bgCtx, "sandbox_image", ref); err != nil {
+				ref, buildErr = "", err
+				log.Error("sandbox image pin failed", "error", err)
+				return
+			}
+			swappable.Swap(runner)
+			log.Info("sandbox image built and pinned through onboarding", "image", ref, "root", runner.Root)
+		}()
+		writeJSON(w, 202, map[string]any{"started": true})
+	})
+
+	// Live progress of the running (or last) sandbox build — the onboarding
+	// and the sandbox page poll this to render a progress bar with the build
+	// log tail instead of a silent spinner.
+	mux.HandleFunc("GET /v1/setup/sandbox/build/status", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		if err := ws.SetSetting(r.Context(), "sandbox_image", ref); err != nil {
-			writeError(w, 500, err)
-			return
-		}
-		swappable.Swap(runner)
-		log.Info("sandbox image built and pinned through onboarding", "image", ref, "root", runner.Root)
-		writeJSON(w, 200, map[string]any{"image": ref})
+		writeJSON(w, 200, sandbox.BuildProgressSnapshot())
 	})
 
 	// Workspace CRUD endpoints

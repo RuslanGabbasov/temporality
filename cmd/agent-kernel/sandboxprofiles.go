@@ -315,17 +315,27 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 			}
 			custom = true
 		}
+		// One docker build at a time across the base and profile surfaces: the
+		// progress registry is a single slot, and the daemon serializes builds
+		// anyway. The response stays synchronous (digest or error) — the build
+		// simply records its progress for the status endpoint while running.
+		if !sandbox.TryBeginBuild() {
+			writeError(w, 409, errors.New("a sandbox image build is already running"))
+			return
+		}
 		// The build outlives the HTTP request: clients time out in seconds
 		// while a cold docker build runs for minutes. WithoutCancel keeps it
 		// running to completion — the digest lands in the row and the next
 		// status poll reports the profile ready.
 		buildCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Minute)
 		defer cancel()
-		ref, err := builders.Build(buildCtx, def)
-		if err != nil {
-			writeError(w, 500, err)
+		ref, buildErr := builders.Build(buildCtx, def)
+		sandbox.FinishBuild(ref, buildErr)
+		if buildErr != nil {
+			writeError(w, 500, buildErr)
 			return
 		}
+		var err error
 		if custom {
 			err = ws.SetCustomProfileImage(r.Context(), id, ref)
 		} else {

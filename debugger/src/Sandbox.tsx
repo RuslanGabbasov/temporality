@@ -30,6 +30,7 @@ import {
 } from './sandboxProfileForm'
 import { observationApi } from './observationApi'
 import { useT } from './i18n'
+import { SandboxBuildProgress, useSandboxBuild } from './useSandboxBuild'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -53,6 +54,7 @@ export default function Sandbox({ project }: { project?: string }) {
   const [formEnabled, setFormEnabled] = useState(true)
   const [filter, setFilter] = useState('')
   const [building, setBuilding] = useState('')
+  const buildTracker = useSandboxBuild()
   const [editing, setEditing] = useState<SandboxProfile | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardText, setWizardText] = useState('')
@@ -107,7 +109,11 @@ export default function Sandbox({ project }: { project?: string }) {
   const build = async (p: SandboxProfile) => {
     setBuilding(p.id); setError(''); setNotice('')
     try {
-      await workspaceApi.buildSandboxProfile(p.id)
+      // The POST waits for the build; the progress tracker renders the live
+      // state meanwhile (phases, steps, log tail) instead of a bare spinner.
+      const post = workspaceApi.buildSandboxProfile(p.id)
+      buildTracker.start(() => post)
+      await post
       setNotice(t('sandbox.built_notice', { name: p.name }))
       await load()
     } catch (f) { setError(message(f)) }
@@ -322,6 +328,11 @@ export default function Sandbox({ project }: { project?: string }) {
       {confirmDialogNode}
       {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} onCloseButtonClick={() => setError('')} style={{ marginBottom: '1rem' }} />}
       {notice && <InlineNotification kind="success" lowContrast title="" subtitle={notice} onCloseButtonClick={() => setNotice('')} style={{ marginBottom: '1rem' }} />}
+      {(buildTracker.busy || buildTracker.status?.done || buildTracker.status?.failed) && (
+        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '0.55rem 0.7rem', marginBottom: '1rem' }}>
+          <SandboxBuildProgress status={buildTracker.status} />
+        </div>
+      )}
       {building && <InlineNotification kind="info" lowContrast hideCloseButton title={t('sandbox.building')} subtitle={t('sandbox.building_hint')} style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
