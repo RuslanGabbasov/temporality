@@ -240,20 +240,29 @@ function ChainRow({ row, onDismiss, onAction, onDetails, busy }: {
           </span>
         </ChainBlock>
       </div>
-      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.45rem', borderTop: '1px dashed var(--tm-border)', paddingTop: '0.4rem' }}>
-        <Button size="sm" kind="danger" disabled={busy} onClick={() => onDismiss(row)}>{t('orgflow.dismiss')}</Button>
-        <Button size="sm" kind="ghost" disabled={busy} onClick={() => onAction(row)}>{t('orgflow.register_action')}</Button>
-        {delivery.source_run_id && (
-          <Button size="sm" kind="ghost" disabled={busy} onClick={() => onDetails(row)} title={t('orgflow.details_level')}>
-            {t('orgflow.request_details')}
-          </Button>
-        )}
-        {delivery.source_run_id && (
-          <span className="mono" style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', alignSelf: 'center' }} title={delivery.source_run_id}>
-            ← {shortId(delivery.source_run_id)}
-          </span>
-        )}
-      </div>
+      {/* Action buttons only while the signal can still be acted on: once
+          delivered/consumed (or terminal), the target run is finished with it
+          — a reject would cancel nothing, so the row degrades to history. */}
+      {(() => {
+        const preDelivery = delivery.status === 'selected' || delivery.status === 'queued'
+        const terminal = delivery.status === 'dismissed' || delivery.status === 'expired' || delivery.status === 'failed'
+        return (
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.45rem', borderTop: '1px dashed var(--tm-border)', paddingTop: '0.4rem' }}>
+            {preDelivery && <Button size="sm" kind="danger" disabled={busy} onClick={() => onDismiss(row)}>{t('orgflow.dismiss')}</Button>}
+            {!terminal && <Button size="sm" kind="ghost" disabled={busy} onClick={() => onAction(row)}>{t('orgflow.register_action')}</Button>}
+            {delivery.source_run_id && (preDelivery || delivery.status === 'delivered' || delivery.status === 'follow_up_requested') && (
+              <Button size="sm" kind="ghost" disabled={busy} onClick={() => onDetails(row)} title={t('orgflow.details_level')}>
+                {t('orgflow.request_details')}
+              </Button>
+            )}
+            {delivery.source_run_id && (
+              <span className="mono" style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', alignSelf: 'center' }} title={delivery.source_run_id}>
+                ← {shortId(delivery.source_run_id)}
+              </span>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
