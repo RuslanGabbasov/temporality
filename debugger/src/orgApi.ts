@@ -139,8 +139,10 @@ export interface OrgDelivery {
   source_summary?: string
   target_run_id: string
   decision: OrgAwarenessDecision | string
-  relevance?: number
-  urgency?: number
+  // Free-form lowercase model values (high/medium/normal/low…) — the kernel
+  // stores them as strings, not numbers.
+  relevance?: string
+  urgency?: string
   reason?: string
   message?: string
   detail_level?: string
@@ -215,8 +217,8 @@ export interface OrgBatchDecision {
   delivery_id?: string
   decision?: string
   target_run_id?: string
-  relevance?: number
-  urgency?: number
+  relevance?: string
+  urgency?: string
   reason?: string
   created_at?: string
 }

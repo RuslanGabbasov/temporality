@@ -88,6 +88,69 @@ const LEVEL_KEYS: Record<string, string> = {
   trace: 'orgflow.level_trace',
 }
 
+// The source-event vocabulary the activity projection publishes (the
+// orgActivityTypeGates set in cmd/agent-kernel/orgactivity.go). Unknown
+// types fall back to the raw value — never an empty chip.
+const EVENT_KEYS: Record<string, string> = {
+  'run.started': 'orgflow.event_run_started',
+  'run.restarted': 'orgflow.event_run_restarted',
+  'run.completed': 'orgflow.event_run_completed',
+  'run.failed': 'orgflow.event_run_failed',
+  'run.cancelled': 'orgflow.event_run_cancelled',
+  'plan.started': 'orgflow.event_plan_started',
+  'plan.completed': 'orgflow.event_plan_completed',
+  'plan.aborted': 'orgflow.event_plan_aborted',
+  'plan.stopped': 'orgflow.event_plan_stopped',
+  'plan.task.started': 'orgflow.event_plan_task_started',
+  'plan.task.completed': 'orgflow.event_plan_task_completed',
+  'plan.task.failed': 'orgflow.event_plan_task_failed',
+  'plan.task.skipped': 'orgflow.event_plan_task_skipped',
+  'delegation.started': 'orgflow.event_delegation_started',
+  'delegation.completed': 'orgflow.event_delegation_completed',
+  'delegation.failed': 'orgflow.event_delegation_failed',
+  'saga.registered': 'orgflow.event_saga_registered',
+  'saga.attached': 'orgflow.event_saga_attached',
+  'saga.renamed': 'orgflow.event_saga_renamed',
+  'saga.merged': 'orgflow.event_saga_merged',
+  'saga.deleted': 'orgflow.event_saga_deleted',
+  'human.requested': 'orgflow.event_human_requested',
+  'human.answered': 'orgflow.event_human_answered',
+  'human.timed_out': 'orgflow.event_human_timed_out',
+  'approval.requested': 'orgflow.event_approval_requested',
+  'approval.granted': 'orgflow.event_approval_granted',
+  'approval.rejected': 'orgflow.event_approval_rejected',
+  'approval.auto_granted': 'orgflow.event_approval_auto_granted',
+}
+
+// Relevance/urgency are free-form lowercase model values — map the shapes
+// models actually emit, raw value stays visible for anything unknown.
+const RELEVANCE_KEYS: Record<string, string> = {
+  high: 'orgflow.degree_high',
+  medium: 'orgflow.degree_medium',
+  med: 'orgflow.degree_medium',
+  normal: 'orgflow.degree_medium',
+  low: 'orgflow.degree_low',
+}
+const URGENCY_KEYS: Record<string, string> = {
+  high: 'orgflow.degree_high',
+  urgent: 'orgflow.degree_high',
+  critical: 'orgflow.degree_high',
+  medium: 'orgflow.degree_medium',
+  normal: 'orgflow.degree_normal',
+  low: 'orgflow.degree_low',
+}
+
+const TRIGGER_KEYS: Record<string, string> = {
+  manual: 'orgflow.trigger_manual',
+  schedule: 'orgflow.trigger_schedule',
+  threshold: 'orgflow.trigger_threshold',
+}
+const BATCH_STATUS_KEYS: Record<string, string> = {
+  open: 'orgflow.batch_status_open',
+  pending: 'orgflow.batch_status_pending',
+  decided: 'orgflow.batch_status_decided',
+}
+
 /** datetime-local input value → RFC 3339 (UTC); empty stays empty. */
 function rfc3339(value: string): string | undefined {
   if (!value) return undefined
@@ -119,13 +182,15 @@ function ChainRow({ row, onDismiss, onAction, onDetails, busy }: {
         <ChainBlock label={t('orgflow.chain_event')}>
           {sourceEvent ? (
             <>
-              <span className="mono" style={{ fontSize: '0.68rem', color: 'var(--tm-text-2)' }}>{sourceEvent.event_type ?? '—'}</span>
+              <span style={{ display: 'flex', gap: '0.3rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <Tag type="blue" size="sm" title={sourceEvent.event_type}>{t(EVENT_KEYS[sourceEvent.event_type ?? ''] ?? sourceEvent.event_type)}</Tag>
+                {sourceEvent.occurred_at && (
+                  <TimeHint value={sourceEvent.occurred_at} style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>
+                    {briefDateTime(sourceEvent.occurred_at)}
+                  </TimeHint>
+                )}
+              </span>
               <span style={{ fontSize: '0.74rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sourceEvent.summary ?? ''}>{sourceEvent.summary ?? '—'}</span>
-              {sourceEvent.occurred_at && (
-                <TimeHint value={sourceEvent.occurred_at} style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>
-                  {briefDateTime(sourceEvent.occurred_at)}
-                </TimeHint>
-              )}
             </>
           ) : (
             <span style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)' }}>—</span>
@@ -137,10 +202,10 @@ function ChainRow({ row, onDismiss, onAction, onDetails, busy }: {
             <>
               <span className="mono" style={{ fontSize: '0.68rem' }} title={batch.id}>{shortId(batch.id)}</span>
               <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)' }}>
-                {batch.trigger ?? '—'} · {batch.status}
+                {batch.trigger ? t(TRIGGER_KEYS[batch.trigger] ?? batch.trigger) : '—'} · {t(BATCH_STATUS_KEYS[batch.status] ?? batch.status)}
               </span>
               <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>
-                {batch.event_count ?? 0} → {batch.decision_count ?? 0} → {batch.delivery_count ?? 0}
+                {t('orgflow.batch_counts', { events: String(batch.event_count ?? 0), decisions: String(batch.decision_count ?? 0), deliveries: String(batch.delivery_count ?? 0) })}
               </span>
             </>
           ) : (
@@ -151,8 +216,8 @@ function ChainRow({ row, onDismiss, onAction, onDetails, busy }: {
         <ChainBlock label={t('orgflow.chain_decision')}>
           <span style={{ display: 'flex', gap: '0.3rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
             <Tag type={DECISION_TAGS[delivery.decision] ?? 'gray'} size="sm">{t(DECISION_KEYS[delivery.decision] ?? delivery.decision)}</Tag>
-            {(delivery.relevance !== undefined) && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }} title="relevance">r {delivery.relevance}</span>}
-            {(delivery.urgency !== undefined) && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }} title="urgency">u {delivery.urgency}</span>}
+            {(delivery.relevance ?? '') !== '' && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }} title={t('orgflow.relevance')}>{t('orgflow.relevance')}: {t(RELEVANCE_KEYS[delivery.relevance ?? ''] ?? delivery.relevance)}</span>}
+            {(delivery.urgency ?? '') !== '' && <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }} title={t('orgflow.urgency')}>{t('orgflow.urgency')}: {t(URGENCY_KEYS[delivery.urgency ?? ''] ?? delivery.urgency)}</span>}
           </span>
           {delivery.reason && <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={delivery.reason}>{delivery.reason}</span>}
         </ChainBlock>
@@ -164,7 +229,7 @@ function ChainRow({ row, onDismiss, onAction, onDetails, busy }: {
           </span>
           {delivery.message && <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={delivery.message}>{delivery.message}</span>}
           <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-            {delivery.detail_level && <span>{delivery.detail_level}</span>}
+            {delivery.detail_level && <span>{t(LEVEL_KEYS[delivery.detail_level] ?? delivery.detail_level)}</span>}
             {(delivery.attempts !== undefined) && <span title="attempts">×{delivery.attempts}</span>}
             {delivery.delivered_at && (
               <TimeHint value={delivery.delivered_at}>{briefDateTime(delivery.delivered_at)}</TimeHint>
