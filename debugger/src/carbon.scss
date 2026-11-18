@@ -1782,6 +1782,8 @@ button.header-nav-link {
   color: var(--tm-text-3);
 }
 .chat-delegation-arrow .chevron-open { transform: rotate(90deg); }
+/* Universal collapsed-row chevron: rotates to point down when open. */
+.chevron-open { transform: rotate(90deg); }
 
 .chat-delegation-agent {
   font-weight: 500;

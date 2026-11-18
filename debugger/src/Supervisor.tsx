@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { Button, Tag, InlineNotification } from '@carbon/react'
+import { ChevronRight } from '@carbon/icons-react'
 import PageLoading from './PageLoading'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { workspaceApi, type SupervisorQueue, type SreRollup, type JudgeConfig } from './workspaceApi'
@@ -945,7 +946,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                         onClick={() => toggleCase(group.caseID)}
                         style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', width: '100%', background: 'none', border: 'none', padding: '0.3rem 0.15rem', cursor: 'pointer', textAlign: 'left' }}
                       >
-                        <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', width: '0.8rem' }}>{collapsed ? '▸' : '▾'}</span>
+                        <ChevronRight size={12} className={collapsed ? '' : 'chevron-open'} style={{ color: 'var(--tm-text-3)', flexShrink: 0 }} />
                         <strong style={{ fontSize: '0.8rem' }}>{t(`supervisor.case_${group.caseID}`) ?? group.caseID}</strong>
                         {group.unresolved > 0 && <Tag type={group.unresolved > 5 ? 'red' : 'blue'} size="sm">{group.unresolved}</Tag>}
                         <span style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>/ {group.rows.length}</span>
