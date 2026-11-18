@@ -568,6 +568,8 @@ export default function Layout({ children, activePage }: LayoutProps) {
     void loadProjectMembers(p.id)
   }
 
+  const [savingProject, setSavingProject] = useState(false)
+  const [projectFormError, setProjectFormError] = useState('')
   const saveProject = async () => {
     const id = editProject?.id ?? newProjectID.trim().toLowerCase().replace(/\s+/g, '-')
     const body = {
@@ -581,25 +583,44 @@ export default function Layout({ children, activePage }: LayoutProps) {
     }
     const url = editProject ? `/kernel-api/v1/workspace/projects/${id}` : '/kernel-api/v1/workspace/projects'
     const method = editProject ? 'PUT' : 'POST'
-    await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(body) })
-    // Sync explicit membership: diff the loaded list against the draft.
-    if (editProject) {
-      const before = new Map(projectMembers.map((m) => [m.user_id, m.role]))
-      const after = new Map(memberDraft.map((m) => [m.user_id, m.role]))
-      for (const [uid, role] of after) {
-        if (before.get(uid) !== role) {
-          await fetch(`/kernel-api/v1/workspace/projects/${id}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ user_id: uid, role }) })
+    setSavingProject(true); setProjectFormError('')
+    try {
+      const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(body) })
+      // The kernel provisioned the project — but the response also carries
+      // validation errors (bad id, duplicate): those must keep the form open
+      // with the reason visible, not silently swallow the user's input.
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`
+        try { detail = (await response.json()).error ?? detail } catch { /* non-json body */ }
+        setProjectFormError(detail)
+        return
+      }
+      // Sync explicit membership: diff the loaded list against the draft.
+      if (editProject) {
+        const before = new Map(projectMembers.map((m) => [m.user_id, m.role]))
+        const after = new Map(memberDraft.map((m) => [m.user_id, m.role]))
+        for (const [uid, role] of after) {
+          if (before.get(uid) !== role) {
+            await fetch(`/kernel-api/v1/workspace/projects/${id}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ user_id: uid, role }) })
+          }
+        }
+        for (const uid of before.keys()) {
+          if (!after.has(uid)) {
+            await fetch(`/kernel-api/v1/workspace/projects/${id}/members/${uid}`, { method: 'DELETE', headers: { ...authHeaders() } })
+          }
         }
       }
-      for (const uid of before.keys()) {
-        if (!after.has(uid)) {
-          await fetch(`/kernel-api/v1/workspace/projects/${id}/members/${uid}`, { method: 'DELETE', headers: { ...authHeaders() } })
-        }
-      }
+      const created = await loadProjects()
+      // A new project becomes the working context immediately: the user
+      // created it to work in it, not to hunt for it in the picker.
+      if (!editProject && id) selectProject(id)
+      setEditProject(null); setNewProjectName(''); setNewProjectID(''); setNewProjectIDTouched(false); setNewProjectDesc(''); setNewProjectOrgUnits([])
+      setProjectMembers([]); setMemberDraft([]); setNewMemberUser(''); setNewMemberRole('viewer')
+    } catch (failure) {
+      setProjectFormError(failure instanceof Error ? failure.message : 'Request failed')
+    } finally {
+      setSavingProject(false)
     }
-    setEditProject(null); setNewProjectName(''); setNewProjectID(''); setNewProjectIDTouched(false); setNewProjectDesc(''); setNewProjectOrgUnits([])
-    setProjectMembers([]); setMemberDraft([]); setNewMemberUser(''); setNewMemberRole('viewer')
-    void loadProjects()
   }
 
   const deleteProject = async (id: string) => {
@@ -707,7 +728,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
               }}
             >
               <Folder size={14} style={{ color: 'rgba(255,255,255,0.6)' }} />
-              <span style={{ color: '#fff' }}>{project || (t('projects.all') ?? 'All projects')}</span>
+              {/* The display name, not the raw id: the header is what the user
+                  reads; ids live in the project panel and deep links. */}
+              <span style={{ color: '#fff' }}>{project ? (projects.find((p) => p.id === project)?.name || project) : (t('projects.all') ?? 'All projects')}</span>
               <ChevronDown size={14} className="chevron-flip" data-open={showProjectPanel ? 'true' : 'false'} style={{ color: 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
             </button>
             {showProjectPanel && (
@@ -1108,9 +1131,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 </fieldset>
               </>
             )}
+            {projectFormError && (
+              <div role="alert" style={{ color: '#ffb4ab', fontSize: '0.78rem', margin: '0.5rem 0' }}>{projectFormError}</div>
+            )}
             <div className="form-actions">
-              <Button kind="secondary" onClick={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectID(''); setNewProjectIDTouched(false); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
-              <Button onClick={() => void saveProject()} disabled={!editProject && !newProjectID.trim()}>{editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+              <Button kind="secondary" disabled={savingProject} onClick={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectID(''); setNewProjectIDTouched(false); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser(''); setProjectFormError('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button onClick={() => void saveProject()} disabled={savingProject || (!editProject && !newProjectID.trim())}>{savingProject ? (t('common.saving') ?? 'Saving…') : (editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create'))}</Button>
             </div>
         </AppModal>
       )}
