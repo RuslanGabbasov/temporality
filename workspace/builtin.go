@@ -26,8 +26,29 @@ type BuiltinAgentSpec struct {
 func boolValue(v bool) *bool { return &v }
 
 // BuiltinAgents returns the curated agent templates offered in the gallery.
+// Lead first: it is the onboarding default — a fresh organization starts
+// with the orchestrator that hands work to the agents created later.
 func BuiltinAgents() []BuiltinAgentSpec {
 	return []BuiltinAgentSpec{
+		{
+			Slug:        "lead",
+			Name:        "Lead",
+			Description: "Decomposes large tasks, delegates subtasks to other agents and aggregates their results into one answer.",
+			Definition: AgentDefinition{
+				Capabilities: AgentCapabilities{ModifyFiles: boolValue(false), Network: boolValue(false), Delegation: boolValue(true)},
+				Constraints: []string{
+					"Delegate the work whenever the task splits into independent parts; coordinate instead of doing everything yourself.",
+					"Never present a subagent's claim as verified before you have checked its result against the task.",
+				},
+				Completion: []string{
+					"Make sure every delegated subtask returned a result or is explicitly reported as failed or unfinished.",
+					"Summarize the combined outcome and name the agent responsible for each part.",
+				},
+			},
+			NetworkAccess: boolValue(false),
+			ReadOnly:      boolValue(true),
+			Labels:        map[string]string{"builtin": "true"},
+		},
 		{
 			Slug:        "coder",
 			Name:        "Coder",

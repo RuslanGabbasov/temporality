@@ -108,7 +108,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       .then((data) => {
         const list = data.builtins ?? []
         setTemplates(list)
-        setTemplateSlug((current) => current || list[0]?.slug || '')
+        // Default choice: the lead template (the orchestrator a fresh
+        // organization starts with), falling back to the first in the list.
+        const preferred = list.find((tpl) => tpl.slug === 'lead') ?? list[0]
+        setTemplateSlug((current) => current || preferred?.slug || '')
       })
       .catch(() => setTemplates([]))
   }, [step])
@@ -272,7 +275,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   return (
     <div className="onboarding-overlay">
-      <div className="onboarding-card">
+      {/* The agent step carries the template gallery — give the card room
+          for three columns; other steps stay at the compact width. */}
+      <div className={`onboarding-card ${step === 'agent' ? 'onboarding-card-wide' : ''}`}>
         {/* Logo */}
         <div className="onboarding-logo">
           <img src="/temporality.svg" alt="Temporality" width={64} height={70} />
@@ -489,7 +494,18 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
           {step === 'agent' && (
             <>
-              <div style={{ display: 'grid', gap: '0.4rem' }}>
+              {/* Template gallery: wraps up to three columns on desktop
+                  (the card widens for this step via onboarding-card-wide),
+                  and scrolls internally so the action buttons stay on screen
+                  however many templates ship. */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                  gap: '0.4rem', alignContent: 'start',
+                  maxHeight: 'min(44vh, 400px)', overflowY: 'auto', width: '100%',
+                }}
+              >
                 {templates.map((tpl) => {
                   const selected = tpl.slug === templateSlug
                   return (
