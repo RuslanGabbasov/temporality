@@ -2974,6 +2974,7 @@ export const ru: Record<string, string> = {
     'learning.nudge.mentor': 'Наставник',
     'learning.nudge.start': 'Пройти урок',
     'learning.nudge.dismiss': 'Не сейчас',
+    'learning.nudge.collapse': 'Свернуть',
     'learning.nudge.aria': 'Наставник предлагает урок',
     'learning.next.title': 'Наставник ведёт',
     'learning.next.continue': 'Продолжить курс',

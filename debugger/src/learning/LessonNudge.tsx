@@ -38,6 +38,7 @@ export default function LessonNudge({ page }: Props) {
   const [lesson, setLesson] = useState<LearningLessonDef | null>(null)
   const [busy, setBusy] = useState(false)
   const [visible, setVisible] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const timerRef = useRef<number | null>(null)
 
   const pick = useCallback(async (currentPage: string) => {
@@ -64,6 +65,7 @@ export default function LessonNudge({ page }: Props) {
   useEffect(() => {
     setLesson(null)
     setVisible(false)
+    setExpanded(false)
     if (timerRef.current) window.clearTimeout(timerRef.current)
     // The session runner owns attention while a lesson is active.
     void fetchLearningState().then((state) => {
@@ -97,13 +99,34 @@ export default function LessonNudge({ page }: Props) {
   // Float in after the delay; unmount otherwise.
   useEffect(() => { if (lesson) setVisible(true) }, [lesson])
 
-  return lesson && visible ? (
+  // Collapsed: the round academic-cap button. Expanded: the small card with
+  // the details — ✕ collapses back to the button, only «Не сейчас» removes
+  // the nudge for good.
+  if (!lesson || !visible) return null
+
+  if (!expanded) {
+    return (
+      <button
+        className="learn-nudge-fab"
+        title={lesson.title}
+        aria-label={`${t('learning.nudge.aria') ?? 'Lesson'}: ${lesson.title}`}
+        onClick={() => setExpanded(true)}
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
+          <path d="M12 3 1 8l11 5 9-4.09V15h2V8L12 3z" />
+          <path d="M5 10.18V14c0 1.66 3.13 3 7 3s7-1.34 7-3v-3.82l-7 3.18-7-3.18z" />
+        </svg>
+      </button>
+    )
+  }
+
+  return (
     <div
       className="learn-nudge"
       role="complementary"
       aria-label={t('learning.nudge.aria') ?? 'Lesson suggestion'}
     >
-      <button className="learn-nudge-close" title={t('learning.nudge.dismiss') ?? 'Не сейчас'} onClick={dismissNow}>✕</button>
+      <button className="learn-nudge-close" title={t('learning.nudge.collapse') ?? 'Свернуть'} onClick={() => setExpanded(false)}>✕</button>
       <div className="learn-nudge-mentor">
         <span className="learn-indicator learn-indicator-available">?</span>
         <span>{t('learning.nudge.mentor') ?? 'Наставник'}</span>
@@ -116,6 +139,9 @@ export default function LessonNudge({ page }: Props) {
         <button className="toolbar-btn primary" disabled={busy} onClick={() => void start()}>
           {busy ? '…' : t('learning.nudge.start') ?? 'Пройти урок'}
         </button>
+        <button className="toolbar-btn" onClick={dismissNow}>
+          {t('learning.nudge.dismiss') ?? 'Не сейчас'}
+        </button>
         {!!lesson.duration_min && (
           <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
             {t('learning.lesson.duration', { count: String(lesson.duration_min) })}
@@ -123,5 +149,5 @@ export default function LessonNudge({ page }: Props) {
         )}
       </div>
     </div>
-  ) : null
+  )
 }

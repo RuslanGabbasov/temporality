@@ -2975,6 +2975,7 @@ export const en: Record<string, string> = {
     'learning.nudge.mentor': 'Mentor',
     'learning.nudge.start': 'Take the lesson',
     'learning.nudge.dismiss': 'Not now',
+    'learning.nudge.collapse': 'Collapse',
     'learning.nudge.aria': 'The mentor suggests a lesson',
     'learning.next.title': 'The mentor leads',
     'learning.next.continue': 'Continue the course',

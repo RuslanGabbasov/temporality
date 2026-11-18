@@ -3404,6 +3404,28 @@ button.header-nav-link {
   box-shadow: 0 14px 44px rgba(0,0,0,.38);
   animation: learn-nudge-in .35s ease both;
 }
+/* Collapsed form: a round academic-cap button. The amber ring breathes a
+   few times, then rests — noticeable on first sight, quiet afterwards. */
+.learn-nudge-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid var(--tm-border-strong);
+  background: var(--tm-elevated, #1a302c);
+  color: var(--tm-amber);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  animation: learn-nudge-in .35s ease both, learn-nudge-breathe 2.4s ease-in-out 1s 3;
+}
+.learn-nudge-fab svg { display: block; }
+.learn-nudge-fab:hover { border-color: var(--tm-amber); color: var(--tm-amber); }
 .learn-nudge-mentor {
   display: flex; align-items: center; gap: 0.4rem;
   font-size: 0.68rem; font-weight: 700; color: var(--tm-amber);
