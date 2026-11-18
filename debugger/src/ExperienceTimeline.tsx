@@ -1102,31 +1102,34 @@ export default function ExperienceTimeline({ project }: { project: string }) {
           })}
           {/* Awareness overlay (docs/temporality-organizational-operations-
               spec.md §12 on the timeline): the supervisor's knowledge spreads
-              read as short vertical links from source to target lanes, each
-              target run wears a dot at its delivery moment — glyph = decision
-              (✉ notify, ? recommend_lookup, ⚡ urgent_steer, ↻ update), color
-              = status (teal delivered, green consumed, gray expired, red
-              failed). */}
+              read as short vertical links from source to target lanes. Each
+              target run wears a dot at its delivery moment — FILL = decision
+              (saturated dark tones, white glyph legible in both themes),
+              RING = status (green consumed/acted, red failed, gray
+              dismissed/expired, no ring = delivered/queued). */}
           {deliveries.length > 0 && (() => {
             const laneYOf = (runID: string): number | undefined =>
               view.runLaneY.get(runID) ?? view.chainLaneY.get(view.rootOf.get(runID) ?? runID)
             const DECISION_GLYPH: Record<string, string> = {
-              notify: '✉', recommend_lookup: '?', urgent_steer: '⚡', update_awareness: '↻', ignore: '·',
+              notify: '✉', recommend_lookup: '↗', urgent_steer: '⚡', update_awareness: '↻', ignore: '·',
             }
+            // Dark, saturated decision colors: a white glyph needs a dark
+            // background to survive both themes — a white glyph on the old
+            // bright teal/blue fills was unreadable at dot size.
             const DECISION_COLOR: Record<string, string> = {
-              notify: '#7aa2f7', recommend_lookup: '#bb9af7', urgent_steer: '#ff9e64', update_awareness: '#e0af68', ignore: '#565f89',
+              notify: '#3b5bdb', recommend_lookup: '#7048b6', urgent_steer: '#d9480f', update_awareness: '#b08d2e', ignore: '#495a6b',
             }
-            const STATUS_STYLE: Record<string, { fill: string; opacity: number }> = {
-              delivered: { fill: DECISION_COLOR.notify, opacity: 0.9 },
-              consumed: { fill: '#73daca', opacity: 1 },
-              follow_up_requested: { fill: '#73daca', opacity: 0.8 },
-              details_delivered: { fill: '#73daca', opacity: 0.8 },
-              acted_upon: { fill: '#73daca', opacity: 1 },
-              dismissed: { fill: '#565f89', opacity: 0.5 },
-              expired: { fill: '#565f89', opacity: 0.5 },
-              failed: { fill: '#f7768e', opacity: 0.6 },
-              selected: { fill: '#7aa2f7', opacity: 0.4 },
-              queued: { fill: '#7aa2f7', opacity: 0.5 },
+            // Status rides the ring: green = consumed/acted/follow-up/details
+            // delivered, red = failed, dim gray = dismissed/expired. No ring —
+            // in flight (delivered/queued/selected).
+            const STATUS_RING: Record<string, { stroke: string; dash?: string }> = {
+              consumed: { stroke: '#2f9e8f' },
+              acted_upon: { stroke: '#2f9e8f' },
+              follow_up_requested: { stroke: '#2f9e8f', dash: '2 1.4' },
+              details_delivered: { stroke: '#2f9e8f', dash: '2 1.4' },
+              failed: { stroke: '#c92a52' },
+              dismissed: { stroke: '#5c6f82', dash: '2 1.4' },
+              expired: { stroke: '#5c6f82', dash: '2 1.4' },
             }
             const dots: React.ReactNode[] = []
             // spread groups: one source event fanned out to many runs reads as
@@ -1141,8 +1144,10 @@ export default function ExperienceTimeline({ project }: { project: string }) {
               const status = delivery.status
               const yLane = laneYOf(delivery.target_run_id)
               if (yLane !== undefined) {
-                const style = STATUS_STYLE[status] ?? { fill: '#7aa2f7', opacity: 0.6 }
+                const fill = DECISION_COLOR[delivery.decision] ?? '#3b5bdb'
                 const glyph = DECISION_GLYPH[delivery.decision] ?? '✉'
+                const ring = STATUS_RING[status]
+                const dim = status === 'dismissed' || status === 'expired'
                 const title = [
                   `${glyph} ${delivery.decision} · ${status}`,
                   delivery.source_run_id ? `from: ${delivery.source_run_id}` : '',
@@ -1153,8 +1158,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                   <g key={delivery.id} className="awareness-dot" onClick={(click) => { click.stopPropagation(); window.location.assign(`/org/flow?target_run=${encodeURIComponent(delivery.target_run_id)}`) }} style={{ cursor: 'pointer' }}>
                     <title>{title}</title>
                     <circle cx={px} cy={yLane} r={7} fill="transparent" />
-                    <circle cx={px} cy={yLane} r={5} fill={style.fill} opacity={style.opacity} stroke={status === 'consumed' ? '#73daca' : 'transparent'} strokeWidth={status === 'consumed' ? 1.5 : 0} />
-                    <text x={px} y={yLane + 3} textAnchor="middle" fontSize={7} fill="#161b22" pointerEvents="none">{glyph}</text>
+                    <circle cx={px} cy={yLane} r={5.5} fill={fill} stroke={ring?.stroke ?? 'transparent'} strokeWidth={ring ? 1.6 : 0} strokeDasharray={ring?.dash} opacity={dim ? 0.55 : 1} />
+                    <text x={px} y={yLane + 2.8} textAnchor="middle" fontSize={8} fontWeight={700} fill="#ffffff" pointerEvents="none">{glyph}</text>
                   </g>,
                 )
               }
