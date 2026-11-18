@@ -7,9 +7,13 @@
       const value = el.dataset[lang];
       if (value !== undefined) el.innerHTML = value;
     });
-    // Documentation links follow the site language: RU tree at /docs/, EN mirror at /docs/en/.
-    document.querySelectorAll('a[data-docs-link-ru]').forEach((el) => {
-      el.href = lang === 'en' ? el.dataset.docsLinkEn : el.dataset.docsLinkRu;
+    // Documentation links follow the site language: RU tree at /docs/, EN mirror at /docs/en/
+    // (data-docs-link-ru/en). Generic data-link-ru/en does the same for any
+    // language-split page — e.g. the AI Organization Runtime pages.
+    document.querySelectorAll('a[data-docs-link-ru], a[data-link-ru]').forEach((el) => {
+      const ru = el.dataset.docsLinkRu ?? el.dataset.linkRu;
+      const en = el.dataset.docsLinkEn ?? el.dataset.linkEn;
+      if (ru && en) el.href = lang === 'en' ? en : ru;
     });
     langToggle.textContent = lang === 'ru' ? 'EN' : 'RU';
     document.title = lang === 'ru' ? 'Temporality — Open-source Runtime for AI Organizations' : 'Temporality — Open-source Runtime for AI Organizations';
