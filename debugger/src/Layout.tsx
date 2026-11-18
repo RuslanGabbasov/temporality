@@ -60,10 +60,12 @@ const NAV_ITEMS = [
   { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/storage', label: 'nav.storage' },
   { path: '/experience', label: 'nav.timeline' },
-  // NOTE: /learning (docs/ai-guided-onboarding-and-learning.md §12.4) is
-  // deliberately NOT in the nav — the main bar has no room to spare and the
-  // learning center matters mostly at the start; its entry point is the
-  // onboarding wizard's final step, the /learning route stays for deep links.
+  // The learning center (docs/ai-guided-onboarding-and-learning.md §12.4):
+  // the mentor's home surface — program, lessons, factual mastery. A nav
+  // entry is mandatory: the wizard's final-step button is one-time-only, and
+  // a user who clicked «Открыть workspace» had no way back (the Nov 17
+  // «onboarding is the entry point» experiment failed exactly there).
+  { path: '/learning', label: 'nav.learning' },
 ]
 
 // Configuration surfaces — grouped under the Settings dropdown. Groups are
