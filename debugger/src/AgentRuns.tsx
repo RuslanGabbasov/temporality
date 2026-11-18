@@ -1916,7 +1916,11 @@ export default function AgentRuns({ project }: { project: string }) {
                             </div>
                           )}
                           <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem' }}>
-                            <Button onClick={() => void decide(event, true)} disabled={busy}>{t('runs.send_answer') ?? 'Send'}</Button>
+                            {/* The schema form carries its own validated send
+                                button — a second Send here would submit without
+                                the form's values; only the free-form answer
+                                needs the outer one. */}
+                            {!schema && <Button onClick={() => void decide(event, true)} disabled={busy}>{t('runs.send_answer') ?? 'Send'}</Button>}
                             <Button kind="secondary" onClick={() => void decide(event, false)} disabled={busy}>{t('runs.cancel_question') ?? 'Cancel question'}</Button>
                           </Stack>
                         </>
