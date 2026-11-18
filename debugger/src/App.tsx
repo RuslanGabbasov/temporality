@@ -30,6 +30,7 @@ import SupervisorModel from './SupervisorModel'
 import Harness from './Harness'
 import LearningCenter from './learning/LearningCenter'
 import LessonRunner from './learning/LessonRunner'
+import LessonNudge from './learning/LessonNudge'
 
 const Routes = {
   dashboard: /^\/dashboard(\/|$)/,
@@ -180,6 +181,9 @@ export default function App() {
     {/* The lesson runner mounts ABOVE pages (§8.3): a lesson leads the user
         across routes, so it must survive SPA navigation. */}
     <LessonRunner />
+    {/* The mentor's contextual nudge: on the page a lesson teaches, offer it
+        once — the same mentor-shoulder-tap, one card at a time. */}
+    <LessonNudge page={page} />
     </I18nProvider>
     </ThemePrefProvider>
   )

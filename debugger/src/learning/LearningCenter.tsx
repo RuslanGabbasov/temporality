@@ -98,6 +98,11 @@ export default function LearningCenter() {
   const capabilities = state?.capabilities ?? []
   const suggestions = (state?.suggestions ?? []).filter((s) => s.status === 'suggested')
   const programLessons = program?.items ?? []
+  // The mentor's ONE next step: the first not-yet-done item of the program —
+  // a course led by the supervisor, not a catalog to browse.
+  const nextItem = programLessons.find((item) => item.state !== 'completed' && item.state !== 'skipped' && item.state !== 'not_applicable') ?? null
+  const nextLesson = nextItem ? lessonById(nextItem.lesson_id) : null
+  const doneCount = programLessons.filter((item) => item.state === 'completed').length
 
   return (
     <div style={{ padding: '1.25rem', maxWidth: '1080px', margin: '0 auto' }}>
@@ -105,50 +110,52 @@ export default function LearningCenter() {
       <p style={{ color: 'var(--tm-text-3)', margin: '0 0 1.25rem', fontSize: '0.85rem' }}>{t('learning.subtitle')}</p>
       {error && <div role="alert" style={{ color: '#ffb4ab', fontSize: '0.78rem', marginBottom: '0.75rem' }}>{error}</div>}
 
-      {/* Program (§4.1): the planner's ordered ladder; completion carries over
-          rebuilds. Each pending item starts the lesson in the runner. */}
-      <section className="learn-section">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
-          <h3 style={{ margin: 0 }}>{t('learning.program.title')}</h3>
-          {!program && (
-            <button className="toolbar-btn primary" disabled={busy === 'build'} onClick={() => void build()}>
-              {busy === 'build' ? '…' : t('learning.program.build')}
-            </button>
-          )}
-        </div>
-        {!program ? (
-          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.82rem' }}>{t('learning.program.none')}</p>
-        ) : programLessons.length === 0 ? (
-          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.82rem' }}>{t('learning.program.empty')}</p>
-        ) : (
-          <div className="learn-list">
-            {programLessons.map((item) => {
-              const lesson = lessonById(item.lesson_id)
-              const done = item.state === 'completed'
-              return (
-                <div key={item.lesson_id} className="learn-row" style={{ opacity: done ? 0.65 : 1 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>
-                      {done ? '✓ ' : ''}{lesson?.title ?? item.lesson_id}
-                    </div>
-                    {(item.why || lesson?.goal) && (
-                      <div style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)', marginTop: '0.15rem' }}>{item.why || lesson?.goal}</div>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexShrink: 0 }}>
-                    {done && <span style={{ color: 'var(--tm-teal)', fontSize: '0.74rem' }}>{t('learning.program.state_completed')}</span>}
-                    {!done && lesson && (
-                      <button className="toolbar-btn primary" disabled={busy === item.lesson_id} onClick={() => void startLesson(item.lesson_id)}>
-                        {busy === item.lesson_id ? '…' : t('learning.lesson.start')}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
+      {/* The mentor's next step (§4.1): ONE lesson with the supervisor's own
+          «why», program progress under it — an individual course, not a
+          catalog to browse. */}
+      {!program && (
+        <section className="learn-section">
+          <div className="learn-card" style={{ padding: '0.9rem 1rem', borderLeft: '3px solid var(--tm-amber)' }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--tm-amber)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>
+              {t('learning.next.title')}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', lineHeight: 1.55 }}>{t('learning.program.none')}</div>
+            <div style={{ marginTop: '0.6rem' }}>
+              <button className="toolbar-btn primary" disabled={busy === 'build'} onClick={() => void build()}>
+                {busy === 'build' ? '…' : t('learning.next.build')}
+              </button>
+            </div>
           </div>
-        )}
-      </section>
+        </section>
+      )}
+      {program && nextItem && (
+        <section className="learn-section" aria-label={t('learning.next.title') ?? ''}>
+          <div className="learn-card" style={{ padding: '0.9rem 1rem', borderLeft: '3px solid var(--tm-amber)' }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--tm-amber)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>
+              {t('learning.next.title')}
+            </div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>{nextLesson?.title ?? nextItem.lesson_id}</div>
+            {(nextItem.why || nextLesson?.goal) && (
+              <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', lineHeight: 1.55, marginTop: '0.3rem' }}>
+                {nextItem.why || nextLesson?.goal}
+              </div>
+            )}
+            <div style={{ marginTop: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+              {nextLesson && (
+                <button className="toolbar-btn primary" disabled={busy === nextItem.lesson_id} onClick={() => void startLesson(nextItem.lesson_id)}>
+                  {busy === nextItem.lesson_id ? '…' : t('learning.next.continue')}
+                </button>
+              )}
+              <span style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)' }}>
+                {t('learning.next.progress', { done: String(doneCount), total: String(programLessons.length) })}
+              </span>
+              {nextLesson?.duration_min ? (
+                <span style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)' }}>{t('learning.lesson.duration', { count: String(nextLesson.duration_min) })}</span>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Supervisor suggestions (P3): capped, dismissible — never a flood. */}
       {suggestions.length > 0 && (

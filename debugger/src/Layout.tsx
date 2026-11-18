@@ -60,12 +60,10 @@ const NAV_ITEMS = [
   { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/storage', label: 'nav.storage' },
   { path: '/experience', label: 'nav.timeline' },
-  // The learning center (docs/ai-guided-onboarding-and-learning.md §12.4):
-  // the mentor's home surface — program, lessons, factual mastery. A nav
-  // entry is mandatory: the wizard's final-step button is one-time-only, and
-  // a user who clicked «Открыть workspace» had no way back (the Nov 17
-  // «onboarding is the entry point» experiment failed exactly there).
-  { path: '/learning', label: 'nav.learning' },
+  // The learning center (docs/ai-guided-onboarding-and-learning.md §12.4) is
+  // NOT primary navigation: the mentor leads lessons contextually (the
+  // LessonNudge floats on the pages they teach), and the full center lives
+  // in the user menu.
 ]
 
 // Configuration surfaces — grouped under the Settings dropdown. Groups are
@@ -815,6 +813,14 @@ export default function Layout({ children, activePage }: LayoutProps) {
                   {identity?.user_id && (
                     <>
                       <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('settings.account') ?? 'Account'}</div>
+                      <div
+                        onClick={() => { navigate('/learning'); setShowUserMenu(false) }}
+                        style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }} />{t('nav.learning') ?? 'Обучение'}
+                      </div>
                       <div
                         onClick={() => { setShowChannels(true); setShowUserMenu(false) }}
                         style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}

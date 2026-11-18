@@ -3380,6 +3380,43 @@ button.header-nav-link {
 .artifact-link-popover.above { transform: translateY(-100%); }
 .artifact-link-popover-title { font-weight: 600; margin-bottom: 0.15rem; overflow-wrap: anywhere; }
 .artifact-link-popover-body { color: var(--tm-text-2); line-height: 1.45; overflow-wrap: anywhere; max-height: 12rem; overflow-y: auto; white-space: pre-wrap; }
+/* Contextual lesson nudge (docs/ai-guided-onboarding-and-learning.md §12.5):
+   a small floating card on the page a lesson teaches. Enters with a soft
+   rise+fade, the mentor badge breathes once — noticeable, not shouty. */
+@keyframes learn-nudge-in {
+  from { opacity: 0; transform: translateY(12px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes learn-nudge-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224,155,90,.35); }
+  50% { box-shadow: 0 0 0 6px rgba(224,155,90,0); }
+}
+.learn-nudge {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  width: min(320px, calc(100vw - 36px));
+  padding: 0.7rem 0.8rem;
+  background: var(--tm-elevated, #1a302c);
+  border: 1px solid var(--tm-border-strong);
+  border-radius: 10px;
+  box-shadow: 0 14px 44px rgba(0,0,0,.38);
+  animation: learn-nudge-in .35s ease both;
+}
+.learn-nudge-mentor {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.68rem; font-weight: 700; color: var(--tm-amber);
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem;
+}
+.learn-nudge-mentor .learn-indicator { animation: learn-nudge-breathe 2.2s ease 1; }
+.learn-nudge-close {
+  position: absolute; top: 0.35rem; right: 0.5rem;
+  background: none; border: none; color: var(--tm-text-3); cursor: pointer; font-size: 0.85rem;
+}
+.learn-nudge-title { font-size: 0.82rem; font-weight: 600; margin-bottom: 0.2rem; padding-right: 1rem; }
+.learn-nudge-goal { font-size: 0.74rem; color: var(--tm-text-2); line-height: 1.5; margin-bottom: 0.5rem; }
+.learn-nudge-actions { display: flex; align-items: center; gap: 0.5rem; }
 /* Document outline (Notion-style section navigation): a sticky rail to the
    right of the rendered body. Hidden on narrow viewports where the two
    columns would crush the text, and for documents without headings (the
