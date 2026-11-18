@@ -31,7 +31,7 @@ import type { User } from './workspaceApi'
 import Markdown from './Markdown'
 import DocumentOutline from './DocumentOutline'
 import MediaViewer, { type MediaViewerPayload } from './MediaViewer'
-import { loadWorkspaceFilePreview } from './filePreview'
+import { loadWorkspaceFilePreview, isWorkspaceDirectoryPath, storageBrowseUrl } from './filePreview'
 import { linkifyArtifactMentions, referencedArtifactIds, stripArtifactMentions, type ArtifactRefInfo } from './artifactLinks'
 import { useArtifactBodyLinks } from './useArtifactBodyLinks'
 import { useFragmentNoteMenu } from './useFragmentNoteMenu'
@@ -693,6 +693,10 @@ export default function Artifacts({ project }: { project?: string }) {
   const onBodyFileLink = useCallback(async (path: string) => {
     const scope = project?.trim() || ''
     if (!scope) return
+    if (isWorkspaceDirectoryPath(path)) {
+      window.location.assign(storageBrowseUrl(scope, path))
+      return
+    }
     try {
       const preview = await loadWorkspaceFilePreview(scope, path)
       if (preview) {
@@ -2361,6 +2365,10 @@ function VersionHistory({ artifactID, project }: { artifactID: string; project?:
   const onFileLink = useCallback(async (path: string) => {
     const scope = project?.trim() || ''
     if (!scope) return
+    if (isWorkspaceDirectoryPath(path)) {
+      window.location.assign(storageBrowseUrl(scope, path))
+      return
+    }
     try {
       const preview = await loadWorkspaceFilePreview(scope, path)
       if (preview) {

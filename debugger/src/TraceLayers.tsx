@@ -10,7 +10,7 @@ import type { ConsoleState } from './consoleStream'
 import type { Locale } from './locales'
 import Markdown, { linkifyWorkspacePaths } from './Markdown'
 import MediaViewer, { type MediaViewerPayload } from './MediaViewer'
-import { loadWorkspaceFilePreview } from './filePreview'
+import { loadWorkspaceFilePreview, isWorkspaceDirectoryPath, storageBrowseUrl } from './filePreview'
 import { workspaceApi } from './workspaceApi'
 import ConsoleOutput from './ConsoleOutput'
 import TracePreview, { tracePreviewOf } from './TracePreview'
@@ -134,6 +134,10 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
           <Markdown
             content={linkifyWorkspacePaths(response, project)}
             onFile={(path) => {
+              if (isWorkspaceDirectoryPath(path)) {
+                window.location.assign(storageBrowseUrl(project, path))
+                return
+              }
               void loadWorkspaceFilePreview(project, path)
                 .then((preview) => {
                   if (preview) { setFileViewer(preview); return }

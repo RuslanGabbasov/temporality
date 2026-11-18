@@ -23,6 +23,20 @@ export function previewKindFor(path: string): 'image' | 'text' | null {
   return null
 }
 
+/** A workspace link whose path ends with a slash marks a DIRECTORY: clicking
+ *  it must open the storage browser at that folder, not a download (the files
+ *  API serves files, not listings). */
+export function isWorkspaceDirectoryPath(path: string): boolean {
+  return path.endsWith('/')
+}
+
+/** The storage page URL browsing a workspace directory: strips the marker
+ *  slash — the browser tree works with plain relative paths. */
+export function storageBrowseUrl(project: string, path: string): string {
+  const dir = path.replace(/\/+$/, '')
+  return `/storage?project=${encodeURIComponent(project)}&path=${encodeURIComponent(dir)}`
+}
+
 /** Fetch a workspace file and shape it for MediaViewer. Returns null when the
  *  file is not previewable (caller falls back to download); throws on fetch
  *  failure so the caller can report it. */

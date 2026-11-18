@@ -90,7 +90,13 @@ function linkifyPlainPaths(segment: string, projectId: string): string {
 		.map((chunk, index) => {
 			if (index % 2 === 1) {
 				const inner = chunk.slice(1, -1)
-				if (containsFilePath(inner)) {
+				// A pure path span — the WHOLE code span is one /workspace
+				// path (the most common artifact-reference shape, often a
+				// DIRECTORY: «артефакты — в `/workspace/reports/x/`») —
+				// unwraps to a link even without an extension. Spans with
+				// extra words (a command «ls /workspace/out», prose) keep
+				// their code styling unless they hold a file path.
+				if (/^\s*\/?workspace\/\S+\/?\s*$/.test(inner) || containsFilePath(inner)) {
 					WORKSPACE_PATH_RE.lastIndex = 0
 					return wrapPaths(inner, projectId)
 				}
@@ -116,13 +122,17 @@ function containsFilePath(text: string): boolean {
 
 // wrapPaths wraps every bare workspace path of one plain-text piece into a
 // markdown link. Trailing punctuation (a sentence dot, an underscore run)
-// stays outside the link.
+// stays outside the link; a trailing SLASH survives into the link's path
+// parameter — it marks a DIRECTORY, which the click handlers open in the
+// storage browser instead of trying to download.
 function wrapPaths(text: string, projectId: string): string {
 	return text.replace(WORKSPACE_PATH_RE, (_match, lead: string, rawPath: string) => {
-		const path = rawPath.replace(/[._-]+$/, '')
+		const isDir = /\/$/.test(rawPath)
+		const path = rawPath.replace(/[._/-]+$/, '')
 		const trail = rawPath.slice(path.length)
-		const url = `${FILES_URL_PREFIX}${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(fileApiPath(path))}`
-		return `${lead}[${path}](${url})${trail}`
+		const target = isDir ? `${fileApiPath(path)}/` : fileApiPath(path)
+		const url = `${FILES_URL_PREFIX}${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(target)}`
+		return `${lead}[${rawPath.replace(/[._-]+$/, '')}](${url})${trail}`
 	})
 }
 

@@ -56,7 +56,7 @@ import { TimeHint } from './timeHint'
 import { buildChatPrompt } from './chatPrompt'
 import { copyText } from './clipboard'
 import MediaViewer, { type MediaViewerPayload } from './MediaViewer'
-import { loadWorkspaceFilePreview } from './filePreview'
+import { loadWorkspaceFilePreview, isWorkspaceDirectoryPath, storageBrowseUrl } from './filePreview'
 import { useMentionMenu, MentionMenu } from './MentionMenu'
 import { randomUUID } from './uuid'
 
@@ -790,6 +790,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   // an inline arrow would remount the memo on every render and re-parse every
   // bubble's markdown.
   const onFileLink = useCallback(async (path: string) => {
+    if (isWorkspaceDirectoryPath(path)) {
+      window.location.assign(storageBrowseUrl(project, path))
+      return
+    }
     try {
       const preview = await loadWorkspaceFilePreview(project, path)
       if (preview) {

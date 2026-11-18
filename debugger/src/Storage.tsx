@@ -289,6 +289,43 @@ export default function Storage({ project }: { project: string }) {
     void load()
   }, [load])
 
+  // Deep link support: /storage?path=reports/x expands the workspace tree to
+  // that folder (awareness/answer links to artifact DIRECTORIES land here).
+  // Walks the path segment by segment on the real listings (loadChildren
+  // returns them), expanding each level and selecting the folder card.
+  const deepLinkAppliedFor = useRef('')
+  useEffect(() => {
+    if (!project.trim() || !areas.workspace) return
+    const wanted = new URLSearchParams(window.location.search).get('path')?.trim() ?? ''
+    if (!wanted || wanted.includes('..')) return
+    const stamp = `${project}:${wanted}`
+    if (deepLinkAppliedFor.current === stamp) return // already walked on this render
+    deepLinkAppliedFor.current = stamp
+    let cancelled = false
+    void (async () => {
+      const segments = wanted.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
+      let current = ''
+      let entries = areas.workspace ?? undefined
+      let lastEntry: StorageFileEntry | undefined
+      for (const segment of segments) {
+        if (!entries) entries = await loadChildren('workspace', current)
+        if (cancelled || !entries) return // segment not found — stop at what expanded
+        const prefix = current ? `${current}/` : ''
+        const entry = entries.find((e) => e.dir && (e.path === `${prefix}${segment}` || e.name === segment))
+        if (!entry) return
+        current = entry.path
+        lastEntry = entry
+        entries = await loadChildren('workspace', current)
+        if (cancelled) return
+        const k = key('workspace', current)
+        setExpanded((prev) => (prev.has(k) ? prev : new Set(prev).add(k)))
+      }
+      if (lastEntry) setSelected({ area: 'workspace', entry: lastEntry })
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, areas.workspace])
+
   // Refresh = full tree reload + re-fetch of search results and overview.
   const refreshAll = useCallback(async () => {
     await load()
@@ -324,7 +361,9 @@ export default function Storage({ project }: { project: string }) {
     return () => { alive = false }
   }, [searchQ, project, refreshTick])
 
-  const loadChildren = async (area: AreaName, dirPath: string) => {
+  // Returns the fetched listing so async walkers (the deep-link expander)
+  // don't wait on the React commit to see it.
+  const loadChildren = async (area: AreaName, dirPath: string): Promise<StorageFileEntry[] | undefined> => {
     const k = key(area, dirPath)
     setLoadingDir(k)
     setError('')
@@ -332,7 +371,8 @@ export default function Storage({ project }: { project: string }) {
       const page = await storageListDir(project.trim(), area, dirPath)
       setChildren((current) => ({ ...current, [k]: page.entries }))
       void loadSizes(area, dirPath)
-    } catch (f) { setError(message(f)) }
+      return page.entries
+    } catch (f) { setError(message(f)); return undefined }
     finally { setLoadingDir(null) }
   }
 
