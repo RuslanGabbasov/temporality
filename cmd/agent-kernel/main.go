@@ -3264,6 +3264,11 @@ func main() {
 		},
 		log: log,
 	})
+	// The same curation runs on a schedule: the supervisor keeps the saga
+	// bindings tidy without a human pressing anything.
+	StartSagaCurationLoop(ctx, log, ws, events, costAPI, func(ctx context.Context) (*llm.Client, error) {
+		return judgeModelClient(ctx, ws, secretMasterKey)
+	})
 	// Server-side chat persistence (docs/resilience-and-scale.md §4).
 	RegisterChatRoutes(mux, gate, ws)
 	// Presentation Engine (docs/presentation-engine.md §9–§15): structured

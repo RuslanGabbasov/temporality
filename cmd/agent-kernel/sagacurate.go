@@ -203,51 +203,135 @@ func RegisterSagaCurateRoutes(deps sagaCurateRoutesDeps) {
 		}
 
 		actor := requestUserID(r)
-		report := sagaCurateReport{Applied: true, NewSagas: []string{}}
-		// Order: register new sagas → attach/re-bind tasks → merge duplicates.
-		for _, ns := range plan.NewSagas {
-			sagaID := agent.SagaID(ns.Title, ns.TaskIDs[0])
-			data := map[string]any{"saga_id": sagaID, "title": ns.Title, "origin": "mentor-curation", "actor_id": actor}
-			if ns.Goal != "" {
-				data["goal"] = ns.Goal
-			}
-			if err := emitSagaLifecycleEvent(r.Context(), deps.events, "saga.registered", sagaID, project, ns.TaskIDs[0], actor, data); err != nil {
-				writeError(w, 502, fmt.Errorf("recording a new saga failed: %w", err))
-				return
-			}
-			report.NewSagas = append(report.NewSagas, ns.Title)
-			for _, taskID := range ns.TaskIDs {
-				if err := emitSagaLifecycleEvent(r.Context(), deps.events, "saga.attached", sagaID, project, taskID, actor, map[string]any{
-					"saga_id": sagaID, "task_id": taskID, "origin": "mentor-curation", "actor_id": actor,
-				}); err != nil {
-					writeError(w, 502, fmt.Errorf("attaching a task failed: %w", err))
-					return
-				}
-				report.Assignments++
-			}
-		}
-		for _, a := range plan.Assignments {
-			if err := emitSagaLifecycleEvent(r.Context(), deps.events, "saga.attached", a.SagaID, project, a.TaskID, actor, map[string]any{
-				"saga_id": a.SagaID, "task_id": a.TaskID, "origin": "mentor-curation", "actor_id": actor,
-			}); err != nil {
-				writeError(w, 502, fmt.Errorf("re-binding a task failed: %w", err))
-				return
-			}
-			report.Assignments++
-		}
-		for _, m := range plan.Merges {
-			if err := emitSagaLifecycleEvent(r.Context(), deps.events, "saga.merged", m.Into, project, "", actor, map[string]any{
-				"saga_id": m.Into, "source_saga_ids": m.Sources, "origin": "mentor-curation", "actor_id": actor,
-			}); err != nil {
-				writeError(w, 502, fmt.Errorf("recording a merge failed: %w", err))
-				return
-			}
-			report.Merges++
-		}
+		report := applySagaCuratePlan(r.Context(), deps.events, project, plan, actor)
 		_ = deps.ws.RecordAccessAudit(r.Context(), actor, "saga.curated", "project", project,
 			map[string]any{"assignments": report.Assignments, "new_sagas": len(report.NewSagas), "merges": report.Merges})
 		writeJSON(w, 200, map[string]any{"plan": plan, "report": report})
 	})
+}
+
+// recentSagaTasks: the freshest window of tasks, capped.
+func recentSagaTasks(budget cost.ProjectBudget, days, cap int) []cost.TaskRollup {
+	tasks := make([]cost.TaskRollup, len(budget.Tasks))
+	copy(tasks, budget.Tasks)
+	sort.SliceStable(tasks, func(i, j int) bool {
+		return taskStamp(tasks[i]).After(taskStamp(tasks[j]))
+	})
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+	recent := make([]cost.TaskRollup, 0, len(tasks))
+	for _, task := range tasks {
+		if taskStamp(task).Before(cutoff) {
+			break
+		}
+		recent = append(recent, task)
+		if len(recent) >= cap {
+			break
+		}
+	}
+	return recent
+}
+
+func liveSagaList(budget cost.ProjectBudget, cap int) []cost.SagaRollup {
+	out := make([]cost.SagaRollup, 0, len(budget.Sagas))
+	for _, saga := range budget.Sagas {
+		if saga.MergedInto == "" {
+			out = append(out, saga)
+			if len(out) >= cap {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// validateSagaCuratePlan checks every model id against the projection:
+// unknown ids dropped, no-op bindings skipped, tasks of a merged-away saga
+// re-pointed at the merge target.
+func validateSagaCuratePlan(plan sagaCuratePlan, recent []cost.TaskRollup, liveSagas []cost.SagaRollup) sagaCuratePlan {
+	taskIDs := map[string]bool{}
+	taskSaga := map[string]string{}
+	for _, task := range recent {
+		taskIDs[task.TaskID] = true
+		taskSaga[task.TaskID] = task.SagaID
+	}
+	sagaKnown := map[string]bool{}
+	for _, saga := range liveSagas {
+		sagaKnown[saga.SagaID] = true
+	}
+	plan.Assignments = keepCurateAssignments(plan.Assignments, curateMaxOps, func(a sagaCurateAssignment) (string, bool) {
+		return a.TaskID, taskIDs[a.TaskID] && sagaKnown[a.SagaID] && taskSaga[a.TaskID] != a.SagaID
+	})
+	mergedInto := map[string]string{}
+	merges := make([]sagaCurateMerge, 0, len(plan.Merges))
+	for _, m := range plan.Merges {
+		if !sagaKnown[m.Into] {
+			continue
+		}
+		sources := make([]string, 0, len(m.Sources))
+		for _, source := range m.Sources {
+			if source == m.Into || !sagaKnown[source] || mergedInto[source] != "" {
+				continue
+			}
+			sources = append(sources, source)
+		}
+		if len(sources) == 0 {
+			continue
+		}
+		for _, source := range sources {
+			mergedInto[source] = m.Into
+		}
+		merges = append(merges, sagaCurateMerge{Into: m.Into, Sources: sources})
+	}
+	plan.Merges = merges
+	for i := range plan.Assignments {
+		if target, ok := mergedInto[plan.Assignments[i].SagaID]; ok {
+			plan.Assignments[i].SagaID = target
+		}
+	}
+	plan.NewSagas = keepCurateNewSagas(plan.NewSagas, func(ns sagaCurateNewSaga) bool {
+		return strings.TrimSpace(ns.Title) != "" && len(ns.TaskIDs) > 0
+	})
+	return plan
+}
+
+// applySagaCuratePlan emits the plan through the journal: register new sagas
+// → attach/re-bind tasks → merge duplicates.
+func applySagaCuratePlan(ctx context.Context, events sagaLifecycleOutbox, project string, plan sagaCuratePlan, actor string) sagaCurateReport {
+	report := sagaCurateReport{Applied: true, NewSagas: []string{}}
+	for _, ns := range plan.NewSagas {
+		sagaID := agent.SagaID(ns.Title, ns.TaskIDs[0])
+		data := map[string]any{"saga_id": sagaID, "title": ns.Title, "origin": "mentor-curation", "actor_id": actor}
+		if ns.Goal != "" {
+			data["goal"] = ns.Goal
+		}
+		if err := emitSagaLifecycleEvent(ctx, events, "saga.registered", sagaID, project, ns.TaskIDs[0], actor, data); err != nil {
+			break
+		}
+		report.NewSagas = append(report.NewSagas, ns.Title)
+		for _, taskID := range ns.TaskIDs {
+			_ = emitSagaLifecycleEvent(ctx, events, "saga.attached", sagaID, project, taskID, actor, map[string]any{
+				"saga_id": sagaID, "task_id": taskID, "origin": "mentor-curation", "actor_id": actor,
+			})
+			report.Assignments++
+		}
+	}
+	for _, a := range plan.Assignments {
+		if err := emitSagaLifecycleEvent(ctx, events, "saga.attached", a.SagaID, project, a.TaskID, actor, map[string]any{
+			"saga_id": a.SagaID, "task_id": a.TaskID, "origin": "mentor-curation", "actor_id": actor,
+		}); err != nil {
+			break
+		}
+		report.Assignments++
+	}
+	for _, m := range plan.Merges {
+		if err := emitSagaLifecycleEvent(ctx, events, "saga.merged", m.Into, project, "", actor, map[string]any{
+			"saga_id": m.Into, "source_saga_ids": m.Sources, "origin": "mentor-curation", "actor_id": actor,
+		}); err != nil {
+			break
+		}
+		report.Merges++
+	}
+	return report
 }
 
 // keepCurateAssignments keeps the first cap valid, deduplicated assignments.
@@ -336,4 +420,135 @@ func buildSagaCuratePlan(ctx context.Context, model *llm.Client, tasks []cost.Ta
 		return plan, nil
 	})
 	return plan, err
+}
+
+// ── Scheduled curation (§8.1, supervisor-driven) ───────────────────────────
+// The model pass runs on a schedule — nobody clicks a button. Every cycle
+// the judge re-points the recent tasks of every project that saw activity:
+// assignments and new sagas apply silently, merges apply only for dormant
+// sagas (no running tasks — regrouping live work under a human is rude).
+// A human-created grouping is never touched without running work: the pass
+// only fixes what the AGENTS scattered.
+
+const (
+	sagaCurateFirstDelay = 45 * time.Minute
+	sagaCurateEvery      = 6 * time.Hour
+	sagaCurateQuietDays  = 7 // activity within this window keeps a saga «active»
+)
+
+// StartSagaCurationLoop runs the scheduled curation pass for every project
+// with recent runs.
+func StartSagaCurationLoop(ctx context.Context, log *slog.Logger, ws *workspace.Store, events sagaLifecycleOutbox, costAPI *cost.CostAPI, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(sagaCurateFirstDelay):
+		}
+		ticker := time.NewTicker(sagaCurateEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runPassGuarded(log, "saga-curation", ctx, func(pctx context.Context) {
+					runSagaCurationPass(pctx, log, ws, events, costAPI, modelClient)
+				})
+			}
+		}
+	}()
+}
+
+func runSagaCurationPass(ctx context.Context, log *slog.Logger, ws *workspace.Store, events sagaLifecycleOutbox, costAPI *cost.CostAPI, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	if _, err := modelClient(ctx); err != nil {
+		log.Info("saga curation: judge model not configured — skipping the cycle")
+		return
+	}
+	projects, err := ws.ListProjects(ctx)
+	if err != nil {
+		log.Warn("saga curation: projects", "error", err)
+		return
+	}
+	for _, project := range projects {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(3 * time.Second): // pace the model calls between projects
+		}
+		budget, err := costAPI.ProjectBudgetData(ctx, project.ID)
+		if err != nil {
+			log.Warn("saga curation: budget", "project", project.ID, "error", err)
+			continue
+		}
+		recent := recentSagaTasks(budget, curateDays, curateTaskCap)
+		if len(recent) == 0 {
+			continue
+		}
+		liveSagas := liveSagaList(budget, curateSagaCap)
+		client, mErr := modelClient(ctx)
+		if mErr != nil {
+			log.Info("saga curation: judge model lost mid-cycle — pausing", "error", mErr)
+			return
+		}
+		plan, perr := buildSagaCuratePlan(ctx, client, recent, liveSagas)
+		if perr != nil {
+			log.Warn("saga curation: model", "project", project.ID, "error", perr)
+			continue
+		}
+		plan = validateSagaCuratePlan(plan, recent, liveSagas)
+		if len(plan.Assignments) == 0 && len(plan.NewSagas) == 0 && len(plan.Merges) == 0 {
+			continue
+		}
+		// A merge of a LIVE saga regroups running work — the scheduled pass
+		// merges only dormant duplicates; live ones stay for the human.
+		running := map[string]bool{}
+		for _, saga := range liveSagas {
+			running[saga.SagaID] = saga.Running > 0
+		}
+		merges := plan.Merges[:0]
+		for _, m := range plan.Merges {
+			dormant := !running[m.Into]
+			for _, source := range m.Sources {
+				if running[source] {
+					dormant = false
+					break
+				}
+			}
+			if dormant {
+				merges = append(merges, m)
+			}
+		}
+		plan.Merges = merges
+		actor := "supervisor"
+		for _, ns := range plan.NewSagas {
+			sagaID := agent.SagaID(ns.Title, ns.TaskIDs[0])
+			data := map[string]any{"saga_id": sagaID, "title": ns.Title, "origin": "mentor-schedule", "actor_id": actor}
+			if ns.Goal != "" {
+				data["goal"] = ns.Goal
+			}
+			if err := emitSagaLifecycleEvent(ctx, events, "saga.registered", sagaID, project.ID, ns.TaskIDs[0], actor, data); err != nil {
+				log.Warn("saga curation: register", "project", project.ID, "error", err)
+				break
+			}
+			for _, taskID := range ns.TaskIDs {
+				_ = emitSagaLifecycleEvent(ctx, events, "saga.attached", sagaID, project.ID, taskID, actor, map[string]any{
+					"saga_id": sagaID, "task_id": taskID, "origin": "mentor-schedule", "actor_id": actor,
+				})
+			}
+		}
+		for _, a := range plan.Assignments {
+			if err := emitSagaLifecycleEvent(ctx, events, "saga.attached", a.SagaID, project.ID, a.TaskID, actor, map[string]any{
+				"saga_id": a.SagaID, "task_id": a.TaskID, "origin": "mentor-schedule", "actor_id": actor,
+			}); err != nil {
+				log.Warn("saga curation: attach", "project", project.ID, "error", err)
+				break
+			}
+		}
+		log.Info("saga curation pass", "project", project.ID,
+			"assignments", len(plan.Assignments), "new_sagas", len(plan.NewSagas), "merges", len(plan.Merges))
+	}
 }
