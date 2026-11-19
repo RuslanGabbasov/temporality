@@ -1726,7 +1726,10 @@ export const workspaceApi = {
     request<{ entries: ArtifactInboxEntry[]; count: number }>('/v1/workspace/artifacts/inbox'),
   // The tag editor: replaces the artifact's tag set (operators only).
   setArtifactTags: (id: string, tags: string[]) =>
-    request<{ artifact: Artifact }>(`/v1/workspace/artifacts/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags }) }),  // Distinct catalog tags, most-used first — the filter dropdown's options.
+    request<{ artifact: Artifact }>(`/v1/workspace/artifacts/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags }) }),
+  // Bulk «global/local»: project_id = '' releases the artifact to registry-global.
+  setArtifactProject: (id: string, projectId: string) =>
+    request<{ artifact: Artifact }>(`/v1/workspace/artifacts/${id}/project`, { method: 'POST', body: JSON.stringify({ project_id: projectId }) }),  // Distinct catalog tags, most-used first — the filter dropdown's options.
   artifactTags: () =>
     request<{ tags: Array<{ tag: string; count: number }> }>('/v1/workspace/artifacts/tags'),
   getArtifact: (id: string) =>

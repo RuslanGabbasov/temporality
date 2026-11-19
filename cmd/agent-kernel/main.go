@@ -6500,6 +6500,31 @@ func main() {
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactTagged, "artifact", artifact.ID, map[string]any{"tags": artifact.Tags})
 		writeJSON(w, 200, map[string]any{"artifact": artifact})
 	})
+	// Project pin / release: the bulk «global/local» action and the attribute
+	// editor. project_id = "" releases the artifact to registry-global.
+	mux.HandleFunc("POST /v1/workspace/artifacts/{artifactID}/project", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var req struct {
+			ProjectID string `json:"project_id"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		artifact, err := ws.SetArtifactProject(r.Context(), r.PathValue("artifactID"), strings.TrimSpace(req.ProjectID), requestUserID(r))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), "artifact.project_set", "artifact", artifact.ID, map[string]any{"project_id": artifact.ProjectID})
+		writeJSON(w, 200, map[string]any{"artifact": artifact})
+	})
 	mux.HandleFunc("POST /v1/workspace/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {
 			return

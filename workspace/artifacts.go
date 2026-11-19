@@ -396,6 +396,29 @@ func (s *Store) SetArtifactTags(ctx context.Context, id, principal string, tags 
 	return artifacts[0], nil
 }
 
+// SetArtifactProject pins an artifact to one project or releases it to
+// registry-global (projectID = ""). The bulk «global/local» action and the
+// attribute dialog share it; the actor joins the contributors like every
+// other mutation path.
+func (s *Store) SetArtifactProject(ctx context.Context, id, projectID, principal string) (Artifact, error) {
+	defer func() { s.AddArtifactContributor(ctx, id, principal) }()
+	rows, err := s.pool.Query(ctx,
+		`UPDATE workspace_artifact SET project_id = $2, updated_at = now() WHERE id = $1 RETURNING `+artifactColumns,
+		id, projectID)
+	if err != nil {
+		return Artifact{}, err
+	}
+	defer rows.Close()
+	artifacts, err := scanArtifacts(rows)
+	if err != nil {
+		return Artifact{}, err
+	}
+	if len(artifacts) == 0 {
+		return Artifact{}, ErrNotFound
+	}
+	return artifacts[0], nil
+}
+
 // AddArtifactContributor appends one principal to the contributors set
 // (idempotent): every mutation path calls it with its actor so the «who put
 // a hand on this» list stays complete — the author filter and the

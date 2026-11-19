@@ -195,6 +195,16 @@ export default function Artifacts({ project }: { project?: string }) {
     finally { setTagsBusy(false) }
   }
   const [limit, setLimit] = useState(200)
+  // Bulk mode (the settle queue's pattern): checkbox multi-select over the
+  // served page, one action bar — tags append, archive, global/local pin,
+  // bulk submit. Per-item failures collect into one summary line.
+  const [selectedArtifacts, setSelectedArtifacts] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkTags, setBulkTags] = useState('')
+  const [bulkSummary, setBulkSummary] = useState<{ ok: number; failed: Array<{ id: string; error: string }> } | null>(null)
+  const [bulkSubmitOpen, setBulkSubmitOpen] = useState(false)
+  const [bulkSubmitReviewers, setBulkSubmitReviewers] = useState<string[]>([])
+  const [bulkSubmitNote, setBulkSubmitNote] = useState('')
   const [totalKnown, setTotalKnown] = useState<number | null>(null)
   const searchGen = useRef(0)
   // Two-column layout (docs/artifact-registry.md §8): the left column is the
@@ -733,7 +743,59 @@ export default function Artifacts({ project }: { project?: string }) {
   			if (xAt !== yAt) return yAt - xAt
   			return (STATUS_ORDER[x.status ?? 'approved'] - STATUS_ORDER[y.status ?? 'approved']) || x.title.localeCompare(y.title)
   		})
-  const hasMore = totalKnown === null && artifacts.length >= limit
+  	const hasMore = totalKnown === null && artifacts.length >= limit
+
+  	// ── Bulk actions (the settle queue's pattern) ──
+  	const toggleArtifactSelection = (id: string) => {
+  		setSelectedArtifacts((prev) => {
+  			const next = new Set(prev)
+  			if (next.has(id)) next.delete(id)
+  			else next.add(id)
+  			return next
+  		})
+  	}
+  	const selectedRows = visibleArtifacts.filter((a) => selectedArtifacts.has(a.id))
+  	const clearBulk = () => { setSelectedArtifacts(new Set()); setBulkSummary(null); setBulkTags('') }
+  	// One runner for every action: applies fn per selected artifact, collects
+  	// per-item failures into one summary, then reloads the page once.
+  	const runBulk = async (label: string, fn: (a: Artifact) => Promise<unknown>) => {
+  		if (selectedRows.length === 0 || bulkBusy) return
+  		setBulkBusy(true); setBulkSummary(null)
+  		const failed: Array<{ id: string; error: string }> = []
+  		let ok = 0
+  		for (const a of selectedRows) {
+  			try { await fn(a); ok++ } catch (f) { failed.push({ id: a.id, error: message(f) }) }
+  		}
+  		setBulkSummary({ ok, failed })
+		setSelectedArtifacts(new Set())
+		setBulkTags('')
+		await load()
+  		setBulkBusy(false)
+  	}
+  	const bulkAppendTags = () => {
+  		const add = bulkTags.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  		if (add.length === 0) return
+  		void runBulk(t('artifacts.bulk_tags') ?? 'Теги', async (a) => {
+  			const merged = Array.from(new Set([...(a.tags ?? []), ...add])).sort()
+  			await workspaceApi.setArtifactTags(a.id, merged)
+  		})
+  	}
+  	const bulkArchive = () => {
+  		void runBulk(t('artifacts.bulk_archive') ?? 'В архив', async (a) => {
+  			await workspaceApi.deprecateArtifact(a.id)
+  		})
+  	}
+  	const bulkProject = (projectID: string) => {
+  		void runBulk(projectID ? t('artifacts.bulk_pin') ?? 'Привязать к проекту' : t('artifacts.bulk_global') ?? 'Сделать глобальным', async (a) => {
+  			await workspaceApi.setArtifactProject(a.id, projectID)
+  		})
+  	}
+  	const bulkSubmit = async () => {
+  		setBulkSubmitOpen(false)
+  		void runBulk(t('artifacts.submit_review') ?? 'На согласование', async (a) => {
+  			await workspaceApi.submitArtifact(a.id, { reviewers: bulkSubmitReviewers, note: bulkSubmitNote })
+  		})
+  	}
 
   const providerLabel = (p: string) =>
     p === 'builtin' ? (t('artifacts.provider_short_builtin') ?? 'In registry')
@@ -1301,11 +1363,52 @@ export default function Artifacts({ project }: { project?: string }) {
                   </div>
                 )}
               </div>
+              {/* The bulk action bar: appears with the selection — tags append,
+                  archive, global/local pin, bulk submit; per-item failures land
+                  in one summary instead of N error banners. */}
+              {selectedArtifacts.size > 0 && (
+                <div style={{ border: '1px solid var(--tm-teal)', borderRadius: '8px', padding: '0.5rem 0.7rem', marginBottom: '0.6rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', background: 'var(--tm-surface)' }}>
+                  <strong style={{ fontSize: '0.78rem' }}>{t('artifacts.bulk_selected', { count: String(selectedArtifacts.size) }) ?? `Выбрано: ${selectedArtifacts.size}`}</strong>
+	                  <TextInput
+	                    id="bulk-tags"
+	                    labelText=""
+	                    hideLabel
+	                    size="sm"
+	                    placeholder={t('artifacts.bulk_tags_placeholder') ?? 'теги через запятую…'}
+	                    value={bulkTags}
+	                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBulkTags(e.target.value)}
+	                    style={{ width: '13rem' }}
+	                  />
+                  <Button size="sm" kind="secondary" disabled={bulkBusy || !bulkTags.trim()} onClick={bulkAppendTags}>{t('artifacts.bulk_tags') ?? 'Добавить теги'}</Button>
+                  <Button size="sm" kind="secondary" disabled={bulkBusy} onClick={bulkArchive}>{t('artifacts.bulk_archive') ?? 'В архив'}</Button>
+                  {project && <Button size="sm" kind="secondary" disabled={bulkBusy} onClick={() => bulkProject(project)}>{t('artifacts.bulk_pin') ?? 'Привязать к проекту'}</Button>}
+                  <Button size="sm" kind="secondary" disabled={bulkBusy} onClick={() => bulkProject('')}>{t('artifacts.bulk_global') ?? 'Сделать глобальным'}</Button>
+                  <Button size="sm" kind="primary" disabled={bulkBusy} onClick={() => setBulkSubmitOpen(true)}>{t('artifacts.bulk_submit') ?? 'На согласование'}</Button>
+                  <Button size="sm" kind="ghost" disabled={bulkBusy} onClick={clearBulk}>{t('action.cancel') ?? 'Cancel'}</Button>
+                  {bulkSummary && (
+                    <span style={{ fontSize: '0.72rem', color: bulkSummary.failed.length ? 'var(--tm-danger)' : 'var(--tm-text-3)', flexBasis: '100%' }}>
+                      {bulkSummary.failed.length === 0
+                        ? t('artifacts.bulk_summary_ok', { ok: String(bulkSummary.ok) }) ?? `Готово: ${bulkSummary.ok}`
+                        : `Готово: ${bulkSummary.ok}, ошибок: ${bulkSummary.failed.length} — ${bulkSummary.failed.map((f) => `${f.id}: ${f.error}`).join('; ').slice(0, 300)}`}
+                    </span>
+                  )}
+                </div>
+              )}
               <div style={{ paddingRight: '0.15rem' }}>
                 {visibleArtifacts.map((a) => (
                   <div key={a.id} style={rowStyle(selectedId === a.id)} onClick={() => setSelectedId(a.id)}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-                      <strong style={{ fontSize: '0.85rem' }}>{a.title}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedArtifacts.has(a.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleArtifactSelection(a.id)}
+                          title={t('artifacts.bulk_select') ?? 'Выбрать для массовых действий'}
+                          style={{ flexShrink: 0, cursor: 'pointer' }}
+                        />
+                        <strong style={{ fontSize: '0.85rem' }}>{a.title}</strong>
+                      </div>
                       <Tag type={statusTagType(a.status)} size="sm">{statusLabel(a.status)}</Tag>
                     </div>
                     <div style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.15rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -2314,6 +2417,37 @@ export default function Artifacts({ project }: { project?: string }) {
               } catch (f) { setError(message(f)) }
               finally { setBusy(false) }
             }}>{selected.status === 'approved' ? (t('artifacts.annotation_start_agent_approved') ?? 'Apply notes and submit for approval') : (t('artifacts.annotation_start_agent_rework') ?? 'Send for rework')}</Button>
+          </Stack>
+        </AppModal>
+      )}
+
+      {bulkSubmitOpen && selectedArtifacts.size > 0 && (
+        <AppModal onClose={() => setBulkSubmitOpen(false)} panelStyle={{ width: '560px' }}>
+          <Heading>{t('artifacts.bulk_submit_title') ?? 'Bulk submit for review'}</Heading>
+          <Stack gap={3}>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.85rem' }}>
+              {t('artifacts.bulk_submit_hint', { count: String(selectedArtifacts.size) }) ?? `Одни рецензенты и заметка применятся ко всем ${selectedArtifacts.size} выбранным артефактам. Раны lifecycle не подходящие под submit вернут ошибку в сводке.`}
+            </p>
+            <div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('artifacts.submit_reviewers_label') ?? 'Reviewers'}</div>
+              <ReviewerPicker
+                value={bulkSubmitReviewers}
+                onChange={setBulkSubmitReviewers}
+                users={directory}
+                org={org}
+              />
+            </div>
+            <TextArea
+              id="bulk-submit-note"
+              labelText={t('artifacts.submit_note_label') ?? 'Note'}
+              value={bulkSubmitNote}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setBulkSubmitNote(e.target.value)}
+              rows={2}
+            />
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setBulkSubmitOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button kind="primary" disabled={bulkBusy || bulkSubmitReviewers.length === 0} onClick={() => void bulkSubmit()}>{t('artifacts.bulk_submit') ?? 'На согласование'}</Button>
+            </div>
           </Stack>
         </AppModal>
       )}
