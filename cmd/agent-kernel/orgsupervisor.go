@@ -44,10 +44,12 @@ const (
 	orgAwarenessActorID        = "org-awareness"
 )
 
-// orgNoteSignaler mirrors client.Client.SignalWorkflow — production passes
-// the Temporal client, tests record calls.
+// orgNoteSignaler mirrors client.Client — production passes the Temporal
+// client, tests record calls. TerminateWorkflow backs the executable steer
+// (urgent_steer + action cancel_run/cancel_subtree).
 type orgNoteSignaler interface {
 	SignalWorkflow(ctx context.Context, workflowID, runID, signalName string, arg any) error
+	TerminateWorkflow(ctx context.Context, workflowID, runID string, reason string, args ...interface{}) error
 }
 
 // orgSupervisorDeps wires the loop; constructed in main.go where the store,
@@ -453,6 +455,14 @@ func validateOrgDecisions(
 				SuggestedLookup: lookup,
 				Urgency:       urgency,
 				DeduplicationKey: dedupKey,
+				// The executable steer survives only on urgent_steer: any other
+				// decision kind is informational by contract.
+				Action: func() string {
+					if raw.Decision == workspace.OrgDecisionUrgentSteer {
+						return raw.Action
+					}
+					return ""
+				}(),
 				Model:         modelName,
 				CreatedAt:     now,
 			})
@@ -512,6 +522,7 @@ func (deps *orgSupervisorDeps) createOrgDelivery(ctx context.Context, decision w
 		Decision: decision.Decision, Relevance: decision.Relevance, Urgency: urgency,
 		Reason: decision.Reason, Message: modelMessage,
 		DetailLevel: orgSuggestedDetailLevel(decision.SuggestedLookup),
+		Action: decision.Action,
 		Status:      workspace.OrgDeliverySelected,
 		DeduplicationKey: decision.DeduplicationKey,
 		FollowUpRefs: json.RawMessage("[]"), RelatedActionRefs: json.RawMessage("[]"),
@@ -591,8 +602,11 @@ func orgAwarenessSteerMessage(d workspace.OrgAwarenessDelivery) string {
 }
 
 // startOrgAwarenessDeliveryLoop moves selected deliveries through the steer
-// mechanism every 30 seconds.
-func startOrgAwarenessDeliveryLoop(ctx context.Context, log *slog.Logger, ws *workspace.Store, signaler orgNoteSignaler) {
+// mechanism every 30 seconds. The cancel closure executes urgent_steer
+// cancel actions (terminate the workflow, journal the terminal event, settle
+// the workspace row) — wired in orgboards.go where the journal credentials
+// live.
+func startOrgAwarenessDeliveryLoop(ctx context.Context, log *slog.Logger, ws *workspace.Store, signaler orgNoteSignaler, canceler orgSteerCanceler) {
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -607,15 +621,24 @@ func startOrgAwarenessDeliveryLoop(ctx context.Context, log *slog.Logger, ws *wo
 				return
 			case <-ticker.C:
 				runPassGuarded(log, "org-delivery", ctx, func(pctx context.Context) {
-					runOrgDeliveryPass(pctx, log, ws, signaler)
+					runOrgDeliveryPass(pctx, log, ws, signaler, canceler)
 				})
 			}
 		}
 	}()
 }
 
+// orgSteerCanceler executes the cancellation: terminate the workflow, close
+// the workspace row and journal the derived terminal event (the workflow's
+// own deferred run.cancelled never fires on terminate — the same heal
+// contract the operator stop route follows). Implemented in orgboards.go
+// where the journal credentials and the temporal client live.
+type orgSteerCanceler interface {
+	Cancel(ctx context.Context, project, runID, reason string) error
+}
+
 // runOrgDeliveryPass queues selected rows and attempts the queued ones.
-func runOrgDeliveryPass(ctx context.Context, log *slog.Logger, ws *workspace.Store, signaler orgNoteSignaler) {
+func runOrgDeliveryPass(ctx context.Context, log *slog.Logger, ws *workspace.Store, signaler orgNoteSignaler, canceler orgSteerCanceler) {
 	if _, err := ws.QueueOrgAwarenessDeliveries(ctx, 50); err != nil {
 		log.Warn("org awareness delivery: queue", "error", err)
 	}
@@ -631,6 +654,12 @@ func runOrgDeliveryPass(ctx context.Context, log *slog.Logger, ws *workspace.Sto
 		}
 		if expiredRuns[delivery.TargetRunID] {
 			continue // already expired this pass
+		}
+		if delivery.Action != "" && canceler != nil {
+			if err := executeOrgSteerCancel(ctx, log, ws, canceler, delivery); err != nil {
+				log.Warn("org awareness delivery: steer cancel", "delivery", delivery.ID, "error", err)
+			}
+			continue
 		}
 		expired, err := deliverOrgAwarenessRow(ctx, log, ws, signaler, delivery)
 		if err != nil {
@@ -696,5 +725,51 @@ func deliverOrgAwarenessRow(ctx context.Context, log *slog.Logger, ws *workspace
 		return false, nil
 	}
 	messageRef := "user_note/" + workflowID
-	return false, ws.MarkOrgAwarenessDeliveryDelivered(ctx, delivery.ID, messageRef)
-}
+		return false, ws.MarkOrgAwarenessDeliveryDelivered(ctx, delivery.ID, messageRef)
+	}
+
+	// executeOrgSteerCancel performs the executable urgent_steer: terminate the
+	// target run (cancel_run) or the target plus its live subtree (cancel_subtree),
+	// then close the delivery as delivered — the action IS the message. Every
+	// child termination is audited by the canceler with the supervisor's reason.
+	func executeOrgSteerCancel(ctx context.Context, log *slog.Logger, ws *workspace.Store, canceler orgSteerCanceler, delivery workspace.OrgAwarenessDelivery) error {
+		project := delivery.ProjectID
+		if project == "" {
+			var err error
+			project, err = ws.RunProjectID(ctx, delivery.TargetRunID)
+			if err != nil {
+				return err
+			}
+		}
+		reason := "cancelled by the organizational supervisor (urgent_steer)"
+		if delivery.Reason != "" {
+			reason += ": " + delivery.Reason
+		}
+		targets := []string{delivery.TargetRunID}
+		if delivery.Action == "cancel_subtree" {
+			runs, _, listErr := ws.ListOrgActiveRuns(ctx, workspace.OrgActiveRunFilter{ProjectID: project, Limit: 500})
+			if listErr != nil {
+				return listErr
+			}
+			prefix := delivery.TargetRunID + "/"
+			for _, run := range runs {
+				if strings.HasPrefix(run.RunID, prefix) && run.Status == "running" {
+					targets = append(targets, run.RunID)
+				}
+			}
+		}
+		var firstErr error
+		for _, runID := range targets {
+			if err := canceler.Cancel(ctx, project, runID, reason); err != nil {
+				log.Warn("org steer cancel: terminate", "run", runID, "error", err)
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
+		}
+		if firstErr != nil {
+			return firstErr
+		}
+		log.Info("org steer cancel executed", "target", delivery.TargetRunID, "action", delivery.Action, "runs", len(targets))
+		return ws.MarkOrgAwarenessDeliveryDelivered(ctx, delivery.ID, "steer-cancel/"+delivery.TargetRunID)
+	}

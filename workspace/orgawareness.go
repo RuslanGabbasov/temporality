@@ -81,6 +81,8 @@ type OrgAwarenessDecision struct {
 	SuggestedLookup json.RawMessage `json:"suggested_lookup,omitempty"`
 	Urgency         string          `json:"urgency"`
 	DeduplicationKey string         `json:"deduplication_key,omitempty"`
+	// Executable steer (urgent_steer only, see OrgDecision.Action).
+	Action          string          `json:"action,omitempty"`
 	Model           string          `json:"model,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
 }
@@ -103,6 +105,10 @@ type OrgAwarenessDelivery struct {
 	Reason           string          `json:"reason,omitempty"`
 	Message          string          `json:"message,omitempty"`
 	DetailLevel      string          `json:"detail_level,omitempty"`
+	// Executable steer action (urgent_steer only): cancel_run terminates the
+	// target run, cancel_subtree — it plus every live run under it. Empty =
+	// the informational note delivery.
+	Action           string          `json:"action,omitempty"`
 	Status           string          `json:"status"`
 	MessageRef       string          `json:"message_ref,omitempty"`
 	Attempts         int             `json:"attempts"`
@@ -340,7 +346,7 @@ func (s *Store) DueOrgActivityBatchNode(ctx context.Context) (string, string, er
 
 const orgDeliveryColumns = `id, decision_id, batch_id, org_node_id, project_id, source_event_id,
 source_run_id, source_summary, target_run_id, target_actor_id, decision, relevance, urgency,
-reason, message, detail_level, status, message_ref, attempts, last_error, deduplication_key,
+reason, message, detail_level, action, status, message_ref, attempts, last_error, deduplication_key,
 follow_up_refs, related_action_refs, created_at, queued_at, delivered_at, consumed_at, closed_at, updated_at`
 
 func scanOrgDelivery(scanner interface{ Scan(dest ...any) error }) (OrgAwarenessDelivery, error) {
@@ -348,7 +354,7 @@ func scanOrgDelivery(scanner interface{ Scan(dest ...any) error }) (OrgAwareness
 	var followUp, related []byte
 	err := scanner.Scan(&d.ID, &d.DecisionID, &d.BatchID, &d.OrgNodeID, &d.ProjectID, &d.SourceEventID,
 		&d.SourceRunID, &d.SourceSummary, &d.TargetRunID, &d.TargetActorID, &d.Decision, &d.Relevance,
-		&d.Urgency, &d.Reason, &d.Message, &d.DetailLevel, &d.Status, &d.MessageRef, &d.Attempts,
+		&d.Urgency, &d.Reason, &d.Message, &d.DetailLevel, &d.Action, &d.Status, &d.MessageRef, &d.Attempts,
 		&d.LastError, &d.DeduplicationKey, &followUp, &related, &d.CreatedAt, &d.QueuedAt,
 		&d.DeliveredAt, &d.ConsumedAt, &d.ClosedAt, &d.UpdatedAt)
 	if err != nil {
@@ -473,12 +479,12 @@ func (s *Store) CreateOrgAwarenessDelivery(ctx context.Context, d OrgAwarenessDe
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO org_awareness_delivery (id, decision_id, batch_id, org_node_id, project_id,
 		    source_event_id, source_run_id, source_summary, target_run_id, target_actor_id,
-		    decision, relevance, urgency, reason, message, detail_level, status, deduplication_key,
+		    decision, relevance, urgency, reason, message, detail_level, action, status, deduplication_key,
 		    follow_up_refs, related_action_refs)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
 		d.ID, d.DecisionID, d.BatchID, d.OrgNodeID, d.ProjectID,
 		d.SourceEventID, d.SourceRunID, d.SourceSummary, d.TargetRunID, d.TargetActorID,
-		d.Decision, d.Relevance, d.Urgency, d.Reason, d.Message, d.DetailLevel, d.Status,
+		d.Decision, d.Relevance, d.Urgency, d.Reason, d.Message, d.DetailLevel, d.Action, d.Status,
 		d.DeduplicationKey, []byte(d.FollowUpRefs), []byte(d.RelatedActionRefs))
 	if isUniqueViolation(err) {
 		return ErrConflict

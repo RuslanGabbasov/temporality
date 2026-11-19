@@ -8,10 +8,12 @@ package main
 // notification never widens RBAC (spec §3, §7.1).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,6 +24,7 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/llm"
+	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 )
 
@@ -825,7 +828,7 @@ func RegisterOrgOperationsRoutes(ctx context.Context, deps orgRoutesDeps, activi
 	startOrgActivityLoop(ctx, deps.log, ws, deps.observationURL)
 	if orgOperationsEnabled() {
 		startOrgSupervisorLoop(ctx, deps.log, ws, activities, deps.observationURL, modelClient)
-		startOrgAwarenessDeliveryLoop(ctx, deps.log, ws, signaler)
+		startOrgAwarenessDeliveryLoop(ctx, deps.log, ws, signaler, orgSteerCancelerImpl(ws, activities.SourceID, signaler, deps.observationURL, deps.journalToken, deps.log))
 	}
 }
 
@@ -835,4 +838,63 @@ func RegisterOrgOperationsRoutes(ctx context.Context, deps orgRoutesDeps, activi
 func orgOperationsEnabled() bool {
 	raw := strings.TrimSpace(os.Getenv("ORG_OPERATIONS"))
 	return raw != "off" && raw != "0" && raw != "false"
+}
+
+// orgSteerCancelerFn adapts a closure to the orgSteerCanceler interface.
+type orgSteerCancelerFn func(ctx context.Context, project, runID, reason string) error
+
+func (f orgSteerCancelerFn) Cancel(ctx context.Context, project, runID, reason string) error {
+	return f(ctx, project, runID, reason)
+}
+
+// orgSteerCancelerImpl executes the supervisor's urgent_steer cancellation:
+// terminate the run's workflow (the signaler IS the Temporal client — its
+// interface carries TerminateWorkflow), then close the gap the workflow's
+// deferred terminal event leaves behind: journal run.cancelled with the
+// supervisor's reason and settle the workspace row — the same heal contract
+// the operator stop route follows.
+func orgSteerCancelerImpl(ws *workspace.Store, sourceID string, signaler orgNoteSignaler, observationURL string, journalToken func() string, log *slog.Logger) orgSteerCanceler {
+	return orgSteerCancelerFn(func(ctx context.Context, project, runID, reason string) error {
+		workflowID := agent.WorkflowID(sourceID, project, runID)
+		if err := signaler.TerminateWorkflow(ctx, workflowID, runID, reason); err != nil {
+			detail := strings.ToLower(err.Error())
+			healed := strings.Contains(detail, "not found") ||
+				strings.Contains(detail, "already completed") ||
+				strings.Contains(detail, "already closed") ||
+				strings.Contains(detail, "already canceled") ||
+				strings.Contains(detail, "already cancelled")
+			if !healed {
+				return err
+			}
+			log.Warn("org steer cancel: workflow already gone", "run", runID)
+		}
+		// The journal keeps the auditable why; the workspace row settles so
+		// the boards and the runs list agree the run is over.
+		event := observation.Event{
+			Schema:     observation.Schema,
+			EventID:    fmt.Sprintf("org-steer-cancel/%s/%d", runID, time.Now().UnixNano()),
+			OccurredAt: time.Now().UTC(),
+			Source:     observation.Source{ID: sourceID, Integration: "agent-kernel", Version: "1"},
+			Context:    observation.Context{Project: project, Run: runID, Actor: observation.Actor{ID: "org-awareness", Type: "system"}},
+			Type:       "run.cancelled",
+			Data:       map[string]any{"reason": "supervisor_steer", "detail": reason, "actor_id": "org-awareness"},
+		}
+		if err := event.Validate(); err == nil {
+			payload, _ := json.Marshal(map[string]any{"events": []observation.Event{event}})
+			req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(observationURL, "/")+"/v1/observations/events", bytes.NewReader(payload))
+			if reqErr == nil {
+				if token := journalToken(); token != "" {
+					req.Header.Set("Authorization", "Bearer "+token)
+				}
+				req.Header.Set("Content-Type", "application/json")
+				resp, respErr := http.DefaultClient.Do(req)
+				if respErr == nil {
+					_, _ = io.Copy(io.Discard, resp.Body)
+					_ = resp.Body.Close()
+				}
+			}
+		}
+		_ = ws.UpdateRunStatus(ctx, runID, "cancelled", "", 0, reason)
+		return nil
+	})
 }

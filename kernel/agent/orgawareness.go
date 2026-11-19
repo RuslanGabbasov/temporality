@@ -80,6 +80,12 @@ type OrgDecision struct {
 	SuggestedLookup  *OrgSuggestedLookup `json:"suggested_lookup,omitempty"`
 	Urgency          string              `json:"urgency,omitempty"`
 	DeduplicationKey string              `json:"deduplication_key,omitempty"`
+	// Executable steer (urgent_steer only): cancel_run terminates the run,
+	// cancel_subtree — it plus every live run under it. The supervisor model
+	// may name it when the observed work is plainly wrong (off-task, runaway,
+	// duplicating finished work) and waiting for the next human check-in
+	// would only burn tokens. Parsed, whitelisted and pinned server-side.
+	Action string `json:"action,omitempty"`
 }
 
 // OrgBatchVerdict is the parsed batch output.
@@ -106,6 +112,10 @@ func parseOrgBatchReply(content string) (OrgBatchVerdict, error) {
 		d.Relevance = strings.ToLower(strings.TrimSpace(d.Relevance))
 		d.Urgency = strings.ToLower(strings.TrimSpace(d.Urgency))
 		d.DeduplicationKey = strings.TrimSpace(d.DeduplicationKey)
+		d.Action = strings.ToLower(strings.TrimSpace(d.Action))
+		if d.Action != "cancel_run" && d.Action != "cancel_subtree" {
+			d.Action = "" // anything else is not an executable steer
+		}
 		d.Reason = orgCapText(d.Reason, 400)
 		d.Message = orgCapText(d.Message, 600)
 		if d.SuggestedLookup != nil {
@@ -156,6 +166,11 @@ Decisions:
 - "recommend_lookup": tell a run about relevant work AND suggest it request details.
 - "urgent_steer": rare — critical information that cannot wait for the next batch (blocked work, conflicting changes in the same component).
 - "update_awareness": a substantially changed fact that was already delivered (use a NEW deduplication_key with a revision suffix).
+
+urgent_steer may carry an executable action for the two cases where knowing is not enough — the observed work is PLAINLY wrong and every further hour is waste:
+- "action": "cancel_run" — the target run itself is off-task, runaway (repeating finished work, working on a neighboring task nobody asked for), or duplicates an already-completed effort.
+- "action": "cancel_subtree" — the whole delegation subtree of the target run is off-track.
+Use an action ONLY with urgent_steer, ONLY for a clear off-task judgment you can ground in the batch events, and prefer cancel_run. Never invent any other action value; an action without a compelling reason in "reason" will be audited.
 
 Hard rules:
 - Only notify runs listed in active_runs; never a run that is completed, failed or cancelled.
