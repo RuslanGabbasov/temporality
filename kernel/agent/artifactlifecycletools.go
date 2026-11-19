@@ -117,6 +117,9 @@ func (a *Activities) handleArtifactCreate(ctx context.Context, request ToolReque
 		"kind":        "work",
 		"saga_id":     artifactStringArg(request, "saga_id"),
 		"origin_run":  request.RunID,
+		// Project attribution from the run's own context (server-side, not a
+		// model argument): the work product lands in its project's catalog.
+		"project_id": request.Project,
 		// The run's human starter rides along: the workspace stamps them into
 		// contributors, so the author/org-unit filters can find agent-authored
 		// work (origin_user stays empty on the agent path).

@@ -6338,6 +6338,9 @@ func main() {
 			Status: r.URL.Query().Get("status"), Kind: r.URL.Query().Get("kind"), SagaID: r.URL.Query().Get("saga_id"),
 			Query:    strings.TrimSpace(r.URL.Query().Get("q")),
 			Provider: r.URL.Query().Get("provider"),
+			// The header project scope narrows to that project's work products;
+			// registry-global artifacts (project_id = '') pass the filter too.
+			ProjectID: strings.TrimSpace(r.URL.Query().Get("project")),
 		}
 		// Creator filter: «my artifacts» and per-author views. The pick names a
 		// user (id, name or email) — resolve it into every identifier form that
@@ -10170,6 +10173,10 @@ type artifactRequest struct {
 	SagaID      *string `json:"saga_id"` // saga link; nil = keep on edit, "" = detach
 	OriginRun   string  `json:"origin_run"`
 	OrgUnitID   string  `json:"org_unit_id"` // only set on create; updates keep the stored binding
+	// Project attribution (agent artifact tools send it from the run's own
+	// context): non-empty pins the artifact to that project's catalog view;
+	// empty = registry-global.
+	ProjectID string `json:"project_id"`
 	// Actor is the run's human starter, sent by the agent artifact tools.
 	// The kernel service identity has no author of its own: without it
 	// agent-authored artifacts carry no attribution, and the author /
@@ -10264,6 +10271,7 @@ func (r artifactRequest) toArtifact(id string) (workspace.Artifact, error) {
 		SagaID:      derefString(r.SagaID),
 		OriginRun:   strings.TrimSpace(r.OriginRun),
 		OrgUnitID:   strings.TrimSpace(r.OrgUnitID),
+		ProjectID:   strings.TrimSpace(r.ProjectID),
 		Tags:        r.Tags,
 	}, nil
 }

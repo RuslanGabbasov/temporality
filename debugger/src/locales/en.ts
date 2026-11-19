@@ -2040,6 +2040,8 @@ export const en: Record<string, string> = {
     'artifacts.status_deprecated': 'Deprecated',
     'artifacts.edit_attributes': 'Artifact attributes',
     'artifacts.settings_title': 'Artifact attributes — {{name}}',
+    'artifacts.global': 'global',
+    'artifacts.global_hint': 'A registry-global artifact — visible from every project',
     'artifacts.deprecate': 'Mark as deprecated',
     'artifacts.deprecate_confirm': 'Mark «{{name}}» as deprecated?',
     'artifacts.deprecate_hint': 'The document stays reachable by id but drops out of the default listing. A skill still referencing it blocks the move and is named in the error.',

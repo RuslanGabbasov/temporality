@@ -2040,6 +2040,8 @@ export const ru: Record<string, string> = {
     'artifacts.status_deprecated': 'Устарел',
     'artifacts.edit_attributes': 'Атрибуты артефакта',
     'artifacts.settings_title': 'Атрибуты артефакта — {{name}}',
+    'artifacts.global': 'глобальный',
+    'artifacts.global_hint': 'Глобальный артефакт — виден во всех проектах',
     'artifacts.deprecate': 'Перевести в «Устарел»',
     'artifacts.deprecate_confirm': 'Перевести «{{name}}» в «Устарел»?',
     'artifacts.deprecate_hint': 'Документ останется доступным по id, но исчезнет из списка по умолчанию. Если на него ссылается навык — перевод блокируется с именем навыка.',

@@ -772,6 +772,10 @@ export interface Artifact {
   size_bytes: number
   mime_type?: string
   org_unit_id?: string
+  /** Project attribution: non-empty pins the artifact to one project's
+   *  catalog view; empty = registry-global (visible everywhere, labeled
+   *  as global in the UI). */
+  project_id?: string
   /** Lifecycle (docs/artifact-lifecycle.md): draft → in_review →
    * approved/rejected; agent-created rows start as drafts, human creates land
    * approved. kind separates reference documents from saga work products. */

@@ -1312,6 +1312,11 @@ export default function Artifacts({ project }: { project?: string }) {
                       <span>{a.id}{a.version && a.version > 1 ? ` · v${a.version}` : ''}</span>
                       <span>{humanArtifactSize(a.size_bytes)}</span>
                       {(references[a.id] ?? []).length > 0 && <span title={(references[a.id] ?? []).join(', ')}>🔗 {(references[a.id] ?? []).length}</span>}
+                      {(a.project_id ? [
+                        <span key="proj" className="mono" title={`${a.project_id}`}>📁 {a.project_id}</span>
+                      ] : [
+                        <span key="global" title={t('artifacts.global_hint') ?? 'Глобальный артефакт — виден во всех проектах'}>🌐</span>
+                      ])}
                       {(a.tags ?? []).length === 0 && (
                         // No tag row below → the modification time rides at the
                         // right end of this line, still the row's bottom corner.
@@ -1535,6 +1540,11 @@ export default function Artifacts({ project }: { project?: string }) {
                 <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.5rem', alignItems: 'center' }}>
                   <Tag type={statusTagType(selected.status)} size="sm" title={`status: ${selected.status ?? 'approved'}`}>{statusLabel(selected.status)}</Tag>
                   <Tag type={selected.provider === 'builtin' ? 'blue' : 'gray'} size="sm" title={selected.provider}>{providerLabel(selected.provider)}</Tag>
+                  {/* Global vs project-pinned: the visibility question the reader
+                      asks first when an artifact «appeared» in their project. */}
+                  {selected.project_id
+                    ? <Tag type="cool-gray" size="sm" title={selected.project_id}>📁 {selected.project_id}</Tag>
+                    : <Tag type="purple" size="sm" title={t('artifacts.global_hint') ?? 'Глобальный артефакт — виден во всех проектах'}>🌐 {t('artifacts.global') ?? 'глобальный'}</Tag>}
                   {selected.kind === 'work' && <Tag type="cool-gray" size="sm">{t('artifacts.kind_work') ?? 'work product'}</Tag>}
                   <Tag type="cool-gray" size="sm">{humanArtifactSize(selected.size_bytes)}</Tag>
                   {usedBy.length > 0

@@ -56,7 +56,11 @@ type Artifact struct {
 	// content: tagging never flips lifecycle state or bumps the version.
 	Tags []string `json:"tags,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
-	OrgUnitID string    `json:"org_unit_id,omitempty"`
+	OrgUnitID string `json:"org_unit_id,omitempty"`
+	// Project attribution: a work product born in one project's run lands in
+	// that project's catalog view; empty = registry-global (visible from
+	// every project, labeled as global in the UI).
+	ProjectID string    `json:"project_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -100,14 +104,14 @@ func (a *Artifact) normalize() {
 	a.SizeBytes = int64(len(a.Content))
 }
 
-const artifactColumns = `id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, contributors, org_unit_id, created_at, updated_at`
+const artifactColumns = `id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, contributors, org_unit_id, project_id, created_at, updated_at`
 
 func scanArtifact(row interface{ Scan(dest ...any) error }) (Artifact, error) {
 	var a Artifact
 	var orgUnitID, originUser, originRun, sagaID *string
 	if err := row.Scan(&a.ID, &a.Title, &a.Description, &a.Provider, &a.ExternalRef,
 		&a.Content, &a.ContentHash, &a.SizeBytes, &a.MimeType,
-		&a.Status, &a.Kind, &a.Version, &a.OriginType, &originUser, &originRun, &sagaID, &a.Tags, &a.Contributors, &orgUnitID, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.Status, &a.Kind, &a.Version, &a.OriginType, &originUser, &originRun, &sagaID, &a.Tags, &a.Contributors, &orgUnitID, &a.ProjectID, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return a, ErrNotFound
 		}
@@ -150,13 +154,14 @@ func (s *Store) CreateArtifact(ctx context.Context, artifact *Artifact) error {
 		initialContributors = append([]string{artifact.OriginUser}, initialContributors...)
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_artifact (id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, contributors, org_unit_id, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+		`INSERT INTO workspace_artifact (id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, tags, contributors, org_unit_id, project_id, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
 		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
 		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
 		artifact.Status, artifact.Kind, artifact.Version, artifact.OriginType,
 		nullString(artifact.OriginUser), nullString(artifact.OriginRun), nullString(artifact.SagaID),
-		textArray(artifact.Tags), textArray(initialContributors), nullString(artifact.OrgUnitID), artifact.CreatedAt, artifact.UpdatedAt)
+		textArray(artifact.Tags), textArray(initialContributors), nullString(artifact.OrgUnitID),
+		artifact.ProjectID, artifact.CreatedAt, artifact.UpdatedAt)
 	return err
 }
 
@@ -230,6 +235,10 @@ type ArtifactFilter struct {
 	// visibility chain.
 	Provider  string
 	OrgUnitID string
+	// Project narrows to one project's work products. Registry-global
+	// artifacts (project_id = '') always pass — they are visible from every
+	// project by contract; the UI labels them as global.
+	ProjectID string
 	// Query narrows by name: case-insensitive substring over title,
 	// description and id — the search box for registries of tens of thousands.
 	Query string
@@ -282,6 +291,11 @@ func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f Art
 	if f.SagaID != "" {
 		args = append(args, f.SagaID)
 		query += ` AND saga_id = $` + strconv.Itoa(len(args))
+	}
+	if f.ProjectID != "" {
+		args = append(args, f.ProjectID)
+		n := strconv.Itoa(len(args))
+		query += ` AND (project_id = $` + n + ` OR project_id = '')`
 	}
 	if f.Provider != "" {
 		args = append(args, f.Provider)
