@@ -161,13 +161,28 @@ export default function ProjectOverview({ project }: Props) {
   const tasksOf = useCallback((sagaID: string) => (budget?.tasks ?? []).filter((task) => task.saga_id === sagaID), [budget])
   const liveSagas = useMemo(() => (budget?.sagas ?? []).filter((saga) => !saga.merged_into), [budget])
   // Активные vs исторические: сага живёт, пока идёт работа (running) или
-  // активность была за последние 7 дней; остальное — архив с поиском.
-  const sagaActiveWindowMs = 7 * 24 * 3600 * 1000
+  // активность была в выбранном окне (неделя/месяц/квартал — каденция
+  // выпуска версий бывает квартальной, неделя отправляет живое в архив).
+  // Выбор запоминается в localStorage.
+  const sagaWindowOptions = [
+    { id: 'week', label: t('project.sagas_window_week') ?? 'Неделя', ms: 7 * 24 * 3600 * 1000 },
+    { id: 'month', label: t('project.sagas_window_month') ?? 'Месяц', ms: 30 * 24 * 3600 * 1000 },
+    { id: 'quarter', label: t('project.sagas_window_quarter') ?? 'Квартал', ms: 91 * 24 * 3600 * 1000 },
+  ] as const
+  const SAGA_WINDOW_KEY = 'sagas-active-window'
+  const [sagaWindow, setSagaWindowState] = useState<string>(() => {
+    try { return localStorage.getItem(SAGA_WINDOW_KEY) ?? 'quarter' } catch { return 'quarter' }
+  })
+  const setSagaWindow = (id: string) => {
+    setSagaWindowState(id)
+    try { localStorage.setItem(SAGA_WINDOW_KEY, id) } catch { /* private mode */ }
+  }
+  const sagaActiveWindowMs = (sagaWindowOptions.find((o) => o.id === sagaWindow) ?? sagaWindowOptions[2]).ms
   const sagaLastActivity = useCallback((saga: SagaRollup) => saga.last_ended_at ?? saga.first_started_at ?? '', [])
   const activeSagas = useMemo(() => liveSagas.filter((saga) => {
     const stamp = sagaLastActivity(saga)
     return saga.running > 0 || !stamp || Date.parse(stamp) > Date.now() - sagaActiveWindowMs
-  }), [liveSagas, sagaLastActivity])
+  }), [liveSagas, sagaLastActivity, sagaActiveWindowMs])
   const historicalSagas = useMemo(() => liveSagas.filter((saga) => !activeSagas.some((a) => a.saga_id === saga.saga_id)), [liveSagas, activeSagas])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
@@ -401,12 +416,24 @@ export default function ProjectOverview({ project }: Props) {
             <>
               {/* Активные: работа идёт сейчас или была за последние 7 дней. */}
               <section style={{ marginBottom: '0.75rem' }}>
-                <Heading style={{ fontSize: '0.9rem', marginBottom: '0.3rem' }}>
-                  {t('project.sagas_active') ?? 'Active'} ({activeSagas.length})
-                </Heading>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.3rem' }}>
+                  <Heading style={{ fontSize: '0.9rem', marginBottom: 0 }}>
+                    {t('project.sagas_active') ?? 'Active'} ({activeSagas.length})
+                  </Heading>
+                  <span style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center' }} title={t('project.sagas_window_hint') ?? undefined}>
+                    {sagaWindowOptions.map((option) => (
+                      <button
+                        key={option.id}
+                        className={`lens-toggle ${sagaWindow === option.id ? 'on' : ''}`}
+                        onClick={() => setSagaWindow(option.id)}
+                        style={{ fontSize: '0.7rem', padding: '0.05rem 0.5rem' }}
+                      >{option.label}</button>
+                    ))}
+                  </span>
+                </div>
                 {activeSagas.length > 0
                   ? renderSagaTable(activeSagas)
-                  : <div style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem' }}>{t('project.sagas_active_empty') ?? 'Нет активной работы — всё завершено'}</div>}
+                  : <div style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem' }}>{t('project.sagas_active_empty_window') ?? 'Нет работы в выбранном окне — расширьте окно или смотрите историю'}</div>}
               </section>
               {/* Исторические: свёрнуты по умолчанию, поиск по названию. */}
               <section>
