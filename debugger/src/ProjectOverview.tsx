@@ -87,6 +87,10 @@ type Dialog =
  * by hand here too: rename, merge duplicates, bind unbound tasks — the manual
  * half of docs/sagas.md §8, event-sourced like the agent tools.
  */
+// Единая сетка таблицы саг: заголовок, строки саг и развернутые задачи
+// используют ОДНИ колонки — значения задач встают ровно под заголовки.
+const SAGA_GRID_COLUMNS = '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)'
+
 export default function ProjectOverview({ project }: Props) {
   const { t, locale } = useI18n()
   // Hydrate from the session cache: the previous visit paints instantly, the
@@ -246,7 +250,7 @@ export default function ProjectOverview({ project }: Props) {
   // для активных и исторических секций.
   const renderSagaTable = (sagas: SagaRollup[]) => (
     <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '1rem' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.75rem', alignItems: 'baseline', padding: '0.4rem 0.6rem', background: 'var(--tm-raised)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: SAGA_GRID_COLUMNS, gap: '0.25rem 0.6rem', fontSize: '0.75rem', alignItems: 'baseline', padding: '0.4rem 0.6rem', background: 'var(--tm-raised)' }}>
         <span />
         <span />
         <span style={{ color: 'var(--tm-text-3)' }}>{t('project.saga_col') ?? 'Saga'}</span>
@@ -262,7 +266,7 @@ export default function ProjectOverview({ project }: Props) {
       </div>
       {sagas.map((saga) => (
         <div key={saga.saga_id} style={{ borderTop: '1px solid var(--tm-border)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: SAGA_GRID_COLUMNS, gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}>
             <span style={{ display: 'flex', alignItems: 'center' }}>
               <input
                 type="checkbox"
@@ -307,24 +311,19 @@ export default function ProjectOverview({ project }: Props) {
           </div>
           {openSaga === saga.saga_id && tasksOf(saga.saga_id).length > 0 && (
             <div style={{ borderTop: '1px solid var(--tm-border)', background: 'var(--tm-surface-2)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.45rem 0.6rem 0.25rem', color: 'var(--tm-text-3)' }}>
-                <span>{t('project.tasks_col') ?? 'Tasks'}</span>
-                <span>{t('runs.task_col_runs') ?? 'Runs'}</span>
-                <span>{t('runs.task_agents_col') ?? 'Agents'}</span>
-                <span title={t('runs.task_elapsed') ?? undefined}>⏱ {t('runs.col_elapsed') ?? 'Elapsed'}</span>
-                <span title={t('runs.task_active') ?? undefined}>⚒ {t('runs.col_active') ?? 'Active'}</span>
-                <span>{t('runs.col_tokens') ?? 'Tokens'}</span>
-                <span>{t('runs.col_cost') ?? 'Cost'}</span>
-                <span title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
-                <span title={t('runs.approvals_hint') ?? undefined}>👤 {t('runs.col_approvals') ?? 'Approvals'}</span>
-                <span />
-              </div>
+              {/* Задачи разворачиваются в ТЕ ЖЕ колонки, что и строка саги:
+                  название — в широкую колонку с увеличенным отступом слева
+                  (иерархия), цифры — ровно под заголовками. Отдельная шапка
+                  не нужна — она дублировала основную. */}
               {tasksOf(saga.saga_id).map((task) => (
-                <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
-                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id}>
+                <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: SAGA_GRID_COLUMNS, gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.3rem 0.6rem' }}>
+                  <span />
+                  <span />
+                  <span style={{ paddingLeft: '2.2rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id}>
                     {task.title || task.task_id}
                     {task.running > 0 && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{pluralT(t, locale, 'runs.task_running_n', task.running)}</Tag>}
                   </span>
+                  <span />
                   <span>{task.run_count}</span>
                   <span>{task.agent_count}</span>
                   <span>⏱ {formatDuration(task.elapsed_ms, t)}</span>
@@ -340,9 +339,11 @@ export default function ProjectOverview({ project }: Props) {
                     {task.approvals.requested > 0
                       ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms, t)}</>
                       : '—'}
-                  </span>
-                  <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button onClick={() => void runAction(() => taskSagaBind(project.trim(), task.task_id, ''))} title={t('project.saga_detach') ?? 'Detach from saga'} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1 }}>✕</button>
+                    <button
+                      onClick={() => void runAction(() => taskSagaBind(project.trim(), task.task_id, ''))}
+                      title={t('project.saga_detach') ?? 'Detach from saga'}
+                      style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, marginLeft: '0.4rem' }}
+                    >✕</button>
                   </span>
                 </div>
               ))}
