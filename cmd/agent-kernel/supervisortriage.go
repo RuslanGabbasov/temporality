@@ -145,6 +145,9 @@ type journalTypedEvents struct {
 		Context struct {
 			Project string `json:"project"`
 			Run     string `json:"run"`
+			Actor   struct {
+				ID string `json:"id"`
+			} `json:"actor"`
 		} `json:"context"`
 		Type string         `json:"type"`
 		Data map[string]any `json:"data"`

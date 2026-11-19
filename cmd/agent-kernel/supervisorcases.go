@@ -736,8 +736,9 @@ func detectUserFriction(ctx context.Context, log *slog.Logger, activities *agent
 		if actor == "" {
 			// Intake/trigger/webhook runs carry the actor in the event
 			// context, not in data — the blank-actor friction cases («cannot
-			// identify the user») all came from reading data only.
-			actor = event.Context.Actor.ID
+			// identify the user») all came from reading data only. The fetch
+			// already flattened context.actor.id into ActorID.
+			actor = event.ActorID
 		}
 		if title == "" {
 			continue
