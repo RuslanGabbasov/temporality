@@ -213,10 +213,21 @@ function buildLang(lang) {
     // Cache-buster: a stale cached docs.css once made the primary button
     // invisible (amber on amber) — the version forces fresh styles.
     const canonical = siteUrl(`/docs/${lang.code === 'ru' ? '' : lang.code + '/'}${slug}.html`)
-    // hreflang only where a mirror exists (tech tree is monolingual).
-    const mirror = lang.other
-      ? `<link rel="alternate" hreflang="${lang.other}" href="${siteUrl(`/docs/${lang.other}/${slug}.html`)}">\n<link rel="alternate" hreflang="ru" href="${siteUrl(`/docs/${slug}.html`)}">\n<link rel="alternate" hreflang="x-default" href="${siteUrl(`/docs/${slug}.html`)}">`
-      : `<link rel="alternate" hreflang="ru" href="${siteUrl(`/docs/${slug}.html`)}">`
+    // hreflang only where a mirror exists (tech tree is monolingual). The
+    // mirror URL is the OTHER language's CANONICAL form: RU pages live at
+    // /docs/<slug>.html (no prefix), EN at /docs/en/<slug>.html. The old
+    // literal /docs/ru/<slug>.html alternate 404'd on every EN page, and the
+    // tech tree's ru alternate pointed past its own /docs/tech/ prefix —
+    // Google Search Console reported both as broken links.
+    let hreflang = ''
+    if (lang.other) {
+      const otherPrefix = lang.other === 'ru' ? '' : lang.other + '/'
+      hreflang = `<link rel="alternate" hreflang="${lang.other}" href="${siteUrl(`/docs/${otherPrefix}${slug}.html`)}">` +
+        `<link rel="alternate" hreflang="x-default" href="${siteUrl(`/docs/${slug}.html`)}">`
+    } else {
+      hreflang = `<link rel="alternate" hreflang="ru" href="${canonical}">` +
+        `<link rel="alternate" hreflang="x-default" href="${canonical}">`
+    }
     const escaped = (s) => String(s ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;')
     const desc = escaped(description)
     const og = `
@@ -241,7 +252,7 @@ ${desc ? `<meta name="twitter:description" content="${desc}">` : ''}
 <meta name="theme-color" content="#0F1F1D">${desc ? `<meta name="description" content="${desc}">` : ''}
 <title>${title}</title>
 <link rel="canonical" href="${canonical}">
-${mirror}
+${hreflang}
 ${og}
 <link rel="icon" href="${rootPrefix}/assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">

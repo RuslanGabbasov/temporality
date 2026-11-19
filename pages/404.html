@@ -8,4 +8,33 @@
 <style>body{font-family:Inter,sans-serif;background:#0F1F1D;color:#e8eef0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}main{text-align:center}h1{font-size:3rem;margin:0 0 .5rem}a{color:#7FD1C0}</style>
 </head>
 <body><main><h1>404</h1><p>Такой страницы нет — <a href="https://temporality.tech/">на главную</a> · <a href="https://temporality.tech/docs/index.html">документация</a></p></main></body>
+<script>
+// Known stale paths Google still crawls: GitHub Pages cannot 301, so the
+// 404 page maps them to the live document (JS redirect; robots noindex above
+// keeps this page itself out of the index). /docs/ru/<slug> — the old
+// hreflang bug sent crawlers there; tech docs once lived past /docs/.
+(function () {
+  var path = window.location.pathname.replace(/^(.*\/docs\u002F)/, '/docs/');
+  var target = null;
+  var ruMatch = path.match(/^\/docs\/ru\/([A-Za-z0-9-]+\.html)$/);
+  if (ruMatch) target = '/docs/' + ruMatch[1];
+  var techMatch = !target && path.match(/^\/docs\/([A-Za-z0-9-]+\.html)$/);
+  if (techMatch) {
+    var slug = techMatch[1];
+    // Known tech-tree documents that used to be expected at /docs/ root.
+    var techDocs = ['DESIGN', 'artifact-lifecycle', 'human-knowledge-explorer-plan'];
+    for (var i = 0; i < techDocs.length; i++) {
+      if (slug === techDocs[i] + '.html') { target = '/docs/tech/' + slug; break; }
+    }
+  }
+  if (target) {
+    var link = document.createElement('a');
+    link.href = target;
+    link.textContent = 'Страница переехала — открыть ' + target;
+    var main = document.querySelector('main p');
+    if (main) { main.appendChild(document.createElement('br')); main.appendChild(link); }
+    window.location.replace(target);
+  }
+})();
+</script>
 </html>
