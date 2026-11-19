@@ -2215,7 +2215,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			break
 		}
 		// Malformed tool calls (empty function name — seen once from a real
-		// provider, harness_bug case) MUST NOT enter the history: the next
+		// provider, harness_bug case; arguments that never parsed as JSON —
+		// the Xiaomi 400 run death) MUST NOT enter the history: the next
 		// model call replays them and the provider rejects the whole request
 		// with a 400. Filtered here, before both execution and the history
 		// append; each dropped call answers the model with an actionable tool
@@ -2228,6 +2229,20 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: "Tool call was rejected: it had no function name. Re-issue it with the correct tool."})
 				continue
+			}
+			if call.ArgsError != "" {
+				// The arguments never parsed as JSON: replaying the raw string
+				// in the assistant message 400s the WHOLE next request at the
+				// provider (Xiaomi: «Invalid request parameters»). Substitute a
+				// valid placeholder so the history stays provider-safe, answer
+				// the call with the tool's own missing-argument error, and let
+				// the model re-issue it correctly.
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": fmt.Sprintf("%s/%s", frame, call.ID), "tool_call_id": call.ID, "tool": call.Name, "error_type": "malformed_arguments", "effect": "none", "detail": call.ArgsError}); err != nil {
+					return result, err
+				}
+				call.Args = map[string]any{"_malformed_arguments": true}
+				call.ArgsRaw = ""
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: "Tool call arguments were malformed JSON; the call was not executed. Re-issue it with valid JSON arguments."})
 			}
 			validCalls = append(validCalls, call)
 		}
