@@ -264,12 +264,12 @@ export default function ProjectOverview({ project }: Props) {
                 <span style={{ color: 'var(--tm-text-3)' }}>{t('project.tasks_col') ?? 'Tasks'}</span>
                 <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_col_runs') ?? 'Runs'}</span>
                 <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_agents_col') ?? 'Agents'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>⏱ {t('runs.task_elapsed') ?? 'elapsed'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>⚒ {t('runs.task_active') ?? 'active'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.tokens') ?? 'Tokens'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.cost') ?? 'Cost'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.task_elapsed') ?? undefined}>⏱ {t('runs.col_elapsed') ?? 'Elapsed'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.task_active') ?? undefined}>⚒ {t('runs.col_active') ?? 'Active'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.col_tokens') ?? 'Tokens'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.col_cost') ?? 'Cost'}</span>
                 <span style={{ color: 'var(--tm-text-3)' }} title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>👤 {t('runs.approvals_col') ?? 'Approvals'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.approvals_hint') ?? undefined}>👤 {t('runs.col_approvals') ?? 'Approvals'}</span>
               </div>
               {liveSagas.map((saga) => {
                 return (
@@ -327,23 +327,51 @@ export default function ProjectOverview({ project }: Props) {
                       </span>
                     </div>
                     {openSaga === saga.saga_id && tasksOf(saga.saga_id).length > 0 && (
-                      <div style={{ padding: '0.25rem 0.6rem 0.5rem 2rem', display: 'grid', gap: '0.2rem', fontSize: '0.78rem', color: 'var(--tm-text-2)' }}>
+                      <div style={{ borderTop: '1px solid var(--tm-border)', background: 'var(--tm-surface-2)' }}>
+                        {/* Same column grid as the aggregate row minus the
+                            checkbox/chevron gutter — expanded tasks read as a
+                            table, not as loose wrapped lines. */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.45rem 0.6rem 0.25rem', color: 'var(--tm-text-3)' }}>
+                          <span>{t('project.tasks_col') ?? 'Tasks'}</span>
+                          <span>{t('runs.task_col_runs') ?? 'Runs'}</span>
+                          <span>{t('runs.task_agents_col') ?? 'Agents'}</span>
+                          <span title={t('runs.task_elapsed') ?? undefined}>⏱ {t('runs.col_elapsed') ?? 'Elapsed'}</span>
+                          <span title={t('runs.task_active') ?? undefined}>⚒ {t('runs.col_active') ?? 'Active'}</span>
+                          <span>{t('runs.col_tokens') ?? 'Tokens'}</span>
+                          <span>{t('runs.col_cost') ?? 'Cost'}</span>
+                          <span title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
+                          <span title={t('runs.approvals_hint') ?? undefined}>👤 {t('runs.col_approvals') ?? 'Approvals'}</span>
+                          <span />
+                        </div>
                         {tasksOf(saga.saga_id).map((task) => (
-                          <div key={task.task_id} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
-                            <span style={{ minWidth: '10rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id}>
+                          <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
+                            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id}>
                               {task.title || task.task_id}
                               {task.running > 0 && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{pluralT(t, locale, 'runs.task_running_n', task.running)}</Tag>}
                             </span>
-                            <span>{pluralT(t, locale, 'runs.task_runs_n', task.run_count)}</span>
-                            <span>{pluralT(t, locale, 'runs.task_agents_n', task.agent_count)}</span>
+                            <span>{task.run_count}</span>
+                            <span>{task.agent_count}</span>
                             <span>⏱ {formatDuration(task.elapsed_ms, t)}</span>
-                            <span>{task.total_tokens.toLocaleString()} {t('runs.tokens') ?? 'tokens'}</span>
-                            {task.total_cost_usd > 0 && <span>${task.total_cost_usd.toFixed(2)}</span>}
-                            <button
-                              onClick={() => void runAction(() => taskSagaBind(project.trim(), task.task_id, ''))}
-                              title={t('project.saga_detach') ?? 'Detach from saga'}
-                              style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1 }}
-                            >✕</button>
+                            <span>⚒ {formatDuration(task.active_ms, t)}</span>
+                            <span>{task.total_tokens.toLocaleString()}</span>
+                            <span>{task.total_cost_usd > 0 ? `$${task.total_cost_usd.toFixed(2)}` : '—'}</span>
+                            <span style={{ whiteSpace: 'nowrap' }} title={t('dashboard.human_col_hint') ?? undefined}>
+                              {(task.human?.hab_seconds ?? 0) > 0 || (task.human?.hwt_seconds ?? 0) > 0
+                                ? <>🧠 {formatDuration((task.human?.hab_seconds ?? 0) * 1000, t)} · ⏳ {formatDuration((task.human?.hwt_seconds ?? 0) * 1000, t)}</>
+                                : '—'}
+                            </span>
+                            <span title={approvalHint(t, task.approvals, task.human)} style={{ whiteSpace: 'nowrap' }}>
+                              {task.approvals.requested > 0
+                                ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms, t)}</>
+                                : '—'}
+                            </span>
+                            <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                              <button
+                                onClick={() => void runAction(() => taskSagaBind(project.trim(), task.task_id, ''))}
+                                title={t('project.saga_detach') ?? 'Detach from saga'}
+                                style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1 }}
+                              >✕</button>
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -496,10 +524,11 @@ export default function ProjectOverview({ project }: Props) {
               onChange={setFormSaga}
             />
             {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
+            {actionBusy && <InlineNotification kind="info" lowContrast hideCloseButton title={t('project.saga_merge_busy') ?? 'Merging — moving tasks and spend…'} />}
             <div className="form-actions" style={{ marginTop: 0 }}>
-              <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button size="sm" kind="secondary" disabled={actionBusy} onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button size="sm" disabled={actionBusy || !formSaga} onClick={() => void runAction(() => sagaMerge(project.trim(), formSaga, dialog.sources))}>
-                {t('project.saga_merge') ?? 'Merge'}
+                {actionBusy ? (t('project.saga_merge_busy_btn') ?? 'Merging…') : (t('project.saga_merge') ?? 'Merge')}
               </Button>
             </div>
           </Stack>
