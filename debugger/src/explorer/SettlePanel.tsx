@@ -28,10 +28,11 @@ function challengeOf(item: KnowledgeItem): { rule: string; reason: string } {
 }
 
 // Localized rule label: every known challenge rule has an
-// explorer.settle_rule_<id> key (dots → underscores); unknown rules fall
-// back to the raw id — a filter option never renders empty.
+// explorer.settle_rule_<id> key (dots AND dashes → underscores; the rule ids
+// carry dashes — extraction-contradiction.v1 — while the keys use
+// underscores); unknown rules fall back to the raw id.
 function ruleLabel(rule: string, t: (key: string) => string): string {
-  const key = `explorer.settle_rule_${rule.replace(/\./g, '_')}`
+  const key = `explorer.settle_rule_${rule.replace(/[.-]/g, '_')}`
   const label = t(key)
   return label === key ? rule : label
 }

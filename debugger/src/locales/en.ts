@@ -2720,6 +2720,7 @@ export const en: Record<string, string> = {
     'explorer.settle_rule_extraction_contradiction_v1': 'Contradicted by a run',
     'explorer.settle_rule_hint_outcome_v1': 'Hint outcome verdict',
     'explorer.settle_rule_manual_v1': 'Challenged manually',
+    'explorer.settle_rule_manual': 'Challenged manually',
     'explorer.settle_reason_placeholder': 'e.g. verified on the stand / obsolete after the migration',
     'explorer.settle_confirm': 'Confirm selected',
     'explorer.settle_invalidate': 'Invalidate selected',

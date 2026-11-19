@@ -2720,6 +2720,7 @@ export const ru: Record<string, string> = {
     'explorer.settle_rule_extraction_contradiction_v1': 'Противоречие из рана',
     'explorer.settle_rule_hint_outcome_v1': 'Вердикт по подсказке',
     'explorer.settle_rule_manual_v1': 'Оспорено вручную',
+    'explorer.settle_rule_manual': 'Оспорено вручную',
     'explorer.settle_reason_placeholder': 'например: проверено на стенде / неактуально после миграции',
     'explorer.settle_confirm': 'Подтвердить выбранное',
     'explorer.settle_invalidate': 'Инвалидировать выбранное',
