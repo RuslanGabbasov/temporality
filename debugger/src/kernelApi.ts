@@ -428,6 +428,26 @@ export function taskSagaBind(project: string, taskID: string, sagaID: string): P
   return request(`/v1/workspace/tasks/${encodeURIComponent(taskID)}/saga?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ saga_id: sagaID }) })
 }
 
+export interface SagaCuratePlan {
+  assignments: Array<{ task_id: string; saga_id: string }>
+  new_sagas: Array<{ title: string; goal?: string; task_ids: string[] }>
+  merges: Array<{ into: string; sources: string[] }>
+  notes?: string
+}
+
+export interface SagaCurateReport {
+  applied: boolean
+  assignments: number
+  new_sagas: string[]
+  merges: number
+}
+
+/** The supervisor judge walks the recent tasks and re-points them at the
+ *  right sagas. Dry-run by default: apply=true emits the re-binding. */
+export function sagasCurate(project: string, opts: { days?: number; apply?: boolean }): Promise<{ plan: SagaCuratePlan; report: SagaCurateReport; note?: string }> {
+  return request(`/v1/workspace/projects/${encodeURIComponent(project)}/sagas/curate`, { method: 'POST', body: JSON.stringify({ days: opts.days ?? 14, apply: !!opts.apply }) })
+}
+
 // ── System dashboard (docs/system-dashboard.md §3.2–§3.3) ─────────────────────
 
 export interface OverviewProjectRow {

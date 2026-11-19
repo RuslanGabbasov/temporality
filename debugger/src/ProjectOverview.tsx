@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Heading, InlineNotification, Tag, Tile, Button, Stack, TextInput, TextArea } from '@carbon/react'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
-import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, type ProjectBudget, type SagaRollup, type TaskRollup } from './kernelApi'
+import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, sagasCurate, type ProjectBudget, type SagaRollup, type SagaCuratePlan, type TaskRollup } from './kernelApi'
 import { FloatingComboBox } from './FloatingComboBox'
 import ProjectRequired from './ProjectRequired'
 import AppModal from './Modal'
@@ -174,6 +174,34 @@ export default function ProjectOverview({ project }: Props) {
     })
   }
 
+  // The supervisor curation pass (§8.1): the judge re-points recent tasks at
+  // the right sagas. Two steps: dry-run plan → apply. The report modal shows
+  // what moved; the reload after apply reflects it in the table.
+  const [curating, setCurating] = useState(false)
+  const [curatePlan, setCuratePlan] = useState<SagaCuratePlan | null>(null)
+  const [curateNote, setCurateNote] = useState('')
+  const [curateReport, setCurateReport] = useState<string>('')
+  const curate = async (apply: boolean) => {
+    setCurating(true); setError('')
+    try {
+      const reply = await sagasCurate(project.trim(), { days: 14, apply })
+      if (apply) {
+        const r = reply.report
+        setCuratePlan(null)
+        setCurateNote(r.assignments + r.merges + r.new_sagas.length > 0
+          ? t('project.saga_curate_done', { assignments: String(r.assignments), sagas: String(r.new_sagas.length), merges: String(r.merges) })
+          : t('project.saga_curate_nothing') ?? 'Всё уже разложено правильно')
+        await load()
+      } else {
+        setCuratePlan(reply.plan)
+      }
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setCurating(false)
+    }
+  }
+
   const openDialog = (next: Dialog, defaults?: { title?: string; goal?: string; sagaID?: string }) => {
     setActionError('')
     setFormTitle(defaults?.title ?? '')
@@ -239,19 +267,33 @@ export default function ProjectOverview({ project }: Props) {
               Merged redirect rows are not rendered at all: their tasks and spend
               live in the target saga, the redirect carries no information the
               operator needs — the merge just makes the source disappear. */}
+          {curateNote && (
+            <InlineNotification kind="success" lowContrast title={curateNote} onClose={() => setCurateNote('')} style={{ marginBottom: '0.5rem' }} />
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
             <Heading style={{ fontSize: '0.95rem' }}>{t('project.sagas') ?? 'Sagas'}</Heading>
-            {liveSagas.length >= 2 && (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {liveSagas.length >= 2 && (
+                <Button
+                  size="sm"
+                  kind="ghost"
+                  disabled={selected.size < 1}
+                  title={selected.size < 2 ? (t('project.saga_merge_select') ?? 'Select two or more sagas') : undefined}
+                  onClick={() => openDialog({ kind: 'merge', sources: [...selected] })}
+                >
+                  {t('project.saga_merge') ?? 'Merge'}{selected.size > 0 ? ` (${selected.size})` : ''}
+                </Button>
+              )}
               <Button
                 size="sm"
                 kind="ghost"
-                disabled={selected.size < 1}
-                title={selected.size < 2 ? (t('project.saga_merge_select') ?? 'Select two or more sagas') : undefined}
-                onClick={() => openDialog({ kind: 'merge', sources: [...selected] })}
+                disabled={curating}
+                title={t('project.saga_curate_hint') ?? undefined}
+                onClick={() => void curate(false)}
               >
-                {t('project.saga_merge') ?? 'Merge'}{selected.size > 0 ? ` (${selected.size})` : ''}
+                {curating ? (t('project.saga_curate_busy') ?? '…') : (t('project.saga_curate') ?? 'Tidy up (AI)')}
               </Button>
-            )}
+            </div>
           </div>
           {liveSagas.length === 0 ? (
             <Tile style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('project.no_sagas') ?? 'No sagas registered yet'}</Tile>
@@ -500,6 +542,46 @@ export default function ProjectOverview({ project }: Props) {
               </Button>
             </div>
           </Stack>
+        </AppModal>
+      )}
+
+      {curatePlan && (
+        <AppModal onClose={() => setCuratePlan(null)} panelStyle={{ width: '560px' }}>
+          <Heading style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>{t('project.saga_curate_title') ?? 'The mentor tidied the sagas'}</Heading>
+          <div style={{ display: 'grid', gap: '0.6rem', fontSize: '0.82rem', color: 'var(--tm-text-2)', maxHeight: '55vh', overflowY: 'auto' }}>
+            {curatePlan.new_sagas.map((ns) => (
+              <div key={ns.title} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.7rem' }}>
+                <div style={{ fontWeight: 600, color: 'var(--tm-text)' }}>{t('project.saga_curate_new') ?? 'New saga'}: {ns.title}</div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)', marginTop: '0.2rem' }}>{ns.task_ids.length} × {t('project.tasks_col') ?? 'tasks'}</div>
+              </div>
+            ))}
+            {curatePlan.merges.map((m, i) => (
+              <div key={`m${i}`} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.7rem' }}>
+                <div style={{ fontWeight: 600, color: 'var(--tm-text)' }}>{t('project.saga_curate_merge') ?? 'Merge'} → {sagaTitle(m.into)}</div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)', marginTop: '0.2rem' }}>
+                  ← {m.sources.map((s) => sagaTitle(s)).join(', ')}
+                </div>
+              </div>
+            ))}
+            {curatePlan.assignments.length > 0 && (
+              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.7rem' }}>
+                <div style={{ fontWeight: 600, color: 'var(--tm-text)', marginBottom: '0.3rem' }}>{t('project.saga_curate_assign') ?? 'Re-bound tasks'} ({curatePlan.assignments.length})</div>
+                {curatePlan.assignments.map((a, i) => (
+                  <div key={`${a.task_id}:${i}`} style={{ fontSize: '0.76rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${a.task_id} → ${a.saga_id}`}>
+                    • {(budget?.tasks ?? []).find((task) => task.task_id === a.task_id)?.title || a.task_id} → {sagaTitle(a.saga_id)}
+                  </div>
+                ))}
+              </div>
+            )}
+            {curatePlan.notes && <div style={{ color: 'var(--tm-text-3)' }}>{curatePlan.notes}</div>}
+            {curatePlan.new_sagas.length === 0 && curatePlan.merges.length === 0 && curatePlan.assignments.length === 0 && (
+              <div style={{ color: 'var(--tm-text-3)' }}>{t('project.saga_curate_nothing') ?? 'Всё уже разложено правильно'}</div>
+            )}
+          </div>
+          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+            <Button size="sm" kind="secondary" disabled={curating} onClick={() => setCuratePlan(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+            <Button size="sm" disabled={curating} onClick={() => void curate(true)}>{curating ? '…' : (t('project.saga_curate_apply') ?? 'Apply')}</Button>
+          </div>
         </AppModal>
       )}
 

@@ -570,6 +570,14 @@ func (a *CostAPI) projectBudget(ctx context.Context, project string) (ProjectBud
 	return budget, nil
 }
 
+// ProjectBudgetData exposes the cached project rollup (tasks with saga
+// bindings + live sagas) to server-side features built on top of the same
+// numbers the UI shows — the saga curation pass reads it instead of
+// re-querying the journal.
+func (a *CostAPI) ProjectBudgetData(ctx context.Context, project string) (ProjectBudget, error) {
+	return a.projectBudget(ctx, project)
+}
+
 // budgetEntry returns (creating as needed) the cache slot of one project.
 func (a *CostAPI) budgetEntry(project string) *budgetCacheEntry {
 	a.budgetMu.Lock()

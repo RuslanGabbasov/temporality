@@ -3254,6 +3254,16 @@ func main() {
 	// re-binding from the UI. Event-sourced like the agent tools — the routes
 	// only validate against the journal and emit through the same outbox.
 	RegisterSagaRoutes(mux, gate, events, observationURL)
+	// Supervisor saga curation (docs/sagas.md §8.1): the judge walks the
+	// recent tasks and re-points them at the right sagas — dry-run plan by
+	// default, apply emits the same saga.* events the UI does.
+	RegisterSagaCurateRoutes(sagaCurateRoutesDeps{
+		mux: mux, gate: gate, events: events, costAPI: costAPI, ws: ws,
+		modelClient: func(ctx context.Context) (*llm.Client, error) {
+			return judgeModelClient(ctx, ws, secretMasterKey)
+		},
+		log: log,
+	})
 	// Server-side chat persistence (docs/resilience-and-scale.md §4).
 	RegisterChatRoutes(mux, gate, ws)
 	// Presentation Engine (docs/presentation-engine.md §9–§15): structured

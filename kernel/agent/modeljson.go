@@ -310,3 +310,10 @@ func stripReasoning(content string) string {
 		lower = strings.ToLower(content)
 	}
 }
+
+// CompleteParsed is the exported form of completeParsed: feature packages
+// that build their own JSON-mode prompts (saga curation, learning planner)
+// get the same parse-and-repair ladder without reaching into internals.
+func CompleteParsed[T any](ctx context.Context, model *llm.Client, messages []llm.Message, parse func(string) (T, error)) (T, error) {
+	return completeParsed(ctx, model, messages, parse)
+}
