@@ -60,12 +60,20 @@ func runSupervisorCasesPass(ctx context.Context, log *slog.Logger, activities *a
 	if !supervisorCasesEnabled() {
 		return
 	}
-	verdicts, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "supervisor.verdict", 200)
+	verdicts, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "supervisor.verdict", 500)
 	if err != nil {
 		log.Warn("supervisor cases: list verdicts", "error", err.Error())
 		return
 	}
-	done := caseDoneIndex(verdicts)
+	// Acknowledgements live in a separate event type and carry only the
+	// verdict event id — fetch them too, the dedup resolves case/subject
+	// through them.
+	acks, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "supervisor.verdict.acknowledged", 300)
+	if err != nil {
+		acks = nil // degrade: dedup by publications only
+	}
+	verdicts = append(verdicts, acks...)
+	done, _ := caseDoneIndex(verdicts)
 	client, err := modelClient(ctx)
 	if err != nil {
 		client = nil // cases degrade to their deterministic fallbacks
@@ -359,10 +367,16 @@ func proposeContractsFromClusters(ctx context.Context, log *slog.Logger, activit
 	}
 }
 
-// caseDoneIndex maps case:subject → the newest verdict time inside the dedup
-// window; the run-triage verdicts (no case field) are ignored.
-func caseDoneIndex(verdicts []journalEvent) map[string]time.Time {
+// caseDoneIndex maps case:subject → the newest «settled» mark inside the
+// window. Settled = the case was PUBLISHED recently (dedup within the pass
+// cadence) or ACKNOWLEDGED by a human (the skip/close verdicts).
+// Acknowledgement events carry only verdict_event_id(s) — they resolve to
+// case:subject through the published verdicts' event ids. Without the ack
+// half, a skipped case re-fired every supervisor pass: the human said «not
+// now», twenty minutes later the queue asked again.
+func caseDoneIndex(verdicts []journalEvent) (map[string]time.Time, map[string]string) {
 	done := map[string]time.Time{}
+	eventSubject := map[string]string{}
 	for _, v := range verdicts {
 		caseID, _ := v.Data["case"].(string)
 		subject, _ := v.Data["subject"].(string)
@@ -370,13 +384,35 @@ func caseDoneIndex(verdicts []journalEvent) map[string]time.Time {
 			continue
 		}
 		key := caseID + "\x00" + subject
-		if at, ok := done[key]; !ok {
+		if _, ok := done[key]; !ok {
 			done[key] = time.Now() // journal listing is newest-first; first hit wins
-		} else {
-			_ = at
+		}
+		eventSubject[v.EventID] = key
+	}
+	for _, v := range verdicts {
+		if v.Type != "supervisor.verdict.acknowledged" {
+			continue
+		}
+		ids := []string{}
+		if one, ok := v.Data["verdict_event_id"].(string); ok && one != "" {
+			ids = append(ids, one)
+		}
+		if many, ok := v.Data["verdict_event_ids"].([]any); ok {
+			for _, entry := range many {
+				if s, ok := entry.(string); ok {
+					ids = append(ids, s)
+				}
+			}
+		}
+		for _, id := range ids {
+			if key, ok := eventSubject[id]; ok {
+				if _, seen := done[key]; !seen {
+					done[key] = time.Now()
+				}
+			}
 		}
 	}
-	return done
+	return done, eventSubject
 }
 
 // caseDue reports whether the subject still needs a verdict.
@@ -696,7 +732,13 @@ func detectUserFriction(ctx context.Context, log *slog.Logger, activities *agent
 	counts := map[ask]int{}
 	for _, event := range started {
 		title, _ := event.Data["title"].(string)
-		actor, _ := event.Data["actor_id"].(string)
+		actor := event.ActorID
+		if actor == "" {
+			// Intake/trigger/webhook runs carry the actor in the event
+			// context, not in data — the blank-actor friction cases («cannot
+			// identify the user») all came from reading data only.
+			actor = event.Context.Actor.ID
+		}
 		if title == "" {
 			continue
 		}

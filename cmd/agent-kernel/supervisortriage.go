@@ -72,6 +72,7 @@ type journalEvent struct {
 	Project string
 	Run     string
 	Type    string
+	ActorID string
 	Data    map[string]any
 }
 
@@ -195,7 +196,7 @@ func fetchJournalTypedEvents(ctx context.Context, observationURL, journalToken, 
 			return nil, err
 		}
 		for _, event := range pageData.Events {
-			refs = append(refs, journalEvent{EventID: event.EventID, Project: event.Context.Project, Run: event.Context.Run, Type: event.Type, Data: event.Data})
+			refs = append(refs, journalEvent{EventID: event.EventID, Project: event.Context.Project, Run: event.Context.Run, Type: event.Type, ActorID: event.Context.Actor.ID, Data: event.Data})
 		}
 		if pageData.NextCursor == "" {
 			return refs, nil
