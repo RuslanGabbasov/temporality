@@ -188,6 +188,25 @@ interface Conversation {
 
 const STORAGE_KEY = 'temporality_chats'
 
+// linkifyWorkspacePaths is a full regex pass over the message text; the
+// conversations state re-renders the whole chat on every coalesced stream
+// flush (~8×/s while a run streams, and burst after burst during the tail
+// catch-up), and each render re-linkified EVERY settled bubble's content —
+// O(all messages × length) regex work per frame is what made the chat
+// stutter when returning to a running conversation. The transform is a pure
+// function of (project, content), so a small cache turns the repeats into a
+// Map lookup.
+const linkifyCache = new Map<string, string>()
+function linkifyCached(content: string, project: string): string {
+  const key = `${project}\u0000${content}`
+  const hit = linkifyCache.get(key)
+  if (hit !== undefined) return hit
+  const value = linkifyWorkspacePaths(content, project)
+  if (linkifyCache.size > 400) linkifyCache.clear()
+  linkifyCache.set(key, value)
+  return value
+}
+
 function loadConversations(): Conversation[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -1159,7 +1178,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     }
     const pushLine = (line: string | ChatStreamLine) => {
       lines.push(typeof line === 'string' ? { text: line } : line)
-      if (linesTimer === undefined) linesTimer = window.setTimeout(flushLines, 120)
+      // Catch-up replays dozens of lines in one burst; 120ms would flush a
+      // full-tree render 8×/s for history that is not live news. 400ms keeps
+      // the feed filling without strobing the whole chat; finishCatchUp
+      // flushes the remainder once.
+      if (linesTimer === undefined) linesTimer = window.setTimeout(flushLines, catchingUp ? 400 : 120)
     }
 
     // Compact-trace bookkeeping: per-turn stats (thinking measured from the
@@ -2201,7 +2224,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
                     {msg.content ? (
                       <Markdown
-                        content={linkifyWorkspacePaths(
+                        content={linkifyCached(
                           // Presentation fences exist on assistant answers only,
                           // but linkify applies to BOTH roles: a user pasting a
                           // workspace path into their own message gets a working
