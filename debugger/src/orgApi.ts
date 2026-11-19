@@ -290,6 +290,21 @@ export interface OrgScopeFilters {
   scope?: string
 }
 
+// Monthly usage per org unit (§24): the same org_month_usage rows the policy
+// admission gate enforces — one cell per unit × calendar month.
+export interface OrgMonthUsageRow {
+  org_node_id: string
+  month: string
+  runs: number
+  tokens: number
+  cost_usd: number
+}
+
+export interface OrgUsageResponse {
+  rows: OrgMonthUsageRow[]
+  months: string[]
+}
+
 export interface OrgActivityFilters extends OrgScopeFilters {
   from?: string
   to?: string
@@ -400,6 +415,9 @@ export const orgApi = {
     requestSend<{ state: string }>(`/v1/org/work/task/${encodeURIComponent(taskID)}/accept`, { method: 'POST' }),
   awarenessFlow: (filters: OrgAwarenessFlowFilters) => request<OrgFlowResponse>('/v1/org/awareness-flow', undefined, { ...filters }),
   planGraph: (filters: OrgScopeFilters) => request<OrgPlanGraphResponse>('/v1/org/plan-graph', undefined, { ...filters }),
+  // Monthly usage stats (§24): unit × month cells of tokens/cost/runs.
+  usage: (filters: OrgScopeFilters & { months?: number }) =>
+    request<OrgUsageResponse>('/v1/org/usage', undefined, { ...filters }),
 
   // Per-unit activity settings (values travel as strings, per the PUT contract)
   activitySettings: (unitID: string) =>

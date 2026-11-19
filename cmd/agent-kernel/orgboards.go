@@ -123,6 +123,24 @@ func orgCSV(r *http.Request, key string) []string {
 	return out
 }
 
+// orgUsageMonths parses the months window (default 6, max 24) and returns the
+// 'YYYY-MM' labels newest-first, current month included.
+func orgUsageMonths(raw string) []string {
+	count, _ := strconv.Atoi(strings.TrimSpace(raw))
+	if count <= 0 {
+		count = 6
+	}
+	if count > 24 {
+		count = 24
+	}
+	now := time.Now().UTC()
+	out := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		out = append(out, now.AddDate(0, -i, 0).Format("2006-01"))
+	}
+	return out
+}
+
 // RegisterOrgOperationsRoutes mounts the §15 API surface and starts the
 // background loops (fold projection, supervisor batches, steer delivery).
 func RegisterOrgOperationsRoutes(ctx context.Context, deps orgRoutesDeps, activities *agent.Activities, signaler orgNoteSignaler, modelClient func(ctx context.Context) (*llm.Client, error)) {
@@ -776,6 +794,32 @@ func RegisterOrgOperationsRoutes(ctx context.Context, deps orgRoutesDeps, activi
 			return
 		}
 		writeJSON(w, 200, graph)
+	})
+
+	// §24: monthly usage per org unit — the stats view reads the same
+	// org_month_usage rows the policy admission gate enforces. Months are the
+	// last N calendar months including the current one (default 6, max 24).
+	mux.HandleFunc("GET /v1/org/usage", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		units, err := ws.ListOrgUnits(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		scope, ok := orgUnitNodeScope(units, deps.visibleUnits(r), r.URL.Query().Get("org_node"), r.URL.Query().Get("scope"))
+		if !ok {
+			orgWriteNotFound(w)
+			return
+		}
+		months := orgUsageMonths(r.URL.Query().Get("months"))
+		rows, err := ws.OrgMonthUsage(r.Context(), scope, months)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"rows": rows, "months": months})
 	})
 
 	startOrgActivityLoop(ctx, deps.log, ws, deps.observationURL)

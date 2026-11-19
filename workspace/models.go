@@ -218,6 +218,11 @@ type Policy struct {
 	MaxTokens      *int     `json:"max_tokens,omitempty"`
 	MaxBudgetUSD   *float64 `json:"max_budget_usd,omitempty"`
 	TimeoutSeconds *int     `json:"timeout_seconds,omitempty"`
+	// Monthly caps: the same idea, but per CALENDAR MONTH across every run
+	// attributed to the unit — the release-cadence budget, not a per-run one.
+	// NULL = uncapped; the merge takes the minimum (restrictive).
+	MonthlyMaxTokens    *int64   `json:"monthly_max_tokens,omitempty"`
+	MonthlyMaxBudgetUSD *float64 `json:"monthly_max_budget_usd,omitempty"`
 	// Memory quota dimensions (the model gate): MaxConcurrentRuns caps how
 	// many runs of this unit execute at once; MemoryBudgetMB caps the SUM of
 	// their sandbox memory requirements. NULL = uncapped; the merge takes the

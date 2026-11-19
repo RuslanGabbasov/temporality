@@ -8329,6 +8329,10 @@ func main() {
 	}, activities, temporalClient, func(ctx context.Context) (*llm.Client, error) {
 		return judgeModelClient(ctx, ws, secretMasterKey)
 	})
+	// Monthly org usage accounting (policy monthly caps): folds model.completed
+	// into org_month_usage — the policy admission gate and the usage stats
+	// read the same rows.
+	StartOrgUsageLoop(ctx, log, ws, observationURL, journalToken, costPrices)
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()
@@ -10085,6 +10089,14 @@ func applyRunPolicy(ctx context.Context, ws *workspace.Store, prices cost.Config
 	effective, sources, err := ws.EffectivePolicy(ctx, units...)
 	if err != nil {
 		return err
+	}
+	// Monthly caps gate the run BEFORE it starts: each source row judges the
+	// month-to-date usage of its own org scope (§24). Nothing else here reads
+	// the usage rows, so the check stays beside the fold that produces them.
+	if effective.MonthlyMaxTokens != nil || effective.MonthlyMaxBudgetUSD != nil {
+		if err := enforceMonthlyCaps(ctx, ws, sources); err != nil {
+			return err
+		}
 	}
 	// An empty model means the kernel default (TEMPORALITY_MODEL_ID): the policy
 	// must judge the model the run will actually use.

@@ -18,6 +18,7 @@ import { whoami } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import PolicyDialog from './PolicyDialog'
+import OrgUsageSection from './OrgUsage'
 import { flattenUnits, useOrgUnits } from './orgUnits'
 import OrgActivitySettingsPanel from './OrgActivitySettings'
 
@@ -55,6 +56,8 @@ function policySummaryTags(p: Policy, t: (k: string, v?: Record<string, string>)
   }
   if (p.max_tokens != null) tags.push({ key: 'tokens', text: t('org.policy_tokens_tag', { count: String(p.max_tokens) }) ?? `≤ ${p.max_tokens} tokens` })
   if (p.max_budget_usd != null) tags.push({ key: 'budget', text: t('org.policy_budget_tag', { amount: String(p.max_budget_usd) }) ?? `≤ $${p.max_budget_usd}` })
+  if (p.monthly_max_tokens != null) tags.push({ key: 'mtokens', text: t('org.policy_monthly_tokens_tag', { count: String(p.monthly_max_tokens) }) ?? `≤ ${p.monthly_max_tokens}/mo` })
+  if (p.monthly_max_budget_usd != null) tags.push({ key: 'mbudget', text: t('org.policy_monthly_budget_tag', { amount: String(p.monthly_max_budget_usd) }) ?? `≤ $${p.monthly_max_budget_usd}/mo` })
   if (p.timeout_seconds != null) tags.push({ key: 'timeout', text: t('org.policy_timeout_tag', { count: String(p.timeout_seconds) }) ?? `≤ ${p.timeout_seconds}s` })
   if (p.network_mode === 'deny') tags.push({ key: 'net', text: t('org.policy_network.deny') ?? 'network denied' })
   if (p.sandbox_mode === 'read_only') tags.push({ key: 'ro', text: t('org.policy_sandbox.read_only') ?? 'read-only' })
@@ -773,6 +776,10 @@ export default function Org() {
           </div>
         )}
       </div>
+
+      {/* Monthly usage stats (§24): the unit × month grid the monthly policy
+          caps enforce against. */}
+      <OrgUsageSection units={units} />
 
       {/* Execution identities (docs/org-structure.md §20, §47): the security
           contexts trigger-fired runs act under. Mutations are admin-gated

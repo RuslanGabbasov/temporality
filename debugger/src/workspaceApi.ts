@@ -72,6 +72,10 @@ export interface Policy {
   // the merge takes the minimum down the org tree.
   max_concurrent_runs?: number | null
   memory_budget_mb?: number | null
+  // Calendar-month caps (§24): month-to-date usage of the unit's subtree —
+  // tokens and provider cost — is gated against these at run admission.
+  monthly_max_tokens?: number | null
+  monthly_max_budget_usd?: number | null
   filesystem?: FilesystemRules | null
   enabled: boolean
   created_at: string

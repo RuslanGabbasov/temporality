@@ -43,12 +43,19 @@ func ValidatePolicy(p Policy) error {
 	if err := ValidateFilesystemRules(p.Filesystem); err != nil {
 		return err
 	}
+	if p.MonthlyMaxTokens != nil && *p.MonthlyMaxTokens <= 0 {
+		return errors.New("monthly_max_tokens must be positive")
+	}
+	if p.MonthlyMaxBudgetUSD != nil && *p.MonthlyMaxBudgetUSD <= 0 {
+		return errors.New("monthly_max_budget_usd must be positive")
+	}
 	return nil
 }
 
 const policyColumns = `id, org_unit_id, name, allowed_models, allowed_mcp,
 max_tokens, max_budget_usd, timeout_seconds, network_mode, sandbox_mode, approval_mode,
 egress_allowlist, filesystem, intake_mode, max_concurrent_runs, memory_budget_mb,
+monthly_max_tokens, monthly_max_budget_usd,
 enabled, created_at, updated_at`
 
 func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
@@ -57,9 +64,12 @@ func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	var models, mcp, egress, filesystem []byte
 	var maxTokens, timeout, maxConcurrentRuns, memoryBudgetMB *int
 	var budget *float64
+	var monthlyTokens *int64
+	var monthlyBudget *float64
 	err := scanner.Scan(&p.ID, &orgUnitID, &p.Name, &models, &mcp,
 		&maxTokens, &budget, &timeout, &p.NetworkMode, &p.SandboxMode, &p.ApprovalMode,
 		&egress, &filesystem, &p.IntakeMode, &maxConcurrentRuns, &memoryBudgetMB,
+		&monthlyTokens, &monthlyBudget,
 		&p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return p, err
@@ -78,6 +88,8 @@ func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	p.MaxTokens = maxTokens
 	p.MaxBudgetUSD = budget
 	p.TimeoutSeconds = timeout
+	p.MonthlyMaxTokens = monthlyTokens
+	p.MonthlyMaxBudgetUSD = monthlyBudget
 	p.MaxConcurrentRuns = zeroAsUnset(maxConcurrentRuns)
 	p.MemoryBudgetMB = zeroAsUnset(memoryBudgetMB)
 	return p, nil
@@ -119,11 +131,12 @@ func (s *Store) CreatePolicy(ctx context.Context, p *Policy) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO org_policy
 		 (id, org_unit_id, name, allowed_models, allowed_mcp, max_tokens, max_budget_usd,
+		  monthly_max_tokens, monthly_max_budget_usd,
 		  timeout_seconds, network_mode, sandbox_mode, approval_mode, egress_allowlist,
 		  filesystem, intake_mode, max_concurrent_runs, memory_budget_mb, enabled, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
-		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
+		p.MaxTokens, p.MaxBudgetUSD, p.MonthlyMaxTokens, p.MonthlyMaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
 		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode,
 		intOrZero(p.MaxConcurrentRuns), intOrZero(p.MemoryBudgetMB), p.Enabled, p.CreatedAt, p.UpdatedAt)
 	return err
@@ -172,13 +185,14 @@ func (s *Store) UpdatePolicy(ctx context.Context, p Policy) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE org_policy
 		 SET org_unit_id = $2, name = $3, allowed_models = $4, allowed_mcp = $5,
-		     max_tokens = $6, max_budget_usd = $7, timeout_seconds = $8,
-		     network_mode = $9, sandbox_mode = $10, approval_mode = $11,
-		     egress_allowlist = $12, filesystem = $13, intake_mode = $14,
-		     max_concurrent_runs = $15, memory_budget_mb = $16, enabled = $17, updated_at = $18
+		     max_tokens = $6, max_budget_usd = $7, monthly_max_tokens = $8, monthly_max_budget_usd = $9,
+		     timeout_seconds = $10,
+		     network_mode = $11, sandbox_mode = $12, approval_mode = $13,
+		     egress_allowlist = $14, filesystem = $15, intake_mode = $16,
+		     max_concurrent_runs = $17, memory_budget_mb = $18, enabled = $19, updated_at = $20
 		 WHERE id = $1`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
-		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
+		p.MaxTokens, p.MaxBudgetUSD, p.MonthlyMaxTokens, p.MonthlyMaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
 		marshalStrings(p.EgressAllowlist), marshalFilesystem(p.Filesystem), p.IntakeMode,
 		intOrZero(p.MaxConcurrentRuns), intOrZero(p.MemoryBudgetMB), p.Enabled, p.UpdatedAt)
 	if err != nil {
@@ -281,6 +295,10 @@ func MergePolicies(rows []Policy) (effective Policy, sources []Policy) {
 		effective.MaxTokens = minIntPtr(effective.MaxTokens, p.MaxTokens)
 		effective.MaxBudgetUSD = minFloatPtr(effective.MaxBudgetUSD, p.MaxBudgetUSD)
 		effective.TimeoutSeconds = minIntPtr(effective.TimeoutSeconds, p.TimeoutSeconds)
+		// Monthly caps merge restrictive like every other cap: the tightest
+		// configured month wins down the tree.
+		effective.MonthlyMaxTokens = minInt64Ptr(effective.MonthlyMaxTokens, p.MonthlyMaxTokens)
+		effective.MonthlyMaxBudgetUSD = minFloatPtr(effective.MonthlyMaxBudgetUSD, p.MonthlyMaxBudgetUSD)
 		// Memory quota caps merge restrictive: the smallest configured value
 		// wins down the tree — a child unit cannot out-bid its ancestors.
 		effective.MaxConcurrentRuns = minIntPtr(effective.MaxConcurrentRuns, p.MaxConcurrentRuns)
@@ -437,4 +455,17 @@ func sortPolicies(rows []Policy) {
 			break
 		}
 	}
+}
+
+func minInt64Ptr(a, b *int64) *int64 {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	if *b < *a {
+		return b
+	}
+	return a
 }
