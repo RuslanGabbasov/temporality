@@ -694,6 +694,32 @@ func (a *Activities) hasImages(request ModelRequest) bool {
 	return false
 }
 
+// stripImagesForTextModel removes image blocks from every message and appends
+// an honest note in their place. Pure; used when no vision-capable route
+// exists (the supervisor panel pins no vision model) — sending multimodal
+// content parts to a text-only endpoint is a guaranteed provider 400.
+func stripImagesForTextModel(messages []llm.Message) []llm.Message {
+	out := make([]llm.Message, len(messages))
+	copy(out, messages)
+	for i := range out {
+		if len(out[i].Images) == 0 {
+			continue
+		}
+		count := len(out[i].Images)
+		out[i].Images = nil
+		out[i].Content = strings.TrimRight(out[i].Content, "\n") +
+			fmt.Sprintf("\n\n[image not delivered: %d image%s omitted — the active model does not accept images; answer without it or ask for a textual description]", count, pluralS(count))
+	}
+	return out
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // visionModelFor returns the supervisor panel's vision model, cached for
 // supervisorCacheTTL. Failures degrade to "no override".
 func (a *Activities) visionModelFor(ctx context.Context) string {
@@ -827,6 +853,19 @@ func (a *Activities) callModelOnce(ctx context.Context, request ModelRequest) (l
 		if vision := a.visionModelFor(ctx); vision != "" && vision != request.Model {
 			request.Model = vision
 			visionOverride = true
+		} else if vision == "" {
+			// No vision model pinned anywhere: an image-bearing payload sent to
+			// a text-only endpoint is a guaranteed provider 400 (z.ai code
+			// 1210 — «content type other than text»), and workflow retries
+			// would re-send the same broken payload forever. Degrade honestly:
+			// drop the image blocks, tell the model what happened, and leave a
+			// trace marker so the operator sees WHY the answer lost its eyes.
+			request.Messages = stripImagesForTextModel(request.Messages)
+			a.emitModelAttempt(ctx, request, attempt, activityID, "vision_degraded", 0, "no vision model configured in the supervisor panel")
+			if logger := activity.GetLogger(ctx); logger != nil {
+				logger.Warn("vision payload degraded to text-only: no vision model configured",
+					"run_id", request.RunID, "turn", request.Turn)
+			}
 		}
 	}
 	if request.Model != "" && (a.Model == nil || request.Model != a.Model.Model()) {
