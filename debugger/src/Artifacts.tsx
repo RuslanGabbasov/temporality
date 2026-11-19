@@ -21,6 +21,7 @@ import { shortTime } from './eventSummary'
 import { TimeHint, fullDateTime, briefDateTime } from './timeHint'
 import ListFilter from './ListFilter'
 import AppModal from './Modal'
+import { FloatingComboBox } from './FloatingComboBox'
 import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 import { ReviewerPicker } from './ReviewerPicker'
@@ -1682,16 +1683,20 @@ export default function Artifacts({ project }: { project?: string }) {
                                   ) : (
                                     <>
                                       <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                        <select
-                                          value={delegateTarget}
-                                          onChange={(e) => setDelegateTarget(e.target.value)}
-                                          style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.78rem', padding: '0.3rem 0.5rem', minWidth: '12rem' }}
-                                        >
-                                          <option value="">{t('artifacts.round_delegate_pick') ?? 'Кому передать…'}</option>
-                                          {directory.filter((u) => u.active).map((u) => (
-                                            <option key={u.id} value={`user:${u.id}`}>{u.name || u.id}</option>
-                                          ))}
-                                        </select>
+	                                        <div style={{ minWidth: '12rem' }}>
+	                                          {/* A searchable combobox, not a bare select: the user
+	                                              directory runs to hundreds of people. */}
+	                                          <FloatingComboBox
+	                                            id="round-delegate-user"
+	                                            size="sm"
+	                                            items={directory.filter((u) => u.active).map((u) => ({ id: `user:${u.id}`, text: u.name || u.id }))}
+	                                            itemToString={(item) => (item ? item.text : '')}
+	                                            selectedItem={directory.filter((u) => `user:${u.id}` === delegateTarget).map((u) => ({ id: `user:${u.id}`, text: u.name || u.id }))[0] ?? null}
+	                                            onChange={({ selectedItem }) => setDelegateTarget((selectedItem as { id: string } | null)?.id ?? '')}
+	                                            placeholder={t('artifacts.round_delegate_pick') ?? 'Кому передать…'}
+	                                            titleText={t('artifacts.round_delegate_pick') ?? 'Кому передать…'}
+	                                          />
+	                                        </div>
                                       </div>
                                       <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.4rem' }}>
                                         <Button size="sm" disabled={roundBusy || !delegateTarget} onClick={() => void delegateRound(r)}>{t('artifacts.round_delegate_apply') ?? 'Делегировать'}</Button>

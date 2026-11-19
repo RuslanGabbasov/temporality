@@ -25,6 +25,7 @@ import { whoami, login as apiLogin, authMethods, authLogout, INTAKE_PROJECT_ID, 
 import ChannelsDialog from './ChannelsDialog'
 import PasswordChangeDialog from './PasswordChangeDialog'
 import UserFactsDialog from './UserFactsDialog'
+import { FloatingComboBox } from './FloatingComboBox'
 import AppModal from './Modal'
 import { workspaceApi, type OrgUnit } from './workspaceApi'
 import { flattenUnits } from './orgUnits'
@@ -1100,18 +1101,26 @@ export default function Layout({ children, activePage }: LayoutProps) {
                         </div>
                       )
                     })}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
-                      <select
-                        aria-label={t('projects.members_user') ?? 'User'}
-                        value={newMemberUser}
-                        onChange={(e) => setNewMemberUser(e.target.value)}
-                        style={{ flex: 1, background: 'var(--tm-bg)', color: 'var(--tm-text)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                      >
-                        <option value="">{allUsers.length === 0 ? (t('projects.members_no_users') ?? 'No users') : (t('projects.members_pick_user') ?? 'Pick a user…')}</option>
-                        {allUsers.filter((u) => !memberDraft.some((m) => m.user_id === u.id)).map((u) => (
-                          <option key={u.id} value={u.id}>{u.name}</option>
-                        ))}
-                      </select>
+	                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+	                      {/* The user picker is a searchable combobox, not a native
+			                  select: directories run to hundreds of people, and
+			                  scrolling a bare list for one name is the same UX trap
+			                  the saga/agent pickers already fixed. Already-added
+			                  members drop out of the suggestions. */}
+		                  <div style={{ flex: 1, minWidth: 0 }}>
+		                    <FloatingComboBox
+		                      id="project-member-user"
+		                      size="sm"
+		                      items={allUsers
+		                        .filter((u) => !memberDraft.some((m) => m.user_id === u.id))
+		                        .map((u) => ({ id: u.id, text: u.name }))}
+		                      itemToString={(item) => (item ? item.text : '')}
+		                      selectedItem={allUsers.filter((u) => u.id === newMemberUser).map((u) => ({ id: u.id, text: u.name }))[0] ?? null}
+		                      onChange={({ selectedItem }) => setNewMemberUser((selectedItem as { id: string } | null)?.id ?? '')}
+		                      placeholder={allUsers.length === 0 ? (t('projects.members_no_users') ?? 'No users') : (t('projects.members_pick_user') ?? 'Pick a user…')}
+		                      titleText={t('projects.members_user') ?? 'User'}
+		                    />
+		                  </div>
                       <select
                         aria-label={t('projects.member_role') ?? 'Role'}
                         value={newMemberRole}
