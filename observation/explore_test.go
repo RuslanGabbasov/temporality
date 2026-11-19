@@ -494,8 +494,11 @@ func TestExploreCompareCandidateRequiresTextOverlap(t *testing.T) {
 // The candidate pool needs the SAME FACT, not merely shared words: with
 // vectors in hand, unrelated same-topic neighbours die on the similarity
 // floor even when one side denies something, paraphrase-close pairs pass the
-// top lane, moderately-close same-subject pairs pass the related lane, and a
-// denial lowers the bar but never below its own floor.
+// top lane, and a denial lowers the bar but never below its own floor +
+// lexical-identity share. The old «moderately-close related lane» (0.6–0.85
+// cosine, no denial check) is gone deliberately: on the live corpus it was
+// the main source of unrelated pairs — the local embedding model scores
+// same-domain different-fact statements 0.85–0.92.
 func TestExploreCompareCandidateRequiresSameFact(t *testing.T) {
 	base := time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
 	older := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
@@ -506,7 +509,10 @@ func TestExploreCompareCandidateRequiresSameFact(t *testing.T) {
 		// B: one subject, paraphrase-close — a real disagreement.
 		{ID: "K-auth-git", Proposition: "git fetch требует явных учётных данных при работе с сервером", State: "proposed", Topics: []string{"authentication"}, Project: "demo", CreatedAt: base},
 		{ID: "K-auth-token", Proposition: "git fetch требует явных учётных данных иначе сервер отклоняет запрос", State: "challenged", Topics: []string{"authentication"}, Project: "demo", CreatedAt: older},
-		// C: same subject, moderately close, no denial — still a candidate.
+		// C: same subject, moderately close, no denial — NOT a candidate: the
+		// two statements describe different facts of one subject (manual vs
+		// service-run migrations), exactly the shape the live corpus proved
+		// the old related lane flooded the queue with.
 		{ID: "K-mig-manual", Proposition: "Миграции базы данных применяются вручную на стенде", State: "proposed", Topics: []string{"tooling"}, Project: "demo", CreatedAt: base},
 		{ID: "K-mig-auto", Proposition: "Миграции базы данных запускает отдельный сервис автоматически", State: "challenged", Topics: []string{"tooling"}, Project: "demo", CreatedAt: older},
 		// D: shared words, no denial, far apart — noise.
@@ -536,8 +542,8 @@ func TestExploreCompareCandidateRequiresSameFact(t *testing.T) {
 	if !paired["K-auth-git|K-auth-token"] {
 		t.Fatalf("paraphrase-close disagreement must pair, got %v", paired)
 	}
-	if !paired["K-mig-auto|K-mig-manual"] {
-		t.Fatalf("moderately-close same-subject pair must pair, got %v", paired)
+	if paired["K-mig-auto|K-mig-manual"] {
+		t.Fatalf("moderately-close same-subject pairs are not same-fact: must not pair, got %v", paired)
 	}
 	if paired["K-cache-on|K-report"] {
 		t.Fatalf("far-apart same-topic noise must not pair, got %v", paired)

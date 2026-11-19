@@ -1014,8 +1014,9 @@ func (e exploreEngine) collectConflicts(targets []Knowledge) []ExploreConflict {
 				if overlap < 2 {
 					continue
 				}
+				jaccard := contentTokenJaccard(left.Proposition, right.Proposition)
 				similarity, hasVectors := e.similarity(left.ID, right.ID)
-				if !sameFactCandidate(similarity, hasVectors, overlap, left.Proposition, right.Proposition) {
+				if !sameFactCandidate(similarity, hasVectors, overlap, jaccard, left.Proposition, right.Proposition) {
 					continue
 				}
 				conflict := ExploreConflict{
@@ -1032,9 +1033,23 @@ func (e exploreEngine) collectConflicts(targets []Knowledge) []ExploreConflict {
 			}
 		}
 	}
+	// Human-facing order: explicit contradictions first, replacement
+	// resolutions next, heuristic candidates last — the tab reads top-down,
+	// and recorded facts outrank guesses (alphabetical basis order did the
+	// opposite: candidates above explicit contradictions).
+	rank := func(basis string) int {
+		switch basis {
+		case "explicit:contradicts":
+			return 0
+		case "resolved:replacement":
+			return 1
+		default:
+			return 2
+		}
+	}
 	sort.Slice(conflicts, func(i, j int) bool {
-		if conflicts[i].Basis != conflicts[j].Basis {
-			return conflicts[i].Basis < conflicts[j].Basis
+		if rank(conflicts[i].Basis) != rank(conflicts[j].Basis) {
+			return rank(conflicts[i].Basis) < rank(conflicts[j].Basis)
 		}
 		return strings.Join(conflicts[i].KnowledgeIDs, "\x00") < strings.Join(conflicts[j].KnowledgeIDs, "\x00")
 	})
@@ -1057,40 +1072,69 @@ func contentTokenOverlap(left, right string) int {
 	return n
 }
 
+// contentTokenJaccard is the lexical-identity share of the two statements'
+// content tokens: |A∩B| / |A∪B|. Two statements of ONE fact share most of
+// their vocabulary; two facts from one domain share a couple of words over
+// two long token sets — the live corpus put garbage pairs at ≤0.15 and real
+// duplicates at 0.25+. Union never empty here: both sides carry tokens.
+func contentTokenJaccard(left, right string) float64 {
+	l := contentTokens(left)
+	r := contentTokens(right)
+	if len(l) == 0 || len(r) == 0 {
+		return 0
+	}
+	shared := 0
+	for token := range l {
+		if r[token] {
+			shared++
+		}
+	}
+	union := len(l) + len(r) - shared
+	return float64(shared) / float64(union)
+}
+
 // Conflict-candidate precision floor: text overlap earns a pair a look,
 // these signals decide whether the two statements could be about one fact.
+// Calibrated on a live 7269-item corpus (Nov 2026): the local embedding
+// model compresses cosine — unrelated same-domain statements score 0.85+
+// and even 0.92+ (a whole REST API shared between them lifts everything),
+// so the old 0.85 «paraphrase» band admitted piles of unrelated pairs.
+// The separating signal is lexical identity: real same-fact pairs share
+// most content tokens (Jaccard 0.25–0.5 in the wild), garbage pairs sit at
+// 0.00–0.15 (median 0.05).
 const (
-	// candidateConflictMinCosine admits paraphrase-close pairs — the same
-	// "worth a conflict judgment" band the kernel's conflict predictor uses
-	// (cmd/agent-kernel/embeddingsbackfill.go conflictScoreMin).
-	candidateConflictMinCosine = 0.85
-	// candidateConflictRelatedMinCosine is the same-subject plausibility
-	// floor with vectors in hand: "the branch exists" vs "the branch does
-	// not" scores high; "git credentials" vs "REST token scopes" does not.
-	candidateConflictRelatedMinCosine = 0.6
-	// candidateConflictOppositionMinCosine is the lowered floor for a denial
-	// pair (exactly one side denies): denials reword what they deny.
-	candidateConflictOppositionMinCosine = 0.5
+	// candidateConflictMinCosine + jaccard floor admit near-duplicate pairs —
+	// the same statement with diverging lifecycle states, worth a human look
+	// but not auto-contradictions.
+	candidateConflictMinCosine  = 0.93
+	candidateConflictMinJaccard = 0.25
+	// candidateConflictOppositionMinCosine/Jaccard govern the denial lane
+	// (exactly one side denies): denials reword what they deny, so cosine
+	// runs a bit lower — but «the same fact, denied» still shares most
+	// content words. Old floors (0.5/none) paired every same-tool denial
+	// with every other fact about that tool.
+	candidateConflictOppositionMinCosine  = 0.78
+	candidateConflictOppositionMinJaccard = 0.18
 	// candidateConflictUnknownOverlap is the lexical bar for pairs whose
 	// vectors are missing: without similarity evidence, the opposition lane
 	// needs real word overlap to compensate.
-	candidateConflictUnknownOverlap = 3
+	candidateConflictUnknownOverlap = 5
 )
 
 // sameFactCandidate is the precision gate of the heuristic candidate pool.
-func sameFactCandidate(similarity float64, hasVectors bool, overlap int, left, right string) bool {
+func sameFactCandidate(similarity float64, hasVectors bool, overlap int, jaccard float64, left, right string) bool {
 	switch {
-	case hasVectors && similarity >= candidateConflictMinCosine:
+	case hasVectors && similarity >= candidateConflictMinCosine && jaccard >= candidateConflictMinJaccard:
 		return true
 	case hasVectors:
 		if oppositionSignal(left, right) {
-			return similarity >= candidateConflictOppositionMinCosine
+			return similarity >= candidateConflictOppositionMinCosine && jaccard >= candidateConflictOppositionMinJaccard
 		}
-		return similarity >= candidateConflictRelatedMinCosine
+		return false
 	default:
 		// No vectors yet (a fresh statement minutes before its embedding
 		// lands): lexical evidence only — opposition plus real overlap.
-		return oppositionSignal(left, right) && overlap >= candidateConflictUnknownOverlap
+		return oppositionSignal(left, right) && overlap >= candidateConflictUnknownOverlap && jaccard >= candidateConflictOppositionMinJaccard
 	}
 }
 
