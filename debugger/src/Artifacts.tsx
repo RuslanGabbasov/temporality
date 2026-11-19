@@ -13,7 +13,7 @@ import {
   IconButton,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download, Chat, Checkmark, Archive, Restart, Globe, Pin, Tag as TagIcon } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline, Close, Download, Chat, Checkmark, Archive, Restart, Globe, Pin, Tag as TagIcon, Send } from '@carbon/icons-react'
 import { workspaceApi, exportArtifactMarkdown, type Artifact, type ArtifactAnnotation, type ArtifactInboxEntry, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
 import { MarkdownWithPresentations } from './PresentationView'
 import { whoami, canReconcile } from './kernelApi'
@@ -1473,9 +1473,19 @@ export default function Artifacts({ project }: { project?: string }) {
               							+{bulkTagsAdd.size} / −{bulkTagsRemove.size}
               						</span>
               					)}
-              					<Button size="sm" kind="primary" disabled={bulkBusy} onClick={() => setBulkSubmitOpen(true)} style={{ flexShrink: 0 }}>
-              						{t('artifacts.bulk_submit') ?? 'На согласование'}
-              					</Button>
+					{/* The one text button of the old bar — narrow viewports clipped
+					    it; an amber icon keeps it on the single line and visible
+					    (amber = «требует внимания человека», the review lane's
+					    color everywhere else in the app). */}
+					<IconButton
+						size="sm"
+						label={t('artifacts.bulk_submit') ?? 'На согласование'}
+						onClick={() => setBulkSubmitOpen(true)}
+						disabled={bulkBusy}
+						style={{ background: 'var(--tm-amber, #e6b85c)', color: '#1a1102' }}
+					>
+						<Send size={16} />
+					</IconButton>
               					<IconButton size="sm" kind="ghost" label={t('action.cancel') ?? 'Отменить'} onClick={clearBulk} disabled={bulkBusy}>
               						<Close size={16} />
               					</IconButton>
