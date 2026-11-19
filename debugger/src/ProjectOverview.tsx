@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Heading, InlineNotification, Tag, Tile, Button, Stack, TextInput, TextArea } from '@carbon/react'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
-import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, type ProjectBudget, type SagaRollup, type TaskRollup } from './kernelApi'
+import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, type ProjectBudget, type SagaRollup, type TaskRollup, type ApprovalStats, type HumanStats } from './kernelApi'
 import { FloatingComboBox } from './FloatingComboBox'
 import ProjectRequired from './ProjectRequired'
 import AppModal from './Modal'
@@ -50,6 +50,114 @@ export function SagaComboBox({ id, labelText, sagas, exclude, value, onChange }:
 // sagas tab, and every dashboard visit remounted it into a blank page. The
 // cached budget paints the previous visit at once; the fetch updates in place.
 const budgetCacheKey = (project: string) => `sagas.budget:${project}`
+
+const minStamp = (a?: string, b?: string) => {
+  if (!a) return b
+  if (!b) return a
+  return a < b ? a : b
+}
+
+const maxStamp = (a?: string, b?: string) => {
+  if (!a) return b
+  if (!b) return a
+  return a > b ? a : b
+}
+
+const emptyApprovals = (): ApprovalStats => ({ requested: 0, granted: 0, rejected: 0, timed_out: 0, wait_ms: 0 })
+
+// Sums the rollup stats exactly the way the server's accumulator does
+// (kernel/cost aggregateProjectBudget): numeric adds plus the max wait and
+// the HAB share of the human time as flow efficiency.
+const sumApprovals = (list: ApprovalStats[]): ApprovalStats => list.reduce((acc, a) => ({
+  requested: acc.requested + a.requested,
+  granted: acc.granted + a.granted,
+  rejected: acc.rejected + a.rejected,
+  timed_out: acc.timed_out + a.timed_out,
+  auto_granted: (acc.auto_granted ?? 0) + (a.auto_granted ?? 0),
+  pending: (acc.pending ?? 0) + (a.pending ?? 0),
+  wait_ms: acc.wait_ms + a.wait_ms,
+  max_wait_ms: Math.max(acc.max_wait_ms ?? 0, a.max_wait_ms ?? 0),
+}), emptyApprovals())
+
+const sumHuman = (list: (HumanStats | undefined)[]): HumanStats | undefined => {
+  const present = list.filter((h): h is HumanStats => h != null)
+  if (present.length === 0) return undefined
+  const decisions = present.reduce((acc, h) => acc + h.decisions, 0)
+  const answers = present.reduce((acc, h) => acc + h.answers, 0)
+  const hab = present.reduce((acc, h) => acc + h.hab_seconds, 0)
+  const hwt = present.reduce((acc, h) => acc + h.hwt_seconds, 0)
+  return {
+    decisions,
+    answers,
+    hab_seconds: hab,
+    hwt_seconds: hwt,
+    flow_efficiency: hab + hwt > 0 ? Math.trunc((hab * 100) / (hab + hwt)) : 0,
+  }
+}
+
+// One saga row computed from its bound tasks: the server builds saga rollups
+// by feeding every bound task's events into one saga accumulator — the sum of
+// the tasks' rollups (agent_count adds up rather than dedupes; that
+// self-corrects on the next full reload). The optimistic mutations reuse
+// this fold so the grid moves to the post-mutation numbers at once.
+const sagaFromTasks = (sagaID: string, meta: SagaRollup | undefined, bound: TaskRollup[]): SagaRollup => {
+  const first = bound[0]
+  // Stats come from the bound tasks alone: the meta row already carries the
+  // previous server computation's totals — adding them in would double count
+  // after a rebind. The meta only contributes identity (title/goal/merged).
+  const approvals = sumApprovals(bound.map((t) => t.approvals))
+  const human = sumHuman(bound.map((t) => t.human))
+  return {
+    saga_id: sagaID,
+    title: meta?.title || first?.title || sagaID,
+    goal: meta?.goal,
+    merged_into: meta?.merged_into,
+    registered_by_run: meta?.registered_by_run,
+    registered_at: meta?.registered_at,
+    task_ids: bound.map((t) => t.task_id),
+    root_run_id: first?.root_run_id,
+    run_count: bound.reduce((acc, t) => acc + t.run_count, 0),
+    running: bound.reduce((acc, t) => acc + t.running, 0),
+    model_calls: bound.reduce((acc, t) => acc + t.model_calls, 0),
+    agent_count: bound.reduce((acc, t) => acc + t.agent_count, 0),
+    first_started_at: bound.reduce<string | undefined>((acc, t) => minStamp(acc, t.first_started_at), undefined),
+    last_ended_at: bound.reduce<string | undefined>((acc, t) => maxStamp(acc, t.last_ended_at), undefined),
+    elapsed_ms: bound.reduce((acc, t) => acc + t.elapsed_ms, 0),
+    active_ms: bound.reduce((acc, t) => acc + t.active_ms, 0),
+    total_prompt_tokens: bound.reduce((acc, t) => acc + t.total_prompt_tokens, 0),
+    total_cached_tokens: bound.reduce((acc, t) => acc + (t.total_cached_tokens ?? 0), 0),
+    total_completion_tokens: bound.reduce((acc, t) => acc + t.total_completion_tokens, 0),
+    total_tokens: bound.reduce((acc, t) => acc + t.total_tokens, 0),
+    total_cost_usd: bound.reduce((acc, t) => acc + t.total_cost_usd, 0),
+    approvals,
+    human,
+  }
+}
+
+// Rebuilds every saga row from the task bindings + the saga meta (title,
+// goal, merged_into, registration): the local twin of the server's fold.
+// Called after every optimistic mutation so the sagas grid shows the exact
+// post-mutation accounting without waiting for the slow full reload.
+function recomputeSagas(b: ProjectBudget): ProjectBudget {
+  const metaById = new Map(b.sagas.map((s) => [s.saga_id, s]))
+  const boundBySaga = new Map<string, TaskRollup[]>()
+  for (const task of b.tasks) {
+    if (!task.saga_id) continue
+    const list = boundBySaga.get(task.saga_id)
+    if (list) list.push(task)
+    else boundBySaga.set(task.saga_id, [task])
+  }
+  const ids = new Set<string>([...metaById.keys(), ...boundBySaga.keys()])
+  const sagas = [...ids].map((id) => sagaFromTasks(id, metaById.get(id), boundBySaga.get(id) ?? []))
+  // Newest first, like the server: the saga's own start, else registration.
+  sagas.sort((a, b2) => {
+    const aAt = a.first_started_at ?? a.registered_at
+    const bAt = b2.first_started_at ?? b2.registered_at
+    if (aAt !== bAt) return (bAt ?? '').localeCompare(aAt ?? '')
+    return a.saga_id < b2.saga_id ? -1 : 1
+  })
+  return { ...b, sagas, saga_count: sagas.filter((s) => !s.merged_into).length }
+}
 
 /** The tab's shape while the first budget is in flight: totals strip, the
  *  sagas table, the unbound-tasks list — nothing jumps when data arrives. */
@@ -109,9 +217,6 @@ export default function ProjectOverview({ project }: Props) {
   // пагинация: рендерим страницы по 50, «Показать ещё» листает дальше.
   const [unboundQuery, setUnboundQuery] = useState('')
   const [unboundShown, setUnboundShown] = useState(25)
-  // Прогресс массовых операций: привязка N задач — это N запросов подряд,
-  // без счётчика диалог выглядит как «ничего не происходит».
-  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   // Form state shared by the dialogs; reset on open.
   const [formTitle, setFormTitle] = useState('')
@@ -136,7 +241,11 @@ export default function ProjectOverview({ project }: Props) {
       confirmLabel: t('project.saga_delete') ?? 'Delete',
     })
     if (!ok) return
-    await runAction(() => sagaDelete(project.trim(), saga.saga_id))
+    await runAction(() => sagaDelete(project.trim(), saga.saga_id), (b) => recomputeSagas({
+      ...b,
+      sagas: b.sagas.filter((s) => s.saga_id !== saga.saga_id),
+      tasks: b.tasks.map((t) => t.saga_id === saga.saga_id ? { ...t, saga_id: undefined } : t),
+    }))
   }
 
   const load = useCallback(async () => {
@@ -166,6 +275,22 @@ export default function ProjectOverview({ project }: Props) {
     setBudget(cacheGet<ProjectBudget>(budgetCacheKey(project.trim())))
     void load()
   }, [load])
+
+  // The latest budget for synchronous optimistic patches: state updates are
+  // async, but two quick actions must not build on a stale snapshot.
+  const budgetRef = useRef<ProjectBudget | null>(null)
+  useEffect(() => { budgetRef.current = budget }, [budget])
+
+  // Paints the mutation immediately and keeps the tab cache in sync — the
+  // rows move the moment the user acts, not when the slow full reload lands.
+  const patchBudget = useCallback((fn: (b: ProjectBudget) => ProjectBudget) => {
+    const current = budgetRef.current
+    if (!current) return
+    const next = fn(current)
+    budgetRef.current = next
+    setBudget(next)
+    cacheSet(budgetCacheKey(project.trim()), next)
+  }, [project])
 
   const unbound = useMemo(() => (budget?.tasks ?? [])
     .filter((task) => !task.saga_id)
@@ -237,18 +362,27 @@ export default function ProjectOverview({ project }: Props) {
     setDialog(next)
   }
 
-  // Every successful action closes its dialog, clears the merge selection and
-  // reloads: the projection changed server-side, the rows must follow.
-  const runAction = async (action: () => Promise<unknown>) => {
+  // Every action paints its effect first (the optimistic patch), then the
+  // request only confirms it: the dialog closes and the rows move at once —
+  // the tab never freezes for the ~10s the full refresh takes. A failed save
+  // is the one case that refetches the whole list: the server may hold any
+  // partial state, so the truth wins over the local view.
+  const runAction = async (action: () => Promise<unknown>, optimistic?: (b: ProjectBudget) => ProjectBudget) => {
+    const snapshot = budgetRef.current
     setActionBusy(true)
     setActionError('')
+    if (optimistic) patchBudget(optimistic)
+    setDialog(null)
+    setSelected(new Set())
     try {
       await action()
-      setDialog(null)
-      setSelected(new Set())
-      await load()
     } catch (failure) {
       setActionError(message(failure))
+      if (snapshot) {
+        budgetRef.current = snapshot
+        setBudget(snapshot)
+      }
+      await load()
     } finally {
       setActionBusy(false)
     }
@@ -369,7 +503,10 @@ export default function ProjectOverview({ project }: Props) {
                       ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms, t)}</>
                       : '—'}
                     <button
-                      onClick={() => void runAction(() => taskSagaBind(project.trim(), task.task_id, ''))}
+                      onClick={() => void runAction(() => taskSagaBind(project.trim(), task.task_id, ''), (b) => recomputeSagas({
+                        ...b,
+                        tasks: b.tasks.map((t) => t.task_id === task.task_id ? { ...t, saga_id: undefined } : t),
+                      }))}
                       title={t('project.saga_detach') ?? 'Detach from saga'}
                       style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, marginLeft: '0.4rem' }}
                     >✕</button>
@@ -387,6 +524,11 @@ export default function ProjectOverview({ project }: Props) {
     <div style={{ padding: '1rem' }}>
       {error && (
         <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
+      )}
+      {/* Operation failures surface at page level: the dialog closes the
+          moment an action starts, so there is no dialog left to show it. */}
+      {actionError && !dialog && (
+        <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} onClose={() => setActionError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
@@ -625,7 +767,26 @@ export default function ProjectOverview({ project }: Props) {
             {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
             <div className="form-actions" style={{ marginTop: 0 }}>
               <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
-              <Button size="sm" disabled={actionBusy || (!formTitle.trim() && !formGoal.trim())} onClick={() => void runAction(() => sagaRename(project.trim(), dialog.saga.saga_id, { title: formTitle.trim() || undefined, goal: formGoal.trim() || undefined }))}>
+              <Button
+                size="sm"
+                disabled={actionBusy || (!formTitle.trim() && !formGoal.trim())}
+                onClick={() => {
+                  const sagaID = dialog.saga.saga_id
+                  const title = formTitle.trim()
+                  const goal = formGoal.trim()
+                  void runAction(
+                    () => sagaRename(project.trim(), sagaID, { title: title || undefined, goal: goal || undefined }),
+                    (b) => recomputeSagas({
+                      ...b,
+                      sagas: b.sagas.map((s) => s.saga_id === sagaID ? {
+                        ...s,
+                        title: title || s.title,
+                        goal: goal || undefined,
+                      } : s),
+                    }),
+                  )
+                }}
+              >
                 {t('action.save') ?? 'Save'}
               </Button>
             </div>
@@ -657,7 +818,24 @@ export default function ProjectOverview({ project }: Props) {
             {actionBusy && <InlineNotification kind="info" lowContrast hideCloseButton title={t('project.saga_merge_busy') ?? 'Merging — moving tasks and spend…'} />}
             <div className="form-actions" style={{ marginTop: 0 }}>
               <Button size="sm" kind="secondary" disabled={actionBusy} onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
-              <Button size="sm" disabled={actionBusy || !formSaga} onClick={() => void runAction(() => sagaMerge(project.trim(), formSaga, dialog.sources))}>
+              <Button
+                size="sm"
+                disabled={actionBusy || !formSaga}
+                onClick={() => {
+                  const target = formSaga
+                  const sources = new Set(dialog.sources)
+                  void runAction(
+                    () => sagaMerge(project.trim(), target, dialog.sources),
+                    (b) => recomputeSagas({
+                      ...b,
+                      // Merge is a rebind: the sources' tasks move onto the
+                      // target and the sources keep only a redirect row.
+                      sagas: b.sagas.map((s) => sources.has(s.saga_id) ? { ...s, merged_into: target } : s),
+                      tasks: b.tasks.map((t) => t.saga_id && sources.has(t.saga_id) ? { ...t, saga_id: target } : t),
+                    }),
+                  )
+                }}
+              >
                 {actionBusy ? (t('project.saga_merge_busy_btn') ?? 'Merging…') : (t('project.saga_merge') ?? 'Merge')}
               </Button>
             </div>
@@ -685,7 +863,21 @@ export default function ProjectOverview({ project }: Props) {
             {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
             <div className="form-actions" style={{ marginTop: 0 }}>
               <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
-              <Button size="sm" disabled={actionBusy || !formSaga} onClick={() => void runAction(() => taskSagaBind(project.trim(), dialog.task.task_id, formSaga))}>
+              <Button
+                size="sm"
+                disabled={actionBusy || !formSaga}
+                onClick={() => {
+                  const target = formSaga
+                  const taskID = dialog.task.task_id
+                  void runAction(
+                    () => taskSagaBind(project.trim(), taskID, target),
+                    (b) => recomputeSagas({
+                      ...b,
+                      tasks: b.tasks.map((t) => t.task_id === taskID ? { ...t, saga_id: target } : t),
+                    }),
+                  )
+                }}
+              >
                 {t('project.saga_attach') ?? 'Attach'}
               </Button>
             </div>
@@ -720,7 +912,41 @@ export default function ProjectOverview({ project }: Props) {
             {actionError && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={actionError} lowContrast hideCloseButton />}
             <div className="form-actions" style={{ marginTop: 0 }}>
               <Button size="sm" kind="secondary" onClick={() => setDialog(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
-              <Button size="sm" disabled={actionBusy || !formTitle.trim()} onClick={() => void runAction(() => sagaCreate(project.trim(), { title: formTitle.trim(), goal: formGoal.trim() || undefined, task_id: dialog.task.task_id }))}>
+              <Button
+                size="sm"
+                disabled={actionBusy || !formTitle.trim()}
+                onClick={() => {
+                  const title = formTitle.trim()
+                  const goal = formGoal.trim() || undefined
+                  const taskID = dialog.task.task_id
+                  // The real saga id only exists after the create returns, so
+                  // this patch runs on success (not before the request).
+                  void runAction(async () => {
+                    const created = await sagaCreate(project.trim(), { title, goal, task_id: taskID })
+                    patchBudget((b) => recomputeSagas({
+                      ...b,
+                      sagas: [{
+                        saga_id: created.saga_id,
+                        title,
+                        goal,
+                        task_ids: [],
+                        run_count: 0,
+                        running: 0,
+                        model_calls: 0,
+                        agent_count: 0,
+                        elapsed_ms: 0,
+                        active_ms: 0,
+                        total_prompt_tokens: 0,
+                        total_completion_tokens: 0,
+                        total_tokens: 0,
+                        total_cost_usd: 0,
+                        approvals: emptyApprovals(),
+                      }, ...b.sagas],
+                      tasks: b.tasks.map((t) => t.task_id === taskID ? { ...t, saga_id: created.saga_id } : t),
+                    }))
+                  })
+                }}
+              >
                 {t('action.save') ?? 'Create'}
               </Button>
             </div>
@@ -749,22 +975,27 @@ export default function ProjectOverview({ project }: Props) {
               <Button
                 size="sm"
                 disabled={actionBusy || !formSaga}
-                onClick={() => void runAction(async () => {
-                  // Chunked binds with a progress counter: 50 tasks are 50
-                  // sequential calls — silence read as «ничего не происходит».
-                  setBulkProgress({ done: 0, total: dialog.tasks.length })
-                  let failed = 0
-                  for (let i = 0; i < dialog.tasks.length; i += 5) {
-                    const chunk = dialog.tasks.slice(i, i + 5)
-                    const results = await Promise.allSettled(chunk.map((taskID) => taskSagaBind(project.trim(), taskID, formSaga)))
-                    failed += results.filter((r) => r.status === 'rejected').length
-                    setBulkProgress({ done: Math.min(i + 5, dialog.tasks.length), total: dialog.tasks.length })
-                  }
-                  setBulkProgress(null)
-                  if (failed > 0) throw new Error(`${failed} задач не привязалось — повторите неудачные`)
-                })}
+                onClick={() => {
+                  const target = formSaga
+                  const tasks = new Set(dialog.tasks)
+                  // All selected tasks move at once; the chunked binds only
+                  // confirm behind the dialog. A failed chunk rolls the view
+                  // back and refetches the full list.
+                  void runAction(async () => {
+                    let failed = 0
+                    for (let i = 0; i < dialog.tasks.length; i += 5) {
+                      const chunk = dialog.tasks.slice(i, i + 5)
+                      const results = await Promise.allSettled(chunk.map((taskID) => taskSagaBind(project.trim(), taskID, target)))
+                      failed += results.filter((r) => r.status === 'rejected').length
+                    }
+                    if (failed > 0) throw new Error(`${failed} задач не привязалось — список будет перечитан`)
+                  }, (b) => recomputeSagas({
+                    ...b,
+                    tasks: b.tasks.map((t) => tasks.has(t.task_id) ? { ...t, saga_id: target } : t),
+                  }))
+                }}
               >
-                {bulkProgress ? (t('project.bulk_progress', { done: String(bulkProgress.done), total: String(bulkProgress.total) }) ?? `Привязываю ${bulkProgress.done}/${bulkProgress.total}…`) : (t('project.saga_attach') ?? 'Attach to saga')}
+                {t('project.saga_attach') ?? 'Attach to saga'}
               </Button>
             </div>
           </Stack>
@@ -801,12 +1032,41 @@ export default function ProjectOverview({ project }: Props) {
               <Button
                 size="sm"
                 disabled={actionBusy || !formTitle.trim()}
-                onClick={() => void runAction(async () => {
-                  const created = await sagaCreate(project.trim(), { title: formTitle.trim(), goal: formGoal.trim() || undefined })
-                  for (const taskID of dialog.tasks) {
-                    await taskSagaBind(project.trim(), taskID, created.saga_id)
-                  }
-                })}
+                onClick={() => {
+                  const title = formTitle.trim()
+                  const goal = formGoal.trim() || undefined
+                  const tasks = new Set(dialog.tasks)
+                  void runAction(async () => {
+                    const created = await sagaCreate(project.trim(), { title, goal })
+                    // The rows move the moment the create returns; the binds
+                    // only confirm behind it. A failed bind rolls the view
+                    // back and refetches the full list.
+                    patchBudget((b) => recomputeSagas({
+                      ...b,
+                      sagas: [{
+                        saga_id: created.saga_id,
+                        title,
+                        goal,
+                        task_ids: [],
+                        run_count: 0,
+                        running: 0,
+                        model_calls: 0,
+                        agent_count: 0,
+                        elapsed_ms: 0,
+                        active_ms: 0,
+                        total_prompt_tokens: 0,
+                        total_completion_tokens: 0,
+                        total_tokens: 0,
+                        total_cost_usd: 0,
+                        approvals: emptyApprovals(),
+                      }, ...b.sagas],
+                      tasks: b.tasks.map((t) => tasks.has(t.task_id) ? { ...t, saga_id: created.saga_id } : t),
+                    }))
+                    for (const taskID of tasks) {
+                      await taskSagaBind(project.trim(), taskID, created.saga_id)
+                    }
+                  })
+                }}
               >
                 {t('action.save') ?? 'Create'}
               </Button>
