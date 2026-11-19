@@ -90,6 +90,9 @@ type Dialog =
 // Единая сетка таблицы саг: заголовок, строки саг и развернутые задачи
 // используют ОДНИ колонки — значения задач встают ровно под заголовки.
 const SAGA_GRID_COLUMNS = '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)'
+// Строка задачи в развернутой саге: гуттеры те же, «Сага»+«Задачи» слиты в
+// одну широкую колонку — длинные названия ранов не обрезаются на полпути.
+const SAGA_TASK_GRID_COLUMNS = '1.6rem 1.2rem minmax(13.6rem, 3fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)'
 
 export default function ProjectOverview({ project }: Props) {
   const { t, locale } = useI18n()
@@ -208,6 +211,13 @@ export default function ProjectOverview({ project }: Props) {
   // The scheduled mentor pass keeps the sagas tidy on its own — the tab
   // only presents: active work up top, history searchable below.
 
+  // Переход к трейсу рана (как в дереве делегаций): SPA-навигация без
+  // перезагрузки страницы.
+  const openTrace = (runID: string) => {
+    window.history.pushState(null, '', `/agents?project=${encodeURIComponent(project.trim())}&run=${encodeURIComponent(runID)}&view=trace`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
+
   const openDialog = (next: Dialog, defaults?: { title?: string; goal?: string; sagaID?: string }) => {
     setActionError('')
     setFormTitle(defaults?.title ?? '')
@@ -316,14 +326,22 @@ export default function ProjectOverview({ project }: Props) {
                   (иерархия), цифры — ровно под заголовками. Отдельная шапка
                   не нужна — она дублировала основную. */}
               {tasksOf(saga.saga_id).map((task) => (
-                <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: SAGA_GRID_COLUMNS, gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.3rem 0.6rem' }}>
+                <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: SAGA_TASK_GRID_COLUMNS, gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.3rem 0.6rem' }}>
                   <span />
                   <span />
-                  <span style={{ paddingLeft: '2.2rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id}>
-                    {task.title || task.task_id}
-                    {task.running > 0 && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{pluralT(t, locale, 'runs.task_running_n', task.running)}</Tag>}
+                  <span style={{ paddingLeft: '2.2rem', minWidth: 0, display: 'flex', alignItems: 'baseline', gap: '0.4rem', overflow: 'hidden', color: 'var(--tm-text)' }} title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {task.title || task.task_id}
+                    </span>
+                    {task.running > 0 && <Tag type="cool-gray" size="sm" style={{ flexShrink: 0 }}>{pluralT(t, locale, 'runs.task_running_n', task.running)}</Tag>}
+                    {task.root_run_id && (
+                      <button
+                        onClick={() => openTrace(task.root_run_id!)}
+                        title={t('project.saga_open_trace') ?? 'Открыть трейс рана'}
+                        style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
+                      >↗</button>
+                    )}
                   </span>
-                  <span />
                   <span>{task.run_count}</span>
                   <span>{task.agent_count}</span>
                   <span>⏱ {formatDuration(task.elapsed_ms, t)}</span>

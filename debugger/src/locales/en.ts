@@ -99,6 +99,7 @@ export const en: Record<string, string> = {
     'project.saga_create_title': 'New saga',
     'project.saga_create_hint': 'The saga is created and bound to this task right away.',
     'project.saga_detach': 'Detach from saga',
+    'project.saga_open_trace': 'Open the run trace',
     'project.saga_none': 'No sagas in the project yet — create one',
     'project.saga_actions_done': 'Done',
     'project.task_col_actions': 'Actions',

@@ -99,6 +99,7 @@ export const ru: Record<string, string> = {
     'project.saga_create_title': 'Новая сага',
     'project.saga_create_hint': 'Сага будет создана и сразу привязана к этой задаче.',
     'project.saga_detach': 'Отвязать от саги',
+    'project.saga_open_trace': 'Открыть трейс рана',
     'project.saga_none': 'В проекте нет саг — создайте новую',
     'project.saga_actions_done': 'Готово',
     'project.task_col_actions': 'Действия',
