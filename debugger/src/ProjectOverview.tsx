@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Heading, InlineNotification, Tag, Tile, Button, Stack, TextInput, TextArea } from '@carbon/react'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
-import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, sagasCurate, type ProjectBudget, type SagaRollup, type SagaCuratePlan, type TaskRollup } from './kernelApi'
+import { projectBudget, sagaCreate, sagaRename, sagaMerge, sagaDelete, taskSagaBind, type ProjectBudget, type SagaRollup, type TaskRollup } from './kernelApi'
 import { FloatingComboBox } from './FloatingComboBox'
 import ProjectRequired from './ProjectRequired'
 import AppModal from './Modal'
@@ -160,6 +160,18 @@ export default function ProjectOverview({ project }: Props) {
   const unboundShown = 8
   const tasksOf = useCallback((sagaID: string) => (budget?.tasks ?? []).filter((task) => task.saga_id === sagaID), [budget])
   const liveSagas = useMemo(() => (budget?.sagas ?? []).filter((saga) => !saga.merged_into), [budget])
+  // Активные vs исторические: сага живёт, пока идёт работа (running) или
+  // активность была за последние 7 дней; остальное — архив с поиском.
+  const sagaActiveWindowMs = 7 * 24 * 3600 * 1000
+  const sagaLastActivity = useCallback((saga: SagaRollup) => saga.last_ended_at ?? saga.first_started_at ?? '', [])
+  const activeSagas = useMemo(() => liveSagas.filter((saga) => {
+    const stamp = sagaLastActivity(saga)
+    return saga.running > 0 || !stamp || Date.parse(stamp) > Date.now() - sagaActiveWindowMs
+  }), [liveSagas, sagaLastActivity])
+  const historicalSagas = useMemo(() => liveSagas.filter((saga) => !activeSagas.some((a) => a.saga_id === saga.saga_id)), [liveSagas, activeSagas])
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyQuery, setHistoryQuery] = useState('')
+  const [showAllHist, setShowAllHist] = useState(false)
   const sagaTitle = useCallback((sagaID: string) => {
     const saga = (budget?.sagas ?? []).find((s) => s.saga_id === sagaID)
     return saga ? (saga.title || saga.saga_id) : sagaID
@@ -174,33 +186,8 @@ export default function ProjectOverview({ project }: Props) {
     })
   }
 
-  // The supervisor curation pass (§8.1): the judge re-points recent tasks at
-  // the right sagas. Two steps: dry-run plan → apply. The report modal shows
-  // what moved; the reload after apply reflects it in the table.
-  const [curating, setCurating] = useState(false)
-  const [curatePlan, setCuratePlan] = useState<SagaCuratePlan | null>(null)
-  const [curateNote, setCurateNote] = useState('')
-  const [curateReport, setCurateReport] = useState<string>('')
-  const curate = async (apply: boolean) => {
-    setCurating(true); setError('')
-    try {
-      const reply = await sagasCurate(project.trim(), { days: 14, apply })
-      if (apply) {
-        const r = reply.report
-        setCuratePlan(null)
-        setCurateNote(r.assignments + r.merges + r.new_sagas.length > 0
-          ? t('project.saga_curate_done', { assignments: String(r.assignments), sagas: String(r.new_sagas.length), merges: String(r.merges) })
-          : t('project.saga_curate_nothing') ?? 'Всё уже разложено правильно')
-        await load()
-      } else {
-        setCuratePlan(reply.plan)
-      }
-    } catch (failure) {
-      setError(message(failure))
-    } finally {
-      setCurating(false)
-    }
-  }
+  // The scheduled mentor pass keeps the sagas tidy on its own — the tab
+  // only presents: active work up top, history searchable below.
 
   const openDialog = (next: Dialog, defaults?: { title?: string; goal?: string; sagaID?: string }) => {
     setActionError('')
@@ -228,6 +215,129 @@ export default function ProjectOverview({ project }: Props) {
   }
 
   if (!project.trim()) return <ProjectRequired what={t('project.title') ?? 'project overview'} />
+
+  // Исторические саги под фильтром и лимитом: считается только при раскрытой
+  // секции (пустой список = секция закрыта).
+  const historyFiltered = useMemo(() => {
+    if (!historyOpen) return []
+    const q = historyQuery.trim().toLowerCase()
+    const list = q
+      ? historicalSagas.filter((s) => (s.title || s.saga_id).toLowerCase().includes(q) || s.saga_id.toLowerCase().includes(q))
+      : historicalSagas
+    return showAllHist ? list : list.slice(0, 50)
+  }, [historyOpen, historicalSagas, historyQuery, showAllHist])
+
+  // Таблица саг (заголовок + строки + раскрытие задач): одна и та же разметка
+  // для активных и исторических секций.
+  const renderSagaTable = (sagas: SagaRollup[]) => (
+    <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '1rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.75rem', alignItems: 'baseline', padding: '0.4rem 0.6rem', background: 'var(--tm-raised)' }}>
+        <span />
+        <span />
+        <span style={{ color: 'var(--tm-text-3)' }}>{t('project.saga_col') ?? 'Saga'}</span>
+        <span style={{ color: 'var(--tm-text-3)' }}>{t('project.tasks_col') ?? 'Tasks'}</span>
+        <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_col_runs') ?? 'Runs'}</span>
+        <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_agents_col') ?? 'Agents'}</span>
+        <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.task_elapsed') ?? undefined}>⏱ {t('runs.col_elapsed') ?? 'Elapsed'}</span>
+        <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.task_active') ?? undefined}>⚒ {t('runs.col_active') ?? 'Active'}</span>
+        <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.col_tokens') ?? 'Tokens'}</span>
+        <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.col_cost') ?? 'Cost'}</span>
+        <span style={{ color: 'var(--tm-text-3)' }} title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
+        <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.approvals_hint') ?? undefined}>👤 {t('runs.col_approvals') ?? 'Approvals'}</span>
+      </div>
+      {sagas.map((saga) => (
+        <div key={saga.saga_id} style={{ borderTop: '1px solid var(--tm-border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}>
+            <span style={{ display: 'flex', alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                checked={selected.has(saga.saga_id)}
+                onChange={(e) => toggleSelected(saga.saga_id, e.target.checked)}
+                title={t('project.saga_merge') ?? 'Merge'}
+                style={{ accentColor: 'var(--tm-accent, #f97316)' }}
+              />
+            </span>
+            <button
+              onClick={() => setOpenSaga(openSaga === saga.saga_id ? null : saga.saga_id)}
+              style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: tasksOf(saga.saga_id).length > 0 ? 'pointer' : 'default', padding: 0, lineHeight: 1 }}
+              title={tasksOf(saga.saga_id).length > 0 ? (t('project.saga_expand') ?? 'Bound tasks') : undefined}
+            >
+              {tasksOf(saga.saga_id).length > 0 && (openSaga === saga.saga_id ? <ChevronDown size={12} /> : <ChevronRight size={12} />)}
+            </button>
+            <span style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', minWidth: 0 }} title={(saga.goal ? saga.goal + '\n' : '') + saga.saga_id}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {saga.title || saga.saga_id}
+              </span>
+              {saga.running > 0 && <Tag type="cool-gray" size="sm">{pluralT(t, locale, 'runs.task_running_n', saga.running)}</Tag>}
+              <button onClick={() => openDialog({ kind: 'rename', saga }, { title: saga.title, goal: saga.goal })} title={t('project.saga_rename') ?? 'Rename'} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}>✎</button>
+              <button onClick={() => void deleteSaga(saga)} title={t('project.saga_delete') ?? 'Delete saga'} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}>✕</button>
+            </span>
+            <span>{saga.task_ids.length}</span>
+            <span>{saga.run_count}</span>
+            <span>{saga.agent_count}</span>
+            <span>{formatDuration(saga.elapsed_ms, t)}</span>
+            <span>{formatDuration(saga.active_ms, t)}</span>
+            <span>{saga.total_tokens.toLocaleString()}</span>
+            <span>{saga.total_cost_usd > 0 ? `$${saga.total_cost_usd.toFixed(2)}` : '—'}</span>
+            <span title={t('dashboard.human_col_hint') ?? undefined} style={{ whiteSpace: 'nowrap' }}>
+              {(saga.human?.hab_seconds ?? 0) > 0 || (saga.human?.hwt_seconds ?? 0) > 0
+                ? <>🧠 {formatDuration((saga.human?.hab_seconds ?? 0) * 1000, t)} · ⏳ {formatDuration((saga.human?.hwt_seconds ?? 0) * 1000, t)}</>
+                : '—'}
+            </span>
+            <span title={approvalHint(t, saga.approvals, saga.human)} style={{ whiteSpace: 'nowrap' }}>
+              {saga.approvals.requested > 0
+                ? <>✓{saga.approvals.granted} ✗{saga.approvals.rejected}{saga.approvals.timed_out > 0 ? ` ⏱${saga.approvals.timed_out}` : ''}{(saga.approvals.pending ?? 0) > 0 ? ` …${saga.approvals.pending}` : ''} · {formatDuration(saga.approvals.wait_ms, t)}</>
+                : '—'}
+            </span>
+          </div>
+          {openSaga === saga.saga_id && tasksOf(saga.saga_id).length > 0 && (
+            <div style={{ borderTop: '1px solid var(--tm-border)', background: 'var(--tm-surface-2)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.45rem 0.6rem 0.25rem', color: 'var(--tm-text-3)' }}>
+                <span>{t('project.tasks_col') ?? 'Tasks'}</span>
+                <span>{t('runs.task_col_runs') ?? 'Runs'}</span>
+                <span>{t('runs.task_agents_col') ?? 'Agents'}</span>
+                <span title={t('runs.task_elapsed') ?? undefined}>⏱ {t('runs.col_elapsed') ?? 'Elapsed'}</span>
+                <span title={t('runs.task_active') ?? undefined}>⚒ {t('runs.col_active') ?? 'Active'}</span>
+                <span>{t('runs.col_tokens') ?? 'Tokens'}</span>
+                <span>{t('runs.col_cost') ?? 'Cost'}</span>
+                <span title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
+                <span title={t('runs.approvals_hint') ?? undefined}>👤 {t('runs.col_approvals') ?? 'Approvals'}</span>
+                <span />
+              </div>
+              {tasksOf(saga.saga_id).map((task) => (
+                <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id}>
+                    {task.title || task.task_id}
+                    {task.running > 0 && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{pluralT(t, locale, 'runs.task_running_n', task.running)}</Tag>}
+                  </span>
+                  <span>{task.run_count}</span>
+                  <span>{task.agent_count}</span>
+                  <span>⏱ {formatDuration(task.elapsed_ms, t)}</span>
+                  <span>⚒ {formatDuration(task.active_ms, t)}</span>
+                  <span>{task.total_tokens.toLocaleString()}</span>
+                  <span>{task.total_cost_usd > 0 ? `$${task.total_cost_usd.toFixed(2)}` : '—'}</span>
+                  <span style={{ whiteSpace: 'nowrap' }} title={t('dashboard.human_col_hint') ?? undefined}>
+                    {(task.human?.hab_seconds ?? 0) > 0 || (task.human?.hwt_seconds ?? 0) > 0
+                      ? <>🧠 {formatDuration((task.human?.hab_seconds ?? 0) * 1000, t)} · ⏳ {formatDuration((task.human?.hwt_seconds ?? 0) * 1000, t)}</>
+                      : '—'}
+                  </span>
+                  <span title={approvalHint(t, task.approvals, task.human)} style={{ whiteSpace: 'nowrap' }}>
+                    {task.approvals.requested > 0
+                      ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms, t)}</>
+                      : '—'}
+                  </span>
+                  <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button onClick={() => void runAction(() => taskSagaBind(project.trim(), task.task_id, ''))} title={t('project.saga_detach') ?? 'Detach from saga'} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1 }}>✕</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+
   return (
     <div style={{ padding: '1rem' }}>
       {error && (
@@ -267,9 +377,8 @@ export default function ProjectOverview({ project }: Props) {
               Merged redirect rows are not rendered at all: their tasks and spend
               live in the target saga, the redirect carries no information the
               operator needs — the merge just makes the source disappear. */}
-          {curateNote && (
-            <InlineNotification kind="success" lowContrast title={curateNote} onClose={() => setCurateNote('')} style={{ marginBottom: '0.5rem' }} />
-          )}
+          {/* The scheduled mentor pass keeps the bindings tidy; the note would
+              duplicate it — the table itself is the truth. */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
             <Heading style={{ fontSize: '0.95rem' }}>{t('project.sagas') ?? 'Sagas'}</Heading>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -284,144 +393,54 @@ export default function ProjectOverview({ project }: Props) {
                   {t('project.saga_merge') ?? 'Merge'}{selected.size > 0 ? ` (${selected.size})` : ''}
                 </Button>
               )}
-              <Button
-                size="sm"
-                kind="ghost"
-                disabled={curating}
-                title={t('project.saga_curate_hint') ?? undefined}
-                onClick={() => void curate(false)}
-              >
-                {curating ? (t('project.saga_curate_busy') ?? '…') : (t('project.saga_curate') ?? 'Tidy up (AI)')}
-              </Button>
             </div>
           </div>
           {liveSagas.length === 0 ? (
             <Tile style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('project.no_sagas') ?? 'No sagas registered yet'}</Tile>
           ) : (
-            <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.75rem', alignItems: 'baseline', padding: '0.4rem 0.6rem', background: 'var(--tm-raised)' }}>
-                <span />
-                <span />
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('project.saga_col') ?? 'Saga'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('project.tasks_col') ?? 'Tasks'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_col_runs') ?? 'Runs'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_agents_col') ?? 'Agents'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.task_elapsed') ?? undefined}>⏱ {t('runs.col_elapsed') ?? 'Elapsed'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.task_active') ?? undefined}>⚒ {t('runs.col_active') ?? 'Active'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.col_tokens') ?? 'Tokens'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.col_cost') ?? 'Cost'}</span>
-                <span style={{ color: 'var(--tm-text-3)' }} title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
-                <span style={{ color: 'var(--tm-text-3)' }} title={t('runs.approvals_hint') ?? undefined}>👤 {t('runs.col_approvals') ?? 'Approvals'}</span>
-              </div>
-              {liveSagas.map((saga) => {
-                return (
-                  <div key={saga.saga_id} style={{ borderTop: '1px solid var(--tm-border)' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}>
-                      <span style={{ display: 'flex', alignItems: 'center' }}>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(saga.saga_id)}
-                          onChange={(e) => toggleSelected(saga.saga_id, e.target.checked)}
-                          title={t('project.saga_merge') ?? 'Merge'}
-                          style={{ accentColor: 'var(--tm-accent, #f97316)' }}
-                        />
-                      </span>
-                      <button
-                        onClick={() => setOpenSaga(openSaga === saga.saga_id ? null : saga.saga_id)}
-                        style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: tasksOf(saga.saga_id).length > 0 ? 'pointer' : 'default', padding: 0, lineHeight: 1 }}
-                        title={tasksOf(saga.saga_id).length > 0 ? (t('project.saga_expand') ?? 'Bound tasks') : undefined}
-                      >
-                        {tasksOf(saga.saga_id).length > 0 && (openSaga === saga.saga_id ? <ChevronDown size={12} /> : <ChevronRight size={12} />)}
-                      </button>
-                      <span style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem', minWidth: 0 }} title={(saga.goal ? saga.goal + '\n' : '') + saga.saga_id}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {saga.title || saga.saga_id}
-                        </span>
-
-                        {saga.running > 0 && <Tag type="cool-gray" size="sm">{pluralT(t, locale, 'runs.task_running_n', saga.running)}</Tag>}
-                        <button
-                          onClick={() => openDialog({ kind: 'rename', saga }, { title: saga.title, goal: saga.goal })}
-                            title={t('project.saga_rename') ?? 'Rename'}
-                            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
-                        >✎</button>
-                        <button
-                          onClick={() => void deleteSaga(saga)}
-                          title={t('project.saga_delete') ?? 'Delete saga'}
-                          style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1, flexShrink: 0 }}
-                        >✕</button>
-                      </span>
-                      <span>{saga.task_ids.length}</span>
-                      <span>{saga.run_count}</span>
-                      <span>{saga.agent_count}</span>
-                      <span>{formatDuration(saga.elapsed_ms, t)}</span>
-                      <span>{formatDuration(saga.active_ms, t)}</span>
-                      <span>{saga.total_tokens.toLocaleString()}</span>
-                      <span>{saga.total_cost_usd > 0 ? `$${saga.total_cost_usd.toFixed(2)}` : '—'}</span>
-                      <span title={t('dashboard.human_col_hint') ?? undefined} style={{ whiteSpace: 'nowrap' }}>
-                        {(saga.human?.hab_seconds ?? 0) > 0 || (saga.human?.hwt_seconds ?? 0) > 0
-                          ? <>🧠 {formatDuration((saga.human?.hab_seconds ?? 0) * 1000, t)} · ⏳ {formatDuration((saga.human?.hwt_seconds ?? 0) * 1000, t)}</>
-                          : '—'}
-                      </span>
-                      <span title={approvalHint(t, saga.approvals, saga.human)} style={{ whiteSpace: 'nowrap' }}>
-                        {saga.approvals.requested > 0
-                          ? <>✓{saga.approvals.granted} ✗{saga.approvals.rejected}{saga.approvals.timed_out > 0 ? ` ⏱${saga.approvals.timed_out}` : ''}{(saga.approvals.pending ?? 0) > 0 ? ` …${saga.approvals.pending}` : ''} · {formatDuration(saga.approvals.wait_ms, t)}</>
-                          : '—'}
-                      </span>
-                    </div>
-                    {openSaga === saga.saga_id && tasksOf(saga.saga_id).length > 0 && (
-                      <div style={{ borderTop: '1px solid var(--tm-border)', background: 'var(--tm-surface-2)' }}>
-                        {/* Same column grid as the aggregate row minus the
-                            checkbox/chevron gutter — expanded tasks read as a
-                            table, not as loose wrapped lines. */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.45rem 0.6rem 0.25rem', color: 'var(--tm-text-3)' }}>
-                          <span>{t('project.tasks_col') ?? 'Tasks'}</span>
-                          <span>{t('runs.task_col_runs') ?? 'Runs'}</span>
-                          <span>{t('runs.task_agents_col') ?? 'Agents'}</span>
-                          <span title={t('runs.task_elapsed') ?? undefined}>⏱ {t('runs.col_elapsed') ?? 'Elapsed'}</span>
-                          <span title={t('runs.task_active') ?? undefined}>⚒ {t('runs.col_active') ?? 'Active'}</span>
-                          <span>{t('runs.col_tokens') ?? 'Tokens'}</span>
-                          <span>{t('runs.col_cost') ?? 'Cost'}</span>
-                          <span title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
-                          <span title={t('runs.approvals_hint') ?? undefined}>👤 {t('runs.col_approvals') ?? 'Approvals'}</span>
-                          <span />
-                        </div>
-                        {tasksOf(saga.saga_id).map((task) => (
-                          <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.78rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
-                            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id}>
-                              {task.title || task.task_id}
-                              {task.running > 0 && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{pluralT(t, locale, 'runs.task_running_n', task.running)}</Tag>}
-                            </span>
-                            <span>{task.run_count}</span>
-                            <span>{task.agent_count}</span>
-                            <span>⏱ {formatDuration(task.elapsed_ms, t)}</span>
-                            <span>⚒ {formatDuration(task.active_ms, t)}</span>
-                            <span>{task.total_tokens.toLocaleString()}</span>
-                            <span>{task.total_cost_usd > 0 ? `$${task.total_cost_usd.toFixed(2)}` : '—'}</span>
-                            <span style={{ whiteSpace: 'nowrap' }} title={t('dashboard.human_col_hint') ?? undefined}>
-                              {(task.human?.hab_seconds ?? 0) > 0 || (task.human?.hwt_seconds ?? 0) > 0
-                                ? <>🧠 {formatDuration((task.human?.hab_seconds ?? 0) * 1000, t)} · ⏳ {formatDuration((task.human?.hwt_seconds ?? 0) * 1000, t)}</>
-                                : '—'}
-                            </span>
-                            <span title={approvalHint(t, task.approvals, task.human)} style={{ whiteSpace: 'nowrap' }}>
-                              {task.approvals.requested > 0
-                                ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms, t)}</>
-                                : '—'}
-                            </span>
-                            <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                              <button
-                                onClick={() => void runAction(() => taskSagaBind(project.trim(), task.task_id, ''))}
-                                title={t('project.saga_detach') ?? 'Detach from saga'}
-                                style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: 0, fontSize: '0.75rem', lineHeight: 1 }}
-                              >✕</button>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            <>
+              {/* Активные: работа идёт сейчас или была за последние 7 дней. */}
+              <section style={{ marginBottom: '0.75rem' }}>
+                <Heading style={{ fontSize: '0.9rem', marginBottom: '0.3rem' }}>
+                  {t('project.sagas_active') ?? 'Active'} ({activeSagas.length})
+                </Heading>
+                {activeSagas.length > 0
+                  ? renderSagaTable(activeSagas)
+                  : <div style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem' }}>{t('project.sagas_active_empty') ?? 'Нет активной работы — всё завершено'}</div>}
+              </section>
+              {/* Исторические: свёрнуты по умолчанию, поиск по названию. */}
+              <section>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.3rem' }}>
+                  <button className="toolbar-btn" onClick={() => setHistoryOpen((v) => !v)}>
+                    {historyOpen ? '▾' : '▸'} {t('project.sagas_history') ?? 'History'} ({historicalSagas.length})
+                  </button>
+                  {historyOpen && historicalSagas.length > 0 && (
+                    <input
+                      value={historyQuery}
+                      onChange={(e) => setHistoryQuery(e.target.value)}
+                      placeholder={t('project.sagas_history_search') ?? 'Поиск по названию…'}
+                      style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.8rem', padding: '0.3rem 0.6rem', outline: 'none', width: 'min(320px, 100%)' }}
+                    />
+                  )}
+                </div>
+                {historyOpen && (
+                  historicalSagas.length === 0 ? (
+                    <div style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem' }}>{t('project.sagas_history_empty') ?? 'Пока нет завершённых саг'}</div>
+                  ) : (
+                    <>
+                      {historyFiltered.length === 0
+                        ? <div style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem' }}>{t('project.sagas_history_nomatch') ?? 'Ничего не найдено'}</div>
+                        : renderSagaTable(historyFiltered)}
+                      {historicalSagas.length > historyFiltered.length && (
+                        <Button size="sm" kind="ghost" onClick={() => setShowAllHist(true)}>
+                          {t('project.sagas_history_show_all') ?? 'Show all'} ({historicalSagas.length - historyFiltered.length})
+                        </Button>
+                      )}
+                    </>
+                  )
+                )}
+              </section>
+            </>
           )}
 
           {/* Tasks outside any saga: same accounting, no explicit effort behind them.
@@ -542,46 +561,6 @@ export default function ProjectOverview({ project }: Props) {
               </Button>
             </div>
           </Stack>
-        </AppModal>
-      )}
-
-      {curatePlan && (
-        <AppModal onClose={() => setCuratePlan(null)} panelStyle={{ width: '560px' }}>
-          <Heading style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>{t('project.saga_curate_title') ?? 'The mentor tidied the sagas'}</Heading>
-          <div style={{ display: 'grid', gap: '0.6rem', fontSize: '0.82rem', color: 'var(--tm-text-2)', maxHeight: '55vh', overflowY: 'auto' }}>
-            {curatePlan.new_sagas.map((ns) => (
-              <div key={ns.title} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.7rem' }}>
-                <div style={{ fontWeight: 600, color: 'var(--tm-text)' }}>{t('project.saga_curate_new') ?? 'New saga'}: {ns.title}</div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)', marginTop: '0.2rem' }}>{ns.task_ids.length} × {t('project.tasks_col') ?? 'tasks'}</div>
-              </div>
-            ))}
-            {curatePlan.merges.map((m, i) => (
-              <div key={`m${i}`} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.7rem' }}>
-                <div style={{ fontWeight: 600, color: 'var(--tm-text)' }}>{t('project.saga_curate_merge') ?? 'Merge'} → {sagaTitle(m.into)}</div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)', marginTop: '0.2rem' }}>
-                  ← {m.sources.map((s) => sagaTitle(s)).join(', ')}
-                </div>
-              </div>
-            ))}
-            {curatePlan.assignments.length > 0 && (
-              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.7rem' }}>
-                <div style={{ fontWeight: 600, color: 'var(--tm-text)', marginBottom: '0.3rem' }}>{t('project.saga_curate_assign') ?? 'Re-bound tasks'} ({curatePlan.assignments.length})</div>
-                {curatePlan.assignments.map((a, i) => (
-                  <div key={`${a.task_id}:${i}`} style={{ fontSize: '0.76rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${a.task_id} → ${a.saga_id}`}>
-                    • {(budget?.tasks ?? []).find((task) => task.task_id === a.task_id)?.title || a.task_id} → {sagaTitle(a.saga_id)}
-                  </div>
-                ))}
-              </div>
-            )}
-            {curatePlan.notes && <div style={{ color: 'var(--tm-text-3)' }}>{curatePlan.notes}</div>}
-            {curatePlan.new_sagas.length === 0 && curatePlan.merges.length === 0 && curatePlan.assignments.length === 0 && (
-              <div style={{ color: 'var(--tm-text-3)' }}>{t('project.saga_curate_nothing') ?? 'Всё уже разложено правильно'}</div>
-            )}
-          </div>
-          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
-            <Button size="sm" kind="secondary" disabled={curating} onClick={() => setCuratePlan(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
-            <Button size="sm" disabled={curating} onClick={() => void curate(true)}>{curating ? '…' : (t('project.saga_curate_apply') ?? 'Apply')}</Button>
-          </div>
         </AppModal>
       )}
 
