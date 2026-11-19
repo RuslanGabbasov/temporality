@@ -400,8 +400,8 @@ export interface ProjectBudget {
   tasks: TaskRollup[]
 }
 
-export function projectBudget(project: string): Promise<ProjectBudget> {
-  return request(`/v1/agent/cost/project-budget?project=${encodeURIComponent(project)}`)
+export function projectBudget(project: string, opts?: { refresh?: '1' }): Promise<ProjectBudget> {
+  return request(`/v1/agent/cost/project-budget?project=${encodeURIComponent(project)}${opts?.refresh ? '&refresh=1' : ''}`)
 }
 
 // ── Manual saga management (docs/sagas.md §8) ──────────────────────────────────

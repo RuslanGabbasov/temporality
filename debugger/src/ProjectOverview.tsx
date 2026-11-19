@@ -105,6 +105,13 @@ export default function ProjectOverview({ project }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   // Bulk selection of unbound tasks (attach-to-saga / create-saga-from-selection).
   const [unboundBulk, setUnboundBulk] = useState<Set<string>>(new Set())
+  // Поиск по названию/id (800+ записей — без фильтра панель мертва) и
+  // пагинация: рендерим страницы по 50, «Показать ещё» листает дальше.
+  const [unboundQuery, setUnboundQuery] = useState('')
+  const [unboundShown, setUnboundShown] = useState(25)
+  // Прогресс массовых операций: привязка N задач — это N запросов подряд,
+  // без счётчика диалог выглядит как «ничего не происходит».
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   // Form state shared by the dialogs; reset on open.
   const [formTitle, setFormTitle] = useState('')
@@ -137,7 +144,7 @@ export default function ProjectOverview({ project }: Props) {
     setBusy(true)
     setError('')
     try {
-      const data = await projectBudget(project.trim())
+      const data = await projectBudget(project.trim(), { refresh: '1' })
       // Older kernels predate sagas: normalize so the page never sees nulls.
       const normalized = { ...data, sagas: data.sagas ?? [], tasks: data.tasks ?? [], approvals: data.approvals }
       setBudget(normalized)
@@ -163,8 +170,12 @@ export default function ProjectOverview({ project }: Props) {
   const unbound = useMemo(() => (budget?.tasks ?? [])
     .filter((task) => !task.saga_id)
     .sort((a, b) => (b.first_started_at ?? '').localeCompare(a.first_started_at ?? '')), [budget])
-  const [showAllUnbound, setShowAllUnbound] = useState(false)
-  const unboundShown = 8
+  const unboundFiltered = useMemo(() => {
+    const q = unboundQuery.trim().toLowerCase()
+    if (!q) return unbound
+    return unbound.filter((task) =>
+      (task.title || '').toLowerCase().includes(q) || task.task_id.toLowerCase().includes(q))
+  }, [unbound, unboundQuery])
   const tasksOf = useCallback((sagaID: string) => (budget?.tasks ?? []).filter((task) => task.saga_id === sagaID), [budget])
   const liveSagas = useMemo(() => (budget?.sagas ?? []).filter((saga) => !saga.merged_into), [budget])
   // Активные vs исторические: сага живёт, пока идёт работа (running) или
@@ -498,38 +509,50 @@ export default function ProjectOverview({ project }: Props) {
               Bulk-first management: checkboxes + one toolbar (attach to a chosen
               saga / create a saga from the selection) instead of two buttons
               duplicated on every row. */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
             <Heading style={{ fontSize: '0.95rem', marginBottom: 0 }}>
               {t('project.unbound') ?? 'Tasks without a saga'} ({unbound.length})
             </Heading>
             {unbound.length > 0 && (
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                {unboundBulk.size > 0 && (
-                  <>
-                    <Button size="sm" kind="ghost" disabled={liveSagas.length === 0} title={liveSagas.length === 0 ? (t('project.saga_none') ?? 'No sagas in the project yet — create one') : undefined} onClick={() => openDialog({ kind: 'bulk-attach', tasks: [...unboundBulk] })}>
-                      {t('project.saga_attach_n') ?? 'Attach to saga'} ({unboundBulk.size})
-                    </Button>
-                    <Button size="sm" kind="ghost" onClick={() => openDialog({ kind: 'bulk-create', tasks: [...unboundBulk] })}>
-                      {t('project.saga_create_n') ?? 'Create saga'} ({unboundBulk.size})
-                    </Button>
-                  </>
-                )}
-                <Button size="sm" kind="ghost" disabled={unboundBulk.size === unbound.length} onClick={() => setUnboundBulk(new Set(unbound.map((task) => task.task_id)))}>
-                  {t('project.unbound_select_all') ?? 'Select all'}
-                </Button>
-                {unboundBulk.size > 0 && (
+              <input
+                value={unboundQuery}
+                onChange={(e) => { setUnboundQuery(e.target.value); setUnboundShown(25) }}
+                placeholder={t('project.unbound_search') ?? 'Поиск по названию или id…'}
+                style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-bg)', color: 'var(--tm-text)', fontSize: '0.8rem', padding: '0.3rem 0.6rem', outline: 'none', width: 'min(320px, 100%)' }}
+              />
+            )}
+          </div>
+          {/* Bulk toolbar: select-all covers the FILTERED list — a novice types
+              a keyword, hits «выбрать найденные», attaches 30 tasks in one
+              click. The filtered set is the source of truth for bulk ops. */}
+          {unboundFiltered.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', margin: '0 0 0.4rem' }}>
+              <Button size="sm" kind="ghost" disabled={unboundFiltered.every((task) => unboundBulk.has(task.task_id))} onClick={() => setUnboundBulk(new Set(unboundFiltered.map((task) => task.task_id)))}>
+                {t('project.unbound_select_found') ?? 'Select found'} ({unboundFiltered.length})
+              </Button>
+              {unboundBulk.size > 0 && (
+                <>
+                  <Button size="sm" kind="ghost" disabled={liveSagas.length === 0} title={liveSagas.length === 0 ? (t('project.saga_none') ?? 'No sagas in the project yet — create one') : undefined} onClick={() => openDialog({ kind: 'bulk-attach', tasks: [...unboundBulk] })}>
+                    {t('project.saga_attach_n') ?? 'Attach to saga'} ({unboundBulk.size})
+                  </Button>
+                  <Button size="sm" kind="ghost" onClick={() => openDialog({ kind: 'bulk-create', tasks: [...unboundBulk] })}>
+                    {t('project.saga_create_n') ?? 'Create saga'} ({unboundBulk.size})
+                  </Button>
                   <Button size="sm" kind="ghost" onClick={() => setUnboundBulk(new Set())}>
                     {t('supervisor.bulk_clear') ?? 'Clear'}
                   </Button>
-                )}
-              </div>
-            )}
-          </div>
+                </>
+              )}
+            </div>
+          )}
           {unbound.length === 0 ? (
             <Tile style={{ color: 'var(--tm-text-3)' }}>{t('project.no_unbound') ?? 'Every task belongs to a saga'}</Tile>
           ) : (
             <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
-              {(showAllUnbound ? unbound : unbound.slice(0, unboundShown)).map((task) => (
+              {unboundFiltered.length === 0 && (
+                <div style={{ padding: '0.5rem 0.6rem', fontSize: '0.78rem', color: 'var(--tm-text-3)' }}>{t('project.unbound_nomatch') ?? 'Ничего не найдено по фильтру'}</div>
+              )}
+              {unboundFiltered.slice(0, unboundShown).map((task) => (
                 <div style={{ display: 'grid', gridTemplateColumns: '1.6rem minmax(10rem, 2.2fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
                   <span style={{ display: 'flex', alignItems: 'center' }}>
                     <input
@@ -567,10 +590,10 @@ export default function ProjectOverview({ project }: Props) {
                   </span>
                 </div>
               ))}
-              {unbound.length > unboundShown && !showAllUnbound && (
-                <div style={{ padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
-                  <Button size="sm" kind="ghost" onClick={() => setShowAllUnbound(true)}>
-                    {t('project.unbound_show_all') ?? 'Show all'} ({unbound.length - unboundShown} {t('project.unbound_more') ?? 'more'})
+              {unbound.length > unboundShown && (
+                <div style={{ padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <Button size="sm" kind="ghost" onClick={() => setUnboundShown((n) => n + 50)}>
+                    {t('project.unbound_show_more') ?? 'Show 50 more'} ({unbound.length - unboundShown})
                   </Button>
                 </div>
               )}
@@ -727,12 +750,21 @@ export default function ProjectOverview({ project }: Props) {
                 size="sm"
                 disabled={actionBusy || !formSaga}
                 onClick={() => void runAction(async () => {
-                  for (const taskID of dialog.tasks) {
-                    await taskSagaBind(project.trim(), taskID, formSaga)
+                  // Chunked binds with a progress counter: 50 tasks are 50
+                  // sequential calls — silence read as «ничего не происходит».
+                  setBulkProgress({ done: 0, total: dialog.tasks.length })
+                  let failed = 0
+                  for (let i = 0; i < dialog.tasks.length; i += 5) {
+                    const chunk = dialog.tasks.slice(i, i + 5)
+                    const results = await Promise.allSettled(chunk.map((taskID) => taskSagaBind(project.trim(), taskID, formSaga)))
+                    failed += results.filter((r) => r.status === 'rejected').length
+                    setBulkProgress({ done: Math.min(i + 5, dialog.tasks.length), total: dialog.tasks.length })
                   }
+                  setBulkProgress(null)
+                  if (failed > 0) throw new Error(`${failed} задач не привязалось — повторите неудачные`)
                 })}
               >
-                {t('project.saga_attach') ?? 'Attach to saga'}
+                {bulkProgress ? (t('project.bulk_progress', { done: String(bulkProgress.done), total: String(bulkProgress.total) }) ?? `Привязываю ${bulkProgress.done}/${bulkProgress.total}…`) : (t('project.saga_attach') ?? 'Attach to saga')}
               </Button>
             </div>
           </Stack>

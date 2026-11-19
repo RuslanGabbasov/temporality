@@ -501,14 +501,16 @@ func (a *CostAPI) TaskCostHandler(w http.ResponseWriter, r *http.Request) {
 
 // ProjectBudgetHandler returns the project rollup: totals across every task
 // plus a row per explicit saga and per task (docs/sagas.md) with tokens, time,
-// cost and approval budget.
+// cost and approval budget. refresh=1 bypasses the 60-second cache — the UI
+// passes it right after a rename/merge/bind so the new picture shows
+// immediately instead of «ничего не произошло».
 func (a *CostAPI) ProjectBudgetHandler(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	if project == "" {
 		writeError(w, 400, "project is required")
 		return
 	}
-	budget, err := a.projectBudget(r.Context(), project)
+	budget, err := a.projectBudget(r.Context(), project, r.URL.Query().Get("refresh") == "1")
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -554,11 +556,13 @@ type budgetCacheEntry struct {
 // The per-entry mutex is the single-flight: concurrent requests for the same
 // project serialize behind one computation instead of hammering the journal
 // in duplicate.
-func (a *CostAPI) projectBudget(ctx context.Context, project string) (ProjectBudget, error) {
+func (a *CostAPI) projectBudget(ctx context.Context, project string, forceRefresh bool) (ProjectBudget, error) {
 	entry := a.budgetEntry(project)
+	// Single-flight: concurrent loads serialize behind the entry mutex.
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.ok && time.Since(entry.fetchedAt) < budgetCacheTTL {
+	fresh := entry.ok && time.Since(entry.fetchedAt) < budgetCacheTTL
+	if fresh && !forceRefresh {
 		return entry.budget, nil
 	}
 	events, err := a.queryEventsFilteredParallel(ctx, project, "", "", budgetEventTypes...)
@@ -575,7 +579,7 @@ func (a *CostAPI) projectBudget(ctx context.Context, project string) (ProjectBud
 // numbers the UI shows — the saga curation pass reads it instead of
 // re-querying the journal.
 func (a *CostAPI) ProjectBudgetData(ctx context.Context, project string) (ProjectBudget, error) {
-	return a.projectBudget(ctx, project)
+	return a.projectBudget(ctx, project, false)
 }
 
 // budgetEntry returns (creating as needed) the cache slot of one project.
