@@ -177,6 +177,24 @@ func registerPresentationRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws 
 			return
 		}
 		if err := ws.CreatePresentation(r.Context(), &row); err != nil {
+			// Duplicate id: re-presenting an existing presentation is an UPDATE
+			// (new version, previous document into history) — a 409 here just
+			// confused agents into version-less retry loops. Expired/archived
+			// rows reject the update (state machine): report that clearly.
+			if strings.Contains(err.Error(), "duplicate key") {
+				row.Status = status
+				if updErr := ws.UpdatePresentation(r.Context(), &row, presentation.Revision{ChangedBy: row.CreatedBy}); updErr == nil {
+					_ = ws.RecordAccessAudit(r.Context(), row.CreatedBy, "presentation.updated", "presentation", row.ID, map[string]any{"title": row.Title, "via": "re-present"})
+					emitPresentationEvent(r.Context(), events, "presentation.published", row, map[string]any{
+						"presentation": json.RawMessage(row.Document),
+					})
+					writeJSON(w, 200, row)
+					return
+				} else {
+					writeError(w, 409, fmt.Errorf("presentation %q already exists and cannot be re-presented (%v) — use a new id", id, updErr))
+					return
+				}
+			}
 			writeError(w, 409, err)
 			return
 		}

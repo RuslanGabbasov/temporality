@@ -45,6 +45,7 @@ func ValidateDocument(doc *Document, policy Policy) error {
 		limits: policy.effective(),
 		ids:    map[string]bool{},
 	}
+	normalizeDocumentEnvelope(doc) // envelope leniency: empty/version-less forms normalize onto the canonical type
 	if doc.Version != IRVersion {
 		v.failf("version: unsupported IR version %q (want %q)", doc.Version, IRVersion)
 	}

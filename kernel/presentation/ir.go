@@ -67,16 +67,43 @@ type Action struct {
 // ParseDocument decodes and shallowly checks one IR payload: envelope fields
 // (version/type) must match the supported IR, and the JSON must be an object.
 // Full structural validation happens in Validate.
+//
+// Envelope leniency: models omit `version`/`type` or write type synonyms
+// ("deck", "slides") despite the catalog saying type:'presentation'. The type
+// field is a tag — the components define the document — so empty values and
+// known synonyms normalize onto the canonical envelope instead of failing
+// the whole document on a formality.
+var documentTypeSynonyms = map[string]string{
+	"deck":   DocumentType,
+	"decks":  DocumentType,
+	"slide":  DocumentType,
+	"slides": DocumentType,
+}
+
+func normalizeDocumentEnvelope(doc *Document) {
+	if doc.Version == "" {
+		doc.Version = IRVersion
+	}
+	if doc.Type == "" {
+		doc.Type = DocumentType
+		return
+	}
+	if synonym, ok := documentTypeSynonyms[strings.ToLower(strings.TrimSpace(doc.Type))]; ok {
+		doc.Type = synonym
+	}
+}
+
 func ParseDocument(raw []byte) (Document, error) {
 	var doc Document
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return Document{}, fmt.Errorf("presentation IR is not valid JSON: %w", err)
 	}
+	normalizeDocumentEnvelope(&doc)
 	if doc.Version != IRVersion {
 		return Document{}, fmt.Errorf("unsupported IR version %q (want %q)", doc.Version, IRVersion)
 	}
 	if doc.Type != DocumentType {
-		return Document{}, fmt.Errorf("unsupported document type %q (want %q)", doc.Type, DocumentType)
+		return Document{}, fmt.Errorf("unsupported document type %q (want %q) — set the envelope type to %q", doc.Type, DocumentType, DocumentType)
 	}
 	return doc, nil
 }
