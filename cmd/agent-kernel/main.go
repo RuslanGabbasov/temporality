@@ -4663,10 +4663,33 @@ func main() {
 				return
 			}
 			if !pinnedSeen {
+				// Three different diseases shared one message: the provider
+				// deleted, the model missing from its list, and — the case that
+				// actually bites — the provider alive and serving the model but
+				// NOT visible to this project (its org-unit binding does not
+				// cover the run's project). GetProvider resolves the truth
+				// regardless of visibility, so the fix can name the real cause:
+				// delete vs model-list edit vs the org binding to fix or clear.
+				pinnedName = pinnedProvider
 				if p, pErr := ws.GetProvider(r.Context(), pinnedProvider); pErr == nil {
 					pinnedName = p.Name
+					serves := false
+					for _, m := range p.Models {
+						if m == model {
+							serves = true
+							break
+						}
+					}
+					if !serves {
+						writeError(w, 404, fmt.Errorf("the agent's provider %s does not list model %q — add the model to the provider (Providers) or switch the agent to a served model", providerLabel(pinnedName, pinnedProvider), model))
+						return
+					}
+					if p.OrgUnitID != "" {
+						writeError(w, 404, fmt.Errorf("the agent's provider %s serves model %q but is bound to org unit %q — this project cannot see it; bind the provider to this project's org unit, set the binding to «вся инсталляция», or switch the agent to a visible provider", providerLabel(pinnedName, pinnedProvider), model, p.OrgUnitID))
+						return
+					}
 				}
-				writeError(w, 404, fmt.Errorf("the agent's provider %s does not serve model %q (or is not visible to this project) — fix the provider's model list or pick another model", providerLabel(pinnedName, pinnedProvider), model))
+				writeError(w, 404, fmt.Errorf("the agent's provider %s does not serve model %q (or the provider was deleted) — fix the provider's model list or pick another model", providerLabel(pinnedName, pinnedProvider), model))
 				return
 			}
 			writeError(w, 404, fmt.Errorf("the agent's provider %s does not serve model %q — fix the provider's model list or pick another model", providerLabel(pinnedName, pinnedProvider), model))
