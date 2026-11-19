@@ -79,7 +79,7 @@ func (s *Store) UpsertLearningProgram(ctx context.Context, p *LearningProgram) e
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 ON CONFLICT (user_id) DO UPDATE SET kind = EXCLUDED.kind, goal = EXCLUDED.goal,
 		   status = 'active', items = EXCLUDED.items, updated_at = now()
-		 RETURNING (SELECT id FROM learning_program WHERE user_id = EXCLUDED.user_id)`,
+		 RETURNING id`,
 		p.ID, p.UserID, p.Kind, p.Goal, p.Status, programJSON(p.Items), now, now).Scan(&prevID)
 	if err != nil {
 		return err
@@ -144,7 +144,7 @@ func (s *Store) StartLearningSession(ctx context.Context, session *LearningSessi
 	session.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO learning_session (id, user_id, lesson_id, program_id, status, step_index, history, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::jsonb, '[]'::jsonb), $8, $9)`,
 		session.ID, session.UserID, session.LessonID, session.ProgramID, session.Status,
 		session.StepIndex, session.History, now, now)
 	return err
