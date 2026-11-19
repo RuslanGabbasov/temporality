@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { supervisorAckedIds, supervisorPendingCount } from './Supervisor'
+import { traceHref, supervisorAckedIds, supervisorPendingCount } from './Supervisor'
 import type { ObservationEvent } from './observationApi'
 
 function verdict(eventID: string, data: Record<string, unknown>): ObservationEvent {
@@ -57,5 +57,34 @@ describe('supervisor queue accounting', () => {
     expect(supervisorPendingCount(verdicts, partially)).toBe(2)
     const fully = supervisorAckedIds([], ['v1', 'v2'])
     expect(supervisorPendingCount(verdicts, fully)).toBe(1)
+  })
+})
+
+/** Behavior suspicion rows deep-link straight at the alarm source: the trace
+ *  opens filtered to agent.behavior events and searched by the guard
+ *  pattern — hundreds of steps collapse to the two rows the case is about. */
+describe('traceHref', () => {
+  const row = (over: Partial<Parameters<typeof traceHref>[0]> = {}) => ({
+    key: 'k', cause: 'unknown', pattern: '', caseID: 'run_failed', subject: '',
+    summary: '', recommendation: '', project: 'omni', count: 1, runs: [],
+    eventIDs: [], lastAt: '', status: 'open', ...over,
+  })
+
+  it('plain cases link to the bare run trace', () => {
+    expect(traceHref(row(), 'root')).toBe('/agents?project=omni&run=root')
+  })
+
+  it('behavior suspicions filter the trace to agent.behavior and search the pattern', () => {
+    const href = traceHref(row({ caseID: 'behavior_suspicion', pattern: 'azure-devops tech.directum.ru' }), 'root/delegate/01')
+    expect(href).toContain('view=trace')
+    expect(href).toContain('traceType=agent.behavior')
+    expect(href).toContain('traceQ=azure-devops')
+    expect(href).toContain('run=root%2Fdelegate%2F01')
+  })
+
+  it('a behavior verdict without a pattern skips the search', () => {
+    const href = traceHref(row({ caseID: 'behavior_suspicion' }), 'root')
+    expect(href).toContain('traceType=agent.behavior')
+    expect(href).not.toContain('traceQ')
   })
 })
