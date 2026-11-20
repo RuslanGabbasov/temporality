@@ -17,6 +17,8 @@ import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
 import OrgActivityBoard from './OrgActivityBoard'
 import OrgWorkBoard from './OrgWorkBoard'
+import OrgUsageSection from './OrgUsage'
+import { useOrgUnits } from './orgUnits'
 import { orgApi, type OrgWorkView } from './orgApi'
 import { SupervisorPanels } from './Supervisor'
 import { workspaceApi, type UserMetricsRow, type UserFact } from './workspaceApi'
@@ -33,7 +35,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'work' | 'activity' | 'sagas' | 'supervisor' | 'users'
+type Tab = 'overview' | 'work' | 'activity' | 'sagas' | 'supervisor' | 'users' | 'usage'
 // Every valid tab: the URL param and the last-tab memory validate against this
 // full set (the TAB_KEYS strip above it is only the initial-render order).
 // 'quality' was removed: the eval-loop table rendered all-dashes without
@@ -41,7 +43,7 @@ type Tab = 'overview' | 'work' | 'activity' | 'sagas' | 'supervisor' | 'users'
 // flat tab the delivery list was contextless — awareness now reads ON the
 // timeline (dots + spread links there), and /org/flow stays as the detail
 // page the timeline dots and the work board deep-link into.
-const ALL_TABS: Tab[] = ['overview', 'work', 'activity', 'sagas', 'supervisor', 'users']
+const ALL_TABS: Tab[] = ['overview', 'work', 'activity', 'sagas', 'supervisor', 'users', 'usage']
 const TAB_KEYS: Tab[] = ['overview', 'sagas']
 // The last open tab survives reloads and revisits: returning to the
 // supervisor triage mid-investigation must not land back on the overview.
@@ -201,6 +203,8 @@ export default function Dashboard({ project, setProject }: Props) {
   // Supervisor tab badge: unresolved problem-queue depth. The panel reports it
   // while mounted; this light fetch seeds it before the first tab open.
   const [supervisorPending, setSupervisorPending] = useState(0)
+  // Unit names for the usage grid (the tab moved here from Organization).
+  const { units } = useOrgUnits()
   const [toolReadiness, setToolReadiness] = useState<ReadinessCheck[] | null>(() => cached?.toolReadiness ?? null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -371,6 +375,9 @@ export default function Dashboard({ project, setProject }: Props) {
     // problem queue lives inside the dashboard, not as a separate page.
     { key: 'supervisor', label: t('dashboard.tab_supervisor') ?? 'Supervisor' },
     { key: 'users', label: t('dashboard.tab_users') ?? 'Users' },
+    // Usage moved from the Organization page (the manager reads spend next to
+    // the work it produced, not inside unit configuration).
+    { key: 'usage', label: t('dashboard.tab_usage') ?? 'Usage' },
   ]
 
   return (
@@ -816,6 +823,7 @@ export default function Dashboard({ project, setProject }: Props) {
       {tab === 'supervisor' && <SupervisorPanels onPendingChange={setSupervisorPending} />}
 
       {tab === 'users' && <UsersTab />}
+      {tab === 'usage' && <OrgUsageSection units={units} />}
     </div>
   )
 }

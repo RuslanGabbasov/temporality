@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Heading, Select, SelectItem } from '@carbon/react'
+import { Select, SelectItem } from '@carbon/react'
 import { useT } from './i18n'
 import { orgApi, type OrgUsageResponse } from './orgApi'
 import type { OrgUnit } from './workspaceApi'
@@ -83,9 +83,9 @@ export default function OrgUsageSection({ units }: { units: OrgUnit[] }) {
   }, [data, units])
 
   return (
-    <div style={{ marginTop: '1.25rem', border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '1rem', background: 'var(--tm-elevated)' }}>
+    <div style={{ marginTop: '0.25rem', border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '1rem', background: 'var(--tm-elevated)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-        <Heading style={{ fontSize: '1rem' }}>{t('org.usage_title') ?? 'Usage'}</Heading>
+        <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{t('org.usage_hint') ?? 'Month-to-date tokens and provider cost per org unit — the same numbers the monthly policy caps enforce.'}</div>
         <div style={{ width: '160px' }}>
           <Select
             id="org-usage-window"
@@ -99,9 +99,6 @@ export default function OrgUsageSection({ units }: { units: OrgUnit[] }) {
           </Select>
         </div>
       </div>
-      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.75rem' }}>
-        {t('org.usage_hint') ?? 'Month-to-date tokens and provider cost per org unit — the same numbers the monthly policy caps enforce.'}
-      </p>
       {error ? (
         <div style={{ color: 'var(--tm-danger, #f7768e)', fontSize: '0.78rem' }}>{error}</div>
       ) : rows.length === 0 ? (

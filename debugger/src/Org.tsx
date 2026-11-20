@@ -18,7 +18,6 @@ import { whoami } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import PolicyDialog from './PolicyDialog'
-import OrgUsageSection from './OrgUsage'
 import { flattenUnits, useOrgUnits } from './orgUnits'
 import OrgActivitySettingsPanel from './OrgActivitySettings'
 
@@ -777,9 +776,8 @@ export default function Org() {
         )}
       </div>
 
-      {/* Monthly usage stats (§24): the unit × month grid the monthly policy
-          caps enforce against. */}
-      <OrgUsageSection units={units} />
+      {/* Monthly usage stats moved to the Dashboard's «Использование» tab:
+          spend reads next to the work it produced, not inside unit config. */}
 
       {/* Execution identities (docs/org-structure.md §20, §47): the security
           contexts trigger-fired runs act under. Mutations are admin-gated

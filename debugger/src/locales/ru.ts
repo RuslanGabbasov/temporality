@@ -193,6 +193,7 @@ export const ru: Record<string, string> = {
     'dashboard.human_flow_hint': 'HAB / (HAB + HWT): доля человеческой шкалы времени, ушедшая на реальное внимание, а не на простой. Ниже 30% — работа застревает на людях.',
     'dashboard.tab_supervisor': 'Супервайзинг',
     'dashboard.tab_users': 'Пользователи',
+    'dashboard.tab_usage': 'Использование',
     'dashboard.users_title': 'Пользователи и их метрики',
     'dashboard.users_empty': 'Пользователей пока нет',
     'dashboard.users_col_user': 'Пользователь',

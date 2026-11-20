@@ -193,6 +193,7 @@ export const en: Record<string, string> = {
     'dashboard.human_flow_hint': 'HAB / (HAB + HWT): the share of the human-bound timeline that was real attention, not idle wait. Below 30% — work keeps stalling on people.',
     'dashboard.tab_supervisor': 'Supervisor',
     'dashboard.tab_users': 'Users',
+    'dashboard.tab_usage': 'Usage',
     'dashboard.users_title': 'Users and their metrics',
     'dashboard.users_empty': 'No users yet',
     'dashboard.users_col_user': 'User',
