@@ -169,6 +169,24 @@ type UserProblemsStats struct {
 	SupervisorAll int                     `json:"supervisor_all"`
 }
 
+// emptyUserStats seeds every slice with an empty (non-nil) value: a nil
+// Go slice marshals to JSON `null`, and the dashboard's dossier reads
+// `.length` on every list — `null` there is a TypeError on expand.
+func emptyUserStats() UserStats {
+	return UserStats{
+		ByProject: []UserProjectStat{},
+		ByAgent:   []UserAgentStat{},
+		Sagas:     []UserSagaStat{},
+		Knowledge: UserKnowledgeStats{Items: []UserKnowledgeStat{}},
+		Asks:      UserAsksStats{Recent: []UserAskRecent{}},
+		Problems: UserProblemsStats{
+			FailedRuns:   []UserFailedRun{},
+			TimedOutAsks: []UserAskRecent{},
+			Supervisor:   []UserSupervisorProblem{},
+		},
+	}
+}
+
 // registerUserStatsRoutes mounts the expanded-row dossier next to the row
 // metrics. Reader gate only: it reads the same tables and journal the row
 // metrics already expose, just folded per period.
@@ -213,7 +231,7 @@ type userRunAgg struct {
 // DB-only numbers, not 500 the whole dossier — only the DB reads (runs,
 // asks) are fatal.
 func buildUserStats(ctx context.Context, ws *workspace.Store, userID string, from time.Time, observationURL, journalToken string, prices cost.Config, factors cost.HumanFactors) (UserStats, error) {
-	stats := UserStats{}
+	stats := emptyUserStats()
 	runs, err := ws.ListRunsByActorSince(ctx, userID, from, 2000)
 	if err != nil {
 		return stats, err

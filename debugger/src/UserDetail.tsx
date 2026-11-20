@@ -172,6 +172,17 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
   const runs = stats?.runs
   const sagas: UserSagaStat[] = stats?.sagas ?? []
   const problems = stats?.problems
+  // The kernel serialises every list as `[]`, but a `null` anywhere would
+  // crash the whole tab on `.length` — the reads stay defensive.
+  const byProject = stats?.by_project ?? []
+  const byAgent = stats?.by_agent ?? []
+  const knowledgeItems = stats?.knowledge?.items ?? []
+  const knowledgeProposed = stats?.knowledge?.proposed ?? 0
+  const recentAsks = stats?.asks?.recent ?? []
+  const failedRuns = problems?.failed_runs ?? []
+  const timedOutAsks = problems?.timed_out_asks ?? []
+  const supervisorCases = problems?.supervisor ?? []
+  const supervisorAll = problems?.supervisor_all ?? 0
 
   return (
     <div style={{ padding: '0.45rem 0.6rem 0.7rem 1.5rem', background: 'var(--tm-raised)', display: 'grid', gap: '0.55rem' }}>
@@ -191,8 +202,8 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
           <button type="button" style={jumpStyle()} onClick={() => go('/knowledge')} title={t('dashboard.users_jump_knowledge_hint')}>
             {t('dashboard.users_jump_knowledge')}
           </button>
-          <button type="button" style={jumpStyle(problems != null && problems.supervisor_all > 0)} onClick={() => go('/dashboard?tab=supervisor')} title={t('dashboard.users_jump_problems_hint')}>
-            {t('dashboard.users_jump_problems')}{problems != null && problems.supervisor_all > 0 ? ` · ${problems.supervisor_all}` : ''}
+          <button type="button" style={jumpStyle(supervisorAll > 0)} onClick={() => go('/dashboard?tab=supervisor')} title={t('dashboard.users_jump_problems_hint')}>
+            {t('dashboard.users_jump_problems')}{supervisorAll > 0 ? ` · ${supervisorAll}` : ''}
           </button>
         </div>
         <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
@@ -265,8 +276,8 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(17rem, 1fr))', gap: '0.55rem' }}>
             {/* Spend per project — a row jumps to that project's sagas/budget page. */}
             <Section title={t('dashboard.users_by_project')}>
-              {stats.by_project.length === 0 && <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>—</span>}
-              {stats.by_project.map((project) => (
+              {byProject.length === 0 && <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>—</span>}
+              {byProject.map((project) => (
                 <ListRow
                   key={project.project_id}
                   title={`${project.project_id} · ${project.runs} ${t('dashboard.users_stat_runs')}`}
@@ -283,8 +294,8 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
 
             {/* Spend per agent — display-only: agent ids are the stable label. */}
             <Section title={t('dashboard.users_by_agent')}>
-              {stats.by_agent.length === 0 && <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>—</span>}
-              {stats.by_agent.map((agent) => (
+              {byAgent.length === 0 && <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>—</span>}
+              {byAgent.map((agent) => (
                 <ListRow key={agent.agent_id} title={agent.agent_id}>
                   <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }}>{agent.agent_id}</span>
                   <span style={{ color: 'var(--tm-text-2)' }}>{agent.runs}</span>
@@ -322,11 +333,11 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
             {/* Knowledge contribution: proposals this person authored. */}
             <Section
               title={t('dashboard.users_sec_knowledge')}
-              extra={<span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>{t('dashboard.users_knowledge_proposed')} · {stats.knowledge.proposed}</span>}
+              extra={<span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>{t('dashboard.users_knowledge_proposed')} · {knowledgeProposed}</span>}
             >
-              {stats.knowledge.items.length === 0 && <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>{t('dashboard.users_knowledge_empty')}</span>}
+              {knowledgeItems.length === 0 && <span style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)' }}>{t('dashboard.users_knowledge_empty')}</span>}
               <div style={{ display: 'grid', gap: '0.15rem' }}>
-                {stats.knowledge.items.map((item) => {
+                {knowledgeItems.map((item) => {
                   const query = item.proposition || item.knowledge_id
                   const project = item.project ? `project=${encodeURIComponent(item.project)}&` : ''
                   return (
@@ -353,10 +364,10 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
               <Tile label={t('dashboard.users_asks_answered')} value={stats.asks.answered} hint={formatDuration(stats.asks.wait_seconds * 1000, t)} />
               <Tile label={t('dashboard.users_asks_timedout')} value={stats.asks.timed_out} danger={stats.asks.timed_out > 0} />
             </div>
-            {stats.asks.recent.length > 0 && (
+            {recentAsks.length > 0 && (
               <div style={{ marginTop: '0.4rem', display: 'grid', gap: '0.15rem' }}>
                 <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>{t('dashboard.users_asks_recent')}</div>
-                {stats.asks.recent.map((ask, index) => {
+                {recentAsks.map((ask, index) => {
                   const labelKey = askStatusLabelKey(ask.status)
                   return (
                     <ListRow
@@ -377,14 +388,14 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
           {/* Problems: failures, expired asks and open supervisor cases
               about this person's runs — each row jumps to its evidence. */}
           <Section title={t('dashboard.users_sec_problems')}>
-            {problems && problems.failed_runs.length === 0 && problems.timed_out_asks.length === 0 && problems.supervisor.length === 0 && (
+            {failedRuns.length === 0 && timedOutAsks.length === 0 && supervisorCases.length === 0 && (
               <span style={{ fontSize: '0.74rem', color: 'var(--tm-text-2)' }}>{t('dashboard.users_problems_none')}</span>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(17rem, 1fr))', gap: '0.5rem' }}>
-              {problems && problems.failed_runs.length > 0 && (
+              {failedRuns.length > 0 && (
                 <div style={{ display: 'grid', gap: '0.15rem', alignContent: 'start' }}>
-                  <div style={{ fontSize: '0.68rem', color: 'var(--tm-danger)' }}>{t('dashboard.users_problem_failed')} · {runs?.failed ?? problems.failed_runs.length}</div>
-                  {problems.failed_runs.map((run) => (
+                  <div style={{ fontSize: '0.68rem', color: 'var(--tm-danger)' }}>{t('dashboard.users_problem_failed')} · {runs?.failed ?? failedRuns.length}</div>
+                  {failedRuns.map((run) => (
                     <ListRow
                       key={run.run_id}
                       title={run.error || run.run_id}
@@ -398,10 +409,10 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
                   ))}
                 </div>
               )}
-              {problems && problems.timed_out_asks.length > 0 && (
+              {timedOutAsks.length > 0 && (
                 <div style={{ display: 'grid', gap: '0.15rem', alignContent: 'start' }}>
-                  <div style={{ fontSize: '0.68rem', color: 'var(--tm-warning)' }}>{t('dashboard.users_problem_timedout')} · {stats?.asks.timed_out ?? problems.timed_out_asks.length}</div>
-                  {problems.timed_out_asks.map((ask, index) => (
+                  <div style={{ fontSize: '0.68rem', color: 'var(--tm-warning)' }}>{t('dashboard.users_problem_timedout')} · {stats?.asks?.timed_out ?? timedOutAsks.length}</div>
+                  {timedOutAsks.map((ask, index) => (
                     <ListRow key={`${ask.at}-${index}`} title={ask.question} onClick={ask.run_id ? () => go(`/agents?run=${encodeURIComponent(ask.run_id!)}`) : undefined}>
                       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>«{ask.question}»</span>
                       <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap' }}>{fmtDate(ask.at)}</span>
@@ -409,13 +420,13 @@ export function UserDetailPanel({ row }: { row: UserMetricsRow }) {
                   ))}
                 </div>
               )}
-              {problems && problems.supervisor.length > 0 && (
+              {supervisorCases.length > 0 && (
                 <div style={{ display: 'grid', gap: '0.15rem', alignContent: 'start' }}>
                   <div style={{ fontSize: '0.68rem', color: 'var(--tm-danger)' }}>
                     {t('dashboard.users_problem_supervisor')}
-                    {problems.supervisor_all > problems.supervisor.length ? ` · ${t('dashboard.users_supervisor_more', { count: String(problems.supervisor_all - problems.supervisor.length) })}` : ` · ${problems.supervisor.length}`}
+                    {supervisorAll > supervisorCases.length ? ` · ${t('dashboard.users_supervisor_more', { count: String(supervisorAll - supervisorCases.length) })}` : ` · ${supervisorCases.length}`}
                   </div>
-                  {problems.supervisor.map((problem) => (
+                  {supervisorCases.map((problem) => (
                     <ListRow key={`${problem.family}-${problem.subject}`} title={problem.summary || problem.cause || problem.subject} onClick={() => go('/dashboard?tab=supervisor')}>
                       <Tag size="sm" type="red">{problem.family}</Tag>
                       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{problem.summary || problem.cause || problem.subject}</span>

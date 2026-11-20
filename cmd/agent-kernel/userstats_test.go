@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -157,6 +159,38 @@ func TestUserStatsRoutesRegister(t *testing.T) {
 	mux := http.NewServeMux()
 	registerUserMetricsRoutes(mux, gate, nil, cost.DefaultHumanFactors)
 	registerUserStatsRoutes(mux, gate, nil, cost.DefaultHumanFactors, "http://localhost:8080", "", prices)
+}
+
+// The dossier must serialise every list as `[]`, never `null` — the UI
+// reads `.length` on all of them (emptyUserStats). A forgotten slice shows
+// up here as a JSON null anywhere in the payload.
+func TestUserStatsJSONHasNoNulls(t *testing.T) {
+	payload, err := json.Marshal(emptyUserStats())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var walk func(node any, path string)
+	walk = func(node any, path string) {
+		switch value := node.(type) {
+		case map[string]any:
+			for key, child := range value {
+				if child == nil {
+					t.Errorf("%s.%s is null — the dashboard reads .length on it", path, key)
+					continue
+				}
+				walk(child, path+"."+key)
+			}
+		case []any:
+			for i, child := range value {
+				walk(child, fmt.Sprintf("%s[%d]", path, i))
+			}
+		}
+	}
+	walk(decoded, "stats")
 }
 
 func TestUserStatsCaseMatches(t *testing.T) {
