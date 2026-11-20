@@ -1071,6 +1071,116 @@ export interface UserMetricsRow {
   last_ask_question?: string
 }
 
+/** Per-period run rollup + model spend of one user (Users tab dossier). */
+export interface UserRunsStats {
+  total: number
+  succeeded: number
+  failed: number
+  cancelled: number
+  turn_limit: number
+  other: number
+  tokens: number
+  cost_usd: number
+  model_calls: number
+  projects: number
+  agents: number
+}
+
+export interface UserProjectStat {
+  project_id: string
+  runs: number
+  failed: number
+  tokens: number
+  cost_usd: number
+}
+
+export interface UserAgentStat {
+  agent_id: string
+  runs: number
+  failed: number
+  tokens: number
+  cost_usd: number
+}
+
+/** A saga the user registered/attached or ran bound tasks inside. */
+export interface UserSagaStat {
+  saga_id: string
+  title?: string
+  project?: string
+  runs: number
+  role: string // registered | attached | work
+}
+
+export interface UserKnowledgeStat {
+  knowledge_id: string
+  proposition?: string
+  project?: string
+  at: string
+}
+
+export interface UserKnowledgeStats {
+  proposed: number
+  items: UserKnowledgeStat[]
+}
+
+export interface UserAskRecent {
+  question: string
+  status: string
+  at: string
+  run_id?: string
+}
+
+export interface UserAsksStats {
+  open: number
+  answered: number
+  timed_out: number
+  wait_seconds: number
+  hab_seconds: number
+  recent: UserAskRecent[]
+}
+
+export interface UserFailedRun {
+  run_id: string
+  title?: string
+  project?: string
+  status: string
+  error?: string
+  at: string
+}
+
+export interface UserSupervisorProblem {
+  family: string
+  cause?: string
+  subject: string
+  summary?: string
+  status: string
+  project?: string
+  last_seen: string
+}
+
+export interface UserProblemsStats {
+  failed_runs: UserFailedRun[]
+  timed_out_asks: UserAskRecent[]
+  supervisor: UserSupervisorProblem[]
+  supervisor_all: number
+}
+
+/** The expanded Users-row dossier: everything attributable to one person
+ *  inside the requested window — runs, spend, sagas, knowledge, asks and
+ *  problems (GET /v1/workspace/users/{id}/stats). */
+export interface UserStats {
+  user_id: string
+  window: string
+  from?: string
+  runs: UserRunsStats
+  by_project: UserProjectStat[]
+  by_agent: UserAgentStat[]
+  sagas: UserSagaStat[]
+  knowledge: UserKnowledgeStats
+  asks: UserAsksStats
+  problems: UserProblemsStats
+}
+
 export interface User {
   id: string
   name: string
@@ -1795,6 +1905,8 @@ export const workspaceApi = {
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
   userMetrics: () =>
     request<{ users: UserMetricsRow[] }>('/v1/workspace/users/metrics'),
+  userStats: (userId: string, window: string) =>
+    request<UserStats>(`/v1/workspace/users/${encodeURIComponent(userId)}/stats?window=${encodeURIComponent(window)}`),
   userFacts: (userId: string) =>
     request<{ facts: UserFact[] }>(`/v1/workspace/users/${encodeURIComponent(userId)}/facts`),
   addUserFact: (userId: string, fact: string) =>

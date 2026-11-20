@@ -157,7 +157,12 @@ export default function Artifacts({ project }: { project?: string }) {
   // this-month presets — a 10k registry is unnavigable without them.
   // Author filter pick: a person (author=<id>) or an org unit
   // (author_unit=<unit id> — every active member counts as author).
-  const [authorPick, setAuthorPick] = useState<{ kind: 'user' | 'unit'; id: string; name: string } | null>(null)
+  const [authorPick, setAuthorPick] = useState<{ kind: 'user' | 'unit'; id: string; name: string } | null>(() => {
+    // Deep link (?author=<userID>): the Users tab's «artifacts» jump lands
+    // with this person pinned as the author filter.
+    const raw = new URLSearchParams(window.location.search).get('author')
+    return raw ? { kind: 'user', id: raw, name: raw } : null
+  })
   const [searchFocused, setSearchFocused] = useState(false)
   const [ageFilter, setAgeFilter] = useState<'' | 'week' | 'month' | 'quarter'>('')
   // Approvals inbox: open review rounds addressed to the caller, one tab.

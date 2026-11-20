@@ -209,7 +209,7 @@ export default function ProjectOverview({ project }: Props) {
   const [budget, setBudget] = useState<ProjectBudget | null>(() => cacheGet<ProjectBudget>(budgetCacheKey(project.trim())))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [openSaga, setOpenSaga] = useState<string | null>(null)
+  const [openSaga, setOpenSaga] = useState<string | null>(() => new URLSearchParams(window.location.search).get('saga'))
   const [selected, setSelected] = useState<Set<string>>(new Set())
   // Bulk selection of unbound tasks (attach-to-saga / create-saga-from-selection).
   const [unboundBulk, setUnboundBulk] = useState<Set<string>>(new Set())
@@ -400,6 +400,19 @@ export default function ProjectOverview({ project }: Props) {
       : historicalSagas
     return showAllHist ? list : list.slice(0, 50)
   }, [historyOpen, historicalSagas, historyQuery, showAllHist])
+
+  // Deep link (?saga=… — the Users tab's saga chips land here): expand that
+  // saga on arrival. A historical saga sits behind the archive toggle and
+  // its 50-row cap, so the link opens the section with the full list
+  // unrolled instead of silently showing nothing.
+  useEffect(() => {
+    if (!openSaga || !budget) return
+    if (activeSagas.some((s) => s.saga_id === openSaga)) return
+    if (historicalSagas.some((s) => s.saga_id === openSaga)) {
+      setHistoryOpen(true)
+      setShowAllHist(true)
+    }
+  }, [openSaga, budget, activeSagas, historicalSagas])
 
   // Таблица саг (заголовок + строки + раскрытие задач): одна и та же разметка
   // для активных и исторических секций.

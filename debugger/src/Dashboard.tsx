@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Button, Heading, InlineNotification, Tag, Tile } from '@carbon/react'
+import { Heading, InlineNotification, Tag, Tile } from '@carbon/react'
 import { observationApi, type HealthStats, type HealthModelStats, type ObservationEvent } from './observationApi'
 import {
   projectsOverview,
@@ -21,10 +21,10 @@ import OrgUsageSection from './OrgUsage'
 import { useOrgUnits } from './orgUnits'
 import { orgApi, type OrgWorkView } from './orgApi'
 import { SupervisorPanels } from './Supervisor'
-import { workspaceApi, type UserMetricsRow, type UserFact } from './workspaceApi'
+import { workspaceApi, type UserMetricsRow } from './workspaceApi'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
-import { runStatusLabel } from './eventPresentation'
+import { UserDetailPanel } from './UserDetail'
 import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
 import { fmtBytes } from './format'
 import { fullDateTime } from './timeHint'
@@ -834,21 +834,102 @@ export default function Dashboard({ project, setProject }: Props) {
 // apart from the data rows (commit 8c81742).
 export const USERS_COLUMNS = 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(4rem, 0.5fr) minmax(7rem, 1.1fr)'
 
-/** Column header of the Users table — same ColHead, same tracks as the rows. */
-export function UsersTableHead() {
+// The list controls over the loaded rows: free-text search plus flag chips,
+// and a sortable column set. Pure functions — the lockstep tests and the
+// filter tests drive them without rendering the tab.
+export type UsersFlag = 'all' | 'active' | 'inactive' | 'problems' | 'asks'
+export type UsersSortKey = 'name' | 'runs' | 'week' | 'open' | 'activity' | 'answered' | 'wait' | 'hab' | 'problems' | 'lastask'
+export interface UsersSort { key: UsersSortKey; dir: 1 | -1 }
+
+/** Narrow the loaded rows by search needle (name/id/role/unit) and flag. */
+export function filterUserRows(rows: UserMetricsRow[], query: string, flag: UsersFlag): UserMetricsRow[] {
+  const needle = query.trim().toLowerCase()
+  return rows.filter((row) => {
+    if (needle) {
+      const hay = `${row.name} ${row.id} ${row.role ?? ''} ${row.org_unit_id ?? ''}`.toLowerCase()
+      if (!hay.includes(needle)) return false
+    }
+    switch (flag) {
+      case 'active': return row.active
+      case 'inactive': return !row.active
+      case 'problems': return row.failed_runs + row.timed_out_asks > 0
+      case 'asks': return row.asks_open > 0
+      default: return true
+    }
+  })
+}
+
+const timeOrLast = (value: string | undefined) => (value ? Date.parse(value) : 0)
+
+/** Sort a copy of the rows for one column; ties fall back to the name so
+ *  the order is stable between renders. */
+export function sortUserRows(rows: UserMetricsRow[], sort: UsersSort): UserMetricsRow[] {
+  const value = (row: UserMetricsRow, key: UsersSortKey): number => {
+    switch (key) {
+      case 'name': return 0 // handled by localeCompare below
+      case 'runs': return row.runs_total
+      case 'week': return row.runs_week
+      case 'open': return row.asks_open
+      case 'activity': return timeOrLast(row.last_run_at)
+      case 'answered': return row.asks_total
+      case 'wait': return row.wait_seconds
+      case 'hab': return row.hab_seconds
+      case 'problems': return row.failed_runs + row.timed_out_asks
+      case 'lastask': return timeOrLast(row.last_ask_at)
+    }
+  }
+  const sorted = [...rows].sort((a, b) => {
+    if (sort.key === 'name') {
+      return sort.dir * (a.name || a.id).localeCompare(b.name || b.id)
+    }
+    const delta = value(a, sort.key) - value(b, sort.key)
+    if (delta !== 0) return sort.dir * delta
+    return (a.name || a.id).localeCompare(b.name || b.id)
+  })
+  // The activity columns read their recency from a nil-able timestamp: the
+  // «never» rows sink to the bottom in both directions.
+  if (sort.key === 'activity' || sort.key === 'lastask') {
+    const has = (row: UserMetricsRow) => (sort.key === 'activity' ? row.last_run_at : row.last_ask_at) != null
+    sorted.sort((a, b) => Number(has(b)) - Number(has(a)))
+  }
+  return sorted
+}
+
+const USER_FLAG_CHIPS: { key: UsersFlag; label: string }[] = [
+  { key: 'all', label: 'dashboard.users_filter_all' },
+  { key: 'active', label: 'dashboard.users_filter_active' },
+  { key: 'inactive', label: 'dashboard.users_filter_inactive' },
+  { key: 'problems', label: 'dashboard.users_filter_problems' },
+  { key: 'asks', label: 'dashboard.users_filter_asks' },
+]
+
+/** Column header of the Users table — same ColHead, same tracks as the rows.
+ *  Every cell is a sort toggle (arrow shows the active column); the sticky
+ *  wrapper around it lives in UsersTab. */
+export function UsersTableHead({ sort, onSort }: { sort?: UsersSort; onSort?: (key: UsersSortKey) => void }) {
   const { t } = useI18n()
+  // ONE span per cell — the lockstep test counts spans against grid tracks.
+  const cell = (key: UsersSortKey, children: ReactNode, hint?: string) => (
+    <span
+      onClick={onSort ? () => onSort(key) : undefined}
+      title={hint ?? (onSort ? t('dashboard.users_sort_hint') : undefined)}
+      style={onSort ? { cursor: 'pointer', userSelect: 'none' } : undefined}
+    >
+      {children}{sort?.key === key ? (sort.dir === -1 ? ' ↓' : ' ↑') : ''}
+    </span>
+  )
   return (
     <ColHead columns={USERS_COLUMNS}>
-      <span>{t('dashboard.users_col_user') ?? 'User'}</span>
-      <span title={t('dashboard.users_runs_hint') ?? undefined}>{t('runs.task_col_runs') ?? 'Runs'}</span>
-      <span title={t('dashboard.users_runs_hint') ?? undefined}>7d</span>
-      <span title={t('dashboard.users_asks_hint') ?? undefined}>⏳ {t('dashboard.users_open') ?? 'open'}</span>
-      <span>{t('dashboard.users_last_run') ?? 'Last run'}</span>
-      <span title={t('dashboard.users_asks_hint') ?? undefined}>{t('dashboard.users_answered') ?? 'Answered'}</span>
-      <span title={t('dashboard.users_wait_hint') ?? undefined}>⏳ {t('dashboard.users_wait') ?? 'wait'}</span>
-      <span title={t('dashboard.users_hab_hint') ?? undefined}>🧠 {t('dashboard.users_hab') ?? 'HAB'}</span>
-      <span title={t('dashboard.users_problems_hint') ?? undefined}>⚠</span>
-      <span title={t('dashboard.users_last_ask_hint') ?? undefined}>{t('dashboard.users_last_ask') ?? 'Last ask'}</span>
+      {cell('name', t('dashboard.users_col_user'))}
+      {cell('runs', t('runs.task_col_runs'), t('dashboard.users_runs_hint'))}
+      {cell('week', '7d', t('dashboard.users_runs_hint'))}
+      {cell('open', <>⏳ {t('dashboard.users_open')}</>, t('dashboard.users_asks_hint'))}
+      {cell('activity', t('dashboard.users_last_run'))}
+      {cell('answered', t('dashboard.users_answered'), t('dashboard.users_asks_hint'))}
+      {cell('wait', <>⏳ {t('dashboard.users_wait')}</>, t('dashboard.users_wait_hint'))}
+      {cell('hab', <>🧠 {t('dashboard.users_hab')}</>, t('dashboard.users_hab_hint'))}
+      {cell('problems', '⚠', t('dashboard.users_problems_hint'))}
+      {cell('lastask', t('dashboard.users_last_ask'), t('dashboard.users_last_ask_hint'))}
     </ColHead>
   )
 }
@@ -883,14 +964,17 @@ export function UsersTableRow({ row, expanded, onOpen }: { row: UserMetricsRow; 
 // what waits on them (open asks), what they already decided. The server
 // rolls the numbers up (exec_context actor + resolved_user); this renders.
 function UsersTab() {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const [rows, setRows] = useState<UserMetricsRow[] | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  // Facts drawer: one expanded user at a time; facts load on expand.
+  // One expanded user at a time: the dossier loads its own facts and stats.
   const [expandedUser, setExpandedUser] = useState<string | null>(null)
-  const [facts, setFacts] = useState<UserFact[] | null>(null)
-  const [draftFact, setDraftFact] = useState('')
+  // List controls: search needle + flag chip + column sort — all client-side
+  // over the loaded rollup (the row count is directory-sized by design).
+  const [query, setQuery] = useState('')
+  const [flag, setFlag] = useState<UsersFlag>('all')
+  const [sort, setSort] = useState<UsersSort>({ key: 'activity', dir: -1 })
   const load = useCallback(async () => {
     setBusy(true)
     setError('')
@@ -904,36 +988,14 @@ function UsersTab() {
     }
   }, [])
   useEffect(() => { void load() }, [load])
-  const openFacts = useCallback(async (userID: string) => {
-    if (expandedUser === userID) { setExpandedUser(null); return }
-    setExpandedUser(userID)
-    setFacts(null)
-    try {
-      const data = await workspaceApi.userFacts(userID)
-      setFacts(data.facts ?? [])
-    } catch (failure) {
-      setError(errorMessage(failure))
-    }
-  }, [expandedUser])
-  const addFact = useCallback(async (userID: string) => {
-    const fact = draftFact.trim()
-    if (!fact) return
-    try {
-      await workspaceApi.addUserFact(userID, fact)
-      setDraftFact('')
-      const data = await workspaceApi.userFacts(userID)
-      setFacts(data.facts ?? [])
-    } catch (failure) {
-      setError(errorMessage(failure))
-    }
-  }, [draftFact])
-  const removeFact = useCallback(async (userID: string, factID: number) => {
-    try {
-      await workspaceApi.deleteUserFact(userID, factID)
-      setFacts((prev) => (prev ?? []).filter((f) => f.id !== factID))
-    } catch (failure) {
-      setError(errorMessage(failure))
-    }
+  const visible = useMemo(
+    () => sortUserRows(filterUserRows(rows ?? [], query, flag), sort),
+    [rows, query, flag, sort],
+  )
+  const onSort = useCallback((key: UsersSortKey) => {
+    setSort((prev) => prev.key === key
+      ? { key, dir: prev.dir === -1 ? 1 : -1 }
+      : { key, dir: key === 'name' ? 1 : -1 })
   }, [])
   return (
     <div>
@@ -943,66 +1005,58 @@ function UsersTab() {
       </div>
       {error && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
       {rows === null ? (
-        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('common.loading') ?? 'Loading…'}</Tile>
+        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('common.loading')}</Tile>
       ) : rows.length === 0 ? (
-        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.users_empty') ?? 'No users yet'}</Tile>
+        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.users_empty')}</Tile>
       ) : (
-        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
-          <UsersTableHead />
-          {rows.map((row) => (
-            <div key={row.id} style={{ borderTop: '1px solid var(--tm-border)' }}>
-              <UsersTableRow row={row} expanded={expandedUser === row.id} onOpen={(userID) => void openFacts(userID)} />
-              {expandedUser === row.id && (
-                <div style={{ padding: '0.35rem 0.6rem 0.6rem 1.5rem', background: 'var(--tm-raised)' }}>
-                  {(row.last_run || row.last_ask_question) && (
-                    <div style={{ fontSize: '0.75rem', marginBottom: '0.45rem', display: 'grid', gap: '0.15rem' }}>
-                      {row.last_run && (
-                        <span>
-                          {t('dashboard.users_last_run_did') ?? 'Last'}: <strong style={{ color: 'var(--tm-text)' }}>{row.last_run.title || row.last_run.run_id}</strong>
-                          {' '}· [{row.last_run.project}] · {runStatusLabel(row.last_run.status, t)}
-                          {row.failed_runs > 0 && <span style={{ color: 'var(--tm-danger)' }}> · ⚠ {pluralT(t, locale, 'dashboard.users_failed_n', row.failed_runs)}</span>}
-                        </span>
-                      )}
-                      {row.last_ask_question && (
-                        <span style={{ color: 'var(--tm-text-2)' }}>
-                          {t('dashboard.users_last_ask_did') ?? 'Last question to answer'}: «{row.last_ask_question}»
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('dashboard.users_facts_title') ?? 'Stored preferences and facts'}</div>
-                  {facts === null ? (
-                    <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)' }}>{t('common.loading') ?? 'Loading…'}</span>
-                  ) : facts.length === 0 ? (
-                    <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)' }}>{t('dashboard.users_facts_empty') ?? 'No facts stored yet — the dialog accumulates them, or add one below'}</span>
-                  ) : (
-                    <div style={{ display: 'grid', gap: '0.2rem', marginBottom: '0.4rem' }}>
-                      {facts.map((fact) => (
-                        <div key={fact.id} style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', fontSize: '0.8rem' }}>
-                          <span style={{ flex: 1 }}>{fact.fact}{fact.origin === 'agent' && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem' }}> · {t('dashboard.users_facts_from_dialog') ?? 'from dialog'}</span>}</span>
-                          <button
-                            onClick={() => void removeFact(row.id, fact.id)}
-                            title={t('dashboard.users_facts_delete') ?? 'Delete'}
-                            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', lineHeight: 1 }}
-                          >✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.3rem' }}>
-                    <input
-                      value={draftFact}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraftFact(e.target.value)}
-                      onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') void addFact(row.id) }}
-                      placeholder={t('dashboard.users_facts_placeholder') ?? 'New fact or preference…'}
-                      style={{ flex: 1, maxWidth: '28rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text)', padding: '0.25rem 0.5rem', fontSize: '0.78rem' }}
-                    />
-                    <Button size="sm" kind="ghost" disabled={!draftFact.trim()} onClick={() => void addFact(row.id)}>{t('dashboard.users_facts_add') ?? 'Add'}</Button>
-                  </div>
-                </div>
-              )}
+        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+          {/* Sticky control block: the filter row and the column header pin
+              under the app bar while the list scrolls — with a big directory
+              the header is the only thing keeping the columns readable. */}
+          <div style={{ position: 'sticky', top: '3rem', zIndex: 10, background: 'var(--tm-bg)', borderRadius: '6px 6px 0 0', borderBottom: '1px solid var(--tm-border)' }}>
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', padding: '0.4rem 0.6rem' }}>
+              <input
+                value={query}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+                placeholder={t('dashboard.users_search_placeholder')}
+                aria-label={t('dashboard.users_search_placeholder')}
+                style={{ minWidth: '12rem', flex: '0 1 16rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text)', padding: '0.25rem 0.5rem', fontSize: '0.78rem' }}
+              />
+              {USER_FLAG_CHIPS.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => setFlag(chip.key)}
+                  title={t('dashboard.users_filter_hint')}
+                  style={{
+                    border: `1px solid ${flag === chip.key ? 'var(--tm-border-strong, var(--tm-border))' : 'var(--tm-border)'}`,
+                    borderRadius: '999px',
+                    background: flag === chip.key ? 'var(--tm-surface)' : 'transparent',
+                    color: flag === chip.key ? 'var(--tm-text)' : 'var(--tm-text-2)',
+                    cursor: 'pointer',
+                    fontSize: '0.7rem',
+                    padding: '0.1rem 0.55rem',
+                    lineHeight: 1.5,
+                    fontWeight: flag === chip.key ? 600 : 400,
+                  }}
+                >{t(chip.label)}</button>
+              ))}
+              <span style={{ marginLeft: 'auto', fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>
+                {t('dashboard.users_shown', { shown: String(visible.length), total: String(rows.length) })}
+              </span>
             </div>
-          ))}
+            <UsersTableHead sort={sort} onSort={onSort} />
+          </div>
+          {visible.length === 0 ? (
+            <div style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--tm-text-3)' }}>{t('dashboard.users_empty_filtered')}</div>
+          ) : (
+            visible.map((row) => (
+              <div key={row.id} style={{ borderTop: '1px solid var(--tm-border)' }}>
+                <UsersTableRow row={row} expanded={expandedUser === row.id} onOpen={(userID) => setExpandedUser((prev) => (prev === userID ? null : userID))} />
+                {expandedUser === row.id && <UserDetailPanel row={row} />}
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>

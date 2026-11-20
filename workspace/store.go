@@ -771,12 +771,27 @@ func (s *Store) ListRunsByActor(ctx context.Context, actorID string, limit int) 
 	if limit <= 0 || limit > 200 {
 		limit = 10
 	}
+	return s.listRunsByActor(ctx, actorID, time.Time{}, limit)
+}
+
+// ListRunsByActorSince is the windowed variant for the dashboard's per-user
+// stats dossier: the actor's runs created at or after `since` (zero time =
+// full history), newest first, capped at `limit` (clamped to 1..2000,
+// default 500). The attribution predicate is identical to ListRunsByActor.
+func (s *Store) ListRunsByActorSince(ctx context.Context, actorID string, since time.Time, limit int) ([]Run, error) {
+	if limit <= 0 || limit > 2000 {
+		limit = 500
+	}
+	return s.listRunsByActor(ctx, actorID, since, limit)
+}
+
+func (s *Store) listRunsByActor(ctx context.Context, actorID string, since time.Time, limit int) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run
-		 WHERE exec_context->>'actor' = $1 OR exec_context->'authorized_by'->>'user_id' = $1
-		 ORDER BY created_at DESC LIMIT $2`, actorID, limit)
-	println("REPRO store: queried, err:", err != nil)
+		 WHERE (exec_context->>'actor' = $1 OR exec_context->'authorized_by'->>'user_id' = $1)
+		   AND created_at >= $2
+		 ORDER BY created_at DESC LIMIT $3`, actorID, since, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -787,14 +802,12 @@ func (s *Store) ListRunsByActor(ctx context.Context, actorID string, limit int) 
 		var agentID *string
 		var execContext []byte
 		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
-			println("REPRO store: scan error:", err.Error())
 			return nil, err
 		}
 		r.AgentID = derefPtr(agentID)
 		r.ExecContext = decodeExecContext(execContext)
 		result = append(result, r)
 	}
-	println("REPRO store: scan loop done, rows.Err:", rows.Err() != nil)
 	return result, rows.Err()
 }
 

@@ -7774,6 +7774,9 @@ func main() {
 		writeJSON(w, 200, map[string]any{"users": users})
 	})
 	registerUserMetricsRoutes(mux, gate, ws, habFactors)
+	// The Users tab's expanded-row dossier (per-period runs, spend, sagas,
+	// knowledge, asks and problems) rides the same gate and the same folds.
+	registerUserStatsRoutes(mux, gate, ws, habFactors, observationURL, journalToken, costPrices)
 	// User facts (docs/inbound-messages.md §4.3): the explicit half of the
 	// per-user picture — preferences and durable facts the dialogs work with.
 	mux.HandleFunc("GET /v1/workspace/users/{userID}/facts", func(w http.ResponseWriter, r *http.Request) {

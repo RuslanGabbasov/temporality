@@ -662,7 +662,13 @@ export default function AgentRuns({ project }: { project: string }) {
   // over directory users AND org units (typing matches both; picking a user
   // pins the exact actor id, picking a unit matches the actor's unit), plus
   // status — all client-side over the loaded newest-100 window.
-  const [initiatorPick, setInitiatorPick] = useState<{ kind: 'user' | 'unit'; id: string; name: string } | null>(null)
+  const [initiatorPick, setInitiatorPick] = useState<{ kind: 'user' | 'unit'; id: string; name: string } | null>(() => {
+    // Deep link (?initiator=<userID>): the Users tab's «all runs» jump lands
+    // pre-filtered on that person. Unknown/absent ids degrade to no filter
+    // — the same stale-link rule as ?status= below.
+    const raw = new URLSearchParams(window.location.search).get('initiator')
+    return raw ? { kind: 'user', id: raw, name: raw } : null
+  })
   // 'waiting' is a virtual status: a live run paused on a human answer
   // (questionRuns) — not a journal status.
   // Dashboard health chips deep-link into the list (?status=running / waiting
@@ -767,6 +773,15 @@ export default function AgentRuns({ project }: { project: string }) {
     }).catch(() => { /* ids stay */ })
   }, [])
   const userNameOf = useCallback((id: string | undefined) => (id ? (users.get(id)?.name ?? id) : ''), [users])
+  // The deep-linked pick starts with the raw id as its label; the directory
+  // upgrades it to the person's name once it lands.
+  useEffect(() => {
+    setInitiatorPick((pick) => {
+      if (!pick || pick.kind !== 'user' || pick.name !== pick.id) return pick
+      const name = users.get(pick.id)?.name
+      return name ? { ...pick, name } : pick
+    })
+  }, [users])
   const org = useOrgUnits()
 
   // Initiator suggest (ActorSuggestFilter's options callback): the ARTIFACTS

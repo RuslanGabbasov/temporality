@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { USERS_COLUMNS, UsersTableHead, UsersTableRow } from './Dashboard'
+import { USERS_COLUMNS, UsersTableHead, UsersTableRow, filterUserRows, sortUserRows } from './Dashboard'
 import { I18nProvider } from './i18n'
 import type { UserMetricsRow } from './workspaceApi'
 
@@ -75,5 +75,38 @@ describe('Users table grid', () => {
       expect(tracks.length, template).toBeGreaterThan(0)
       expect(cellCount(html), template).toBe(tracks.length)
     }
+  })
+})
+
+// The list controls (search needle, flag chips, column sort) are pure —
+// they carry the whole filter behaviour of a directory that outgrew the
+// one-page rollup.
+describe('Users list controls', () => {
+  const rows: UserMetricsRow[] = [
+    row,
+    { ...row, id: 'u2', name: 'Bob', active: false, failed_runs: 2, asks_open: 3, runs_total: 10, last_run_at: '2026-01-02T00:00:00Z' },
+    { ...row, id: 'u3', name: 'Cy', runs_total: 5, last_run_at: '2026-01-01T00:00:00Z' },
+  ]
+
+  it('filters by needle and by flag', () => {
+    expect(filterUserRows(rows, 'bo', 'all').map((r) => r.id)).toEqual(['u2'])
+    expect(filterUserRows(rows, '', 'inactive').map((r) => r.id)).toEqual(['u2'])
+    expect(filterUserRows(rows, '', 'problems').map((r) => r.id)).toEqual(['u2'])
+    expect(filterUserRows(rows, '', 'asks').map((r) => r.id)).toEqual(['u2'])
+    // The needle searches name, id, role and org unit — every fixture is role=admin.
+    expect(filterUserRows(rows, 'admin', 'all')).toHaveLength(3)
+    expect(filterUserRows(rows, 'nobody', 'all')).toEqual([])
+  })
+
+  it('sorts by column, breaks ties by name and sinks never-active rows last', () => {
+    expect(sortUserRows(rows, { key: 'runs', dir: -1 }).map((r) => r.id)).toEqual(['u2', 'u3', 'u1'])
+    // Recency desc: newest first, the row with no run at all last — and the
+    // same sink holds when the direction flips.
+    expect(sortUserRows(rows, { key: 'activity', dir: -1 }).map((r) => r.id)).toEqual(['u2', 'u3', 'u1'])
+    expect(sortUserRows(rows, { key: 'activity', dir: 1 }).map((r) => r.id)).toEqual(['u3', 'u2', 'u1'])
+    expect(sortUserRows(rows, { key: 'name', dir: 1 }).map((r) => r.id)).toEqual(['u1', 'u2', 'u3'])
+    // The input array is never mutated — filtering/sorting stays referentially
+    // stable for the memo in UsersTab.
+    expect(rows.map((r) => r.id)).toEqual(['u1', 'u2', 'u3'])
   })
 })
