@@ -12,9 +12,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -304,6 +306,22 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any, ide
 	if !ok {
 		return "", fmt.Errorf("MCP tool %q is not allowed", name)
 	}
+	// The tool's own timeout_ms (an MCP convention: the CALLER states how long
+	// it is willing to wait) bounds this call's context. Without it the shared
+	// HTTP client timeout is the only budget. Clamped to 1s..10m: a tool
+	// asking for zero or an hour is either broken or abusive.
+	if ms, ok := argTimeoutMs(args); ok {
+		deadline := time.Duration(ms) * time.Millisecond
+		if deadline < time.Second {
+			deadline = time.Second
+		}
+		if deadline > 10*time.Minute {
+			deadline = 10 * time.Minute
+		}
+		callCtx, cancel := context.WithTimeout(ctx, deadline)
+		defer cancel()
+		ctx = callCtx
+	}
 	session, err := c.ensureSession(ctx)
 	if err != nil {
 		return "", err
@@ -335,6 +353,38 @@ func callTool(ctx context.Context, session *mcp.ClientSession, name string, args
 		params.Meta = mcp.Meta{"idempotency_key": idempotencyKey}
 	}
 	return session.CallTool(ctx, params)
+}
+
+// argTimeoutMs reads the MCP timeout_ms convention from the tool arguments:
+// json.Number/plain float (map[string]any decodes numbers as float64). A
+// missing or non-numeric value means «no explicit budget».
+func argTimeoutMs(args map[string]any) (int64, bool) {
+	if args == nil {
+		return 0, false
+	}
+	switch raw := args["timeout_ms"].(type) {
+	case float64:
+		if raw > 0 && !math.IsNaN(raw) && !math.IsInf(raw, 0) {
+			return int64(raw), true
+		}
+	case int:
+		if raw > 0 {
+			return int64(raw), true
+		}
+	case int64:
+		if raw > 0 {
+			return raw, true
+		}
+	case json.Number:
+		if v, err := raw.Int64(); err == nil && v > 0 {
+			return v, true
+		}
+	case string:
+		if v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && v > 0 {
+			return v, true
+		}
+	}
+	return 0, false
 }
 
 // isBrokenTransport reports whether err means the session's transport is dead
@@ -378,11 +428,31 @@ func isBrokenTransport(err error) bool {
 // sharedHTTPClient returns the one keep-alive HTTP client for this server, so
 // TCP connections and TLS sessions survive reconnects. Only called with c.mu
 // held (from connect, i.e. ensureSession/redial).
+//
+// The timeout bounds one WHOLE request including body read — and MCP tools
+// are not HTTP endpoints: a heavy tools/call (Penpot export, image render)
+// legitimately streams nothing back until the work is done, so the response
+// headers arrive late by design. The old 30s default killed exactly those
+// calls at 30.06s no matter what the tool's own timeout_ms asked for. The
+// per-call budget lives in Call() (timeout_ms argument → context deadline);
+// this client timeout is the outer safety net, default 150s to cover the
+// 120s per-call maximum, override with KERNEL_MCP_HTTP_TIMEOUT.
 func (c *Client) sharedHTTPClient() *http.Client {
 	if c.http == nil {
-		c.http = headerClient(&http.Client{Timeout: 30 * time.Second}, c.cfg.Headers)
+		c.http = headerClient(&http.Client{Timeout: mcpHTTPTimeout()}, c.cfg.Headers)
 	}
 	return c.http
+}
+
+// mcpHTTPTimeout reads KERNEL_MCP_HTTP_TIMEOUT (a Go duration); anything
+// unparseable or non-positive keeps the 150s default.
+func mcpHTTPTimeout() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("KERNEL_MCP_HTTP_TIMEOUT")); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 150 * time.Second
 }
 
 // mcpDialTimeout bounds one connect+initialize handshake. A server that
