@@ -313,9 +313,16 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       // Mid-run chat addendum drained into the conversation (kernel.user_note).
       // The note's own words lead — the reader wants WHAT was sent — the turn
       // marker trails. Pre-text events keep the plain form.
+      // Supervisor awareness notes (orgAwarenessSteerPrefix) get their own
+      // label: «Дополнение пользователя» misread the supervisor's background
+      // push as a human chat message.
       const text = String(d.text ?? '').replace(/\s+/g, ' ').trim()
-      const turn = t('runs.event.user_note_detail', { turn: String(d.turn ?? '?') })
-      return { icon: '⤳', label: t('runs.event.user_note'), detail: text ? `${text.slice(0, 120)}${text.length > 120 ? '…' : ''} · ${turn}` : turn, color: 'var(--tm-teal)' }
+      const awareness = text.startsWith('Organizational awareness (from the department supervisor')
+      const turn = awareness
+        ? t('runs.event.supervisor_note_detail', { turn: String(d.turn ?? '?') })
+        : t('runs.event.user_note_detail', { turn: String(d.turn ?? '?') })
+      const label = awareness ? t('runs.event.supervisor_note') : t('runs.event.user_note')
+      return { icon: awareness ? '🛰' : '⤳', label, detail: text ? `${text.slice(0, 120)}${text.length > 120 ? '…' : ''} · ${turn}` : turn, color: awareness ? '#7aa2f7' : 'var(--tm-teal)' }
     }
     case 'run.note_dropped':
       return { icon: '⚠', label: t('runs.event.note_dropped'), detail: t('runs.event.note_dropped_detail'), color: '#e0af68' }

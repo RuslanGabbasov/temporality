@@ -825,6 +825,8 @@ export const ru: Record<string, string> = {
     'runs.event.model_failed': 'Вызов модели не удался',
     'runs.event.user_note': 'Дополнение пользователя принято',
     'runs.event.user_note_detail': 'сообщение из чата учтено в ходе {{turn}}',
+    'runs.event.supervisor_note': 'Дополнение супервайзера доставлено',
+    'runs.event.supervisor_note_detail': 'контекст осведомлённости учтён в ходе {{turn}}',
     'runs.event.note_dropped': 'Дополнение не доставлено',
     'runs.event.note_dropped_detail': 'бюджет запуска исчерпан до доставки',
     'runs.event.model_nudged': 'Вызов модели подтолкнут',

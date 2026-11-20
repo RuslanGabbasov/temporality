@@ -825,6 +825,8 @@ export const en: Record<string, string> = {
     'runs.event.model_failed': 'Model call failed',
     'runs.event.user_note': 'User note accepted',
     'runs.event.user_note_detail': 'chat message consumed in turn {{turn}}',
+    'runs.event.supervisor_note': 'Supervisor note delivered',
+    'runs.event.supervisor_note_detail': 'awareness context consumed in turn {{turn}}',
     'runs.event.note_dropped': 'Note not delivered',
     'runs.event.note_dropped_detail': "the run's budget ran out before delivery",
     'runs.event.model_nudged': 'Model call nudged',
