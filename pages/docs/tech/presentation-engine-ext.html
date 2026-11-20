@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>ТЗ: Развитие Presentation Engine — расширение выразительных средств визуализации — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/presentation-engine-ext.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/tech/presentation-engine-ext.html"><link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/tech/presentation-engine-ext.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="ТЗ: Развитие Presentation Engine — расширение выразительных средств визуализации — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/presentation-engine-ext.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ТЗ: Развитие Presentation Engine — расширение выразительных средств визуализации — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/presentation-engine-ext.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="ai-guided-onboarding-and-learning.html">Техническое задание: AI-Guided Onboarding & Learning</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="organizational-operations-implementation.html">Реализация: Organizational Operations</a>
+<a class="docs-nav-row" href="organizational-operations-survey.html">Техническое обследование: Organizational Operations</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row active" href="presentation-engine-ext.html">ТЗ: Развитие Presentation Engine — расширение выразительных средств визуализации</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="runtime-for-ai-org.html">ТЗ: Обновление сайта Temporality — Runtime for AI Organizations</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="subscription-providers-claude-codex.html">Подписки Claude Code и Codex как провайдеры моделей</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>ТЗ: Развитие Presentation Engine — расширение выразительных средств визуализации</h1>
+
+<h2 id="1-цель"><a class="anchor" href="#1-цель" aria-label="Section link">#</a>1. Цель</h2><p>Расширить существующий Presentation Engine проекта Temporality новыми способами визуального представления информации, сохранив текущую архитектуру, декларативную модель Presentation IR и единый механизм рендеринга.</p>
+<p>Основная задача — дать агентам возможность выражать более широкий спектр аналитических идей: позиционирование объектов, многомерное сравнение, распределение, иерархии, потоки, процессы и взаимосвязи.</p>
+<p>Развитие должно происходить эволюционно, без создания отдельной подсистемы визуализации и дублирования существующих механизмов.</p>
+<p><strong>Ключевой принцип: агент описывает данные и смысл визуализации, Presentation Engine отвечает за её представление.</strong></p>
+<h2 id="2-архитектурные-ограничения"><a class="anchor" href="#2-архитектурные-ограничения" aria-label="Section link">#</a>2. Архитектурные ограничения</h2><p>Использовать существующие компоненты:</p>
+<ul>
+<li><code>kernel/presentation/ir.go</code> — Presentation IR.</li>
+<li><code>kernel/presentation/registry.go</code> — Component Registry.</li>
+<li><code>kernel/presentation/components.go</code> — типизированные структуры и валидация.</li>
+<li><code>kernel/presentation/layout_viz.go</code> — визуализация и построение layout.</li>
+<li>Существующие SVG, PNG и Text renderers.</li>
+<li><code>kernel/presentation/adapt.go</code> — адаптация под возможности каналов.</li>
+<li><code>kernel/agent/presentationtools.go</code> — инструменты агента и описание каталога IR.</li>
+<li><code>docs/presentation-engine.md</code> — архитектурная документация.</li>
+</ul>
+<p>Необходимо сохранить:</p>
+<ol>
+<li>Renderer-agnostic Presentation IR.</li>
+<li>Единый источник данных для всех форматов отображения.</li>
+<li>Обязательную поддержку Native UI, SVG, PNG и Text.</li>
+<li>Строгую типизацию и валидацию входных данных.</li>
+<li>Централизованный Component Registry.</li>
+<li>Отсутствие исполнения произвольного кода из IR.</li>
+<li>Совместимость с существующими документами IR версии 1.0.</li>
+</ol>
+<p>Не вводить обязательную зависимость от конкретной JS-библиотеки визуализации. Допускается использование существующих механизмов и внешних библиотек за renderer-адаптерами.</p>
+<h2 id="3-этап-p0-завершение-базового-каталога-визуализаций"><a class="anchor" href="#3-этап-p0-завершение-базового-каталога-визуализаций" aria-label="Section link">#</a>3. Этап P0. Завершение базового каталога визуализаций</h2><p>Перед добавлением новых возможностей необходимо привести существующую реализацию в соответствие с заявленной спецификацией.</p>
+<h3 id="31-scatter-chart"><a class="anchor" href="#31-scatter-chart" aria-label="Section link">#</a>3.1. Scatter Chart</h3><p>Добавить поддержку диаграмм рассеяния.</p>
+<p>Требования:</p>
+<ul>
+<li>Двумерные координаты X/Y.</li>
+<li>Подписи осей.</li>
+<li>Минимальные и максимальные значения осей.</li>
+<li>Автоматическое определение диапазонов при отсутствии явных ограничений.</li>
+<li>Подписи точек.</li>
+<li>Индивидуальные размеры и стили маркеров.</li>
+<li>Группировка точек.</li>
+<li>Легенда групп.</li>
+<li>Отображение значений при наличии места.</li>
+<li>Обработка отрицательных и нулевых значений.</li>
+<li>Корректное отображение нескольких точек с одинаковыми координатами.</li>
+</ul>
+<p>Структура данных должна поддерживать независимые объекты с координатами, а не только массивы последовательных значений.</p>
+<h3 id="32-heatmap"><a class="anchor" href="#32-heatmap" aria-label="Section link">#</a>3.2. Heatmap</h3><p>Добавить тепловые карты.</p>
+<p>Требования:</p>
+<ul>
+<li>Двумерная матрица значений.</li>
+<li>Подписи строк и столбцов.</li>
+<li>Цветовая шкала.</li>
+<li>Отображение числовых значений в ячейках.</li>
+<li>Обработка отсутствующих значений.</li>
+<li>Настраиваемые границы шкалы.</li>
+<li>Поддержка отрицательных значений.</li>
+<li>Подписи шкалы и единицы измерения.</li>
+</ul>
+<h3 id="33-histogram"><a class="anchor" href="#33-histogram" aria-label="Section link">#</a>3.3. Histogram</h3><p>Добавить гистограммы распределения.</p>
+<p>Требования:</p>
+<ul>
+<li>Автоматическое или заданное количество интервалов.</li>
+<li>Возможность указать ширину интервала.</li>
+<li>Отображение частот.</li>
+<li>Подписи осей.</li>
+<li>Поддержка нормализованного распределения.</li>
+<li>Корректная обработка пустых и малых выборок.</li>
+</ul>
+<h3 id="34-timeline-chart"><a class="anchor" href="#34-timeline-chart" aria-label="Section link">#</a>3.4. Timeline Chart</h3><p>Проверить необходимость отдельного типа временного графика.</p>
+<p>Если существующий <code>chart</code> может выразить временной ряд без потери семантики, использовать его. В противном случае реализовать специализированный тип с временной шкалой.</p>
+<h3 id="35-согласованность-каталога"><a class="anchor" href="#35-согласованность-каталога" aria-label="Section link">#</a>3.5. Согласованность каталога</h3><p>Провести сверку:</p>
+<ul>
+<li>Документации.</li>
+<li>Реестра компонентов.</li>
+<li>Типизированных структур.</li>
+<li>Валидаторов.</li>
+<li>Agent Tool Catalog.</li>
+<li>Native UI renderer.</li>
+<li>SVG renderer.</li>
+<li>PNG renderer.</li>
+<li>Text fallback.</li>
+</ul>
+<p>Ни один компонент не должен рекламироваться агенту как поддерживаемый, если он не реализован полностью.</p>
+<h2 id="4-этап-p1-новые-выразительные-средства"><a class="anchor" href="#4-этап-p1-новые-выразительные-средства" aria-label="Section link">#</a>4. Этап P1. Новые выразительные средства</h2><h3 id="41-positioning-map-quadrant"><a class="anchor" href="#41-positioning-map-quadrant" aria-label="Section link">#</a>4.1. Positioning Map / Quadrant</h3><p>Приоритет: высокий.</p>
+<p>Предназначение: позиционирование объектов в двумерном пространстве по двум независимым характеристикам.</p>
+<p>Примеры применения:</p>
+<ul>
+<li>Конкурентный анализ.</li>
+<li>Стратегическое позиционирование.</li>
+<li>Сравнение продуктов.</li>
+<li>Оценка рисков.</li>
+<li>Матрица приоритетов.</li>
+<li>Оценка возможностей и зрелости.</li>
+</ul>
+<p>Функциональность:</p>
+<p><strong>Оси:</strong></p>
+<ul>
+<li>Название и описание.</li>
+<li>Минимум и максимум.</li>
+<li>Подписи крайних значений.</li>
+<li>Направление и формат отображения.</li>
+<li>Возможность отображения нулевой линии.</li>
+</ul>
+<p><strong>Объекты:</strong></p>
+<ul>
+<li>X/Y координаты.</li>
+<li>Название.</li>
+<li>Группа.</li>
+<li>Размер маркера.</li>
+<li>Цвет или статус.</li>
+<li>Дополнительное описание.</li>
+<li>Признак выделения.</li>
+<li>Необязательная ссылка на артефакт Temporality.</li>
+</ul>
+<p><strong>Пространственные элементы:</strong></p>
+<ul>
+<li>Вертикальные и горизонтальные reference lines.</li>
+<li>Разделение на квадранты.</li>
+<li>Названия квадрантов.</li>
+<li>Подложки и выделенные области.</li>
+<li>Целевые зоны.</li>
+<li>Подписи и аннотации.</li>
+<li>Обозначение свободных областей.</li>
+</ul>
+<p><strong>Отображение:</strong></p>
+<ul>
+<li>Автоматическое размещение подписей без существенного перекрытия.</li>
+<li>Возможность компактного представления.</li>
+<li>Легенда групп.</li>
+<li>Выделение целевых и выбранных объектов.</li>
+<li>Сохранение пропорций координатного пространства.</li>
+</ul>
+<p>Positioning Map может быть реализован как специализированный IR-компонент или как профиль расширенного Scatter Chart. Предпочтительно повторно использовать общий координатный renderer.</p>
+<h3 id="42-radar-chart"><a class="anchor" href="#42-radar-chart" aria-label="Section link">#</a>4.2. Radar Chart</h3><p>Предназначение: многомерное сравнение объектов по набору характеристик.</p>
+<p>Функциональность:</p>
+<ul>
+<li>Набор измерений.</li>
+<li>Несколько сравниваемых объектов.</li>
+<li>Значения по каждому измерению.</li>
+<li>Индивидуальные серии.</li>
+<li>Подписи осей.</li>
+<li>Минимальные и максимальные значения.</li>
+<li>Легенда.</li>
+<li>Выделение выбранного объекта.</li>
+<li>Отображение числовых значений.</li>
+</ul>
+<p>Применение:</p>
+<ul>
+<li>Сравнение продуктов.</li>
+<li>Оценка компетенций.</li>
+<li>Оценка зрелости подразделений.</li>
+<li>Сравнение моделей и агентов.</li>
+<li>Профилирование возможностей.</li>
+</ul>
+<h3 id="43-sankey-diagram"><a class="anchor" href="#43-sankey-diagram" aria-label="Section link">#</a>4.3. Sankey Diagram</h3><p>Предназначение: визуализация потоков между состояниями, категориями и участниками.</p>
+<p>Функциональность:</p>
+<ul>
+<li>Узлы.</li>
+<li>Направленные связи.</li>
+<li>Вес или объём потока.</li>
+<li>Подписи связей.</li>
+<li>Группировка узлов.</li>
+<li>Цветовое выделение потоков.</li>
+<li>Отображение итоговых объёмов.</li>
+<li>Контроль пересечений и читаемости.</li>
+</ul>
+<p>Применение:</p>
+<ul>
+<li>Распределение ресурсов.</li>
+<li>Движение задач.</li>
+<li>Воронки преобразования.</li>
+<li>Распределение нагрузки.</li>
+<li>Переходы между состояниями.</li>
+<li>Использование ресурсов агентами.</li>
+</ul>
+<h3 id="44-swimlane-diagram"><a class="anchor" href="#44-swimlane-diagram" aria-label="Section link">#</a>4.4. Swimlane Diagram</h3><p>Предназначение: представление процессов с разделением ответственности между участниками.</p>
+<p>Функциональность:</p>
+<ul>
+<li>Дорожки участников.</li>
+<li>Этапы процесса.</li>
+<li>Действия и события.</li>
+<li>Переходы между дорожками.</li>
+<li>Условия переходов.</li>
+<li>Параллельные ветви.</li>
+<li>Начальные и конечные состояния.</li>
+<li>Выделение ответственных.</li>
+<li>Статусы элементов.</li>
+</ul>
+<p>Не следует сводить Swimlane к обычному Flowchart. Участник и его дорожка являются самостоятельными семантическими элементами.</p>
+<p>Применение:</p>
+<ul>
+<li>Бизнес-процессы.</li>
+<li>Взаимодействие подразделений.</li>
+<li>Работа мультиагентных систем.</li>
+<li>Процессы согласования.</li>
+<li>Human-in-the-loop сценарии.</li>
+</ul>
+<h3 id="45-treemap"><a class="anchor" href="#45-treemap" aria-label="Section link">#</a>4.5. Treemap</h3><p>Предназначение: визуализация иерархических данных через вложенные прямоугольные области.</p>
+<p>Функциональность:</p>
+<ul>
+<li>Иерархия объектов.</li>
+<li>Размер области по числовому значению.</li>
+<li>Цвет по дополнительному показателю.</li>
+<li>Подписи.</li>
+<li>Вложенность.</li>
+<li>Легенда.</li>
+<li>Выделение объектов.</li>
+<li>Поддержка нескольких уровней.</li>
+</ul>
+<p>Применение:</p>
+<ul>
+<li>Структура портфеля.</li>
+<li>Распределение ресурсов.</li>
+<li>Организационные структуры.</li>
+<li>Распределение задач.</li>
+<li>Анализ использования ресурсов.</li>
+</ul>
+<h2 id="5-этап-p2-дополнительные-возможности"><a class="anchor" href="#5-этап-p2-дополнительные-возможности" aria-label="Section link">#</a>5. Этап P2. Дополнительные возможности</h2><p>Рассмотреть и реализовать при наличии подтверждённых сценариев использования:</p>
+<ul>
+<li>Funnel — визуализация последовательного сужения потока.</li>
+<li>Decision Tree — дерево решений.</li>
+<li>Priority Matrix — матрица приоритетов.</li>
+<li>Calendar — календарные представления.</li>
+<li>Расширенная Hierarchy — иерархические структуры.</li>
+<li>Portfolio Map — специализированное представление портфеля объектов.</li>
+</ul>
+<p>Не создавать самостоятельный компонент, если соответствующее представление может быть выражено существующим типом без потери семантики.</p>
+<h2 id="6-развитие-presentation-ir"><a class="anchor" href="#6-развитие-presentation-ir" aria-label="Section link">#</a>6. Развитие Presentation IR</h2><h3 id="61-общие-требования"><a class="anchor" href="#61-общие-требования" aria-label="Section link">#</a>6.1. Общие требования</h3><p>Сохранить существующую структуру:</p>
+<ul>
+<li><code>type</code></li>
+<li><code>id</code></li>
+<li><code>content</code></li>
+<li><code>data</code></li>
+<li><code>props</code></li>
+<li><code>items</code></li>
+<li><code>children</code></li>
+<li><code>actions</code></li>
+</ul>
+<p>Новые типы должны использовать те же правила разделения содержимого и параметров представления.</p>
+<h3 id="62-расширение-модели-chart"><a class="anchor" href="#62-расширение-модели-chart" aria-label="Section link">#</a>6.2. Расширение модели Chart</h3><p>Расширить ChartData и ChartProps для поддержки:</p>
+<ul>
+<li>Координатных точек.</li>
+<li>Нескольких серий.</li>
+<li>Категориальных и числовых осей.</li>
+<li>Настраиваемых диапазонов.</li>
+<li>Подписей осей.</li>
+<li>Легенд.</li>
+<li>Reference lines.</li>
+<li>Аннотаций.</li>
+<li>Группировок.</li>
+<li>Дополнительных измерений.</li>
+</ul>
+<p>Не ломать существующий контракт <code>labels</code> / <code>values</code> / <code>series</code>.</p>
+<h3 id="63-новые-типы-компонентов"><a class="anchor" href="#63-новые-типы-компонентов" aria-label="Section link">#</a>6.3. Новые типы компонентов</h3><p>Каждый новый компонент должен иметь:</p>
+<ul>
+<li>Типизированную структуру данных.</li>
+<li>Типизированные props.</li>
+<li>Строгий валидатор.</li>
+<li>Регистрацию в Component Registry.</li>
+<li>Native UI renderer.</li>
+<li>SVG renderer.</li>
+<li>PNG renderer.</li>
+<li>Text fallback.</li>
+<li>Описание в Agent Tool Catalog.</li>
+<li>Документацию.</li>
+<li>Тестовые примеры.</li>
+</ul>
+<h3 id="64-ссылки-на-сущности-temporality"><a class="anchor" href="#64-ссылки-на-сущности-temporality" aria-label="Section link">#</a>6.4. Ссылки на сущности Temporality</h3><p>Предусмотреть возможность связывать элементы визуализаций с существующими сущностями:</p>
+<ul>
+<li>Артефактами.</li>
+<li>Задачами.</li>
+<li>Проектами.</li>
+<li>Запусками агентов.</li>
+<li>Другими доступными объектами.</li>
+</ul>
+<p>Не дублировать модели предметной области внутри Presentation IR.</p>
+<p>Ссылка должна содержать идентификатор и тип целевой сущности. Проверка прав доступа и разрешение ссылки выполняются на стороне runtime.</p>
+<h2 id="7-композиция-визуализаций"><a class="anchor" href="#7-композиция-визуализаций" aria-label="Section link">#</a>7. Композиция визуализаций</h2><p>Развить возможности комбинирования компонентов в одном Presentation Document.</p>
+<p>Поддержать сценарии:</p>
+<ul>
+<li>Заголовок и пояснение.</li>
+<li>KPI и график.</li>
+<li>Матрица и таблица подробностей.</li>
+<li>Несколько связанных графиков.</li>
+<li>График и текстовые выводы.</li>
+<li>Диаграмма и список рекомендаций.</li>
+</ul>
+<p>Использовать существующие <code>card</code> и <code>card-grid</code> как основу композиции.</p>
+<p>Не вводить отдельную модель Dashboard, если существующая композиция Presentation IR покрывает задачу.</p>
+<p>В дальнейшем предусмотреть синхронизацию фильтров и выделения между связанными компонентами.</p>
+<h2 id="8-интерактивность"><a class="anchor" href="#8-интерактивность" aria-label="Section link">#</a>8. Интерактивность</h2><p>Интерактивность должна развиваться в рамках существующей декларативной модели Actions.</p>
+<p>Предусмотреть:</p>
+<ul>
+<li>Выбор точки или объекта.</li>
+<li>Раскрытие подробностей.</li>
+<li>Переход к связанному артефакту.</li>
+<li>Включение и отключение групп.</li>
+<li>Фильтрацию данных.</li>
+<li>Переключение представлений.</li>
+<li>Выбор временного диапазона.</li>
+</ul>
+<p>Произвольный JavaScript из Presentation IR не исполняется.</p>
+<p>Интерактивные действия должны проходить через существующий механизм проверки разрешений и обработки Actions.</p>
+<p>SVG и PNG должны сохранять смысл визуализации без интерактивных возможностей.</p>
+<h2 id="9-требования-к-рендерерам"><a class="anchor" href="#9-требования-к-рендерерам" aria-label="Section link">#</a>9. Требования к рендерерам</h2><h3 id="native-ui"><a class="anchor" href="#native-ui" aria-label="Section link">#</a>Native UI</h3><p>Обеспечить:</p>
+<ul>
+<li>Адаптивное отображение.</li>
+<li>Корректную работу на узких экранах.</li>
+<li>Интерактивность.</li>
+<li>Подсказки.</li>
+<li>Легенды и фильтры.</li>
+<li>Раскрытие подробностей.</li>
+<li>Сохранение читаемости при большом количестве элементов.</li>
+</ul>
+<h3 id="svg"><a class="anchor" href="#svg" aria-label="Section link">#</a>SVG</h3><p>Обеспечить:</p>
+<ul>
+<li>Полноценную статическую визуализацию.</li>
+<li>Корректные подписи.</li>
+<li>Легенды.</li>
+<li>Цветовое кодирование.</li>
+<li>Сохранение пропорций.</li>
+<li>Отсутствие зависимости от JS.</li>
+</ul>
+<h3 id="png"><a class="anchor" href="#png" aria-label="Section link">#</a>PNG</h3><p>Формируется из того же Drawing Model, что и SVG.</p>
+<p>Обеспечить идентичность содержания и геометрии SVG- и PNG-представлений.</p>
+<h3 id="text"><a class="anchor" href="#text" aria-label="Section link">#</a>Text</h3><p>Текстовый fallback должен передавать смысл визуализации, а не просто сообщать её название.</p>
+<p>Например, для Positioning Map необходимо выводить:</p>
+<ul>
+<li>Названия осей.</li>
+<li>Группы объектов.</li>
+<li>Положение объектов.</li>
+<li>Выделенные объекты.</li>
+<li>Основные наблюдения.</li>
+</ul>
+<p>Для Sankey — основные узлы и потоки с их значениями.</p>
+<p>Для Heatmap — табличное представление матрицы.</p>
+<h2 id="10-инструменты-агента"><a class="anchor" href="#10-инструменты-агента" aria-label="Section link">#</a>10. Инструменты агента</h2><p>Обновить <code>presentationIRCatalog</code> в <code>kernel/agent/presentationtools.go</code>.</p>
+<p>Агент должен получать:</p>
+<ul>
+<li>Список доступных типов.</li>
+<li>Описание назначения.</li>
+<li>Поля и ограничения.</li>
+<li>Примеры корректного IR.</li>
+<li>Поддерживаемые режимы отображения.</li>
+</ul>
+<p>Описание должно оставаться достаточно компактным, чтобы не расходовать контекст модели на избыточную документацию.</p>
+<p>Необходима синхронизация каталога с реестром и валидаторами.</p>
+<p>Рекомендуется добавить автоматическую проверку соответствия типов и их описаний.</p>
+<p>В перспективе можно предусмотреть отдельный инструмент получения подробной спецификации компонента по запросу агента, но это не обязательное условие первой реализации.</p>
+<h2 id="11-производительность-и-ограничения"><a class="anchor" href="#11-производительность-и-ограничения" aria-label="Section link">#</a>11. Производительность и ограничения</h2><p>Сохранить существующие ограничения Presentation IR.</p>
+<p>Дополнительно предусмотреть:</p>
+<ul>
+<li>Ограничение количества точек и узлов.</li>
+<li>Ограничение глубины иерархий.</li>
+<li>Защиту от чрезмерной детализации.</li>
+<li>Контроль сложности геометрического layout.</li>
+<li>Ограничение размера итогового SVG.</li>
+<li>Ограничение времени рендеринга.</li>
+<li>Детерминированность результата при одинаковых данных и параметрах.</li>
+</ul>
+<p>Для больших наборов данных предусмотреть упрощение отображения или явное сообщение об ограничении.</p>
+<p>Нельзя молча удалять или искажать исходные данные.</p>
+<h2 id="12-тестирование"><a class="anchor" href="#12-тестирование" aria-label="Section link">#</a>12. Тестирование</h2><p>Для каждого нового компонента обязательны:</p>
+<ol>
+<li>Тесты разбора IR.</li>
+<li>Тесты строгой валидации.</li>
+<li>Тесты корректных и некорректных данных.</li>
+<li>Тесты граничных значений.</li>
+<li>Тесты Native UI renderer.</li>
+<li>Тесты SVG renderer.</li>
+<li>Тесты PNG renderer.</li>
+<li>Тесты Text fallback.</li>
+<li>Тесты адаптации к каналам.</li>
+<li>Проверка идентичности данных между форматами.</li>
+</ol>
+<p>Подготовить набор эталонных визуализаций для автоматического regression testing.</p>
+<p>Отдельно проверить:</p>
+<ul>
+<li>Пустые данные.</li>
+<li>Очень большие значения.</li>
+<li>Отрицательные значения.</li>
+<li>Отсутствующие значения.</li>
+<li>Пересекающиеся подписи.</li>
+<li>Большое количество категорий.</li>
+<li>Узкую ширину отображения.</li>
+<li>Длинные названия объектов.</li>
+</ul>
+<h2 id="13-документация"><a class="anchor" href="#13-документация" aria-label="Section link">#</a>13. Документация</h2><p>Обновить <code>docs/presentation-engine.md</code>.</p>
+<p>Документация должна содержать:</p>
+<ul>
+<li>Полный актуальный каталог компонентов.</li>
+<li>Описание семантики каждого типа.</li>
+<li>Схемы Presentation IR.</li>
+<li>Примеры корректных документов.</li>
+<li>Примеры визуального результата.</li>
+<li>Ограничения.</li>
+<li>Поддерживаемые интерактивные действия.</li>
+<li>Описание fallback для каналов.</li>
+</ul>
+<p>Для новых компонентов подготовить наглядные примеры, пригодные одновременно для документации и тестирования.</p>
+<h2 id="14-приоритет-реализации"><a class="anchor" href="#14-приоритет-реализации" aria-label="Section link">#</a>14. Приоритет реализации</h2><table>
+<thead>
+<tr>
+<th>Приоритет</th>
+<th>Содержание</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>P0</td>
+<td>Сверка и завершение Scatter, Heatmap, Histogram</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>Positioning Map / Quadrant</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>Radar Chart</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>Sankey</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>Swimlane</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>Treemap</td>
+</tr>
+<tr>
+<td>P2</td>
+<td>Композиция и связанные визуализации</td>
+</tr>
+<tr>
+<td>P2</td>
+<td>Расширенная интерактивность</td>
+</tr>
+<tr>
+<td>P3</td>
+<td>Funnel, Decision Tree и дополнительные представления</td>
+</tr>
+</tbody></table>
+<h2 id="15-критерии-приёмки"><a class="anchor" href="#15-критерии-приёмки" aria-label="Section link">#</a>15. Критерии приёмки</h2><p>Работа считается выполненной, если:</p>
+<ol>
+<li>Все новые компоненты зарегистрированы в Component Registry.</li>
+<li>Все компоненты проходят строгую валидацию.</li>
+<li>Каждый компонент поддерживает все обязательные форматы отображения.</li>
+<li>Native UI, SVG и PNG используют согласованную модель данных.</li>
+<li>Text fallback сохраняет семантику визуализации.</li>
+<li>Agent Tool Catalog содержит актуальные схемы.</li>
+<li>Старые Presentation IR документы продолжают корректно обрабатываться.</li>
+<li>Документация соответствует фактической реализации.</li>
+<li>Все новые возможности покрыты автоматическими тестами.</li>
+<li>Агент способен самостоятельно сформировать новые типы визуализаций на основании описания их контрактов.</li>
+</ol>
+<h2 id="16-ожидаемый-результат"><a class="anchor" href="#16-ожидаемый-результат" aria-label="Section link">#</a>16. Ожидаемый результат</h2><p>Presentation Engine должен стать более выразительным инструментом коммуникации агентов с человеком.</p>
+<p>Агент должен уметь выбирать подходящую форму представления в зависимости от характера информации:</p>
+<ul>
+<li>Сравнение объектов — сравнительные таблицы и Radar.</li>
+<li>Позиционирование — Positioning Map.</li>
+<li>Распределение — Histogram и Heatmap.</li>
+<li>Потоки — Sankey.</li>
+<li>Процессы — Swimlane.</li>
+<li>Иерархии — Treemap и Mindmap.</li>
+<li>Динамика — Timeline и Chart.</li>
+<li>Зависимости — Dependency Graph.</li>
+</ul>
+<p>Развитие не должно превращать Presentation Engine в BI-систему или отдельный конструктор дашбордов.</p>
+<p>Это универсальный декларативный язык визуальной коммуникации агента, интегрированный с остальной архитектурой Temporality.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="plan-priming-relevance.html"><small>← Назад</small><strong>Priming v2: от каталога знаний к полезным рекомендациям</strong></a>
+    <a class="pager-next" href="presentation-engine.html"><small>Далее →</small><strong>Техническое задание: Presentation Engine для Temporality</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
