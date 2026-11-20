@@ -447,40 +447,40 @@
 </tr>
 </thead>
 <tbody><tr>
-<td>line-chart</td>
-<td>Линейные графики</td>
+<td>line-chart, bar-chart, pie-chart, area-chart, donut-chart</td>
+<td>Базовые графики (алиасы chart с props.chartType)</td>
 </tr>
 <tr>
-<td>bar-chart</td>
-<td>Столбчатые диаграммы</td>
-</tr>
-<tr>
-<td>pie-chart</td>
-<td>Круговые диаграммы</td>
-</tr>
-<tr>
-<td>area-chart</td>
-<td>Диаграммы областей</td>
-</tr>
-<tr>
-<td>scatter-chart</td>
-<td>Диаграммы рассеяния</td>
-</tr>
-<tr>
-<td>heatmap</td>
-<td>Тепловые карты</td>
-</tr>
-<tr>
-<td>histogram</td>
-<td>Гистограммы</td>
+<td>chart</td>
+<td>Общий график: labels/values/series; временной ряд выражается как chart(line) с датами в labels — отдельный тип не требуется</td>
 </tr>
 <tr>
 <td>gauge</td>
 <td>Индикаторы значений</td>
 </tr>
 <tr>
-<td>timeline-chart</td>
-<td>Временные ряды</td>
+<td>scatter</td>
+<td>Диаграмма рассеяния: независимые объекты с координатами (data.points[{x, y, label, group, size, highlight, note, ref}]), диапазоны осей, легенды групп, reference lines</td>
+</tr>
+<tr>
+<td>quadrant (alias positioning-map)</td>
+<td>Позиционная карта: scatter в quadrant-режиме — деление на 4 подписанных квадранта (§ ТЗ ext §4.1)</td>
+</tr>
+<tr>
+<td>heatmap</td>
+<td>Тепловая карта: матрица значений с пропусками (nil = отсутствующее значение), цветовая шкала, границы шкалы</td>
+</tr>
+<tr>
+<td>histogram</td>
+<td>Гистограмма распределения: сырая выборка, bins/bin_width или автомат, normalized</td>
+</tr>
+<tr>
+<td>radar</td>
+<td>Радар: 3–12 осей, до 6 серий, highlight серии</td>
+</tr>
+<tr>
+<td>treemap</td>
+<td>Вложенные области по весам: иерархия ≤ 3 уровней, цвет по доле</td>
 </tr>
 </tbody></table>
 <p>Требования:</p>
@@ -491,8 +491,9 @@
 <li>Поддерживаются подсказки и отображение значений.</li>
 <li>Обеспечивается адаптивная ширина.</li>
 <li>Обрабатываются нулевые и отрицательные значения.</li>
-<li>Для больших наборов данных предусмотрены ограничения.</li>
+<li>Для больших наборов данных предусмотрены ограничения (§11).</li>
 <li>Визуализация не должна искажать исходные данные.</li>
+<li>Ссылки на сущности (ext §6.4): точки scatter/quadrant, узлы swimlane и листья treemap принимают ref {type: artifact|task|project|run|agent, id} — разрешение ссылки на стороне runtime.</li>
 </ul>
 <h2 id="64-diagrams"><a class="anchor" href="#64-diagrams" aria-label="Section link">#</a>6.4. Diagrams</h2><table>
 <thead>
@@ -526,16 +527,16 @@
 <td>Граф зависимостей</td>
 </tr>
 <tr>
-<td>architecture-diagram</td>
-<td>Архитектурные схемы</td>
+<td>sankey</td>
+<td>Потоки: узлы и направленные связи с весами (распределение ресурсов, переходы состояний)</td>
+</tr>
+<tr>
+<td>swimlane</td>
+<td>Процессы с дорожками участников (дорожка — самостоятельный семантический элемент)</td>
 </tr>
 <tr>
 <td>mindmap</td>
 <td>Интеллект-карты</td>
-</tr>
-<tr>
-<td>network-graph</td>
-<td>Графы взаимосвязей</td>
 </tr>
 </tbody></table>
 <p>Для первой реализации допустимо использовать существующие движки визуализации, включая Mermaid.</p>
