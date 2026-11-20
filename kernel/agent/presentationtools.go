@@ -52,16 +52,25 @@ Containers:
 - card-grid: props {columns: 1..4}, children: [card, ...] (cards only)
 
 Charts:
-- chart: props {chartType: line|bar|pie|donut|area, title?, showValues?, showLegend?} + data {labels:[...], values:[...] (or series:[{name, values}], <= 6 series), unit?, x_title?, y_title?}; values[i] pairs labels[i]; pie/donut need values >= 0 with a positive sum. Aliases set chartType: line-chart, bar-chart, pie-chart, area-chart, donut-chart
+- chart: props {chartType: line|bar|pie|donut|area, title?, showValues?, showLegend?} + data {labels:[...], values:[...] (or series:[{name, values}], <= 6 series), unit?, x_title?, y_title?}; values[i] pairs labels[i]; pie/donut need values >= 0 with a positive sum. Aliases set chartType: line-chart, bar-chart, pie-chart, area-chart, donut-chart. Time series: chart(line) with date labels — no separate type needed
 - gauge: data {value, min? (0), max? (100), label?, unit?}
+- scatter: data {points:[{x, y, label?, group?, size? (0.2..6, default 1), highlight?, note?, ref?}], x_title?, y_title?, unit?, x_min?/x_max?/y_min?/y_max? (explicit ranges; auto otherwise)}; props {title?, showValues?, showLegend?, refLines?: [{axis: x|y, at, label?}]} — independent objects, not parallel arrays
+- quadrant | positioning-map: scatter in positioning mode — props {quadrant: true, quadrantLabels?: [TL,TR,BL,BR]}: two independent criteria, competitive analysis, prioritization; highlight key objects, use groups for categories
+- heatmap: data {rows:[...], cols:[...], values:[[number|null] per row] (nil = missing), unit?, min?/max? (scale bounds)}; props {title?, showValues?} — matrix of intensity
+- histogram: data {values:[...] (the raw sample), bins? (<=60), bin_width?, unit?, x_title?, y_title?}; props {title?, normalized? (share of sample), showValues?} — distribution shape; empty/small samples are fine
+- radar: data {axes:[...] (3..12 dimensions), series:[{name, values aligned to axes}] (<= 6), min?, max?, unit?}; props {title?, showValues?, showLegend?, highlight?: series name} — multi-dimension comparison
+- entity refs: points/quadrant objects, swimlane nodes and treemap nodes accept ref: {type: artifact|task|project|run|agent, id} — a pointer the runtime resolves; never embed domain objects into the IR
 
 Diagrams (node ids unique; edges reference declared ids):
+- sankey: data {nodes:[{id, label?, group?}] (<= 24), links:[{source, target, value > 0, label?}] (<= 60), unit?}; props {title?, showValues?} — flows between states/categories: distribution, funnels, transitions; label each node, keep the graph acyclic
+- swimlane: data {lanes:[{id, label?}] (<= 12 participants), nodes:[{id, lane, label, status?, note?, start? (stage column), span?, ref?}] (<= 40), edges:[{from, to, label?, condition?, dashed?}]}; props {title?} — process with per-participant responsibility: lanes are semantic (never a plain flowchart)
 - flowchart | dependency-graph: data {nodes:[{id, label, shape?: rect|round|diamond, status?}], edges:[{from, to, label?, dashed?}]}; acyclic
 - sequence-diagram: data {participants:[{id, label}] (2..12), messages:[{from, to, label?, kind: sync|async|return}]}
 - mindmap: data {root:{label, note?, children:[same shape]}}; <= 6 levels, <= 100 nodes
 - state-diagram: data {initial?, states:[{id, label, status?}], transitions:[{from, to, label?, dashed?}]}
 - er-diagram: data {entities:[{name, attributes?: ['type name', ...]}], relations:[{from, to, label?, cardinality: 1:1|1:N|N:1|N:M|0:1|0:N}]}
 - class-diagram: data {classes:[{name, attributes?: [...], methods?: [...]}], relations:[{from, to, label?, kind: inheritance|composition|association}]}
+- treemap: data {root:{label, children:[{label, value > 0 (leaf), children?, ref?}]}} (<= 64 nodes, <= 3 levels); props {title?, showValues?, maxDepth? (1..3)}; unit? — hierarchical area = value: portfolio, resource and task distribution
 
 Plans:
 - timeline: items [{label, at (date or short mark), status?, description?}]

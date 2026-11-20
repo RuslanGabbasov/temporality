@@ -201,6 +201,15 @@ func builtinSpecs() []Spec {
 		all(Spec{Type: "chart", Kind: KindVisual, Description: "Chart (props.chartType: line|bar|pie|area|donut)",
 			Aliases: []string{"line-chart", "bar-chart", "pie-chart", "area-chart", "donut-chart"}}),
 		all(Spec{Type: "gauge", Kind: KindVisual, Description: "Single-value gauge (data.value)"}),
+		// Extended visualization catalog (docs/presentation-engine-ext.md §3-§4).
+		all(Spec{Type: "scatter", Kind: KindVisual, Description: "Coordinate scatter plot (data.points, per-point objects)"}),
+		all(Spec{Type: "quadrant", Kind: KindVisual, Description: "Positioning map with quadrants (scatter + props.quadrantLabels)", Aliases: []string{"positioning-map"}}),
+		all(Spec{Type: "heatmap", Kind: KindVisual, Description: "Value matrix heatmap (data.rows, data.cols, data.values)"}),
+		all(Spec{Type: "histogram", Kind: KindVisual, Description: "Distribution histogram (data.values, bins/bin_width)"}),
+		all(Spec{Type: "radar", Kind: KindVisual, Description: "Multi-dimension radar (data.axes, data.series)"}),
+		all(Spec{Type: "sankey", Kind: KindDiagram, Description: "Flow diagram (data.nodes, data.links with values)"}),
+		all(Spec{Type: "swimlane", Kind: KindDiagram, Description: "Swimlane process (data.lanes, data.nodes, data.edges)"}),
+		all(Spec{Type: "treemap", Kind: KindVisual, Description: "Nested area treemap (data.root hierarchy)"}),
 		// Diagrams (§6.4).
 		all(Spec{Type: "flowchart", Kind: KindDiagram, Description: "Block diagram (data.nodes, data.edges)"}),
 		all(Spec{Type: "sequence-diagram", Kind: KindDiagram, Description: "Sequence of messages (data.participants, data.messages)"}),

@@ -29,10 +29,12 @@
             "text", "markdown", "heading", "paragraph", "list", "quote", "code", "link", "badge", "divider",
             "table", "card", "card-grid", "comparison", "key-value", "kpi", "progress", "status", "alert", "accordion",
             "chart", "line-chart", "bar-chart", "pie-chart", "area-chart", "donut-chart", "gauge",
-            "flowchart", "sequence-diagram",
-            "timeline", "gantt",
+            "scatter", "quadrant", "positioning-map", "heatmap", "histogram", "radar", "treemap",
+            "flowchart", "dependency-graph", "sankey", "swimlane", "sequence-diagram", "mindmap",
+            "state-diagram", "er-diagram", "class-diagram",
+            "timeline", "gantt", "roadmap",
             "image", "image-gallery", "file",
-            "button"
+            "button", "form"
           ]
         },
         "id": { "type": "string", "maxLength": 128 },

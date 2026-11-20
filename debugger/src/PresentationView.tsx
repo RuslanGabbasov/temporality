@@ -15,6 +15,7 @@ import MermaidDiagram from './MermaidDiagram'
 import { storageDownloadFile } from './kernelApi'
 import { resolveImageSource, useResolvedImage } from './imageResolution'
 import { splitMarkdownBlocks } from './markdownBlocks'
+import { ScatterView, HeatmapView, HistogramView, RadarView, SankeyView, SwimlaneView, TreemapView } from './PresentationViz2'
 
 // Re-exported so existing call sites (and tests) keep importing from here;
 // the implementation is shared with Markdown.tsx via imageResolution.ts.
@@ -1155,6 +1156,13 @@ export function PresentationBlock({ component, onFile, onInteract, presentationI
     case 'chart': case 'line-chart': case 'bar-chart': case 'pie-chart': case 'area-chart': case 'donut-chart':
       return <ChartView component={component} />
     case 'gauge': return <GaugeView component={component} />
+    case 'scatter': case 'quadrant': case 'positioning-map': return <ScatterView component={component} />
+    case 'heatmap': return <HeatmapView component={component} />
+    case 'histogram': return <HistogramView component={component} />
+    case 'radar': return <RadarView component={component} />
+    case 'sankey': return <SankeyView component={component} />
+    case 'swimlane': return <SwimlaneView component={component} />
+    case 'treemap': return <TreemapView component={component} />
     case 'flowchart': case 'dependency-graph': return <FlowchartView component={component} />
     case 'sequence-diagram': return <SequenceView component={component} />
     case 'mindmap': return <MindmapView component={component} />

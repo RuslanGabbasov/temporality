@@ -172,6 +172,22 @@ func RenderComponentText(c Component, depth int) []string {
 		return accordionText(c, indent)
 	case "chart":
 		return chartText(c, data.chart, indent)
+	case "scatter", "quadrant":
+		var sprops ScatterProps
+		_ = decodeStrict(c.Props, &sprops)
+		return scatterText(c, indent, sprops.Quadrant || c.Type == "quadrant")
+	case "heatmap":
+		return heatmapText(c, indent)
+	case "histogram":
+		return histogramText(c, indent)
+	case "radar":
+		return radarText(c, indent)
+	case "sankey":
+		return sankeyText(c, indent)
+	case "swimlane":
+		return swimlaneText(c, indent)
+	case "treemap":
+		return treemapText(c, indent)
 	case "gauge":
 		var data GaugeData
 		_ = decodeStrict(c.Data, &data)

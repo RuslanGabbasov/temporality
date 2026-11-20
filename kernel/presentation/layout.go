@@ -172,6 +172,20 @@ func (l *layout) renderComponent(c Component, x, y, width float64) float64 {
 		return l.drawChartBlock(c, x, y, width)
 	case "gauge":
 		return l.drawGaugeBlock(c, x, y, width)
+	case "scatter", "quadrant":
+		return l.drawScatterBlock(c, x, y, width)
+	case "heatmap":
+		return l.drawHeatmapBlock(c, x, y, width)
+	case "histogram":
+		return l.drawHistogramBlock(c, x, y, width)
+	case "radar":
+		return l.drawRadarBlock(c, x, y, width)
+	case "sankey":
+		return l.drawSankeyBlock(c, x, y, width)
+	case "swimlane":
+		return l.drawSwimlaneBlock(c, x, y, width)
+	case "treemap":
+		return l.drawTreemapBlock(c, x, y, width)
 	case "flowchart":
 		return l.drawFlowBlock(c, x, y, width)
 	case "dependency-graph":

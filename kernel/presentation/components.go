@@ -562,6 +562,14 @@ func init() {
 		"accordion":        accordionValidator,
 		"chart":            chartValidator,
 		"gauge":            gaugeValidator,
+		"scatter":          scatterValidator,
+		"quadrant":         quadrantValidator,
+		"heatmap":          heatmapValidator,
+		"histogram":        histogramValidator,
+		"radar":            radarValidator,
+		"sankey":           sankeyValidator,
+		"swimlane":         swimlaneValidator,
+		"treemap":          treemapValidator,
 		"flowchart":        flowValidator,
 		"sequence-diagram": sequenceValidator,
 		"mindmap":          mindmapValidator,
@@ -583,16 +591,28 @@ func init() {
 // "pie-chart" component IS a chart with chartType "pie" (docs/presentation-
 // engine.md §6.3 catalog uses explicit slugs; the IR canonical form is chart).
 func aliasDefaults(c *Component, canonical string) bool {
-	if canonical != "chart" {
-		return false
+	if canonical == "chart" {
+		if implied, ok := chartAliasTypes[c.Type]; ok {
+			var props ChartProps
+			if len(c.Props) > 0 {
+				_ = json.Unmarshal(c.Props, &props)
+			}
+			if props.ChartType == "" {
+				props.ChartType = implied
+				encoded, _ := json.Marshal(props)
+				c.Props = encoded
+			}
+			return true
+		}
 	}
-	if implied, ok := chartAliasTypes[c.Type]; ok {
-		var props ChartProps
+	// positioning-map IS a quadrant in positioning mode (§4.1 alias).
+	if canonical == "quadrant" && c.Type == "positioning-map" {
+		var props ScatterProps
 		if len(c.Props) > 0 {
 			_ = json.Unmarshal(c.Props, &props)
 		}
-		if props.ChartType == "" {
-			props.ChartType = implied
+		if !props.Quadrant {
+			props.Quadrant = true
 			encoded, _ := json.Marshal(props)
 			c.Props = encoded
 		}
