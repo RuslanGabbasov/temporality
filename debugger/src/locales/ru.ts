@@ -2750,7 +2750,7 @@ export const ru: Record<string, string> = {
     'explorer.settle_done': 'Применено',
     'explorer.settle_done_n': 'вердиктов записано: {{count}}',
     'explorer.agent_title': 'Исследование агента',
-    'explorer.agent_hint': 'Вызовы knowledge_explore выбранного рана. Повтор выполняется по текущей базе знаний — она могла измениться с момента вызова.',
+    'explorer.agent_hint': 'Вызовы knowledge_explore; повтор — по текущей базе знаний (она могла измениться).',
     'explorer.agent_run_placeholder': 'ID рана…',
     'explorer.agent_recent_runs': 'Недавние раны',
     'explorer.agent_load': 'Загрузить',

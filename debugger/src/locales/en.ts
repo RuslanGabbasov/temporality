@@ -2750,7 +2750,7 @@ export const en: Record<string, string> = {
     'explorer.settle_done': 'Applied',
     'explorer.settle_done_n': 'verdicts recorded: {{count}}',
     'explorer.agent_title': 'Agent research',
-    'explorer.agent_hint': 'knowledge_explore calls of the selected run. The replay runs against the CURRENT knowledge base — it may have changed since the call.',
+    'explorer.agent_hint': 'knowledge_explore calls; the replay runs against the CURRENT knowledge base.',
     'explorer.agent_run_placeholder': 'Run id…',
     'explorer.agent_recent_runs': 'Recent runs',
     'explorer.agent_load': 'Load',

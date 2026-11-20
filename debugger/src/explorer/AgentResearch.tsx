@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, InlineNotification, Tag, TextInput } from '@carbon/react'
+import { Button, InlineNotification, Tag } from '@carbon/react'
 import { observationApi, runEvents, type ExploreResult } from '../observationApi'
 import { extractExploreCalls, extractCallResult, extractRunHintOutcome, parseExploreArguments, parseKnowledgeLookupCall, type AgentExploreCall, type ExploreCallResult, type RunHintOutcome } from './agentExploreCalls'
 import { stateLabel } from './shared'
@@ -11,7 +11,6 @@ import { useT } from '../i18n'
  *  the base as it is now (§12.2-12.3). */
 export default function AgentResearch({ project, onOpenDossier }: { project: string; onOpenDossier: (id: string) => void }) {
   const t = useT()
-  const [runInput, setRunInput] = useState('')
   const [researchRuns, setResearchRuns] = useState<{ id: string; at: string; calls: AgentExploreCall[] }[]>([])
   const [scanLoading, setScanLoading] = useState(false)
   const [calls, setCalls] = useState<AgentExploreCall[]>([])
@@ -26,34 +25,40 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
   const [hintOutcome, setHintOutcome] = useState<RunHintOutcome | null>(null)
   const seq = useRef(0)
 
-  // The tab opens on WHAT THE AGENTS ACTUALLY RESEARCHED: scan the recent
-  // tool.started events for knowledge_explore calls and group them by run —
+  // The tab opens on WHAT THE AGENTS ACTUALLY RESEARCHED: scan recent
+  // tool.started events for knowledge tool calls and group them by run —
   // a picker over all runs forced the user to guess which of the thousands
-  // ever looked at knowledge.
+  // ever looked at knowledge. Cursor-walked up to 4 pages: 500 events cover
+  // a couple of busy days, the walk reaches back for weeks.
   const loadResearchRuns = useCallback(async () => {
     if (!project.trim()) { setResearchRuns([]); return }
     setScanLoading(true)
     try {
       // order=desc: the journal's default window is ASC (oldest first) —
       // without it the scan showed the same ancient October run forever.
-      const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'tool.started', limit: 500, order: 'desc' })
       const byRun = new Map<string, { id: string; at: string; calls: AgentExploreCall[] }>()
-      for (const event of page.events ?? []) {
-        const data = event.data as Record<string, unknown> | undefined
-        if (!data) continue
-        // Both knowledge tools count as research: explore ORIENTS/SEARCHES,
-        // lookup FETCHES one item by its handle — the tab shows either.
-        const tool = data.tool
-        if (tool !== 'knowledge_explore' && tool !== 'knowledge_lookup') continue
-        const call = tool === 'knowledge_lookup' ? parseKnowledgeLookupCall(data) : parseExploreArguments(data)
-        if (!call) continue
-        call.eventID = event.event_id
-        call.at = event.occurred_at
-        const run = event.context?.run ?? ''
-        if (!run) continue
-        const entry = byRun.get(run)
-        if (entry) entry.calls.push(call)
-        else byRun.set(run, { id: run, at: event.occurred_at, calls: [call] })
+      let cursor: string | undefined
+      for (let pageIdx = 0; pageIdx < 4; pageIdx++) {
+        const page = await observationApi.events(project.trim(), cursor, undefined, undefined, { type: 'tool.started', limit: 500, order: 'desc' })
+        for (const event of page.events ?? []) {
+          const data = event.data as Record<string, unknown> | undefined
+          if (!data) continue
+          // Both knowledge tools count as research: explore ORIENTS/SEARCHES,
+          // lookup FETCHES one item by its handle — the tab shows either.
+          const tool = data.tool
+          if (tool !== 'knowledge_explore' && tool !== 'knowledge_lookup') continue
+          const call = tool === 'knowledge_lookup' ? parseKnowledgeLookupCall(data) : parseExploreArguments(data)
+          if (!call) continue
+          call.eventID = event.event_id
+          call.at = event.occurred_at
+          const run = event.context?.run ?? ''
+          if (!run) continue
+          const entry = byRun.get(run)
+          if (entry) entry.calls.push(call)
+          else byRun.set(run, { id: run, at: event.occurred_at, calls: [call] })
+        }
+        cursor = page.next_cursor
+        if (!cursor) break
       }
       const runs = [...byRun.values()]
         .map((entry) => ({ ...entry, calls: [...entry.calls].sort((a, b) => a.at.localeCompare(b.at)) }))
@@ -65,11 +70,8 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
 
   useEffect(() => { void loadResearchRuns() }, [loadResearchRuns])
 
-  async function load(runID?: string) {
-    // Explicit id first: the run list calls load(entry.id) — reading runInput
-    // here would see the stale (pre-setState) value and silently no-op on the
-    // first click.
-    const run = (runID ?? runInput).trim()
+  async function load(runID: string) {
+    const run = runID.trim()
     if (!run) return
     const current = ++seq.current
     setLoading(true); setError(''); setCalls([]); setReplays(new Map()); setReplayErrors(new Map())
@@ -129,30 +131,25 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
 
   return (
     <div>
+      {/* One-line header, refresh at the right edge: the tab's job (explore
+          calls, replayed against the current base) fits in one sentence. */}
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', marginBottom: '0.4rem', flexWrap: 'wrap' }}>
         <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t('explorer.agent_title') ?? 'Agent research'}</div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{t('explorer.agent_hint') ?? ''}</div>
-      </div>
-
-      {/* The research-run list: what the agents actually explored, newest
-          first. Click a run — its calls expand in place with replay buttons.
-          The manual run-id entry is a secondary path below the list. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 600 }}>{t('explorer.agent_researched_runs') ?? 'Runs that explored knowledge'}</div>
-        <Button size="sm" kind="ghost" onClick={() => void loadResearchRuns()} disabled={scanLoading}>↻</Button>
+        <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', flex: 1, minWidth: '12rem' }}>{t('explorer.agent_hint') ?? ''}</div>
+        <Button size="sm" kind="ghost" onClick={() => void loadResearchRuns()} disabled={scanLoading} title={t('common.refresh') ?? 'Refresh'}>↻</Button>
       </div>
 
       {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
 
       {scanLoading && <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem', marginBottom: '0.5rem' }}>…</div>}
-      {!scanLoading && researchRuns.length === 0 && !loadedRun && (
+      {!scanLoading && researchRuns.length === 0 && (
         <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '1rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
           {t('explorer.agent_no_research_runs') ?? 'В последних прогонах агент ничего не исследовал через knowledge_explore. Укажите id рана вручную.'}
         </div>
       )}
 
       {researchRuns.length > 0 && (
-        <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', overflow: 'hidden', marginBottom: '0.75rem', maxHeight: '40vh', overflowY: 'auto' }}>
+        <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', overflow: 'hidden', marginBottom: '0.75rem', maxHeight: 'calc(100vh - 230px)', overflowY: 'auto' }}>
           {researchRuns.map((entry, index) => {
             const expanded = loadedRun === entry.id
             const lastQuestion = entry.calls[entry.calls.length - 1]?.question || entry.calls[0]?.operation || ''
@@ -203,29 +200,7 @@ export default function AgentResearch({ project, onOpenDossier }: { project: str
         </div>
       )}
 
-      {/* Secondary path: a specific run by id (the list covers the recent 50). */}
-      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-        <TextInput
-          id="agent-research-run"
-          size="sm" labelText="" hideLabel
-          style={{ width: '240px' }}
-          placeholder={t('explorer.agent_run_placeholder') ?? 'Run id…'}
-          value={runInput}
-          onChange={(e) => setRunInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void load() }}
-        />
-        <Button size="sm" kind="ghost" onClick={() => void load()} disabled={loading || !runInput.trim()}>
-          {loading ? '…' : (t('explorer.agent_load') ?? 'Load')}
-        </Button>
-      </div>
-
-      {loadedRun && researchRuns.every((entry) => entry.id !== loadedRun) && calls.length === 0 && !loading && (
-        <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '1rem', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>
-          {t('explorer.agent_no_calls') ?? ''}
-        </div>
-      )}
-
-      {loadedRun && calls.length > 0 && researchRuns.every((entry) => entry.id !== loadedRun) && calls.map((call) => (
+      {loadedRun && researchRuns.every((entry) => entry.id !== loadedRun) && calls.length > 0 && calls.map((call) => (
         <CallCard key={call.eventID} call={call} result={callResults.get(call.operationID)} replays={replays} replayBusy={replayBusy} replayErrors={replayErrors} onReplay={replay} onOpenDossier={onOpenDossier} t={t} opLabel={opLabel} />
       ))}
     </div>
