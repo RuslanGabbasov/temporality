@@ -35,10 +35,19 @@ type ServerConfig struct {
 	Allow    []string          `json:"allowed_tools,omitempty"`
 	Approval []string          `json:"approval_tools,omitempty"`
 	Enabled  bool              `json:"enabled"`
+	// TimeoutMs caps one tool call against this server (§ the MCP timeout_ms
+	// convention): the caller's per-call budget is clamped to this ceiling.
+	// 0 = the kernel default (10 minutes). The shared HTTP client timeout
+	// scales to cover it (max + 30s headroom).
+	TimeoutMs int `json:"timeout_ms,omitempty"`
 }
 
 // Validate checks structural constraints before any connection attempt.
 func (c ServerConfig) Validate() error {
+	// The per-call ceiling: 0 = the kernel default; otherwise 1s..24h in ms.
+	if c.TimeoutMs < 0 || c.TimeoutMs > 24*60*60*1000 {
+		return fmt.Errorf("timeout_ms %d outside 0..86400000 (24h)", c.TimeoutMs)
+	}
 	switch c.Type {
 	case TypeStdio:
 		if strings.TrimSpace(c.Command) == "" {

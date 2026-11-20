@@ -10175,7 +10175,7 @@ func mcpConfig(m workspace.MCPServer) mcpclient.ServerConfig {
 		Command: m.Command, Args: m.Args, Env: m.Env,
 		URL: m.URL, Headers: m.Headers,
 		Allow: m.AllowedTools, Approval: m.ApprovalTools,
-		Enabled: m.Enabled,
+		Enabled: m.Enabled, TimeoutMs: m.TimeoutMs,
 	}
 }
 
@@ -10192,7 +10192,10 @@ type mcpServerRequest struct {
 	AllowedTools  []string          `json:"allowed_tools"`
 	ApprovalTools []string          `json:"approval_tools"`
 	Enabled       *bool             `json:"enabled"`
-	OrgUnitID     string            `json:"org_unit_id"` // only set on create; updates keep the stored binding
+	// TimeoutMs caps one tool call against this server (seconds × 1000 from
+	// the card's seconds field). 0 = the kernel default ceiling (10 minutes).
+	TimeoutMs int    `json:"timeout_ms"`
+	OrgUnitID string `json:"org_unit_id"` // only set on create; updates keep the stored binding
 }
 
 func (req mcpServerRequest) toServer(id string) workspace.MCPServer {
@@ -10209,7 +10212,7 @@ func (req mcpServerRequest) toServer(id string) workspace.MCPServer {
 		URL: strings.TrimSpace(req.URL), Command: strings.TrimSpace(req.Command),
 		Args: req.Args, Env: req.Env, Headers: req.Headers,
 		AllowedTools: req.AllowedTools, ApprovalTools: req.ApprovalTools,
-		Enabled: enabled, OrgUnitID: req.OrgUnitID,
+		Enabled: enabled, TimeoutMs: req.TimeoutMs, OrgUnitID: req.OrgUnitID,
 	}
 }
 

@@ -13,6 +13,9 @@ import (
 // transport: stdio (command + args + env), sse or http (url + headers).
 // AllowedTools/ApprovalTools store original tool names from the server;
 // empty AllowedTools exposes every tool the server advertises.
+// TimeoutMs caps one tool call against this server (the MCP timeout_ms
+// convention — the caller's budget, clamped by the server); 0 = the kernel
+// default (10 minutes).
 type MCPServer struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`
@@ -25,6 +28,7 @@ type MCPServer struct {
 	AllowedTools  []string          `json:"allowed_tools"`
 	ApprovalTools []string          `json:"approval_tools"`
 	Enabled       bool              `json:"enabled"`
+	TimeoutMs     int               `json:"timeout_ms,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -53,12 +57,12 @@ func (s *Store) CreateMCPServer(ctx context.Context, m *MCPServer) error {
 	m.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO workspace_mcp_server
-			(id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, org_unit_id, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			(id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, timeout_ms, org_unit_id, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		m.ID, m.Name, m.Type, m.URL, m.Command,
 		marshalStrings(m.Args), marshalStrings(m.Env), marshalMap(m.Headers),
 		marshalStrings(m.AllowedTools), marshalStrings(m.ApprovalTools),
-		m.Enabled, nullString(m.OrgUnitID), m.CreatedAt, m.UpdatedAt)
+		m.Enabled, m.TimeoutMs, nullString(m.OrgUnitID), m.CreatedAt, m.UpdatedAt)
 	return err
 }
 
@@ -67,9 +71,9 @@ func (s *Store) GetMCPServer(ctx context.Context, id string) (MCPServer, error) 
 	var args, env, headers, allowed, approval []byte
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, org_unit_id, created_at, updated_at
-		 FROM workspace_mcp_server WHERE id = $1`, id).
-		Scan(&m.ID, &m.Name, &m.Type, &m.URL, &m.Command, &args, &env, &headers, &allowed, &approval, &m.Enabled, &orgUnitID, &m.CreatedAt, &m.UpdatedAt)
+		`SELECT id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, timeout_ms, org_unit_id, created_at, updated_at
+			 FROM workspace_mcp_server WHERE id = $1`, id).
+		Scan(&m.ID, &m.Name, &m.Type, &m.URL, &m.Command, &args, &env, &headers, &allowed, &approval, &m.Enabled, &m.TimeoutMs, &orgUnitID, &m.CreatedAt, &m.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -82,8 +86,8 @@ func (s *Store) GetMCPServer(ctx context.Context, id string) (MCPServer, error) 
 
 func (s *Store) ListAllMCPServers(ctx context.Context) ([]MCPServer, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, org_unit_id, created_at, updated_at
-		 FROM workspace_mcp_server ORDER BY created_at`)
+		`SELECT id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, timeout_ms, org_unit_id, created_at, updated_at
+			 FROM workspace_mcp_server ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -98,8 +102,8 @@ func (s *Store) ListMCPServersVisible(ctx context.Context, units []string) ([]MC
 		return s.ListAllMCPServers(ctx)
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, org_unit_id, created_at, updated_at
-		 FROM workspace_mcp_server WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
+		`SELECT id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, timeout_ms, org_unit_id, created_at, updated_at
+			 FROM workspace_mcp_server WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
 	if err != nil {
 		return nil, err
 	}
@@ -111,13 +115,13 @@ func (s *Store) UpdateMCPServer(ctx context.Context, m *MCPServer) error {
 	m.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_mcp_server
-		 SET name=$2, type=$3, url=$4, command=$5, args=$6, env=$7, headers=$8,
-		     allowed_tools=$9, approval_tools=$10, enabled=$11, org_unit_id=$12, updated_at=$13
-		 WHERE id=$1`,
+			 SET name=$2, type=$3, url=$4, command=$5, args=$6, env=$7, headers=$8,
+				 allowed_tools=$9, approval_tools=$10, enabled=$11, timeout_ms=$12, org_unit_id=$13, updated_at=$14
+			 WHERE id=$1`,
 		m.ID, m.Name, m.Type, m.URL, m.Command,
 		marshalStrings(m.Args), marshalStrings(m.Env), marshalMap(m.Headers),
 		marshalStrings(m.AllowedTools), marshalStrings(m.ApprovalTools),
-		m.Enabled, nullString(m.OrgUnitID), m.UpdatedAt)
+		m.Enabled, m.TimeoutMs, nullString(m.OrgUnitID), m.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -159,7 +163,7 @@ func scanMCPServers(rows pgx.Rows) ([]MCPServer, error) {
 		var m MCPServer
 		var args, env, headers, allowed, approval []byte
 		var orgUnitID *string
-		if err := rows.Scan(&m.ID, &m.Name, &m.Type, &m.URL, &m.Command, &args, &env, &headers, &allowed, &approval, &m.Enabled, &orgUnitID, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.Type, &m.URL, &m.Command, &args, &env, &headers, &allowed, &approval, &m.Enabled, &m.TimeoutMs, &orgUnitID, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		m.OrgUnitID = derefPtr(orgUnitID)

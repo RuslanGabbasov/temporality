@@ -877,6 +877,8 @@ export interface MCPServer {
   allowed_tools: string[]
   approval_tools: string[]
   enabled: boolean
+  /** Max tool-call timeout against this server, ms; 0/absent = the kernel default. */
+  timeout_ms?: number
   org_unit_id?: string
   created_at: string
   updated_at: string

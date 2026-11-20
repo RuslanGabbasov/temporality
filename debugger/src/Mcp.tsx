@@ -39,7 +39,7 @@ export function maskServerAddress(raw: string): string {
   return address
 }
 
-type ServerForm = Partial<MCPServer> & { envText?: string; headersText?: string }
+type ServerForm = Partial<MCPServer> & { envText?: string; headersText?: string; timeoutSec?: string }
 
 export default function Mcp() {
   const t = useT()
@@ -87,7 +87,7 @@ export default function Mcp() {
     setEditing(null)
     setDiscovered([])
     setDiscoverError('')
-    setForm({ name: '', type: 'stdio', command: '', args: [], env: [], headers: {}, allowed_tools: [], approval_tools: [], enabled: true, envText: '', headersText: '' })
+    setForm({ name: '', type: 'stdio', command: '', args: [], env: [], headers: {}, allowed_tools: [], approval_tools: [], enabled: true, envText: '', headersText: '', timeoutSec: '' })
     setShowForm(true)
   }
 
@@ -100,7 +100,7 @@ export default function Mcp() {
     setFormEnabled(s.enabled)
     setDiscovered([])
     setDiscoverError('')
-    setForm({ ...s, envText: (s.env ?? []).join('\n'), headersText: Object.entries(s.headers ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n') })
+    setForm({ ...s, envText: (s.env ?? []).join('\n'), headersText: Object.entries(s.headers ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n'), timeoutSec: s.timeout_ms ? String(Math.round(s.timeout_ms / 1000)) : '' })
     setShowForm(true)
   }
 
@@ -124,8 +124,18 @@ export default function Mcp() {
       allowed_tools: form.allowed_tools ?? [],
       approval_tools: form.approval_tools ?? [],
       enabled: form.enabled ?? true,
+      // The card asks in seconds; the wire contract is milliseconds.
+      timeout_ms: timeoutSecToMs(form.timeoutSec),
       org_unit_id: form.org_unit_id,
     }
+  }
+
+  // The card's timeout field is in seconds; the API contract is milliseconds.
+  // Empty/0/garbage = unset (the kernel default ceiling, 10 minutes).
+  function timeoutSecToMs(value: string | number | undefined): number {
+    const n = Number(value ?? 0)
+    if (!Number.isFinite(n) || n <= 0) return 0
+    return Math.min(86400, Math.round(n)) * 1000
   }
 
   const discover = async () => {
@@ -255,6 +265,7 @@ export default function Mcp() {
                       ? <Tag type="green" size="sm">{t('mcp.tools_count', { count: String(s.allowed_tools.length) }) ?? `${s.allowed_tools.length} tools`}</Tag>
                       : <Tag type="green" size="sm">{t('mcp.all_tools') ?? 'all tools'}</Tag>}
                     {s.approval_tools?.length ? <Tag type="purple" size="sm">{t('mcp.approval_count', { count: String(s.approval_tools.length) }) ?? `${s.approval_tools.length} approval`}</Tag> : null}
+                    {s.timeout_ms ? <Tag type="cool-gray" size="sm" title={t('mcp.timeout_tag_hint') ?? 'Max tool-call timeout'}>{Math.round(s.timeout_ms / 1000)}s</Tag> : null}
                   </div>
                 </div>
                 <Stack orientation="horizontal" gap={1}>
@@ -295,6 +306,15 @@ export default function Mcp() {
                   <TextArea id="mcp-headers" labelText={t('mcp.headers_label') ?? 'Headers (one "Name: value" per line)'} value={form.headersText ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, headersText: e.target.value })} rows={3} placeholder={'Authorization: Bearer ...'} />
                 </>
               )}
+
+              <TextInput
+                id="mcp-timeout"
+                labelText={t('mcp.timeout_label') ?? 'Max call timeout, seconds'}
+                value={form.timeoutSec ?? ''}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, timeoutSec: e.target.value.replace(/[^0-9]/g, '') })}
+                placeholder="600"
+                helperText={t('mcp.timeout_helper') ?? 'Caps one tool call against this server. Empty = the default 10 minutes. Heavy tools (exports, renders) may need more.'}
+              />
 
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                 <Button size="sm" kind="secondary" onClick={() => void discover()} disabled={discovering}>

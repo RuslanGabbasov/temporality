@@ -310,18 +310,24 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any, ide
 	// it is willing to wait) bounds this call's context. Without it the shared
 	// HTTP client timeout is the only budget. Clamped to 1s..10m: a tool
 	// asking for zero or an hour is either broken or abusive.
+	// The MCP timeout_ms convention: the CALLER states how long it is willing
+	// to wait. The budget is clamped to the server's ceiling (TimeoutMs when
+	// configured, else 10 minutes) and the floor of 1s. The shared HTTP client
+	// timeout scales above the ceiling, so the two never fight.
+	ceiling := c.serverCallBudget()
+	budget := ceiling
 	if ms, ok := argTimeoutMs(args); ok {
-		deadline := time.Duration(ms) * time.Millisecond
-		if deadline < time.Second {
-			deadline = time.Second
+		budget = time.Duration(ms) * time.Millisecond
+		if budget < time.Second {
+			budget = time.Second
 		}
-		if deadline > 10*time.Minute {
-			deadline = 10 * time.Minute
+		if budget > ceiling {
+			budget = ceiling
 		}
-		callCtx, cancel := context.WithTimeout(ctx, deadline)
-		defer cancel()
-		ctx = callCtx
 	}
+	callCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	ctx = callCtx
 	session, err := c.ensureSession(ctx)
 	if err != nil {
 		return "", err
@@ -432,27 +438,25 @@ func isBrokenTransport(err error) bool {
 // The timeout bounds one WHOLE request including body read — and MCP tools
 // are not HTTP endpoints: a heavy tools/call (Penpot export, image render)
 // legitimately streams nothing back until the work is done, so the response
-// headers arrive late by design. The old 30s default killed exactly those
-// calls at 30.06s no matter what the tool's own timeout_ms asked for. The
-// per-call budget lives in Call() (timeout_ms argument → context deadline);
-// this client timeout is the outer safety net, default 150s to cover the
-// 120s per-call maximum, override with KERNEL_MCP_HTTP_TIMEOUT.
+// headers arrive late by design. The old fixed 30s killed exactly those
+// calls no matter what the tool's own timeout_ms asked for. Now the timeout
+// scales with the server's configured per-call ceiling (TimeoutMs + 30s
+// headroom, default ceiling 10m); the per-call budget itself lives in
+// Call() — the caller's timeout_ms clamped to the ceiling.
 func (c *Client) sharedHTTPClient() *http.Client {
 	if c.http == nil {
-		c.http = headerClient(&http.Client{Timeout: mcpHTTPTimeout()}, c.cfg.Headers)
+		c.http = headerClient(&http.Client{Timeout: c.serverCallBudget() + 30*time.Second}, c.cfg.Headers)
 	}
 	return c.http
 }
 
-// mcpHTTPTimeout reads KERNEL_MCP_HTTP_TIMEOUT (a Go duration); anything
-// unparseable or non-positive keeps the 150s default.
-func mcpHTTPTimeout() time.Duration {
-	if raw := strings.TrimSpace(os.Getenv("KERNEL_MCP_HTTP_TIMEOUT")); raw != "" {
-		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-			return d
-		}
+// serverCallBudget is this server's per-call ceiling: the configured
+// TimeoutMs, else the 10-minute default.
+func (c *Client) serverCallBudget() time.Duration {
+	if c.cfg.TimeoutMs > 0 {
+		return time.Duration(c.cfg.TimeoutMs) * time.Millisecond
 	}
-	return 150 * time.Second
+	return 10 * time.Minute
 }
 
 // mcpDialTimeout bounds one connect+initialize handshake. A server that
