@@ -96,6 +96,74 @@ function splitQuoted(text: string, sep: string): string[] {
   return parts
 }
 
+/** Node ids the flowchart lexer RESERVES (probed against mermaid 11.17):
+ *  a bare `graph`/`end`/`style`… in id position lexes as its keyword token
+ *  («got 'GRAPH'») and the whole chart fails — models name nodes `graph`
+ *  all the time. Renamed to `<id>_` on the second parse attempt only. */
+const FLOWCHART_RESERVED = new Set(['graph', 'flowchart', 'subgraph', 'end', 'style', 'linkStyle', 'classDef', 'class', 'click'])
+
+/** Line-leading keywords followed by whitespace open a STATEMENT
+ *  (`subgraph s`, `style A fill:…`, `class A foo`) — the keyword itself must
+ *  survive; the same word in id position gets renamed. */
+const FLOWCHART_STATEMENTS = new Set(['subgraph', 'style', 'linkStyle', 'classDef', 'class', 'click', 'end'])
+
+/** Rename reserved words used as flowchart node ids so a model naming a
+ *  node `graph` still renders. Only words OUTSIDE quotes, brackets (label
+ *  text parses fine there), `|edge labels|` and `%%` comments are touched;
+ *  the diagram-type line (`flowchart TB` / legacy `graph TB`) and bare `end`
+ *  subgraph terminators are preserved. Callers run this only AFTER a parse
+ *  failure — a valid chart is never rewritten. Exported for tests. */
+export function repairFlowchartIds(chart: string): string {
+  const lines = chart.split('\n')
+  if (!/^(flowchart|graph)\b/.test((lines[0] ?? '').trimStart())) return chart
+  return lines.map((line, index) => (index === 0 ? line : repairFlowchartLine(line))).join('\n')
+}
+
+function repairFlowchartLine(line: string): string {
+  // The subgraph terminator — never an id, whatever follows on the line.
+  if (line.trim() === 'end') return line
+  const isWord = (ch: string | undefined) => !!ch && /[A-Za-z0-9_]/.test(ch)
+  const shapeOpeners = new Set(['[', '{', '('])
+  let out = ''
+  let depth = 0
+  let i = 0
+  while (i < line.length) {
+    const ch = line[i]
+    if (ch === '"') {
+      const close = line.indexOf('"', i + 1)
+      const end = close === -1 ? line.length : close + 1
+      out += line.slice(i, end)
+      i = end
+      continue
+    }
+    if (ch === '%' && line[i + 1] === '%') { out += line.slice(i); break }
+    if (ch === '|') {
+      const close = line.indexOf('|', i + 1)
+      const end = close === -1 ? line.length : close + 1
+      out += line.slice(i, end)
+      i = end
+      continue
+    }
+    if (ch === '[' || ch === '{' || ch === '(') { depth++; out += ch; i++; continue }
+    if (ch === ']' || ch === '}' || ch === ')') { depth = Math.max(0, depth - 1); out += ch; i++; continue }
+    if (isWord(ch)) {
+      const start = i
+      while (i < line.length && isWord(line[i])) i++
+      const word = line.slice(start, i)
+      const lineLead = out.trim() === ''
+      const next = line[i]
+      // A statement keyword at line start survives unless it carries a node
+      // shape right away (`style["x"]` is an id, `style A …` is a statement).
+      const statement = lineLead && FLOWCHART_STATEMENTS.has(word) && !(next && shapeOpeners.has(next))
+      out += depth === 0 && FLOWCHART_RESERVED.has(word) && !statement ? `${word}_` : word
+      continue
+    }
+    out += ch
+    i++
+  }
+  return out
+}
+
 /** Mermaid theme bridge: `theme: 'base'` accepts full themeVariables, so the
  *  diagram is painted from the app's `--tm-*` tokens (read at render time via
  *  getComputedStyle) instead of mermaid's fixed `neutral` palette — nodes,
@@ -201,11 +269,13 @@ export function readableOnFill(fill: string): string {
 
 /** Renders one ```mermaid fenced block as an SVG diagram.
  *
- *  The mermaid bundle (~1 MB) is loaded lazily on the first diagram — pages
+ *  the mermaid bundle (~1 MB) is loaded lazily on the first diagram — pages
  *  without diagrams never pay for it. Rendering failures (a malformed chart
  *  from a model) degrade to the chart source in a <pre>, never break the
  *  artifact. Charts are parse-checked BEFORE render: a failing render paints
  *  mermaid's giant error bomb into the document even though it also throws.
+ *  A chart failing on a reserved word used as a node id (`graph`, `end`,
+ *  `style`…) gets one repair attempt (repairFlowchartIds) before degrading.
  *  mermaid's own securityLevel stays 'strict': diagram labels are
  *  model-generated text and must not execute. */
 export default function MermaidDiagram({ chart }: { chart: string }) {
@@ -233,8 +303,19 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
         const mermaid = (await import('mermaid')).default
         const { darkMode, themeVariables } = mermaidTheme()
         mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', darkMode, themeVariables, suppressErrorRendering: true })
-        const candidate = normalizeErDiagram(chart)
-        const parse = await mermaid.parse(candidate, { suppressErrors: true })
+        let candidate = normalizeErDiagram(chart)
+        let parse = await mermaid.parse(candidate, { suppressErrors: true })
+        if (parse === false) {
+          // Second chance: the model named a node after a word the flowchart
+          // lexer reserves (graph, end, style…). Rename those ids and retry —
+          // only charts that ALREADY failed reach this branch, so a valid
+          // chart is never rewritten.
+          const repaired = normalizeErDiagram(repairFlowchartIds(chart))
+          if (repaired !== candidate) {
+            candidate = repaired
+            parse = await mermaid.parse(candidate, { suppressErrors: true })
+          }
+        }
         if (cancelled) return
         if (parse === false) { setFailed(true); return }
         key = `mermaid-${id}-${themeTick}-${candidate.length}`

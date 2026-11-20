@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeErDiagram, readableOnFill } from './MermaidDiagram'
+import { normalizeErDiagram, readableOnFill, repairFlowchartIds } from './MermaidDiagram'
 
 describe('normalizeErDiagram', () => {
   it('passes a valid diagram through unchanged', () => {
@@ -134,5 +134,79 @@ describe('readableOnFill', () => {
   it('falls back to light text for non-hex values', () => {
     expect(readableOnFill('rgba(1,2,3,0.5)')).toBe('#FBF8F2')
     expect(readableOnFill('')).toBe('#FBF8F2')
+  })
+})
+
+// A model naming a node `graph` used to kill the whole diagram: the
+// flowchart lexer turns the reserved word into a GRAPH keyword token where
+// it expects a node id («got 'GRAPH'»). The repair renames reserved ids —
+// and must leave every valid structure byte-identical.
+describe('repairFlowchartIds', () => {
+  const reported = [
+    'flowchart TB',
+    '    sap["SAP × TechWolf (окт. 2026)"]',
+    '    graph["Граф работы: tasks → skills → jobs"]',
+    '    agent["Grounding-слой для AI-агентов"]',
+    '    hcm["Skills-слой = ядро HCM"]',
+    '    hrpro["У HR Pro уже есть: оргструктура + RX + Projects + Omni"]',
+    '    win{"Окно в РФ: 2–3 года"}',
+    '    sap --> graph',
+    '    graph --> agent',
+    '    agent --> hcm',
+    '    hcm -->|"наш актив"| hrpro',
+    '    hrpro --> win',
+  ].join('\n')
+
+  it('renames the reserved id in declarations and edges, labels untouched', () => {
+    const repaired = repairFlowchartIds(reported)
+    expect(repaired).toContain('graph_["Граф работы: tasks → skills → jobs"]')
+    expect(repaired).toContain('sap --> graph_')
+    expect(repaired).toContain('graph_ --> agent')
+    // Quoted labels keep their text — only bare ids are rewritten.
+    expect(repaired).toContain('"Граф работы: tasks → skills → jobs"')
+    expect(repaired).toContain('hcm -->|"наш актив"| hrpro')
+  })
+
+  it('leaves valid structures byte-identical', () => {
+    const valid = [
+      'flowchart TB',
+      '    subgraph s',
+      '      a[graph]',
+      '      a["graph"] --> b',
+      '    end',
+      '    style a fill:#fff,stroke:#333',
+      '    classDef warn color:red',
+      '    class a warn',
+      '    click a href "https://x"',
+      '    a -->|graph| b',
+      '    %% graph comment',
+      '    b --> end',
+    ].join('\n')
+    const repaired = repairFlowchartIds(valid)
+    // Everything survives except the reserved id in the edge target.
+    expect(repaired).toContain('subgraph s')
+    expect(repaired).toContain('    end')
+    expect(repaired).toContain('a[graph]')
+    expect(repaired).toContain('a["graph"] --> b')
+    expect(repaired).toContain('style a fill:#fff,stroke:#333')
+    expect(repaired).toContain('classDef warn color:red')
+    expect(repaired).toContain('class a warn')
+    expect(repaired).toContain('click a href "https://x"')
+    expect(repaired).toContain('a -->|graph| b')
+    expect(repaired).toContain('%% graph comment')
+    expect(repaired).toContain('b --> end_')
+  })
+
+  it('keeps the diagram-type line and non-flowchart charts untouched', () => {
+    expect(repairFlowchartIds('graph TB\n    a --> b')).toBe('graph TB\n    a --> b')
+    expect(repairFlowchartIds('flowchart TB\n    a --> b')).toBe('flowchart TB\n    a --> b')
+    const er = 'erDiagram\n    RUN ||--o{ USER : contains'
+    expect(repairFlowchartIds(er)).toBe(er)
+  })
+
+  it('renames reserved ids in statement positions and subgraph headers', () => {
+    expect(repairFlowchartIds('flowchart TB\n    style graph fill:#eee')).toBe('flowchart TB\n    style graph_ fill:#eee')
+    expect(repairFlowchartIds('flowchart TB\n    subgraph graph')).toBe('flowchart TB\n    subgraph graph_')
+    expect(repairFlowchartIds('flowchart TB\n    end["x"]')).toBe('flowchart TB\n    end_["x"]')
   })
 })
