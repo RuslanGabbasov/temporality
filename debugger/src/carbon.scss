@@ -3756,9 +3756,23 @@ button.header-nav-link {
 .mermaid-diagram {
   max-width: 100%;
   overflow-x: auto;
+  // HTML-подписи (foreignObject) без собственного color наследуют цвет
+  // страницы — иначе чёрный текст на тёмном фоне.
+  color: var(--tm-text);
 }
 .mermaid-diagram svg {
-  max-width: 100%;
+  // fill — наследуемое свойство: корень svg несёт currentColor (цвет
+  // текста приложения), и <text> без СОБСТВЕННОГО fill (ни атрибута, ни
+  // правила класса) наследует его вместо чёрного дефолта SVG. Любые
+  // явные fill продолжают побеждать наследование — ничего не перекрашивается.
+  fill: currentColor;
+  // mermaid отдаёт svg с инлайновым капом `max-width: <natural>px`
+  // (tuneSvgWidth превращает его в фиксированную ширину): узкая диаграмма
+  // растягивается на колонку (масштаб по viewBox), широкая сохраняет свой
+  // размер и скроллится. min-width гарантирует «не уже колонки» и для
+  // варианта useMaxWidth=false (ширина в атрибутах).
+  min-width: 100%;
+  max-width: none;
   height: auto;
 }
 .presentation-timeline { list-style: none; margin: 0; padding: 0; }

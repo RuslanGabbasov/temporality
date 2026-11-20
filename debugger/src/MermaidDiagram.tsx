@@ -164,6 +164,28 @@ function repairFlowchartLine(line: string): string {
   return out
 }
 
+/** Convert mermaid's inline width cap into a fixed width.
+ *
+ *  The useMaxWidth path emits `<svg width="100%" style="max-width: Npx">`:
+ *  the cap (an inline style, which no stylesheet can outrank without
+ *  !important) pins the drawing at its natural size, so a diagram narrower
+ *  than the text column never fills it. Rewriting `max-width: Npx` to
+ *  `width: Npx` keeps N as the drawing's own size while the CSS
+ *  `min-width: 100%` stretches narrow diagrams to the column (viewBox
+ *  scales) and leaves wide ones at N to scroll — see .mermaid-diagram svg.
+ *  Exported for tests. */
+export function tuneSvgWidth(svg: string): string {
+  return svg.replace(
+    /^(\s*<svg\b[^>]*?\bstyle=")([^"]*?)max-width:\s*([\d.]+)px([^"]*")/,
+    (_match, head: string, before: string, width: string, tail: string) => {
+      // Keep every declaration that surrounded the cap; make sure the new
+      // `width:` declaration is terminated when something follows it.
+      const prefix = before && !before.endsWith(';') ? `${before};` : before
+      return `${head}${prefix}width: ${width}px${tail}`
+    },
+  )
+}
+
 /** Mermaid theme bridge: `theme: 'base'` accepts full themeVariables, so the
  *  diagram is painted from the app's `--tm-*` tokens (read at render time via
  *  getComputedStyle) instead of mermaid's fixed `neutral` palette — nodes,
@@ -322,7 +344,7 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
         const { svg: renderedSvg } = await mermaid.render(key, candidate)
         if (cancelled) return
         rendered.current = chart
-        setSvg(renderedSvg)
+        setSvg(tuneSvgWidth(renderedSvg))
       } catch {
         // Belt and braces: remove any error container mermaid left behind.
         if (key) { document.getElementById(`d${key}`)?.remove(); document.getElementById(key)?.remove() }

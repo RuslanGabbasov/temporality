@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeErDiagram, readableOnFill, repairFlowchartIds } from './MermaidDiagram'
+import { normalizeErDiagram, readableOnFill, repairFlowchartIds, tuneSvgWidth } from './MermaidDiagram'
 
 describe('normalizeErDiagram', () => {
   it('passes a valid diagram through unchanged', () => {
@@ -208,5 +208,33 @@ describe('repairFlowchartIds', () => {
     expect(repairFlowchartIds('flowchart TB\n    style graph fill:#eee')).toBe('flowchart TB\n    style graph_ fill:#eee')
     expect(repairFlowchartIds('flowchart TB\n    subgraph graph')).toBe('flowchart TB\n    subgraph graph_')
     expect(repairFlowchartIds('flowchart TB\n    end["x"]')).toBe('flowchart TB\n    end_["x"]')
+  })
+})
+
+// mermaid's useMaxWidth path caps the svg at its natural width with an
+// INLINE style (`max-width: Npx`) that no stylesheet outranks — diagrams
+// narrower than the text column never filled it. The tune converts the cap
+// into a fixed width so the CSS min-width can stretch narrow drawings to
+// the column while wide ones keep N and scroll.
+describe('tuneSvgWidth', () => {
+  it('converts the inline natural-width cap into a fixed width', () => {
+    const svg = '<svg id="x" width="100%" style="max-width: 640px;" viewBox="0 0 640 400"></svg>'
+    expect(tuneSvgWidth(svg)).toBe('<svg id="x" width="100%" style="width: 640px;" viewBox="0 0 640 400"></svg>')
+  })
+
+  it('keeps other style declarations around the cap', () => {
+    const svg = '<svg style="color:red;max-width: 12.5px"></svg>'
+    expect(tuneSvgWidth(svg)).toBe('<svg style="color:red;width: 12.5px"></svg>')
+  })
+
+  it('leaves svgs without a cap (useMaxWidth=false) untouched', () => {
+    const svg = '<svg width="640" height="400" viewBox="0 0 640 400"></svg>'
+    expect(tuneSvgWidth(svg)).toBe(svg)
+    expect(tuneSvgWidth('<svg style="color:red"></svg>')).toBe('<svg style="color:red"></svg>')
+  })
+
+  it('only rewrites the root svg tag', () => {
+    const svg = '<svg style="max-width: 10px"><g><svg style="max-width: 99px"></svg></g></svg>'
+    expect(tuneSvgWidth(svg)).toBe('<svg style="width: 10px"><g><svg style="max-width: 99px"></svg></g></svg>')
   })
 })
