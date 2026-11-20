@@ -275,6 +275,46 @@ type Client struct {
 	streamHTTP   *http.Client
 	providerHost string
 	limiter      *providerLimiter
+	// usageHook, when set, observes every SUCCESSFUL completion with its token
+	// accounting — observability only (the supervisor spend dashboard). Set
+	// once right after construction, before the client is handed to any
+	// goroutine; never written again, never blocks the call.
+	usageHook func(context.Context, UsageEvent)
+}
+
+// UsageEvent is the observability snapshot of one completed model call.
+type UsageEvent struct {
+	Model     string
+	Provider  string
+	Usage     Usage
+	LatencyMs int64
+}
+
+// SetUsageHook installs the completion observer. It must be called before
+// the client is used; a nil hook clears it. Panics inside the hook are not
+// recovered — the hook runs on the caller's hot path, so keep it trivial
+// (journal enqueue), never panic.
+func (c *Client) SetUsageHook(hook func(context.Context, UsageEvent)) {
+	c.usageHook = hook
+}
+
+// observeUsage fires the hook for one successful completion. Failed calls
+// never reach it: they spent no tokens worth accounting (and the provider
+// often reports no usage on errors anyway).
+func (c *Client) observeUsage(ctx context.Context, completion Completion) {
+	if c.usageHook == nil {
+		return
+	}
+	provider := completion.Provider
+	if provider == "" {
+		provider = c.providerHost
+	}
+	c.usageHook(ctx, UsageEvent{
+		Model:     c.cfg.Model,
+		Provider:  provider,
+		Usage:     completion.Usage,
+		LatencyMs: completion.LatencyMs,
+	})
 }
 
 type providerLimiter struct{ slots chan struct{} }
@@ -705,6 +745,7 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 			if stripped > 0 {
 				completion.StrippedFields = stripped
 			}
+			c.observeUsage(ctx, completion)
 			return completion, nil
 		}
 		lastErr = err
@@ -997,6 +1038,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	if !stop && completion.Finish == "" && completion.Content == "" && len(completion.ToolCalls) == 0 {
 		return Completion{}, &transportError{err: errors.New("stream ended mid-generation: no answer, tool calls or finish reason")}
 	}
+	c.observeUsage(ctx, completion)
 	return completion, nil
 }
 

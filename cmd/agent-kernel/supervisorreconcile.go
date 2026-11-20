@@ -35,6 +35,7 @@ import (
 )
 
 func runSupervisorReconcilePass(ctx context.Context, log *slog.Logger, activities *agent.Activities, liveness agent.WorkflowLiveness, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	ctx = withSupervisorPurpose(ctx, "reconcile")
 	// The operations endpoint is on THIS process; calling it through HTTP
 	// would need a self-issued token — go straight to the activity, it is the
 	// same code path the HTTP handler serves.

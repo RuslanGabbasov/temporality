@@ -627,11 +627,12 @@ func (c *Client) messagesStreamComplete(ctx context.Context, messages []Message,
 	}
 	completion.ResponseRef = contentRef([]byte(completion.Content))
 	// Same truncation contract as the chat wire: a stream that ends without
-	// an answer, tool calls or a finish reason is a provider-side truncation
+	// an answer, tool calls or finish reason is a provider-side truncation
 	// and must fail, not complete the run with an empty answer.
 	if !stop && completion.Finish == "" && completion.Content == "" && len(completion.ToolCalls) == 0 {
 		return Completion{}, &transportError{err: errors.New("stream ended mid-generation: no answer, tool calls or finish reason")}
 	}
+	c.observeUsage(ctx, completion)
 	return completion, nil
 }
 

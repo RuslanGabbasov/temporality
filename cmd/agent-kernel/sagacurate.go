@@ -137,12 +137,14 @@ func RegisterSagaCurateRoutes(deps sagaCurateRoutesDeps) {
 			}
 		}
 
-		client, mErr := deps.modelClient(r.Context())
+		// Spend attribution: the usage hook reads the purpose off the ctx.
+		curateCtx := withSupervisorPurpose(r.Context(), "saga_curation")
+		client, mErr := deps.modelClient(curateCtx)
 		if mErr != nil {
 			writeError(w, 503, fmt.Errorf("the judge model is not configured — curation needs it: %w", mErr))
 			return
 		}
-		plan, perr := buildSagaCuratePlan(r.Context(), client, recent, liveSagas)
+		plan, perr := buildSagaCuratePlan(curateCtx, client, recent, liveSagas)
 		if perr != nil {
 			deps.log.Warn("saga curate: model", "project", project, "error", perr)
 			writeError(w, 502, fmt.Errorf("the curation model call failed: %w", perr))
@@ -461,6 +463,7 @@ func StartSagaCurationLoop(ctx context.Context, log *slog.Logger, ws *workspace.
 }
 
 func runSagaCurationPass(ctx context.Context, log *slog.Logger, ws *workspace.Store, events sagaLifecycleOutbox, costAPI *cost.CostAPI, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	ctx = withSupervisorPurpose(ctx, "saga_curation")
 	if _, err := modelClient(ctx); err != nil {
 		log.Info("saga curation: judge model not configured — skipping the cycle")
 		return

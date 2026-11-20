@@ -50,6 +50,7 @@ func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activitie
 }
 
 func runEmbeddingBackfill(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	ctx = withSupervisorPurpose(ctx, "embeddings")
 	// Token read per pass: a boot-order race (journal down at kernel start)
 	// self-heals here instead of requiring a kernel restart.
 	journalToken := os.Getenv("TEMPORALITY_API_TOKEN")

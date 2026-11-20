@@ -586,11 +586,27 @@ func main() {
 	// agent-granted secrets over the loopback workspace API with a TTL cache;
 	// the master key stays in this process and never reaches activities.
 	secretMasterKey := loadSecretMasterKey(ctx, log, ws)
+	// Every supervisor/judge BACKGROUND pass gets its model client through
+	// this wrapper: the usage hook journals supervisor.model.completed (model,
+	// tokens, purpose) — the dashboard's «Расход модели супервизора» card
+	// (docs/supervisor-model.md §7) folds these events into tokens/$. Harness
+	// role fallbacks reach judgeModelClient directly and stay OUT of the
+	// aggregate: their tokens belong to runs, not to the supervisor.
+	supervisorUsageClient := func(ctx context.Context) (*llm.Client, error) {
+		client, err := judgeModelClient(ctx, ws, secretMasterKey)
+		if err != nil {
+			return nil, err
+		}
+		client.SetUsageHook(func(hookCtx context.Context, event llm.UsageEvent) {
+			if jErr := journalSupervisorUsage(hookCtx, events.Enqueue, event, supervisorPurposeOf(hookCtx)); jErr != nil {
+				log.Warn("supervisor usage: journal", "error", jErr)
+			}
+		})
+		return client, nil
+	}
 	// Background quality work (skill builder) falls back to the supervisor
 	// judge model when no project/run default model is configured.
-	activities.JudgeModel = func(ctx context.Context) (*llm.Client, error) {
-		return judgeModelClient(ctx, ws, secretMasterKey)
-	}
+	activities.JudgeModel = supervisorUsageClient
 	// Installation model roles (docs/harness-settings.md): compaction, title
 	// and extraction pick their supervisor-settings slot first, then the
 	// judge model — the designated background-work fallback.
@@ -3259,16 +3275,12 @@ func main() {
 	// default, apply emits the same saga.* events the UI does.
 	RegisterSagaCurateRoutes(sagaCurateRoutesDeps{
 		mux: mux, gate: gate, events: events, costAPI: costAPI, ws: ws,
-		modelClient: func(ctx context.Context) (*llm.Client, error) {
-			return judgeModelClient(ctx, ws, secretMasterKey)
-		},
+		modelClient: supervisorUsageClient,
 		log: log,
 	})
 	// The same curation runs on a schedule: the supervisor keeps the saga
 	// bindings tidy without a human pressing anything.
-	StartSagaCurationLoop(ctx, log, ws, events, costAPI, func(ctx context.Context) (*llm.Client, error) {
-		return judgeModelClient(ctx, ws, secretMasterKey)
-	})
+	StartSagaCurationLoop(ctx, log, ws, events, costAPI, supervisorUsageClient)
 	// Server-side chat persistence (docs/resilience-and-scale.md §4).
 	RegisterChatRoutes(mux, gate, ws)
 	// Presentation Engine (docs/presentation-engine.md §9–§15): structured
@@ -8316,6 +8328,9 @@ func main() {
 	// models and the human-attention coefficients.
 	RegisterSupervisorRoutes(mux, gate, ws, activities)
 	RegisterSupervisorQueueRoutes(ctx, mux, ws, gate, observationURL, journalToken, log)
+	// Supervisor model spend (docs/supervisor-model.md §7): the token/cost
+	// aggregate behind the dashboard's supervisor tab card.
+	registerSupervisorUsageRoutes(mux, gate, observationURL, journalToken, costPrices)
 	// Organizational Operations (docs/temporality-organizational-operations-
 	// spec.md): the org activity projection, the per-node supervisor batches,
 	// the awareness steer delivery and the board APIs. ORG_OPERATIONS=off
@@ -8323,15 +8338,11 @@ func main() {
 	// — the boards read it).
 	// Contextual learning (docs/ai-guided-onboarding-and-learning.md, P0):
 	// the semantic UI-target catalog and the supervisor explain endpoint.
-	RegisterLearningRoutes(mux, gate, ws, visibleUnits, func(ctx context.Context) (*llm.Client, error) {
-		return judgeModelClient(ctx, ws, secretMasterKey)
-	}, log)
+	RegisterLearningRoutes(mux, gate, ws, visibleUnits, supervisorUsageClient, log)
 	RegisterOrgOperationsRoutes(ctx, orgRoutesDeps{
 		mux: mux, gate: gate, ws: ws, visibleUnits: visibleUnits,
 		observationURL: observationURL, journalToken: func() string { return journalToken }, log: log,
-	}, activities, temporalClient, func(ctx context.Context) (*llm.Client, error) {
-		return judgeModelClient(ctx, ws, secretMasterKey)
-	})
+	}, activities, temporalClient, supervisorUsageClient)
 	// Monthly org usage accounting (policy monthly caps): folds model.completed
 	// into org_month_usage — the policy admission gate and the usage stats
 	// read the same rows.
@@ -8339,14 +8350,10 @@ func main() {
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()
-	startEmbeddingBackfillLoop(ctx, log, activities, observationURL, func(ctx context.Context) (*llm.Client, error) {
-		return judgeModelClient(ctx, ws, secretMasterKey)
-	})
+	startEmbeddingBackfillLoop(ctx, log, activities, observationURL, supervisorUsageClient)
 	// Supervisor triage (docs/supervisor-model.md §3 wave A1): diagnose
 	// failed runs with the supervisor model, journal supervisor.verdict.
-	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, liveness, func(ctx context.Context) (*llm.Client, error) {
-		return judgeModelClient(ctx, ws, secretMasterKey)
-	})
+	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, liveness, supervisorUsageClient)
 	// Learning needs (docs/ai-guided-onboarding-and-learning.md, P3):
 	// factual config vs capability mastery — capped suggestions into the
 	// learning center, never a notification flood. Own slow cadence.
@@ -8368,9 +8375,9 @@ func main() {
 		fetchMeta:      relationMetaFetcher(ctx, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), ws),
 		fetchTelemetry: relationTelemetryFetcher(observationURL, os.Getenv("TEMPORALITY_API_TOKEN")),
 		fetchVerdicts:  relationVerdictFetcher(observationURL, os.Getenv("TEMPORALITY_API_TOKEN")),
-		judge:          relationJudgeAdapter(ctx, func(ctx context.Context) (*llm.Client, error) { return judgeModelClient(ctx, ws, secretMasterKey) }),
+		judge:          relationJudgeAdapter(ctx, supervisorUsageClient),
 		fetchConflicts: relationConflictFetcher(observationURL, os.Getenv("TEMPORALITY_API_TOKEN")),
-		judgeConflict:  relationConflictJudgeAdapter(ctx, func(ctx context.Context) (*llm.Client, error) { return judgeModelClient(ctx, ws, secretMasterKey) }),
+		judgeConflict:  relationConflictJudgeAdapter(ctx, supervisorUsageClient),
 	})
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	// Intake pipeline (docs/inbound-messages.md): the system project + agent
@@ -8387,9 +8394,7 @@ func main() {
 		costPrices: costPrices,
 		// Wave C3 (docs/supervisor-model.md §3): validate the chosen amendment
 		// target with the supervisor model before the amendment run starts.
-		supervisorModel: func(ctx context.Context) (*llm.Client, error) {
-			return judgeModelClient(ctx, ws, secretMasterKey)
-		},
+		supervisorModel: supervisorUsageClient,
 	}
 	// Target-run answers follow the message's channel: the loop's watcher
 	// follows the run and delivers the final answer to the sender's chat.

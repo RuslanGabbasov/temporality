@@ -170,7 +170,8 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 		// configuration, not describe the feature in the abstract (§3.1).
 		orgContext := learningOrgContext(r.Context(), ws, input.Project, visibleUnits(r))
 
-		client, err := modelClient(r.Context())
+		learnCtx := withSupervisorPurpose(r.Context(), "learning")
+		client, err := modelClient(learnCtx)
 		if err != nil {
 			// Degrade honestly: without a model the catalog entry itself is
 			// the explanation (§16.7 — no UI errors from missing material).
@@ -181,7 +182,7 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 			writeJSON(w, 200, map[string]any{"explanation": explanation, "docs_link": target.DocsLink, "mode": "informational"})
 			return
 		}
-		plan, err := agent.LearningExplainCase(r.Context(), client, agent.LearningExplainInput{
+		plan, err := agent.LearningExplainCase(learnCtx, client, agent.LearningExplainInput{
 			TargetID:    target.ID,
 			TargetTitle: target.Title,
 			TargetAbout: target.Description,
@@ -275,7 +276,8 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 			Why      string `json:"why,omitempty"`
 		}
 		items := []planItem{}
-		client, mErr := modelClient(r.Context())
+		learnCtx := withSupervisorPurpose(r.Context(), "learning")
+		client, mErr := modelClient(learnCtx)
 		if mErr == nil {
 			planLessons := make([]agent.LearningPlanLesson, 0, len(learningLessons))
 			for _, lesson := range learningLessons {
@@ -287,7 +289,7 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 			for _, cap := range learningCapabilities {
 				planFeatures = append(planFeatures, cap.ID+" — "+cap.Title)
 			}
-			if plan, perr := agent.LearningPlanCase(r.Context(), client, agent.LearningPlanInput{
+			if plan, perr := agent.LearningPlanCase(learnCtx, client, agent.LearningPlanInput{
 				Role:     principalRole(r),
 				Context:  learningOrgContext(r.Context(), ws, strings.TrimSpace(input.Project), visibleUnits(r)),
 				Lessons:  planLessons,

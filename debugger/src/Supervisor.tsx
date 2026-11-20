@@ -3,8 +3,25 @@ import { Button, Tag, InlineNotification } from '@carbon/react'
 import { ChevronRight } from '@carbon/icons-react'
 import PageLoading from './PageLoading'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { workspaceApi, type SupervisorQueue, type SreRollup, type JudgeConfig } from './workspaceApi'
+import { workspaceApi, type SupervisorQueue, type SreRollup, type JudgeConfig, type SupervisorUsage } from './workspaceApi'
 import { useT } from './i18n'
+import { fmtCost, fmtNum } from './format'
+
+// The spend card's period presets — the same window vocabulary the kernel's
+// userStatsFrom endpoint understands.
+const USAGE_WINDOWS = [
+  { key: '24h', label: 'dashboard.users_period_24h' },
+  { key: '168h', label: 'dashboard.users_period_7d' },
+  { key: '720h', label: 'dashboard.users_period_30d' },
+  { key: 'all', label: 'dashboard.users_period_all' },
+] as const
+
+/** Localized purpose label with a raw-key fallback: a purpose the locale
+ *  does not know yet must still read as itself, not as `supervisor.purpose_x`. */
+function purposeLabel(t: (key: string) => string, key: string): string {
+  const label = t(`supervisor.purpose_${key}`)
+  return label.startsWith('supervisor.purpose_') ? key : label
+}
 
 const navigate = (path: string) => { window.history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
 
@@ -326,6 +343,22 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   // Collapsible per-case queue sections: 50+ rows in one flat list stopped
   // being readable — the header toggle folds what has been read.
   const [collapsedCases, setCollapsedCases] = useState<Set<string>>(new Set())
+  // Supervisor model spend (docs/supervisor-model.md §7): tokens/$ of the
+  // background judge passes. Loaded independently of the queue so the bill
+  // paints even while the queue is still fetching (or empty).
+  const [usage, setUsage] = useState<SupervisorUsage | null>(null)
+  const [usageWindow, setUsageWindow] = useState('168h')
+  const [usageError, setUsageError] = useState(false)
+  const loadUsage = useCallback(async (window: string) => {
+    try {
+      setUsage(await workspaceApi.supervisorUsage(window))
+      setUsageError(false)
+    } catch {
+      // An older kernel has no endpoint — the card says so, the queue stays.
+      setUsageError(true)
+    }
+  }, [])
+  useEffect(() => { void loadUsage(usageWindow) }, [usageWindow, loadUsage])
 
   // silent: refresh the data WITHOUT the spinner — acknowledge/skip keep the
   // list mounted, so the scroll position survives on long queues (52+ rows).
@@ -706,6 +739,75 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
           style={{ marginBottom: '1rem' }}
         />
       )}
+
+      {/* Model spend (docs/supervisor-model.md §7): the judge's background
+          passes run OUTSIDE any run — no workspace_run row, no model.completed
+          — so this card reads the supervisor.model.completed aggregate the
+          usage hook journals. Independent of the queue load: an empty queue
+          must not hide the bill. */}
+      <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem 0.6rem', marginBottom: '1rem', fontSize: '0.78rem' }}>
+        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'baseline', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
+          <span style={{ fontWeight: 600 }}>{t('supervisor.usage_title')}</span>
+          <span style={{ display: 'inline-flex', gap: '0.3rem' }}>
+            {USAGE_WINDOWS.map((window) => (
+              <button
+                key={window.key}
+                type="button"
+                onClick={() => setUsageWindow(window.key)}
+                title={t('supervisor.usage_window_hint')}
+                style={{
+                  border: `1px solid ${usageWindow === window.key ? 'var(--tm-border-strong, var(--tm-border))' : 'var(--tm-border)'}`,
+                  borderRadius: '999px',
+                  background: usageWindow === window.key ? 'var(--tm-surface)' : 'transparent',
+                  color: usageWindow === window.key ? 'var(--tm-text)' : 'var(--tm-text-2)',
+                  cursor: 'pointer',
+                  fontSize: '0.7rem',
+                  padding: '0.05rem 0.5rem',
+                  lineHeight: 1.5,
+                  fontWeight: usageWindow === window.key ? 600 : 400,
+                }}
+              >{t(window.label)}</button>
+            ))}
+          </span>
+        </div>
+        {usageError ? (
+          <span style={{ color: 'var(--tm-text-3)' }}>{t('supervisor.usage_unavailable')}</span>
+        ) : usage === null ? (
+          <span style={{ color: 'var(--tm-text-3)' }}>{t('common.loading')}</span>
+        ) : usage.calls === 0 ? (
+          <span style={{ color: 'var(--tm-text-3)' }}>{t('supervisor.usage_empty')}</span>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: '1.1rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
+              <span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('supervisor.usage_tokens')} </span>
+                <strong style={{ fontSize: '0.95rem' }}>{fmtNum(usage.tokens)}</strong>
+                <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}> · {fmtNum(usage.prompt_tokens)}+{fmtNum(usage.completion_tokens)}</span>
+              </span>
+              <span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('supervisor.usage_cost')} </span>
+                <strong style={{ fontSize: '0.95rem' }}>{fmtCost(usage.cost_usd)}</strong>
+              </span>
+              <span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('supervisor.usage_calls')} </span>
+                <strong style={{ fontSize: '0.95rem' }}>{usage.calls}</strong>
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.4rem' }} title={t('supervisor.usage_by_purpose')}>
+              {usage.by_purpose.map((slice) => (
+                <span key={slice.key} style={{ border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.05rem 0.55rem', color: 'var(--tm-text-2)', background: 'var(--tm-surface)' }}>
+                  {purposeLabel(t, slice.key)} · {fmtNum(slice.tokens)} · {fmtCost(slice.cost_usd)}
+                </span>
+              ))}
+            </div>
+            {usage.by_model.length > 0 && (
+              <div style={{ marginTop: '0.3rem', color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>
+                {usage.by_model.map((slice) => `${slice.key} · ${fmtNum(slice.tokens)} · ${fmtCost(slice.cost_usd)}`).join('   ·   ')}
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {loading ? <PageLoading /> : (
         <>

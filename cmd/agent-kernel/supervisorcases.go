@@ -55,6 +55,7 @@ func supervisorCasesEnabled() bool {
 // runSupervisorCasesPass executes one pass over the B/C cases. Model failures
 // and journal hiccups skip their case quietly — the next pass retries.
 func runSupervisorCasesPass(ctx context.Context, log *slog.Logger, activities *agent.Activities, ws supervisorCaseStore, observationURL string, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	ctx = withSupervisorPurpose(ctx, "cases")
 	// Token read per pass (see the triage pass note).
 	journalToken := os.Getenv("TEMPORALITY_API_TOKEN")
 	if !supervisorCasesEnabled() {

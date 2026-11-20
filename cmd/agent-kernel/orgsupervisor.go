@@ -88,6 +88,7 @@ func startOrgSupervisorLoop(ctx context.Context, log *slog.Logger, ws *workspace
 
 // runOrgSupervisorPass processes every due node once.
 func runOrgSupervisorPass(ctx context.Context, deps *orgSupervisorDeps) {
+	ctx = withSupervisorPurpose(ctx, "org")
 	units, err := deps.ws.ListOrgUnits(ctx)
 	if err != nil {
 		deps.log.Warn("org supervisor: units", "error", err)

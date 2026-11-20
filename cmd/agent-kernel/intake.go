@@ -833,8 +833,9 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			// amendment, and a mismatch is a 422 the intake agent relays to the
 			// sender with the recommendation.
 			if r.supervisorModel != nil && supervisorCasesEnabled() {
-				if client, sErr := r.supervisorModel(req.Context()); sErr == nil && client != nil {
-					if verdict, vErr := agent.ValidateAmendmentTarget(req.Context(), client, body.Prompt, amendRunID, task.Title, prevRun.Answer); vErr == nil && !verdict.Matches {
+				supCtx := withSupervisorPurpose(req.Context(), "intake")
+				if client, sErr := r.supervisorModel(supCtx); sErr == nil && client != nil {
+					if verdict, vErr := agent.ValidateAmendmentTarget(supCtx, client, body.Prompt, amendRunID, task.Title, prevRun.Answer); vErr == nil && !verdict.Matches {
 						writeError(w, 422, fmt.Errorf("amendment target check: %s %s", verdict.Explanation, verdict.Recommendation))
 						return
 					}

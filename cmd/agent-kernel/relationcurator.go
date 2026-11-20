@@ -99,6 +99,7 @@ func relationCuratorIntervalFromEnv() time.Duration {
 }
 
 func runRelationCurator(ctx context.Context, deps relationCuratorDeps) {
+	ctx = withSupervisorPurpose(ctx, "relations")
 	interval := relationCuratorIntervalFromEnv()
 	if interval <= 0 {
 		return

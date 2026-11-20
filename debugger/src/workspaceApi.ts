@@ -1319,6 +1319,30 @@ export interface SupervisorQueue {
   facets: { families: Record<string, number>; projects: Record<string, number>; family_last_seen: Record<string, string> }
 }
 
+/** One row of a supervisor-spend breakdown (by purpose or by model). */
+export interface SupervisorUsageSlice {
+  key: string
+  calls: number
+  tokens: number
+  cost_usd: number
+}
+
+/** Token/cost aggregate of the supervisor model over one window — the
+ *  dashboard's «Расход модели супервизора» card (supervisor.model.completed
+ *  journal events, folded server-side). */
+export interface SupervisorUsage {
+  window: string
+  from?: string
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  tokens: number
+  cost_usd: number
+  by_purpose: SupervisorUsageSlice[]
+  by_model: SupervisorUsageSlice[]
+}
+
 // SreRollup is one bucket of the operational series (per project; Model '' =
 // the project aggregate). Version-level SLIs live in agent-evolution's
 // workspace_agent_version_metrics — this is system health over time.
@@ -1493,6 +1517,10 @@ export const workspaceApi = {
     if (params?.model) query.set('model', params.model)
     return request<{ rollups: SreRollup[]; count: number }>(`/v1/workspace/sre/rollup?${query.toString()}`)
   },
+  // Supervisor model spend (docs/supervisor-model.md §7): tokens/cost of the
+  // background judge passes over one window, split by purpose and model.
+  supervisorUsage: (window: string) =>
+    request<SupervisorUsage>(`/v1/workspace/supervisor/usage?window=${encodeURIComponent(window)}`),
   // Hint tier effectiveness (docs/supervisor-model.md §6.6): helpful/harmful
   // rates per matcher tier — the semantic-vs-lexical A/B evidence.
   hintEffectiveness: (project?: string) => {

@@ -77,6 +77,7 @@ type journalEvent struct {
 }
 
 func runSupervisorTriagePass(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	ctx = withSupervisorPurpose(ctx, "triage")
 	// The journal bearer token is read per pass: a boot-order race (journal
 	// not yet listening) must self-heal on the next pass, not require a
 	// kernel restart.

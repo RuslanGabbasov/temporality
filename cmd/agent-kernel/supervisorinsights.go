@@ -41,6 +41,7 @@ const supervisorInsightSevereLatencyMS = 10 * 60_000
 // runSupervisorInsightPass executes one detection pass. Model errors never
 // fail the pass — the template wording is the floor.
 func runSupervisorInsightPass(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	ctx = withSupervisorPurpose(ctx, "insights")
 	// Token read per pass: boot-order races must self-heal (see triage pass).
 	journalToken := os.Getenv("TEMPORALITY_API_TOKEN")
 	now := time.Now().UTC()

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button, InlineNotification, Tag } from '@carbon/react'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
+import { fmtCost, fmtNum } from './format'
 import { runStatusLabel } from './eventPresentation'
 import { workspaceApi, type UserFact, type UserMetricsRow, type UserStats, type UserSagaStat } from './workspaceApi'
 
@@ -26,21 +27,6 @@ const PERIOD_LABELS: Record<Period, string> = {
 function go(path: string) {
   window.history.pushState(null, '', path)
   window.dispatchEvent(new PopStateEvent('popstate'))
-}
-
-/** Compact token/counter formatting: 999 → 999, 12_345 → 12.3k, 2_500_000 → 2.5M. */
-function fmtNum(value: number): string {
-  if (!Number.isFinite(value)) return '—'
-  const abs = Math.abs(value)
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (abs >= 10_000) return `${(value / 1_000).toFixed(1)}k`
-  return value.toLocaleString()
-}
-
-function fmtCost(usd: number): string {
-  if (!Number.isFinite(usd)) return '—'
-  const digits = Math.abs(usd) >= 100 ? 0 : 2
-  return `$${usd.toFixed(digits)}`
 }
 
 function fmtDate(value: string | undefined): string {
