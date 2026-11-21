@@ -446,6 +446,27 @@ function lastUserText(messages: ChatMessage[]): string {
   return ''
 }
 
+// The hint query for a follow-up run: the new phrase («Продолжай» on an old
+// conversation) carries no retrieval signal — the retrieval-relevant text is
+// the AGENT'S LAST REPORT (where the work actually stands: what finished,
+// what remains). The report tail carries the freshest state, so only the
+// last ~1500 chars ride along; the new phrase is appended for the case the
+// report is missing (a first follow-up on a hand-edited transcript).
+function hintQueryForFollowUp(messages: ChatMessage[]): string {
+  const phrase = lastUserText(messages)
+  let reportTail = ''
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role === 'assistant' && message.content.trim()) {
+      const content = message.content.trim()
+      reportTail = content.length > 1500 ? content.slice(-1500) : content
+      break
+    }
+  }
+  if (!reportTail) return phrase
+  return phrase ? `${reportTail}\n\nНовое сообщение пользователя: ${phrase}` : reportTail
+}
+
 /** The activity-feed line for an intermediate model answer: elapsed prefix
  * plus the turn's text, clamped to two lines in CSS with an ellipsis — the
  * JS cap only bounds pathological cases before the string enters state. */
@@ -2045,7 +2066,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         await workspaceApi.updateTask(taskId, { prompt: fullPrompt })
       }
 
-      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: lastUserText(updatedConv.messages) })
+      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: hintQueryForFollowUp(updatedConv.messages) })
       const runId = result.run_id
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
@@ -2078,7 +2099,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         setError(t('chat.continue_no_task') ?? 'Cannot resume: this run has no task to continue.')
         return
       }
-      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: lastUserText(conv.messages) })
+      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: hintQueryForFollowUp(conv.messages) })
       const runId2 = result.run_id
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId: runId2, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
       setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, taskId, messages: [...c.messages, assistantMsg] } : c))
