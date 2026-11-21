@@ -126,7 +126,7 @@ export default function OrgUsageSection({ units }: { units: OrgUnit[] }) {
                   {months.map((month) => {
                     const cell = unit.cells.get(month)
                     return (
-                      <td key={month} style={{ padding: '0.3rem 0.5rem', whiteSpace: 'nowrap', textAlign: 'right', color: cell ? 'var(--tm-text-1)' : 'var(--tm-text-3)' }}>
+                      <td key={month} style={{ padding: '0.3rem 0.5rem', whiteSpace: 'nowrap', textAlign: 'right', color: cell ? 'var(--tm-text)' : 'var(--tm-text-3)' }}>
                         {cell ? `${compactTokens(cell.tokens)} · ${compactCost(cell.cost)}` : '—'}
                       </td>
                     )

@@ -1,17 +1,7 @@
 // @vitest-environment jsdom
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import mermaid from 'mermaid'
-import { repairFlowchartIds, tuneSvgWidth } from './MermaidDiagram'
-
-// jsdom has no SVG layout engine; mermaid only needs the measurement hooks
-// to return plausible boxes.
-beforeAll(() => {
-  const box = { x: 0, y: 0, width: 320, height: 120 }
-  // @ts-expect-error jsdom missing API
-  window.SVGElement.prototype.getBBox = () => ({ ...box })
-  // @ts-expect-error jsdom missing API
-  window.SVGElement.prototype.getComputedTextLength = () => 320
-})
+import { repairFlowchartIds } from './MermaidDiagram'
 
 // End-to-end guard for the reserved-id repair: the EXACT chart a model
 // emitted (node named `graph`) must go from parse-failure to parse-success
@@ -65,29 +55,5 @@ describe('flowchart reserved-id repair (integration)', () => {
     expect(await parses(valid)).toBe(true)
     expect(await parses(repairFlowchartIds(valid))).toBe(true)
     expect(repairFlowchartIds(valid)).toBe(valid)
-  })
-
-  // The width complaint: mermaid's useMaxWidth path caps the root svg with
-  // an inline `max-width: Npx` — the tune converts it to a fixed width so
-  // the CSS min-width can stretch narrow diagrams to the text column.
-  it('converts the rendered natural-width cap into a fixed width', async () => {
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base' })
-    const { svg } = await mermaid.render('tune-width', 'flowchart TB\n    a[Заголовок] --> b[Цель]')
-    const tuned = tuneSvgWidth(svg)
-    expect(tuned.startsWith('<svg')).toBe(true)
-    // The cap lives on the ROOT svg tag; `max-width:` elsewhere (mermaid's
-    // injected CSS, html-label widths) must stay untouched.
-    const rootTag = (source: string) => source.slice(0, source.indexOf('>') + 1)
-    if (rootTag(svg).includes('max-width:')) {
-      expect(rootTag(tuned)).not.toContain('max-width:')
-      expect(rootTag(tuned)).toContain('width:')
-    } else {
-      // useMaxWidth=false build: the natural width lives in the attribute —
-      // untouched here, the CSS min-width handles the column fill.
-      expect(tuned).toBe(svg)
-    }
-    // The tuned svg must still be the same document (no truncated tags).
-    expect(tuned.match(/<svg/g)?.length).toBe(svg.match(/<svg/g)?.length)
-    expect(tuned.match(/<\/svg>/g)?.length).toBe(svg.match(/<\/svg>/g)?.length)
   })
 })

@@ -163,7 +163,7 @@ const inputStyle = {
   border: '1px solid var(--tm-border)',
   borderRadius: '4px',
   background: 'var(--tm-surface)',
-  color: 'var(--tm-text-1)',
+  color: 'var(--tm-text)',
   fontSize: '0.78rem',
   width: '100%',
   boxSizing: 'border-box',
@@ -968,7 +968,7 @@ export default function Storage({ project }: { project: string }) {
                 onClick={() => revealFrom(selected.area, prefix, true)}
                 style={{
                   background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
-                  color: isCurrent ? 'var(--tm-text-1)' : 'var(--tm-text-2)',
+                  color: isCurrent ? 'var(--tm-text)' : 'var(--tm-text-2)',
                   fontWeight: isCurrent ? 600 : 400,
                 }}
               >{seg}</button>
@@ -978,7 +978,7 @@ export default function Storage({ project }: { project: string }) {
         {!isDir && (
           <>
             <span> / </span>
-            <span style={{ color: 'var(--tm-text-1)', fontWeight: 600 }}>{current}</span>
+            <span style={{ color: 'var(--tm-text)', fontWeight: 600 }}>{current}</span>
           </>
         )}
       </nav>
@@ -987,7 +987,7 @@ export default function Storage({ project }: { project: string }) {
 
   const selectBar = selectMode && (
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-      <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <span style={{ fontSize: '0.7rem', color: 'var(--tm-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {t('storage.select_count', { n: String(batchItems.length) })} · {fmtBytes(batchBytes)}
       </span>
       {deleteProgress && (

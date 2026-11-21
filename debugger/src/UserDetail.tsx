@@ -63,7 +63,7 @@ function tiles(grid: React.CSSProperties): React.CSSProperties {
 
 function jumpStyle(active = false): React.CSSProperties {
   return {
-    border: `1px solid ${active ? 'var(--tm-interactive)' : 'var(--tm-border)'}`,
+    border: `1px solid ${active ? 'var(--tm-teal)' : 'var(--tm-border)'}`,
     borderRadius: '999px',
     background: 'var(--tm-bg)',
     color: 'var(--tm-text-2)',

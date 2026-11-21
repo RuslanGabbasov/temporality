@@ -50,6 +50,21 @@ const fmt = (n: number): string => {
 
 const clip = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max - 1)}…` : s)
 
+// Heatmap/treemap cells use FIXED rgb ramps that do not follow the theme,
+// so their label color is chosen by contrast, not by theme: on these ramps
+// black beats white almost everywhere (teal: 8:1 vs 2.6:1), and the old
+// `--tm-text-1` branch painted black-on-dark — that variable was never
+// defined anywhere (invalid var in a presentation attribute → black).
+function textOnCell(r: number, g: number, b: number): string {
+  const lin = (c: number) => {
+    const s = c / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  }
+  const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+  // L > 0.179 is where black's contrast (L+0.05)/0.05 overtakes white's 1.05/(L+0.05).
+  return luminance > 0.179 ? '#0B1412' : '#FFFFFF'
+}
+
 // ── Scatter / quadrant -------------------------------------------------------
 
 type ScatterPointIR = { x: number; y: number; label?: string; group?: string; size?: number; highlight?: boolean; note?: string; ref?: { type: string; id: string } }
@@ -142,14 +157,14 @@ export function ScatterView({ component }: { component: { data?: unknown; props?
               {p.highlight && <circle cx={cx} cy={cy} r={r + 2.5} fill={colorOf(p.group)} opacity={0.3} />}
               <circle cx={cx} cy={cy} r={r} fill={colorOf(p.group)} />
               {p.ref && <title>{p.ref.type} {p.ref.id}</title>}
-              {label && <text x={lx} y={cy - 4} textAnchor={anchor} fontSize={9.5} fontWeight={p.highlight ? 600 : 400} fill="var(--tm-text-1)">{label}</text>}
+              {label && <text x={lx} y={cy - 4} textAnchor={anchor} fontSize={9.5} fontWeight={p.highlight ? 600 : 400} fill="var(--tm-text)">{label}</text>}
             </g>
           )
         })}
         {(props.showLegend !== false && groups.length > 1) && groups.map((g, i) => (
           <g key={g} transform={`translate(${16 + i * 110}, ${H - 8})`}>
             <circle cx={5} cy={-3} r={4.5} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />
-            <text x={14} y={0} fontSize={10} fill="var(--tm-text-1)">{clip(g, 16)}</text>
+            <text x={14} y={0} fontSize={10} fill="var(--tm-text)">{clip(g, 16)}</text>
           </g>
         ))}
       </svg>
@@ -180,7 +195,7 @@ export function HeatmapView({ component }: { component: { data?: unknown; props?
   const cellH = 26
   const colW = Math.max(28, (W - rowLabelW) / cols.length)
   const H = 26 + rows.length * cellH + 22
-  const blend = (cell: number): string => {
+  const blend = (cell: number): [number, number, number] => {
     const t = Math.max(0, Math.min(1, (cell - lo) / (hi - lo)))
     const base = [122, 138, 148]
     const hot = [45, 178, 165]
@@ -190,7 +205,7 @@ export function HeatmapView({ component }: { component: { data?: unknown; props?
     const r = Math.round(base[0] + (mix[0] - base[0]) * tt)
     const g = Math.round(base[1] + (mix[1] - base[1]) * tt)
     const b = Math.round(base[2] + (mix[2] - base[2]) * tt)
-    return `rgb(${r},${g},${b})`
+    return [r, g, b]
   }
   return (
     <figure className="presentation-chart">
@@ -214,14 +229,13 @@ export function HeatmapView({ component }: { component: { data?: unknown; props?
                   </g>
                 )
               }
-              const fill = blend(cell)
-              const dark = /rgb\((\d+),/.exec(fill)
-              const bright = dark ? Number(dark[1]) > 120 : true
+              const [cr, cg, cb] = blend(cell)
+              const fill = `rgb(${cr},${cg},${cb})`
               return (
                 <g key={col + c}>
                   <rect x={x + 1} y={y + 1} width={colW - 2} height={cellH - 2} rx={2} fill={fill} />
                   {props.showValues !== false && (
-                    <text x={x + colW / 2} y={y + cellH / 2 + 3} textAnchor="middle" fontSize={9.5} fill={bright ? 'var(--tm-text-1)' : '#ffffff'}>{fmt(cell)}</text>
+                    <text x={x + colW / 2} y={y + cellH / 2 + 3} textAnchor="middle" fontSize={9.5} fill={textOnCell(cr, cg, cb)}>{fmt(cell)}</text>
                   )}
                 </g>
               )
@@ -327,7 +341,7 @@ export function RadarView({ component }: { component: { data?: unknown; props?: 
   return (
     <figure className="presentation-chart">
       {props.title ? <figcaption className="presentation-chart-title">{props.title}</figcaption> : null}
-      <svg viewBox={`0 0 ${size} ${size + (props.showLegend !== false && series.length > 1 ? 26 : 0)}`} className="presentation-chart-svg" role="img">
+      <svg viewBox={`0 0 ${size} ${size + (props.showLegend !== false && series.length > 1 ? 26 : 0)}`} className="presentation-chart-svg presentation-chart-radar" role="img">
         {[0.25, 0.5, 0.75, 1].map((f) => (
           <polygon key={f} points={ring(f).map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="var(--tm-border)" strokeWidth={0.6} />
         ))}
@@ -363,7 +377,7 @@ export function RadarView({ component }: { component: { data?: unknown; props?: 
         {props.showLegend !== false && series.length > 1 && series.map((s, si) => (
           <g key={s.name ?? si} transform={`translate(${14 + si * 120}, ${size + 14})`}>
             <circle cx={5} cy={-3} r={4.5} fill={props.highlight === s.name ? 'var(--tm-chart-1)' : SERIES_COLORS[(si + 1) % SERIES_COLORS.length]} />
-            <text x={14} y={0} fontSize={10} fontWeight={props.highlight === s.name ? 600 : 400} fill="var(--tm-text-1)">{clip(s.name ?? `series ${si + 1}`, 16)}</text>
+            <text x={14} y={0} fontSize={10} fontWeight={props.highlight === s.name ? 600 : 400} fill="var(--tm-text)">{clip(s.name ?? `series ${si + 1}`, 16)}</text>
           </g>
         ))}
         {data.unit && <text x={size - 4} y={size - 4} textAnchor="end" fontSize={9} fill="var(--tm-text-3)">{data.unit}</text>}
@@ -474,7 +488,7 @@ export function SankeyView({ component }: { component: { data?: unknown; props?:
               <rect x={pos.x} y={pos.y} width={nodeW} height={pos.h} rx={2} fill={SERIES_COLORS[i % SERIES_COLORS.length]}>
                 <title>{node.label ?? node.id}</title>
               </rect>
-              <text x={pos.x - 4} y={pos.y + pos.h / 2 + 3} textAnchor="end" fontSize={10} fill="var(--tm-text-1)">{clip(node.label ?? node.id, 16)}</text>
+              <text x={pos.x - 4} y={pos.y + pos.h / 2 + 3} textAnchor="end" fontSize={10} fill="var(--tm-text)">{clip(node.label ?? node.id, 16)}</text>
               {props.showValues !== false && (
                 <text x={pos.x + nodeW + 4} y={pos.y + pos.h / 2 + 3} textAnchor="start" fontSize={9} fill="var(--tm-text-3)">
                   {fmt(Math.max(inSum.get(node.id) ?? 0, outSum.get(node.id) ?? 0))}{data.unit ? ` ${data.unit}` : ''}
@@ -551,7 +565,7 @@ export function SwimlaneView({ component }: { component: { data?: unknown; props
               <rect x={x} y={y} width={w} height={h} rx={5} fill="var(--tm-surface)" stroke={statusColor(node.status)} strokeWidth={1.6}>
                 {node.ref && <title>{node.ref.type} {node.ref.id}</title>}
               </rect>
-              <text x={x + 5} y={y + 14} fontSize={9.5} fill="var(--tm-text-1)">{clip(node.label, Math.floor(w / 6))}</text>
+              <text x={x + 5} y={y + 14} fontSize={9.5} fill="var(--tm-text)">{clip(node.label, Math.floor(w / 6))}</text>
               {node.note && <text x={x + 5} y={y + h - 5} fontSize={8.5} fill="var(--tm-text-3)">{clip(node.note, Math.floor(w / 7))}</text>}
             </g>
           )
@@ -663,32 +677,33 @@ export function TreemapView({ component }: { component: { data?: unknown; props?
   } else {
     squarify(root.children ?? [], { x: 0, y: 0, w: W, h: H }, maxDepth, 1, leaves)
   }
-  const colorOf = (value: number): string => {
+  const colorOf = (value: number): [number, number, number] => {
     const t = Math.max(0, Math.min(1, value / Math.max(...values, 0.001)))
     const base = [122, 138, 148]
     const hot = [45, 178, 165]
     const r = Math.round(base[0] + (hot[0] - base[0]) * (0.15 + 0.6 * t))
     const g = Math.round(base[1] + (hot[1] - base[1]) * (0.15 + 0.6 * t))
     const b = Math.round(base[2] + (hot[2] - base[2]) * (0.15 + 0.6 * t))
-    return `rgb(${r},${g},${b})`
+    return [r, g, b]
   }
   return (
     <figure className="presentation-chart">
       {props.title ? <figcaption className="presentation-chart-title">{props.title}</figcaption> : null}
       <svg viewBox={`0 0 ${W} ${H}`} className="presentation-chart-svg" role="img">
         {leaves.map(({ node, rect }, i) => {
-          const bright = /rgb\((\d+),/.exec(colorOf(subtreeValue(node)))
-          const darkText = bright ? Number(bright[1]) > 120 : true
+          const [cr, cg, cb] = colorOf(subtreeValue(node))
+          const cellFill = `rgb(${cr},${cg},${cb})`
+          const labelFill = textOnCell(cr, cg, cb)
           return (
             <g key={`${node.label}-${i}`}>
-              <rect x={rect.x} y={rect.y} width={rect.w} height={rect.h} rx={3} fill={colorOf(subtreeValue(node))} stroke="var(--tm-bg)" strokeWidth={1}>
+              <rect x={rect.x} y={rect.y} width={rect.w} height={rect.h} rx={3} fill={cellFill} stroke="var(--tm-bg)" strokeWidth={1}>
                 {node.ref && <title>{node.ref.type} {node.ref.id}</title>}
               </rect>
               {rect.w >= 34 && rect.h >= 16 && (
-                <text x={rect.x + 4} y={rect.y + 13} fontSize={10} fontWeight={600} fill={darkText ? 'var(--tm-text-1)' : '#ffffff'}>{clip(node.label, Math.floor(rect.w / 6))}</text>
+                <text x={rect.x + 4} y={rect.y + 13} fontSize={10} fontWeight={600} fill={labelFill}>{clip(node.label, Math.floor(rect.w / 6))}</text>
               )}
               {props.showValues !== false && node.value !== undefined && rect.h >= 30 && rect.w >= 40 && (
-                <text x={rect.x + 4} y={rect.y + 26} fontSize={9} fill={darkText ? 'var(--tm-text-2)' : '#ffffff'} opacity={0.85}>
+                <text x={rect.x + 4} y={rect.y + 26} fontSize={9} fill={labelFill} opacity={0.85}>
                   {fmt(node.value)}{data.unit ? ` ${data.unit}` : ''}{total > 0 ? ` (${((subtreeValue(node) / total) * 100).toFixed(1)}%)` : ''}
                 </text>
               )}

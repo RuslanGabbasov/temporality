@@ -20,6 +20,14 @@ $css--font-face: false;
   --tm-surface: #142522;
   --tm-elevated: #1A302C;
   --tm-raised: #203A35;
+  // Токены, которые исторически использовались без объявления (в местах
+  // использования стояли inline-fallback'и, где-то — ничего): значения
+  // согласованы с существующей практикой приложения, чтобы визуал
+  // менялся только в сторону уже задокументированных токенов.
+  --tm-surface-2: rgba(127, 127, 127, 0.12);
+  --tm-surface-3: rgba(127, 127, 127, 0.15);
+  --tm-bg-1: var(--tm-surface);
+  --tm-accent: var(--tm-teal);
   --tm-border: rgba(237, 232, 223, 0.10);
   --tm-border-strong: rgba(237, 232, 223, 0.18);
   // Skeletons sit one whisper above the surface — a translucent tint, so the
@@ -61,6 +69,9 @@ $css--font-face: false;
   /* Typography */
   --tm-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --tm-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  // Алиас: без него font-family: var(--tm-font-mono) (Dossier, KnowledgeMap,
+  // explorer — без fallback'а) молча наследовал пропорциональный шрифт.
+  --tm-font-mono: var(--tm-mono);
   --tm-text-xs: 11px;
   --tm-text-sm: 13px;
   --tm-text-md: 14px;
@@ -3738,7 +3749,7 @@ button.header-nav-link {
 
 .presentation-chart { margin: 0; }
 .presentation-chart-title { font-weight: 600; color: var(--tm-text); margin-bottom: 0.3rem; }
-.presentation-chart-svg { width: 100%; max-width: 480px; height: auto; }
+.presentation-chart-svg { width: 100%; height: auto; }
 .presentation-chart-pie { max-width: 240px; }
 .presentation-chart-grid { stroke: var(--tm-border); stroke-width: 0.5; stroke-dasharray: 2 3; }
 .presentation-chart-axis-line { stroke: var(--tm-border); stroke-width: 1; }
@@ -3766,13 +3777,7 @@ button.header-nav-link {
   // правила класса) наследует его вместо чёрного дефолта SVG. Любые
   // явные fill продолжают побеждать наследование — ничего не перекрашивается.
   fill: currentColor;
-  // mermaid отдаёт svg с инлайновым капом `max-width: <natural>px`
-  // (tuneSvgWidth превращает его в фиксированную ширину): узкая диаграмма
-  // растягивается на колонку (масштаб по viewBox), широкая сохраняет свой
-  // размер и скроллится. min-width гарантирует «не уже колонки» и для
-  // варианта useMaxWidth=false (ширина в атрибутах).
-  min-width: 100%;
-  max-width: none;
+  max-width: 100%;
   height: auto;
 }
 .presentation-timeline { list-style: none; margin: 0; padding: 0; }
@@ -3819,6 +3824,9 @@ button.header-nav-link {
 // components (docs/presentation-engine.md §6.7, §11).
 .presentation-chart-gauge { max-width: 190px; }
 .presentation-chart-gantt { max-width: 100%; }
+// Квадратная диаграмма: без капа растянулась бы на всю колонку —
+// такой же высокой, как широкой (урок высоких узких мермейд-диаграмм).
+.presentation-chart-radar { max-width: 420px; }
 .presentation-gauge-value { fill: var(--tm-text); font-size: 18px; font-weight: 700; }
 .presentation-button {
   border: 1px solid var(--tm-teal);
