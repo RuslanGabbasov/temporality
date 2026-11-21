@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/temporality-project/temporality/kernel/harness"
@@ -877,9 +878,16 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			processedActivations[key] = true
 			attemptedThisTurn++
 			activationCount++
-			query := input.Prompt
-			if input.HintQuery != "" {
-				query = input.HintQuery
+			// Tool-triggered hints keep the TOOL context as their retrieval
+			// signal (query+tool+tool_result are merged journal-side), so they
+			// stay useful even on a glue-word prompt — but the task title is
+			// still the better base when the phrase carries no signal.
+			query := buildHintQuery(input)
+			if query == "" {
+				query = strings.TrimSpace(input.HintQuery)
+				if query == "" {
+					query = strings.TrimSpace(input.Prompt)
+				}
 			}
 			hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 			request := HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: query, Skills: input.Skills, TeamRoot: input.TeamRootRunID, Trigger: candidate.Trigger, ActivationID: activationID, Tool: candidate.Tool, MCPServer: candidate.MCPServer, ToolResult: candidate.ToolResult, ErrorClass: candidate.ErrorClass, IssuedKnowledgeIDs: sortedTrueKeys(issuedKnowledge), ActivationSourceID: candidate.SourceID}
@@ -3863,6 +3871,69 @@ func conversationTail(messages []llm.Message, budget int) string {
 //
 // Replay safety (docs/failure-model.md): titleParallel selects the schedule
 // order, gated by GetVersion("run-title-parallel"). Version 1 schedules the
+// hintQuerySignal counts the retrieval-bearing words of a query: words of 4+
+// letters minus a tiny conversation-glue stoplist. «Продолжай», «исправил»,
+// «давай» carry no search signal — they were the mechanism behind priming
+// hints on old conversations returning unrelated knowledge.
+func hintQuerySignal(text string) int {
+	stop := map[string]bool{
+		"продолжай": true, "продолжить": true, "исправил": true, "исправлено": true,
+		"исправляй": true, "давай": true, "сделай": true, "сделал": true,
+		"работает": true, "опять": true, "снова": true, "спасибо": true,
+		"окей": true, "плиз": true, "пожалуйста": true, "сейчас": true,
+		"нифига": true, "ничего": true, "нечего": true,
+		"continue": true, "please": true, "fixed": true, "done": true, "still": true,
+	}
+	n := 0
+	word := strings.Builder{}
+	flush := func() {
+		w := strings.ToLower(word.String())
+		word.Reset()
+		if len([]rune(w)) >= 4 && !stop[w] {
+			n++
+		}
+	}
+	for _, r := range strings.ToLower(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			word.WriteRune(r)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return n
+}
+
+// buildHintQuery resolves the retrieval text for prior-knowledge hints. The
+// user's phrase is primary — but on conversation follow-ups it is often pure
+// glue («Продолжай», «Исправил»), and matching knowledge on glue words is
+// exactly the «бесполезные подсказки» noise. When the phrase carries no
+// signal, the TASK TITLE — the conversation's actual subject — becomes the
+// query (the phrase still rides along: extra tokens cannot hide the
+// discriminative ones). When even the title carries no signal, the query is
+// empty: the caller skips the retrieval instead of matching on noise.
+func buildHintQuery(input RunInput) string {
+	phrase := strings.TrimSpace(input.HintQuery)
+	if phrase == "" {
+		phrase = strings.TrimSpace(input.Prompt)
+	}
+	title := strings.TrimSpace(input.Title)
+	// Threshold 1: the failure phrases carry ZERO signal tokens, while even
+	// one strong word («исправь авторизацию» → авторизацию) is a valid
+	// retrieval key. The IDF-style discriminative filter inside the hint
+	// engine handles the rest.
+	if hintQuerySignal(phrase) >= 1 {
+		return boundedHintQuery(phrase, 4000)
+	}
+	if hintQuerySignal(title) >= 1 {
+		if phrase != "" {
+			return boundedHintQuery(title+". "+phrase, 4000)
+		}
+		return boundedHintQuery(title, 4000)
+	}
+	return ""
+}
+
 // GenerateTitle and KnowledgeHints activities together when BOTH are needed;
 // their results are applied in the same order as the sequential path and
 // run.started is still emitted after both complete, so only the schedule order
@@ -3875,11 +3946,11 @@ func runTitleAndHints(ctx workflow.Context, activityCtx workflow.Context, state 
 	needTitle := input.ParentRunID == "" && title == ""
 	// A team program run has no model turns at the root, so prior-knowledge
 	// hints would never be consumed (docs/agent-teams.md §9).
-	needHints := input.Team == nil && !input.SkipKnowledge
-	hintQuery := input.Prompt
-	if input.HintQuery != "" {
-		hintQuery = input.HintQuery
-	}
+	hintQuery := buildHintQuery(input)
+	// A signal-free query («Продолжай» on an old conversation, and even the
+	// task title carrying nothing) means retrieval would match on noise: the
+	// priming hints are skipped entirely — none at all beats unrelated ones.
+	needHints := input.Team == nil && !input.SkipKnowledge && hintQuery != ""
 	// Hint selection measured 2–10s on a large corpus and delegated children
 	// start in fan-out: the old 20s/20s budget blew the attempt AND the manual
 	// retry, leaving every child with memory.read.failed («Ошибка чтения
