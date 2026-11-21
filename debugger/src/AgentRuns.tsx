@@ -1825,9 +1825,8 @@ export default function AgentRuns({ project }: { project: string }) {
                     const actor = root?.context?.actor?.id
                     if (!actor) return null
                     return (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
+                      <div title={actor} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.3rem' }}>
                         {t('runs.initiator') ?? 'Started by'}: <strong style={{ color: 'var(--tm-text-2)' }}>{userNameOf(actor)}</strong>
-                        <span title={actor} style={{ fontFamily: 'monospace', fontSize: '0.66rem', marginLeft: '0.4rem', opacity: 0.7 }}>{actor}</span>
                       </div>
                     )
                   })()}
@@ -2102,7 +2101,7 @@ export default function AgentRuns({ project }: { project: string }) {
                                   <strong>{info.label}</strong>
                                   <Tag type="gray" size="sm">× {ops.length}</Tag>
                                   <Tag type="red" size="sm">{REASON_KEYS[first.reason] ? t(REASON_KEYS[first.reason]) : first.reason}</Tag>
-                                  {first.agent_id && <Tag type="cool-gray" size="sm">{userNameOf(first.agent_id)}</Tag>}
+                                  									{first.agent_id && <Tag type="cool-gray" size="sm" title={first.agent_id}>{agents.find((a) => a.id === first.agent_id)?.name ?? first.agent_id}</Tag>}
                                   <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}><TimeHint value={times[0]}>{shortTime(times[0])}</TimeHint> — <TimeHint value={times[times.length - 1]}>{shortTime(times[times.length - 1])}</TimeHint></span>
                                   <button
                                     onClick={() => setExpandedGroups((prev) => {
