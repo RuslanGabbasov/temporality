@@ -469,6 +469,9 @@ type planPendingTask struct {
 	childRunID string
 	future     workflow.ChildWorkflowFuture
 	exec       workflow.Execution
+	// cancel tears THIS child down (the watchdog uses it); nil for children
+	// started before the per-child context existed (version-gated replays).
+	cancel workflow.CancelFunc
 }
 
 type RunResult struct {
@@ -1433,9 +1436,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return "", nil, err
 				}
 				childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
-				future := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", child)
+				// An own cancellable context per child: the watchdog (below)
+				// cancels THIS child only — the plan must survive a vanished
+				// child and keep its other branches running.
+				perChildCtx, perChildCancel := workflow.WithCancel(childCtx)
+				future := workflow.ExecuteChildWorkflow(perChildCtx, "AgentRun", child)
 				var childExec workflow.Execution
 				if startErr := future.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
+					perChildCancel()
 					if ctx.Err() != nil {
 						return "", nil, startErr
 					}
@@ -1447,7 +1455,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				statuses[task.ID] = "running"
 				launches[task.ID]++
 				totalLaunches++
-				inflightPlan = append(inflightPlan, &planPendingTask{taskID: task.ID, agentID: task.AgentID, childRunID: childRunID, future: future, exec: childExec})
+				inflightPlan = append(inflightPlan, &planPendingTask{taskID: task.ID, agentID: task.AgentID, childRunID: childRunID, future: future, exec: childExec, cancel: perChildCancel})
 			}
 			if len(inflightPlan) == 0 {
 				break
@@ -1462,6 +1470,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// replay the plain blocking wait.
 			var child RunResult
 			var childErr error
+			timedOut := false
 			if noteSteering == 1 {
 				childDone := false
 				noteChannel := workflow.GetSignalChannel(ctx, UserNoteSignal)
@@ -1480,17 +1489,55 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						appendForwardedNotes(&messages, notes)
 					}
 				})
-				for !childDone {
+				// The watchdog (docs/presentation-engine "kernel or Temporal
+				// restart removed the run's workflow" class of failures): if the
+				// child workflow VANISHES — a kernel or Temporal restart losing
+				// its history mid-run — the future never resolves and this plan
+				// waits forever (the inbound run of 2026-11-20 hung exactly so).
+				// The timer is a workflow command (deterministic on replay); on
+				// fire the child is cancelled and the task settles as failed.
+				timeoutTimer := workflow.NewTimer(ctx, PlanChildTimeout)
+				selector.AddFuture(timeoutTimer, func(f workflow.Future) {
+					timedOut = true
+					if p.cancel != nil {
+						p.cancel()
+					}
+				})
+				for !childDone && !timedOut {
 					selector.Select(ctx)
 				}
 			} else {
-				childErr = p.future.Get(ctx, &child)
+				childDone := false
+				timeoutTimer := workflow.NewTimer(ctx, PlanChildTimeout)
+				selector := workflow.NewSelector(ctx)
+				selector.AddFuture(p.future, func(f workflow.Future) {
+					childDone = true
+					childErr = f.Get(ctx, &child)
+				})
+				selector.AddFuture(timeoutTimer, func(f workflow.Future) {
+					timedOut = true
+					if p.cancel != nil {
+						p.cancel()
+					}
+				})
+				for !childDone && !timedOut {
+					selector.Select(ctx)
+				}
 			}
-			if childErr == nil {
+			if childErr == nil && !timedOut {
 				// Subtree rollup: the child's totals (its own plus its children)
 				// flow into this run's honest spend.
 				subtree.tokens += child.TotalTokens
 				subtree.costUSD += child.CostUSD
+			}
+			if timedOut {
+				// The vanished-workflow watchdog: the child neither completed nor
+				// answered a cancellation — it is GONE. Settle the task as failed
+				// so dependents skip and the plan finishes instead of wedging.
+				if err := failTask(p.taskID, p.childRunID, "child_timeout", fmt.Errorf("plan child %s did not finish within %s (workflow likely lost to a kernel or Temporal restart)", p.childRunID, PlanChildTimeout), summarizeChild(p.childRunID)); err != nil {
+					return "", nil, err
+				}
+				continue
 			}
 			drainedOnce = true
 			// Stale settlement first (docs/agent-delegation.md, acceptance

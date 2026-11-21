@@ -25,6 +25,14 @@ var ModelCallActivityTimeout = harness.Current().ModelCallActivityTimeout
 // lives in the central harness settings (docs/harness-settings.md).
 var ToolActivityTimeout = harness.Current().ToolActivityTimeout
 
+// PlanChildTimeout is the watchdog on one plan task's child run. Children
+// carry their own internal limits (max_turns, time_limit), but a kernel or
+// Temporal restart can make a child workflow VANISH mid-run — its future
+// then never resolves and the parent plan wedges forever (the inbound run
+// of 2026-11-20 hung exactly so). Generous by design: it must exceed every
+// legitimate child execution, and only fire on the already-dead.
+var PlanChildTimeout = durationFromEnv("TEMPORALITY_PLAN_CHILD_TIMEOUT", 2*time.Hour)
+
 // modelHeartbeatInterval is how often kernel.call_model heartbeats while a
 // provider call is in flight. Temporal delivers activity cancellation only
 // through heartbeat responses, so this interval is the worst-case latency
