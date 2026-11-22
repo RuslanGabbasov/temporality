@@ -140,7 +140,9 @@ export function Spotlight({ plan, onClose, onQuestion }: { plan: SpotlightPlan; 
           <pre style={{ marginTop: '0.6rem', padding: '0.5rem 0.6rem', background: 'var(--tm-raised)', borderRadius: 6, fontSize: '0.72rem', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>{plan.example}</pre>
         )}
         <div style={{ marginTop: '0.7rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="toolbar-btn" onClick={() => setAskOpen((v) => !v)}>?</button>
+          {/* The ask affordance exists only where a question can actually go
+              (onQuestion wired): a toggle that opens nothing is a dead button. */}
+          {onQuestion && <button className="toolbar-btn" onClick={() => setAskOpen((v) => !v)}>?</button>}
           {plan.docsLink && (
             <a className="gallery-doc" href={plan.docsLink} target="_blank" rel="noreferrer">Гайд ↗</a>
           )}

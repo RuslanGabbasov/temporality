@@ -495,19 +495,37 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 			writeError(w, 400, err)
 			return
 		}
+		// Terminal sessions ignore further steps: a completed or aborted
+		// lesson must not keep counting (a live session ran its StepIndex to
+		// 10 on a 4-step lesson when the client re-sent clicks).
+		if session.Status == "completed" || session.Status == "aborted" {
+			writeJSON(w, 200, map[string]any{"session": session, "lesson": lesson})
+			return
+		}
 		// §7.7/§4.5: a verification step's «Готово» is checked against the
-		// FACTUAL configuration, not against the user's word — the kernel
-		// records what it can actually see.
+		// FACTUAL configuration, not against the user's word. The check now
+		// GATES the advance: when the kernel cannot see what the lesson
+		// teaches, the step stays put and the response carries why — the
+		// learner gets feedback and a retry instead of a silent completion
+		// with mastery that never happened.
+		var verification map[string]any
 		if input.Action == "done" && session.StepIndex < len(lesson.Steps) &&
 			lesson.Steps[session.StepIndex].Type == StepVerification {
 			if capability := findLearningCapability(lesson.VerifyFeature); capability != nil && capability.Mastered != nil {
 				appCtx := learningAppContext(r.Context(), ws, "", visibleUnits(r))
-				if mstatus, detail := capability.Mastered(appCtx); mstatus == "practiced" || mstatus == "verified" {
-					recordLearningEvidence(r.Context(), ws, &workspace.LearningProgress{
-						UserID: session.UserID, FeatureID: capability.ID, LessonID: lesson.ID,
-						Mastery: mstatus, Source: "verification", Detail: detail,
+				mstatus, detail := capability.Mastered(appCtx)
+				if mstatus != "practiced" && mstatus != "verified" {
+					writeJSON(w, 200, map[string]any{
+						"session": session, "lesson": lesson,
+						"verification": map[string]any{"ok": false, "detail": detail},
 					})
+					return
 				}
+				recordLearningEvidence(r.Context(), ws, &workspace.LearningProgress{
+					UserID: session.UserID, FeatureID: capability.ID, LessonID: lesson.ID,
+					Mastery: mstatus, Source: "verification", Detail: detail,
+				})
+				verification = map[string]any{"ok": true, "detail": detail}
 			}
 		}
 		next := session.StepIndex + 1
@@ -547,7 +565,11 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 		if status != "" {
 			session.Status = status
 		}
-		writeJSON(w, 200, map[string]any{"session": session, "lesson": lesson})
+		payload := map[string]any{"session": session, "lesson": lesson}
+		if verification != nil {
+			payload["verification"] = verification
+		}
+		writeJSON(w, 200, payload)
 	})
 }
 

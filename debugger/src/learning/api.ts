@@ -158,7 +158,7 @@ export async function fetchCurrentSession(): Promise<{ session: LearningSession 
   return { session: data.session ?? null, lesson: data.lesson ?? null }
 }
 
-export async function postSessionStep(sessionId: string, action: string, evidence?: string): Promise<{ session: LearningSession; lesson: LearningLessonDef | null }> {
+export async function postSessionStep(sessionId: string, action: string, evidence?: string): Promise<{ session: LearningSession; lesson: LearningLessonDef | null; verification?: { ok: boolean; detail?: string } }> {
   const response = await kernelFetch(`/v1/learning/sessions/${sessionId}/step`, { method: 'POST', body: JSON.stringify({ action, evidence: evidence ?? '' }) })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return response.json()

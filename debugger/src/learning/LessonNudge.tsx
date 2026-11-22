@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useT } from '../i18n'
 import {
-  fetchLearningLessons, fetchLearningState, startLearningSession,
+  fetchCurrentSession, fetchLearningLessons, fetchLearningState, startLearningSession,
   type LearningLessonDef, type LearningProgramItem,
 } from './api'
 import { notifyLearningSessionChanged } from './LessonRunner'
@@ -39,6 +39,7 @@ export default function LessonNudge({ page }: Props) {
   const [busy, setBusy] = useState(false)
   const [visible, setVisible] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [startError, setStartError] = useState('')
   const timerRef = useRef<number | null>(null)
 
   const pick = useCallback(async (currentPage: string) => {
@@ -66,11 +67,14 @@ export default function LessonNudge({ page }: Props) {
     setLesson(null)
     setVisible(false)
     setExpanded(false)
+    setStartError('')
     if (timerRef.current) window.clearTimeout(timerRef.current)
-    // The session runner owns attention while a lesson is active.
-    void fetchLearningState().then((state) => {
-      const active = state.program && state.program.status === 'in_progress'
-      if (active) return
+    // The session runner owns attention while ANY lesson session is live —
+    // the old program.status === 'in_progress' check never matched (the
+    // program status vocabulary is active|paused|completed|cancelled), so
+    // the nudge used to float next to the runner it duplicated.
+    void fetchCurrentSession().then(({ session }) => {
+      if (session) return
       timerRef.current = window.setTimeout(() => void pick(page), LOAD_DELAY_MS)
     }).catch(() => {
       timerRef.current = window.setTimeout(() => void pick(page), LOAD_DELAY_MS)
@@ -80,14 +84,17 @@ export default function LessonNudge({ page }: Props) {
 
   const start = useCallback(async () => {
     if (!lesson || busy) return
-    setBusy(true)
+    setBusy(true); setStartError('')
     try {
       await startLearningSession(lesson.id)
       if (cache) cache.done.add(lesson.id)
       notifyLearningSessionChanged()
       setLesson(null)
       setVisible(false)
-    } catch { /* the runner reports session errors on its own */ } finally { setBusy(false) }
+    } catch (failure) {
+      // A silent catch made the button look dead — say what happened.
+      setStartError(failure instanceof Error ? failure.message : 'Request failed')
+    } finally { setBusy(false) }
   }, [lesson, busy])
 
   const dismissNow = useCallback(() => {
@@ -148,6 +155,9 @@ export default function LessonNudge({ page }: Props) {
           </span>
         )}
       </div>
+      {startError && (
+        <div style={{ marginTop: '0.4rem', fontSize: '0.72rem', color: '#ffb4ab' }} role="alert">{startError}</div>
+      )}
     </div>
   )
 }

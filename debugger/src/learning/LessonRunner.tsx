@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useT } from '../i18n'
 import { Spotlight, type SpotlightMode, type SpotlightPlan } from './Spotlight'
 import {
-  fetchCurrentSession, fetchLearningState, postSessionStep, resumeLearningSession,
+  fetchCurrentSession, fetchLearningState, postSessionStep, resumeLearningSession, startLearningSession,
   type LearningLessonDef, type LearningSession, type LearningStep,
 } from './api'
 
@@ -41,6 +41,12 @@ export default function LessonRunner() {
   const [minimized, setMinimized] = useState(false)
   const [finishedMastery, setFinishedMastery] = useState('')
   const [spotlightOpen, setSpotlightOpen] = useState(false)
+  /** The kernel's verdict on the last verification step: ok = advanced with
+   *  a green note, failed = the step STAYS and the detail says why. */
+  const [verification, setVerification] = useState<{ ok: boolean; detail?: string } | null>(null)
+  /** The program's next pending lesson — the completion card chains into it
+   *  instead of dead-ending («ничего не переключается между уроками»). */
+  const [nextLesson, setNextLesson] = useState<{ id: string; title: string } | null>(null)
   const reloadRef = useRef<() => void>(() => {})
 
   const reload = useCallback(async () => {
@@ -86,19 +92,28 @@ export default function LessonRunner() {
 
   const advance = useCallback(async (action: 'done' | 'next' | 'skip' | 'pause' | 'abort') => {
     if (!session || busy) return
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setVerification(null)
     try {
       const reply = await postSessionStep(session.id, action)
       setSession(reply.session)
       setLesson(reply.lesson)
       setSpotlightOpen(false)
+      setVerification(reply.verification ?? null)
       if (reply.session.status === 'completed') {
         // Completion ≠ mastery (§4.5): show the FACTUAL verdict the kernel
-        // recorded during the lesson's verification step.
+        // recorded during the lesson's verification step — and chain into
+        // the program's next pending lesson so the path continues.
         try {
           const state = await fetchLearningState()
           const evidence = state.capabilities.find((cap) => cap.id === reply.lesson?.feature_id)
           setFinishedMastery(evidence?.mastery ?? 'introduced')
+          const pending = (state.program?.items ?? []).find((item) =>
+            ['pending', 'scheduled', 'available', 'in_progress'].includes(item.state))
+          if (pending && pending.lesson_id !== reply.lesson?.id) {
+            setNextLesson({ id: pending.lesson_id, title: pending.lesson_id })
+          } else {
+            setNextLesson(null)
+          }
         } catch { setFinishedMastery('introduced') }
       }
       notifyLearningSessionChanged()
@@ -106,6 +121,19 @@ export default function LessonRunner() {
       setError(failure instanceof Error ? failure.message : 'Request failed')
     } finally { setBusy(false) }
   }, [session, busy])
+
+  const startNext = useCallback(async () => {
+    if (!nextLesson || busy) return
+    setBusy(true); setError('')
+    try {
+      await startLearningSession(nextLesson.id)
+      setNextLesson(null); setFinishedMastery(''); setVerification(null)
+      notifyLearningSessionChanged()
+      await reload()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Request failed')
+    } finally { setBusy(false) }
+  }, [nextLesson, busy, reload])
 
   const resume = useCallback(async () => {
     if (!session || busy) return
@@ -145,9 +173,16 @@ export default function LessonRunner() {
       case 'configuration':
       case 'verification':
         return (
-          <button className="toolbar-btn primary" disabled={busy} onClick={() => void advance('done')}>
-            {t('learning.runner.done')}
-          </button>
+          <span style={{ display: 'inline-flex', gap: '0.4rem' }}>
+            <button className="toolbar-btn primary" disabled={busy} onClick={() => void advance('done')}>
+              {t('learning.runner.done')}
+            </button>
+            {verification && !verification.ok && (
+              <button className="toolbar-btn" disabled={busy} onClick={() => void advance('skip')}>
+                {t('learning.runner.skip_step')}
+              </button>
+            )}
+          </span>
         )
       case 'summary':
         return <button className="toolbar-btn primary" disabled={busy} onClick={() => void advance('done')}>{t('learning.runner.finish')}</button>
@@ -160,6 +195,15 @@ export default function LessonRunner() {
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
       <span className="learn-indicator learn-indicator-available">?</span>
       <strong style={{ fontSize: '0.78rem' }}>{lesson.title}</strong>
+      {/* Step dots: a novice sees where they are and how long the road is
+          without reading numbers. */}
+      {session.status === 'active' && total > 0 && (
+        <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'center', marginLeft: '0.3rem' }} title={t('learning.runner.step_of', { current: String(Math.min(stepIndex + 1, total)), total: String(total) })}>
+          {Array.from({ length: total }, (_, i) => (
+            <span key={i} style={{ width: 5, height: 5, borderRadius: '50%', display: 'inline-block', background: i === stepIndex ? 'var(--tm-amber)' : i < stepIndex ? 'var(--tm-teal)' : 'var(--tm-border-strong)' }} />
+          ))}
+        </span>
+      )}
       <span style={{ marginLeft: 'auto', fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>
         {session.status === 'active' && total > 0 && t('learning.runner.step_of', { current: String(Math.min(stepIndex + 1, total)), total: String(total) })}
       </span>
@@ -168,7 +212,7 @@ export default function LessonRunner() {
     </div>
   )
 
-  // Completed: the factual mastery verdict, then the panel leaves.
+  // Completed: the factual mastery verdict + the chain into the next lesson.
   if (session.status === 'completed') {
     return (
       <div className="lesson-runner" style={{ zIndex: 96 }}>
@@ -179,8 +223,15 @@ export default function LessonRunner() {
             {t('learning.runner.mastery', { mastery: t(`learning.mastery.${finishedMastery}`) })}
           </div>
         </div>
-        <div style={{ marginTop: '0.6rem', display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="toolbar-btn" onClick={() => { setSession(null); setLesson(null); setFinishedMastery('') }}>{t('learning.runner.close')}</button>
+        <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          {nextLesson && (
+            <button className="toolbar-btn primary" disabled={busy} onClick={() => void startNext()}>
+              {t('learning.runner.next_lesson')} →
+            </button>
+          )}
+          <button className="toolbar-btn" onClick={() => { setSession(null); setLesson(null); setFinishedMastery(''); setNextLesson(null); navigateTo('/learning') }}>
+            {t('learning.runner.back_to_center')}
+          </button>
         </div>
       </div>
     )
@@ -231,6 +282,17 @@ export default function LessonRunner() {
             )}
             {isVerification && (
               <div style={{ marginTop: '0.4rem', color: 'var(--tm-text-3)', fontSize: '0.72rem' }}>{t('learning.runner.verify_hint')}</div>
+            )}
+            {verification && verification.ok && (
+              <div style={{ marginTop: '0.4rem', color: 'var(--tm-teal)', fontSize: '0.75rem' }}>
+                ✓ {t('learning.runner.check_passed')}{verification.detail ? `: ${verification.detail}` : ''}
+              </div>
+            )}
+            {verification && !verification.ok && (
+              <div style={{ marginTop: '0.4rem', padding: '0.4rem 0.55rem', border: '1px solid var(--tm-amber)', borderRadius: 6, background: 'rgba(230,184,92,0.08)' }}>
+                <div style={{ color: 'var(--tm-amber)', fontSize: '0.75rem', fontWeight: 600 }}>{t('learning.runner.check_failed')}</div>
+                {verification.detail && <div style={{ color: 'var(--tm-text-2)', fontSize: '0.74rem', marginTop: '0.15rem' }}>{verification.detail}</div>}
+              </div>
             )}
           </div>
         ) : null}
