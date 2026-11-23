@@ -94,6 +94,7 @@
 <a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
 <a class="docs-nav-row" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
 <a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="usage-report.html">Usage aggregates and monthly reports</a>
 <a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
 <article class="docs-content">
@@ -329,7 +330,7 @@ Status: Phase 1 <strong>complete</strong> — all original plan items done (2026
 <hr>
 <h2 id="p2-advanced"><a class="anchor" href="#p2-advanced" aria-label="Section link">#</a>P2 — Advanced</h2><ul>
 <li><input disabled="" type="checkbox"> <strong>Read-after-write probes</strong> — operation → observable trace → probe → hint to operator. Probe gives a hint, does NOT automatically issue authoritative verdict. Первая реализация удалена как нерабочая по предпосылкам; вернуться к идее — с дизайном от реальной формы аргументов и внешних следов.</li>
-<li><input disabled="" type="checkbox"> <strong>Cost accounting v2</strong> — cost per run / per project / per task / per saga ✅ (в Done выше); остаются org-уровневые токен-квоты</li>
+<li><input disabled="" type="checkbox"> <strong>Cost accounting v2</strong> — cost per run / per project / per task / per saga ✅ (в Done выше); остаются org-уровневые токен-квоты; агрегаты потребления для агентов и людей (токены/деньги/HAB+HWT в разрезе org_unit, сотрудника, проекта, саги, модели, провайдера) — <code>usage_report</code> тул + <code>GET /v1/agent/usage</code> + автоматический ежемесячный отчёт в журнал (docs/usage-report.md) ✅</li>
 <li><input disabled="" type="checkbox"> <strong>Memory population overview</strong> — counts over time; частично сделано: распределение состояний на странице знаний (lifecycle bar), метрики борда (<code>/org/work</code>) — остались тайм-серии</li>
 <li><input disabled="" type="checkbox"> <strong>Cross-project knowledge</strong> — knowledge that spans multiple projects (scope promotion org_unit/organization есть; cross-project ноды — не делали)</li>
 <li><input checked="" disabled="" type="checkbox"> <strong>Embeddings infrastructure</strong> — shipped beyond the original scope: in-process model (rembed, <code>KERNEL_EMBEDDINGS_MODEL</code>), knowledge embeddings store, semantic hint tier, semantic search and the map in the knowledge explorer; lexical matching остался как дешёвый первый эшелон</li>
