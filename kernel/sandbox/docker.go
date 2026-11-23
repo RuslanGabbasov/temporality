@@ -793,7 +793,7 @@ type runContainerRef struct {
 func (d *Docker) listRunContainers(ctx context.Context) ([]runContainerRef, error) {
 	out, err := exec.CommandContext(ctx, d.Binary, "ps",
 		"--filter", "name="+SandboxNamePrefix,
-		"--format", "{{.ID}}\t{{.Names}}\t{{.Label \""+ScratchKeyLabel+"\"}}\t{{.Label \""+FingerprintLabel+"\"}}\t{{.Label \""+RunLabel+"\"}}\t{{.Label \""+ProjectLabel+"\"}").CombinedOutput()
+		"--format", runContainersFormat).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("list sandbox containers: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -1099,6 +1099,21 @@ const (
 	RunLabel     = "temporality.run"
 	ProjectLabel = "temporality.project"
 )
+
+// runContainersFormat is the docker ps --format template behind
+// listRunContainers. A package var so the template-parse regression test can
+// reach it: a missing closing brace here silently killed the sandbox janitor,
+// the orphan reaper and run recovery at once (docker fails the whole ps on a
+// bad template; CI has no docker daemon, so only the server's warn logs saw
+// it).
+var runContainersFormat = strings.Join([]string{
+	"{{.ID}}",
+	"{{.Names}}",
+	`{{.Label "` + ScratchKeyLabel + `"}}`,
+	`{{.Label "` + FingerprintLabel + `"}}`,
+	`{{.Label "` + RunLabel + `"}}`,
+	`{{.Label "` + ProjectLabel + `"}}`,
+}, "\t")
 
 // SandboxNamePrefix is the deterministic name prefix of every sandbox
 // container this runner creates (see newSandboxContainerName). The orphan
