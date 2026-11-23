@@ -385,7 +385,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     .filter(([, count]) => count > 0)
 
   return (
-    <div style={{ padding: '1rem', height: 'calc(100vh - 3rem)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', overflow: 'hidden' }}>
+    <div data-learn="page.knowledge" style={{ padding: '1rem', height: 'calc(100vh - 3rem)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{t('explorer.title') ?? 'Knowledge explorer'}</h2>
         <div style={{ flex: 1, minWidth: '320px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

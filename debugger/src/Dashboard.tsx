@@ -381,7 +381,7 @@ export default function Dashboard({ project, setProject }: Props) {
   ]
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div data-learn="page.dashboard" style={{ padding: '1rem' }}>
       {error && (
         <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}

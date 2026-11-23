@@ -192,7 +192,7 @@ export default function Users() {
   }
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div data-learn="page.users" style={{ padding: '1rem' }}>
       {confirmDialogNode}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 

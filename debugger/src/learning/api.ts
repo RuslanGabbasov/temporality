@@ -132,11 +132,43 @@ export async function fetchLearningState(): Promise<LearningState> {
   }
 }
 
-export async function fetchLearningLessons(): Promise<LearningLessonDef[]> {
+export interface LearningCatalogMeta {
+  /** Routes the supervisor can write a lesson for (page highlights). */
+  pages: string[]
+  /** The current release's «what's new» material, when the build has any. */
+  whats_new: { available: boolean; version?: string; changes?: number }
+}
+
+export async function fetchLearningLessonsMeta(): Promise<{ lessons: LearningLessonDef[] } & LearningCatalogMeta> {
   const response = await kernelFetch('/v1/learning/lessons')
-  if (!response.ok) return []
+  if (!response.ok) return { lessons: [], pages: [], whats_new: { available: false } }
   const data = await response.json()
-  return data.lessons ?? []
+  return {
+    lessons: data.lessons ?? [],
+    pages: data.pages ?? [],
+    whats_new: data.whats_new ?? { available: false },
+  }
+}
+
+export async function fetchLearningLessons(): Promise<LearningLessonDef[]> {
+  return (await fetchLearningLessonsMeta()).lessons
+}
+
+/** Ask the supervisor to write a lesson for this user right now: a screen
+ *  lesson from its page highlight, or the release's «what's new» lesson.
+ *  The kernel serves a fresh same-version lesson from the store (cached). */
+export async function generateLearningLesson(kind: 'page' | 'whats_new', page?: string, force = false): Promise<LearningLessonDef> {
+  const response = await kernelFetch('/v1/learning/lessons/generate', {
+    method: 'POST',
+    body: JSON.stringify({ kind, page: page ?? '', force }),
+  })
+  if (!response.ok) {
+    let detail = ''
+    try { detail = ((await response.json())?.error as string) ?? '' } catch { /* body may be empty */ }
+    throw new Error(detail || `HTTP ${response.status}`)
+  }
+  const data = await response.json()
+  return data.lesson as LearningLessonDef
 }
 
 export async function buildLearningProgram(): Promise<LearningProgram> {

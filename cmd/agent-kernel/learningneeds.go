@@ -82,12 +82,31 @@ func runLearningNeedsPass(ctx context.Context, log *slog.Logger, ws *workspace.S
 			continue
 		}
 		mastery := map[string]string{}
+		touched := map[string]bool{} // the learner already met this feature
 		for _, p := range progress {
 			mastery[p.FeatureID] = p.Mastery
+			touched[p.FeatureID] = true
+		}
+		// One slot per (user, feature) with a sticky status (§9.2): a
+		// dismissed or accepted suggestion must survive the next pass —
+		// otherwise a 45-minute loop resurrects what the user rejected.
+		slots, err := ws.ListLearningSuggestions(ctx, user.ID)
+		if err != nil {
+			slots = nil // best-effort: fall back to plain upserts
+		}
+		slotStatus := map[string]string{}
+		for _, s := range slots {
+			slotStatus[s.FeatureID] = s.Status
 		}
 		for _, cap := range applicable {
 			if m := mastery[cap.ID]; m == "practiced" || m == "verified" {
 				continue // mastered — nothing to suggest (§18 scenario F)
+			}
+			if touched[cap.ID] {
+				continue // the lesson was already taken — no repeat (§18 F)
+			}
+			if st := slotStatus[cap.ID]; st == "dismissed" || st == "accepted" {
+				continue // the user already decided about this slot (§9.2)
 			}
 			status, detail := "unknown", ""
 			if cap.Mastered != nil {

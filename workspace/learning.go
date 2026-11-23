@@ -279,3 +279,90 @@ func (s *Store) ListLearningSuggestions(ctx context.Context, userID string) ([]L
 	}
 	return out, rows.Err()
 }
+
+// GeneratedLesson is one supervisor-written lesson for ONE user
+// (docs/ai-guided-onboarding-and-learning.md §10.2 extended): the content is
+// generated from the page/version highlights against the user's progress
+// delta, but it lives in the store so sessions survive restarts (§16.4).
+type GeneratedLesson struct {
+	ID         string          `json:"id"`
+	UserID     string          `json:"user_id"`
+	Kind       string          `json:"kind"` // page | whats_new
+	Page       string          `json:"page"` // route for kind=page
+	FeatureID  string          `json:"feature_id"`
+	AppVersion string          `json:"app_version"` // buildVersion at generation
+	Title      string          `json:"title"`
+	Lesson     json.RawMessage `json:"lesson"` // the full LearningLesson JSON
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+}
+
+// UpsertGeneratedLesson stores (or regenerates) the user's lesson for one
+// (kind, page) slot. The ROW ID is kept across regenerations on purpose: an
+// in-flight session references the lesson id and must stay resolvable.
+func (s *Store) UpsertGeneratedLesson(ctx context.Context, l *GeneratedLesson) error {
+	now := time.Now().UTC()
+	l.CreatedAt, l.UpdatedAt = now, now
+	return s.pool.QueryRow(ctx,
+		`INSERT INTO learning_generated_lesson
+		   (id, user_id, kind, page, feature_id, app_version, title, lesson, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+		 ON CONFLICT (user_id, kind, page) DO UPDATE SET
+		   feature_id = EXCLUDED.feature_id, app_version = EXCLUDED.app_version,
+		   title = EXCLUDED.title, lesson = EXCLUDED.lesson, updated_at = now()
+		 RETURNING id, created_at, updated_at`,
+		l.ID, l.UserID, l.Kind, l.Page, l.FeatureID, l.AppVersion, l.Title, l.Lesson, now).
+		Scan(&l.ID, &l.CreatedAt, &l.UpdatedAt)
+}
+
+// GetGeneratedLesson loads one generated lesson by id, scoped to its owner.
+func (s *Store) GetGeneratedLesson(ctx context.Context, userID, id string) (*GeneratedLesson, error) {
+	var l GeneratedLesson
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, user_id, kind, page, feature_id, app_version, title, lesson, created_at, updated_at
+		 FROM learning_generated_lesson WHERE id = $1 AND user_id = $2`, id, userID).
+		Scan(&l.ID, &l.UserID, &l.Kind, &l.Page, &l.FeatureID, &l.AppVersion, &l.Title, &l.Lesson, &l.CreatedAt, &l.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &l, nil
+}
+
+// GetGeneratedLessonBySlot loads the user's lesson for one (kind, page) slot.
+func (s *Store) GetGeneratedLessonBySlot(ctx context.Context, userID, kind, page string) (*GeneratedLesson, error) {
+	var l GeneratedLesson
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, user_id, kind, page, feature_id, app_version, title, lesson, created_at, updated_at
+		 FROM learning_generated_lesson WHERE user_id = $1 AND kind = $2 AND page = $3`, userID, kind, page).
+		Scan(&l.ID, &l.UserID, &l.Kind, &l.Page, &l.FeatureID, &l.AppVersion, &l.Title, &l.Lesson, &l.CreatedAt, &l.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &l, nil
+}
+
+// ListGeneratedLessons returns the user's generated lessons, newest first.
+func (s *Store) ListGeneratedLessons(ctx context.Context, userID string) ([]GeneratedLesson, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, user_id, kind, page, feature_id, app_version, title, lesson, created_at, updated_at
+		 FROM learning_generated_lesson WHERE user_id = $1 ORDER BY updated_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []GeneratedLesson{}
+	for rows.Next() {
+		var l GeneratedLesson
+		if err := rows.Scan(&l.ID, &l.UserID, &l.Kind, &l.Page, &l.FeatureID, &l.AppVersion, &l.Title, &l.Lesson, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}

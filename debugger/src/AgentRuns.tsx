@@ -1579,7 +1579,7 @@ export default function AgentRuns({ project }: { project: string }) {
   const overviewTurns = ownEvents.filter((event) => event.type === 'model.completed').length
   const overviewStartedAt = ownEvents.find((event) => event.type === 'run.started')?.occurred_at
   return (
-    <div style={{ padding: '1rem' }}>
+    <div data-learn="page.runs" style={{ padding: '1rem' }}>
       {error && (
         <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}

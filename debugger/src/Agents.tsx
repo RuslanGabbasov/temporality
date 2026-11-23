@@ -883,7 +883,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     ?? (form.network_access ? 'public' : (form.egress_allowlist ?? []).length > 0 ? 'allowlist' : 'off')
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div data-learn="page.agent-config" style={{ padding: '1rem' }}>
       {confirmDialogNode}
       {bulkOpen && (
         <BulkAgentDialog

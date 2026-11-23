@@ -520,7 +520,7 @@ export default function Teams({ project }: { project: string }) {
   const isDraft = selected?.version_status === 'draft'
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div data-learn="page.teams" style={{ padding: '1rem' }}>
       {confirmDialogNode}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 

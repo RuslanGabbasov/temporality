@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useT } from '../i18n'
 import { Spotlight, type SpotlightMode, type SpotlightPlan } from './Spotlight'
 import {
-  fetchCurrentSession, fetchLearningState, postSessionStep, resumeLearningSession, startLearningSession,
-  type LearningLessonDef, type LearningSession, type LearningStep,
+  fetchCurrentSession, fetchLearningLessons, fetchLearningState, postSessionStep, resumeLearningSession, startLearningSession,
+  type LearningLessonDef, type LearningSession, LearningStep,
 } from './api'
 
 // The lesson runner (docs/ai-guided-onboarding-and-learning.md §8): a floating
@@ -110,7 +110,14 @@ export default function LessonRunner() {
           const pending = (state.program?.items ?? []).find((item) =>
             ['pending', 'scheduled', 'available', 'in_progress'].includes(item.state))
           if (pending && pending.lesson_id !== reply.lesson?.id) {
-            setNextLesson({ id: pending.lesson_id, title: pending.lesson_id })
+            // The chain button must read as a title, not as a raw catalog id
+            // — resolve it against the shipped catalog (best-effort).
+            let title = pending.lesson_id
+            try {
+              const catalog = await fetchLearningLessons()
+              title = catalog.find((l) => l.id === pending.lesson_id)?.title ?? pending.lesson_id
+            } catch { /* keep the id — the button still works */ }
+            setNextLesson({ id: pending.lesson_id, title })
           } else {
             setNextLesson(null)
           }

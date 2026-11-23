@@ -2116,7 +2116,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   if (!project.trim()) return <ProjectRequired what={t('workspace.title') ?? 'Workspace'} />
 
   return (
-    <div className="workspace-root">
+    <div className="workspace-root" data-learn="page.workspace">
       {/* Left panel: conversations */}
       <div className="workspace-sidebar">
         <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--tm-border)' }}>

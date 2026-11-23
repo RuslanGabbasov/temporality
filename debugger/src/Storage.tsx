@@ -1177,7 +1177,7 @@ export default function Storage({ project }: { project: string }) {
   if (!project.trim()) return <ProjectRequired what={t('storage.title')} />
 
   return (
-    <div style={{ padding: '1rem', height: 'calc(100vh - 3rem)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+    <div data-learn="page.storage" style={{ padding: '1rem', height: 'calc(100vh - 3rem)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
       {confirmDialogNode}
       {sweepDialog}
       {policiesDialog}

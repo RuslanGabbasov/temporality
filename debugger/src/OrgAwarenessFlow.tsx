@@ -393,7 +393,7 @@ export default function OrgAwarenessFlow({ embedded }: { embedded?: boolean }) {
   const canMore = rows.length < count
 
   return (
-    <div style={{ padding: embedded ? 0 : '1rem', maxWidth: embedded ? undefined : '86rem', margin: embedded ? undefined : '0 auto' }}>
+    <div data-learn="page.org-flow" style={{ padding: embedded ? 0 : '1rem', maxWidth: embedded ? undefined : '86rem', margin: embedded ? undefined : '0 auto' }}>
       {error && (
         <InlineNotification kind="error" title={t('common.error')} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}

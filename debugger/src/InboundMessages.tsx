@@ -104,7 +104,7 @@ export default function InboundMessages() {
   }
 
   return (
-    <div className="tm-page">
+    <div className="tm-page" data-learn="page.inbound">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ marginTop: 0 }}>{t('inbound.title') ?? 'Inbox'}</h2>

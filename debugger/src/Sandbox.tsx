@@ -324,7 +324,7 @@ export default function Sandbox({ project }: { project?: string }) {
   }
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div data-learn="page.sandbox" style={{ padding: '1rem' }}>
       {confirmDialogNode}
       {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} onCloseButtonClick={() => setError('')} style={{ marginBottom: '1rem' }} />}
       {notice && <InlineNotification kind="success" lowContrast title="" subtitle={notice} onCloseButtonClick={() => setNotice('')} style={{ marginBottom: '1rem' }} />}

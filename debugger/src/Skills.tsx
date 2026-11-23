@@ -527,7 +527,7 @@ export default function Skills() {
   }
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div data-learn="page.skills" style={{ padding: '1rem' }}>
       {confirmDialogNode}
       {transferReport && (
         <AppModal onClose={() => setTransferReport(null)} panelStyle={{ width: '560px' }}>

@@ -75,7 +75,7 @@ export default function SupervisorModel() {
   if (loading) return <PageLoading />
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div data-learn="page.supervisor-model" style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
       {saved && <InlineNotification kind="success" title={t('quality.saved') ?? 'Saved'} hideCloseButton lowContrast style={{ marginBottom: '1rem' }} />}
 

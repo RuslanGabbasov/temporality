@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { InlineLoading } from '@carbon/react'
 import { useT } from '../i18n'
 import {
-  buildLearningProgram, fetchLearningLessons, fetchLearningState,
+  buildLearningProgram, fetchLearningLessonsMeta, fetchLearningState, generateLearningLesson,
   setSuggestionStatus, startLearningSession,
   type LearningCapabilityState, type LearningLessonDef, type LearningState,
 } from './api'
@@ -28,15 +28,17 @@ export default function LearningCenter() {
   const t = useT()
   const [state, setState] = useState<LearningState | null>(null)
   const [lessons, setLessons] = useState<LearningLessonDef[]>([])
+  const [whatsNew, setWhatsNew] = useState<{ available: boolean; version?: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
 
   const load = useCallback(async () => {
     try {
-      const [st, ls] = await Promise.all([fetchLearningState(), fetchLearningLessons()])
+      const [st, meta] = await Promise.all([fetchLearningState(), fetchLearningLessonsMeta()])
       setState(st)
-      setLessons(ls)
+      setLessons(meta.lessons)
+      setWhatsNew(meta.whats_new)
       setError('')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Request failed')
@@ -84,6 +86,19 @@ export default function LearningCenter() {
     } finally { setBusy('') }
   }, [load])
 
+  // «Что нового»: the release's increment as a lesson — generated against
+  // this user's delta, served from the store at the same version.
+  const startWhatsNew = useCallback(async () => {
+    setBusy('whats-new')
+    try {
+      const lesson = await generateLearningLesson('whats_new')
+      await startLearningSession(lesson.id)
+      notifyLearningSessionChanged()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Request failed')
+    } finally { setBusy('') }
+  }, [])
+
   if (loading) return <div style={{ padding: '2rem' }}><InlineLoading description={t('common.loading')} /></div>
   if (error && !state) {
     return (
@@ -105,10 +120,30 @@ export default function LearningCenter() {
   const doneCount = programLessons.filter((item) => item.state === 'completed').length
 
   return (
-    <div style={{ padding: '1.25rem', maxWidth: '1080px', margin: '0 auto' }}>
+    <div data-learn="page.learning" style={{ padding: '1.25rem', maxWidth: '1080px', margin: '0 auto' }}>
       <h2 style={{ margin: '0 0 0.25rem' }}>{t('learning.title')}</h2>
       <p style={{ color: 'var(--tm-text-3)', margin: '0 0 1.25rem', fontSize: '0.85rem' }}>{t('learning.subtitle')}</p>
       {error && <div role="alert" style={{ color: '#ffb4ab', fontSize: '0.78rem', marginBottom: '0.75rem' }}>{error}</div>}
+
+      {/* The release increment (§10.2 extended): one button, one generated
+          lesson — for users who already know the old behaviour. */}
+      {whatsNew?.available && (
+        <section className="learn-section">
+          <div className="learn-card" style={{ padding: '0.9rem 1rem', borderLeft: '3px solid var(--tm-teal)' }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--tm-teal)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>
+              {t('learning.generate.whats_new', { version: whatsNew.version ?? '' })}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', lineHeight: 1.55 }}>
+              {t('learning.generate.whats_new_desc')}
+            </div>
+            <div style={{ marginTop: '0.6rem' }}>
+              <button className="toolbar-btn primary" disabled={busy === 'whats-new'} onClick={() => void startWhatsNew()}>
+                {busy === 'whats-new' ? '…' : t('learning.generate.build')}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* The mentor's next step (§4.1): ONE lesson with the supervisor's own
           «why», program progress under it — an individual course, not a

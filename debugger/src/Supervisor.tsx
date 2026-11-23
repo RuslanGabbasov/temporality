@@ -1292,7 +1292,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
 export default function Supervisor({ setProject }: { setProject?: (project: string) => void }) {
   const t = useT()
   return (
-    <div style={{ padding: '1rem', maxWidth: '60rem', margin: '0 auto' }}>
+    <div data-learn="page.supervisor" style={{ padding: '1rem', maxWidth: '60rem', margin: '0 auto' }}>
       <div style={{ marginBottom: '0.75rem' }}>
         <h2 style={{ margin: 0 }}>{t('supervisor.title')}</h2>
         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>{t('supervisor.subtitle')}</p>

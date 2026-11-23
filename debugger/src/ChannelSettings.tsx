@@ -251,7 +251,7 @@ export default function ChannelSettingsPage() {
   }
 
   return (
-    <div className="tm-page">
+    <div className="tm-page" data-learn="page.channels">
       <Heading>{t('channels_admin.title') ?? 'Delivery channels'}</Heading>
       <p style={{ color: 'var(--tm-text-3)', maxWidth: '46rem', fontSize: '0.8rem', margin: '0.25rem 0 1rem' }}>
         {t('channels_admin.intro') ?? 'Kernel-side credentials for delivering agent questions. Values set here take effect immediately and override the environment variables.'}

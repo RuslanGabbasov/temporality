@@ -727,7 +727,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   }, [view])
 
   if (!model || !view) {
-    return <div className="observability-shell" ref={shellRef}>
+    return <div className="observability-shell" data-learn="page.experience" ref={shellRef}>
       <Header project={project} load={load} loading={loading} />
       {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что журнал доступен на {API_BASE}.</small></div>}
       {loading && <div className="status" role="status"><span className="spinner" /> {t('timeline.loading')} {progress ? `${pluralT(t, locale, 'timeline.loaded_events_n', progress.count)}${progress.more ? '…' : ''}` : ''}</div>}
@@ -803,7 +803,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     return (title ?? root.id).toLowerCase().includes(runsNeedle) || root.id.toLowerCase().includes(runsNeedle)
   })
 
-  return <div className="observability-shell" ref={shellRef}>
+  return <div className="observability-shell" data-learn="page.experience" ref={shellRef}>
     <Header project={project} load={load} loading={loading} />
     {error && <div className="obs-error" role="alert">{error}</div>}
     <div className="experience-meta">

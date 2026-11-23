@@ -30,39 +30,6 @@ type LearningProgressEvidence struct {
 	CheckedAt time.Time `json:"checked_at,omitempty"`
 }
 
-// learningAppContext gathers the factual configuration snapshot (§5.2) the
-// planner and the mastery checks read.
-func learningAppContext(ctx context.Context, ws *workspace.Store, project string, units []string) appContext {
-	c := appContext{}
-	if agents, err := ws.ListAgentsVisible(ctx, units); err == nil {
-		c.Agents = len(agents)
-		for _, a := range agents {
-			id := strings.ToLower(a.ID + " " + a.Name)
-			if strings.Contains(id, "review") {
-				c.HasReviewer = true
-			}
-			if a.Definition != nil && a.Definition.Capabilities.Delegation != nil && *a.Definition.Capabilities.Delegation {
-				c.HasDelegation = true
-			}
-		}
-	}
-	if projects, err := ws.ListProjects(ctx); err == nil {
-		c.Projects = len(projects)
-	}
-	if project != "" {
-		if tasks, err := ws.ListTasks(ctx, project); err == nil {
-			c.Tasks = len(tasks)
-		}
-	}
-	if artifacts, err := ws.ListArtifactsFiltered(ctx, units, workspace.ArtifactFilter{Status: "in_review"}); err == nil {
-		c.Reviews = len(artifacts)
-	}
-	if artifacts, err := ws.ListArtifactsVisible(ctx, units); err == nil {
-		c.Artifacts = len(artifacts)
-	}
-	return c
-}
-
 // learningTarget is one entry of the semantic UI-target catalog. The id is
 // stable against layout, CSS classes, localized text and window size
 // (§6.3): it names a CONCEPT, and the frontend resolves it to whatever
@@ -135,6 +102,7 @@ type learningExplainRequest struct {
 
 // RegisterLearningRoutes mounts the P0 contextual-learning endpoints.
 func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *workspace.Store, visibleUnits func(r *http.Request) []string, modelClient func(ctx context.Context) (*llm.Client, error), log *slog.Logger) {
+	registerLessonGenerate(mux, gate, ws, visibleUnits, modelClient)
 	mux.HandleFunc("GET /v1/learning/catalog", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -346,12 +314,35 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 	})
 
 	// GET /v1/learning/lessons — the shipped lesson catalog (§10.1: part of
-	// the feature delivery).
+	// the feature delivery) plus the user's supervisor-generated lessons and
+	// the teachable-page map the nudge offers generation on.
 	mux.HandleFunc("GET /v1/learning/lessons", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		writeJSON(w, 200, map[string]any{"lessons": learningLessons})
+		userID := requestUserID(r)
+		lessons := make([]any, 0, len(learningLessons)+4)
+		for i := range learningLessons {
+			lessons = append(lessons, learningLessons[i])
+		}
+		if generated, err := ws.ListGeneratedLessons(r.Context(), userID); err == nil {
+			for _, g := range generated {
+				var l LearningLesson
+				if json.Unmarshal(g.Lesson, &l) == nil {
+					l.ID = g.ID // the column is canonical, not the JSON copy
+					lessons = append(lessons, l)
+				}
+			}
+		}
+		whatsNew := map[string]any{"available": false}
+		if rel := releaseFor(buildVersion); rel != nil {
+			whatsNew = map[string]any{"available": true, "version": rel.Version, "changes": len(rel.Changes)}
+		}
+		writeJSON(w, 200, map[string]any{
+			"lessons":   lessons,
+			"pages":     teachableRoutes(),
+			"whats_new": whatsNew,
+		})
 	})
 
 	// POST /v1/learning/sessions/start {lesson_id} — opens a lesson run
@@ -367,12 +358,16 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 			writeError(w, 400, err)
 			return
 		}
-		lesson := findLearningLesson(strings.TrimSpace(input.LessonID))
+		userID := requestUserID(r)
+		lesson, rerr := resolveLearningLesson(r.Context(), ws, userID, strings.TrimSpace(input.LessonID))
+		if rerr != nil {
+			writeError(w, 500, rerr)
+			return
+		}
 		if lesson == nil {
 			writeError(w, 404, fmt.Errorf("lesson not found"))
 			return
 		}
-		userID := requestUserID(r)
 		// One active session per user: a previous unfinished session pauses.
 		if prev, err := ws.GetCurrentLearningSession(r.Context(), userID); err == nil && prev != nil {
 			_ = ws.SetLearningSessionStatus(r.Context(), prev.ID, "paused")
@@ -434,7 +429,11 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 			writeJSON(w, 200, map[string]any{"session": nil})
 			return
 		}
-		lesson := findLearningLesson(session.LessonID)
+		lesson, rerr := resolveLearningLesson(r.Context(), ws, session.UserID, session.LessonID)
+		if rerr != nil {
+			writeError(w, 500, rerr)
+			return
+		}
 		writeJSON(w, 200, map[string]any{"session": session, "lesson": lesson})
 	})
 
@@ -463,7 +462,12 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 			return
 		}
 		session.Status = "active"
-		writeJSON(w, 200, map[string]any{"session": session, "lesson": findLearningLesson(session.LessonID)})
+		lesson, rerr := resolveLearningLesson(r.Context(), ws, session.UserID, session.LessonID)
+		if rerr != nil {
+			writeError(w, 500, rerr)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"session": session, "lesson": lesson})
 	})
 
 	// POST /v1/learning/sessions/{id}/step — advance to the next step (the
@@ -482,9 +486,13 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 			writeError(w, 404, fmt.Errorf("session not found"))
 			return
 		}
-		lesson := findLearningLesson(session.LessonID)
+		lesson, rerr := resolveLearningLesson(r.Context(), ws, session.UserID, session.LessonID)
+		if rerr != nil {
+			writeError(w, 500, rerr)
+			return
+		}
 		if lesson == nil {
-			writeError(w, 404, fmt.Errorf("lesson %q is not in the shipped catalog", session.LessonID))
+			writeError(w, 404, fmt.Errorf("lesson %q is not available", session.LessonID))
 			return
 		}
 		var input struct {
