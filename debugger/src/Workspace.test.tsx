@@ -30,6 +30,13 @@ describe('runTraceUrl', () => {
     expect(en['chat.trace_title']).toBeDefined()
     expect(ru['chat.trace_title']).toBeDefined()
   })
+
+  it('the not-delivered plate is localized in both bundles', () => {
+    for (const key of ['chat.send_failed', 'chat.send_retry', 'chat.send_retry_title', 'chat.send_dismiss_title']) {
+      expect(en[key], key).toBeDefined()
+      expect(ru[key], key).toBeDefined()
+    }
+  })
 })
 
 describe('pluralT', () => {

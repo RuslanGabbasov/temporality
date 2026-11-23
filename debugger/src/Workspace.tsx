@@ -9,7 +9,7 @@ import {
   Tag,
   Heading,
 } from '@carbon/react'
-import { Add, ArrowDown, Attachment, Branch, Checkmark, Send, Share, TrashCan } from '@carbon/icons-react'
+import { Add, ArrowDown, Attachment, Branch, Checkmark, Restart, Send, Share, TrashCan, WarningAltFilled } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile, ApiError } from './workspaceApi'
 import { runCost, taskCost, KERNEL_API, whoami, interactWithPresentation, type Whoami } from './kernelApi'
 import { authHeaders } from './api'
@@ -148,6 +148,12 @@ interface ChatMessage {
    *  the chat says so instead of spinning channel noise at the user. */
   queued?: boolean
   attachments?: UploadedFile[]
+  /** Delivery failure of a user message (messenger-style «not delivered»):
+   *  the send died before a run started — network down, kernel unreachable.
+   *  The plate on the bubble offers a resend; the text still rides the next
+   *  full-history send's prompt, so a newer successful send clears stale
+   *  plates. */
+  sendError?: string
   totals?: string
   /** Whole-task budget (all follow-up runs + delegation tree), docs: cost accounting. */
   taskTotals?: string
@@ -1964,6 +1970,99 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     } finally { sendingRef.current = false }
   }
 
+  // The shared tail of every full-history send: sync the task prompt, start
+  // the run, mount the streaming assistant bubble. Both the composer's send
+  // and the bubble's «not delivered → resend» plate land here.
+  const launchRun = async (conv: Conversation): Promise<void> => {
+    const firstLine = conv.messages[0]?.content ?? ''
+    // Build the run prompt from the conversation: a follow-up (there is
+    // history) is framed as a continuation — every message stamped with its
+    // date-time, the history bounded, the header saying the LAST message is
+    // the new request. Without the frame the model read the transcript as
+    // one compound task and struggled to tell a resumed dialogue (days
+    // later) from a fresh one.
+    const fullPrompt = buildChatPrompt(conv.messages.map((m) => ({
+      role: m.role, content: m.content, timestamp: m.timestamp, attachments: m.attachments,
+    })))
+
+    // Reuse existing task for follow-up messages, create new one for first message
+    let taskId = conv.taskId
+    if (!taskId) {
+      const task = await workspaceApi.createTask({
+        project_id: project,
+        agent_id: conv.agentId || undefined,
+        title: firstLine.slice(0, 80),
+        prompt: fullPrompt,
+      })
+      taskId = task.id
+      // Store taskId on the conversation
+      setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, taskId } : c))
+    } else {
+      // Update the existing task's prompt with the full conversation. The
+      // title is intentionally omitted: it was set from the first message
+      // and the store keeps the stored one when the field is empty.
+      await workspaceApi.updateTask(taskId, { prompt: fullPrompt })
+    }
+
+    const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: hintQueryForFollowUp(conv.messages) })
+    const runId = result.run_id
+
+    const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
+    const withAssistant = { ...conv, taskId, messages: [...conv.messages, assistantMsg] }
+    setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
+
+    streamRun(runId, conv.id)
+  }
+
+  // Messenger-style delivery-failure plate (see ChatMessage.sendError): the
+  // failure lives on the user's own bubble with a resend button — no fake
+  // «Error: …» assistant turn in the transcript.
+  const markSendError = (convId: string, msgIndex: number, detail: string) => {
+    setConversations((prev) => prev.map((c) => c.id !== convId ? c : ({
+      ...c,
+      messages: c.messages.map((m, idx) => idx === msgIndex ? { ...m, sendError: detail } : m),
+    })))
+  }
+
+  const clearSendErrors = (convId: string) => {
+    setConversations((prev) => prev.map((c) => {
+      if (c.id !== convId || !c.messages.some((m) => m.sendError)) return c
+      return { ...c, messages: c.messages.map((m) => m.sendError ? { ...m, sendError: undefined } : m) }
+    }))
+  }
+
+  const dismissSendError = (convId: string, msgIndex: number) => {
+    setConversations((prev) => prev.map((c) => c.id !== convId ? c : ({
+      ...c,
+      messages: c.messages.map((m, idx) => idx === msgIndex ? { ...m, sendError: undefined } : m),
+    })))
+  }
+
+  // «Повторить» on a not-delivered bubble: relaunch the run over the full
+  // history. Only the conversation's tail is retryable — any later full send
+  // already carried this message's text in its prompt (and clears the plate
+  // on success); for a mid-history leftover the plate just clears.
+  const retrySend = async (convId: string, msgIndex: number) => {
+    if (loading || sendingRef.current) return
+    sendingRef.current = true
+    setLoading(true)
+    setError('')
+    try {
+      const conv = conversations.find((c) => c.id === convId)
+      const target = conv?.messages[msgIndex]
+      if (!conv || !target || target.role !== 'user') return
+      if (msgIndex !== conv.messages.length - 1) {
+        dismissSendError(convId, msgIndex)
+        return
+      }
+      const cleaned = { ...conv, messages: conv.messages.map((m, idx) => idx === msgIndex ? { ...m, sendError: undefined } : m) }
+      await launchRun(cleaned)
+      clearSendErrors(convId)
+    } catch (f) {
+      markSendError(convId, msgIndex, message(f))
+    } finally { setLoading(false); sendingRef.current = false }
+  }
+
   // The actual send, extracted so the parallel-send guard's finally covers
   // EVERY exit (the addendum early-returns included) — a leaked sendingRef
   // would silently no-op every later Enter until a page reload, which is
@@ -2014,6 +2113,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       } catch (noteErr) {
         if (!(noteErr instanceof ApiError && noteErr.status === 409)) {
           setError(message(noteErr))
+          // The note never left — put the text and files back into the
+          // composer instead of dropping them (messenger-style: a failed
+          // send keeps its content editable).
+          setInputValue(content)
+          if (sentAttachments.length) setAttachments(sentAttachments)
           setLoading(false)
           return
         }
@@ -2036,49 +2140,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     }
     setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
+    const failedIdx = updatedConv.messages.length - 1
     try {
-      // Build the run prompt from the conversation: a follow-up (there is
-      // history) is framed as a continuation — every message stamped with its
-      // date-time, the history bounded, the header saying the LAST message is
-      // the new request. Without the frame the model read the transcript as
-      // one compound task and struggled to tell a resumed dialogue (days
-      // later) from a fresh one.
-      const fullPrompt = buildChatPrompt(updatedConv.messages.map((m) => ({
-        role: m.role, content: m.content, timestamp: m.timestamp, attachments: m.attachments,
-      })))
-
-      // Reuse existing task for follow-up messages, create new one for first message
-      let taskId = conv.taskId
-      if (!taskId) {
-        const task = await workspaceApi.createTask({
-          project_id: project,
-          agent_id: conv.agentId || undefined,
-          title: firstLine.slice(0, 80),
-          prompt: fullPrompt,
-        })
-        taskId = task.id
-        // Store taskId on the conversation
-        setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, taskId } : c))
-      } else {
-        // Update the existing task's prompt with the full conversation. The
-        // title is intentionally omitted: it was set from the first message
-        // and the store keeps the stored one when the field is empty.
-        await workspaceApi.updateTask(taskId, { prompt: fullPrompt })
-      }
-
-      const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: hintQueryForFollowUp(updatedConv.messages) })
-      const runId = result.run_id
-
-      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
-      const withAssistant = { ...updatedConv, messages: [...updatedConv.messages, assistantMsg] }
-      setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
-
-      streamRun(runId, conv.id)
+      await launchRun(updatedConv)
+      // Success: the run prompt carried the whole history — any older
+      // «not delivered» plates rode along in it; clear them.
+      clearSendErrors(conv.id)
     } catch (f) {
-      setError(message(f))
-      const errMsg: ChatMessage = { role: 'assistant', content: `Error: ${message(f)}`, timestamp: new Date(), status: 'failed' }
-      const withErr = { ...updatedConv, messages: [...updatedConv.messages, errMsg] }
-      setConversations((prev) => prev.map((c) => c.id === withErr.id ? withErr : c))
+      markSendError(conv.id, failedIdx, message(f))
     } finally { setLoading(false) }
   }
 
@@ -2257,6 +2326,47 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         onFile={onFileLink}
                       />
                     ) : null}
+
+                    {/* «Не удалось доставить» — мессенджер-стайл: ошибка живёт
+                        на самой баббле пользователя, с повтором отправки.
+                        Ретрай доступен только хвосту диалога: любой более
+                        поздний полный send уже унёс этот текст в своём
+                        промпте (и снимает плашку на успехе). */}
+                    {msg.role === 'user' && msg.sendError && activeConv && (
+                      <div
+                        className="chat-send-error"
+                        style={{
+                          marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap',
+                          fontSize: '0.7rem', color: 'var(--tm-danger)',
+                          background: 'color-mix(in srgb, var(--tm-danger) 10%, transparent)',
+                          border: '1px solid var(--tm-danger)', borderRadius: '6px', padding: '0.25rem 0.5rem',
+                        }}
+                      >
+                        <WarningAltFilled size={13} style={{ flexShrink: 0 }} />
+                        <span style={{ fontWeight: 600 }}>{t('chat.send_failed') ?? 'Not delivered'}</span>
+                        <span title={msg.sendError} style={{ color: 'var(--tm-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, maxWidth: '16rem' }}>{msg.sendError}</span>
+                        {i === activeConv.messages.length - 1 && (
+                          <button
+                            onClick={() => void retrySend(activeConv.id, i)}
+                            disabled={loading || uploading}
+                            style={{
+                              background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px',
+                              color: 'var(--tm-danger)', cursor: loading || uploading ? 'default' : 'pointer',
+                              fontSize: '0.65rem', padding: '0.1rem 0.4rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                            }}
+                            title={t('chat.send_retry_title') ?? 'Resend this message'}
+                          >
+                            <Restart size={12} />
+                            {t('chat.send_retry') ?? 'Retry'}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => dismissSendError(activeConv.id, i)}
+                          style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0 0.15rem', lineHeight: 1 }}
+                          title={t('chat.send_dismiss_title') ?? 'Hide — the text stays in the history and goes out with the next message'}
+                        >✕</button>
+                      </div>
+                    )}
 
                     {/* Presentation Engine (docs/presentation-engine.md): the
                         structured visual attached to this answer. Actions
