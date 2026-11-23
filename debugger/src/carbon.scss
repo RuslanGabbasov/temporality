@@ -1572,6 +1572,31 @@ button.header-nav-link {
   color: rgba(255, 255, 255, 0.75);
 }
 
+/* Teal-on-teal: .markdown-body links paint var(--tm-teal) — the same color
+ * the user bubble's background is, so a pasted URL vanished into the bubble.
+ * A link is often the whole point of an outgoing message: inside the teal
+ * bubble it reads as underlined white (the chips' white-alpha convention);
+ * the underline keeps it a link when color can't contrast. The light-theme
+ * prefix mirrors the bubble override above — both themes share the teal
+ * bubble, and the theme rule (0,3,1) would out-specify a bare (0,2,1). */
+.chat-bubble-user .markdown-body a,
+.chat-bubble-user a {
+  color: #fff;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.55);
+  text-underline-offset: 0.15em;
+}
+
+.chat-bubble-user .markdown-body a:hover,
+.chat-bubble-user a:hover {
+  text-decoration-color: #fff;
+}
+
+:root[data-theme="light"] .chat-bubble-user .markdown-body a,
+:root[data-theme="light"] .chat-bubble-user a {
+  color: #fff;
+}
+
 .chat-attachment-uploading .spinner {
   width: 0.75rem;
   height: 0.75rem;
