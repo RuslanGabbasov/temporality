@@ -1091,49 +1091,196 @@ func layoutSwimlane(data SwimlaneData, props SwimlaneProps, width float64, theme
 			frag.Ops = append(frag.Ops, Glyph{X: nx + 5, Y: ny + nh - 5, Size: labelSize - 1, Color: theme.TextSecondary, Anchor: "start", Text: clipLine(node.Note, labelSize-1, nw-10)})
 		}
 	}
-	// Edges: right-edge of source → left-edge of target with an elbow mid-gap.
+	// Edges: orthogonal swimlane routing with obstacle checks (mirror of the
+	// frontend router). The old fixed midpoint elbow cut straight through
+	// boxes whenever the target sat in the same column or left of the source.
+	type edgeMeta struct {
+		rect         Rect
+		lane, c0, c1 int
+	}
+	meta := make(map[string]edgeMeta, len(rectByNode))
+	for id, r := range rectByNode {
+		m := edgeMeta{rect: r, lane: 0, c0: 0, c1: 0}
+		for _, node := range data.Nodes {
+			if node.ID != id {
+				continue
+			}
+			li := 0
+			for li < len(data.Lanes) && data.Lanes[li].ID != node.Lane {
+				li++
+			}
+			span := node.Span
+			if span < 1 {
+				span = 1
+			}
+			m.lane, m.c0, m.c1 = li, node.Start, node.Start+span-1
+			break
+		}
+		meta[id] = m
+	}
+	boundary := func(k int) float64 { return laneLabelW + marginX + colW*float64(k) }
+	pathClear := func(pts []Point, a, b string) bool {
+		for i := 1; i < len(pts); i++ {
+			minX, maxX := math.Min(pts[i-1].X, pts[i].X), math.Max(pts[i-1].X, pts[i].X)
+			minY, maxY := math.Min(pts[i-1].Y, pts[i].Y), math.Max(pts[i-1].Y, pts[i].Y)
+			for id, m := range meta {
+				if id == a || id == b {
+					continue
+				}
+				r := m.rect
+				if maxX > r.X+1 && minX < r.X+r.W-1 && maxY > r.Y+1 && minY < r.Y+r.H-1 {
+					return false
+				}
+			}
+		}
+		return true
+	}
 	for _, edge := range data.Edges {
-		from, to := rectByNode[edge.From], rectByNode[edge.To]
-		if from.X == 0 && from.Y == 0 || to.X == 0 && to.Y == 0 {
+		from, okF := rectByNode[edge.From]
+		to, okT := rectByNode[edge.To]
+		if !okF || !okT {
 			continue
 		}
-		x0 := from.X + from.W
-		y0 := from.Y + from.H/2
-		x1 := to.X
-		y1 := to.Y + to.H/2
+		mf, mt := meta[edge.From], meta[edge.To]
+		aCy := from.Y + from.H/2
+		bCy := to.Y + to.H/2
+		aCx := from.X + from.W/2
+		bCx := to.X + to.W/2
+		var cands [][]Point
+		push := func(p []Point) {
+			if len(p) > 1 {
+				cands = append(cands, p)
+			}
+		}
+		if mf.lane == mt.lane {
+			if to.X >= from.X+from.W {
+				push([]Point{{from.X + from.W, aCy}, {to.X, bCy}})
+			} else if to.X+to.W <= from.X {
+				push([]Point{{from.X, aCy}, {to.X + to.W, bCy}})
+			}
+			stripY := plotTop + laneH*float64(mf.lane) + 4
+			push([]Point{{aCx, from.Y}, {aCx, stripY}, {bCx, stripY}, {bCx, to.Y}})
+		} else {
+			oL := math.Max(from.X, to.X)
+			oR := math.Min(from.X+from.W, to.X+to.W)
+			if oL < oR {
+				cx := (oL + oR) / 2
+				if to.Y > from.Y {
+					push([]Point{{cx, from.Y + from.H}, {cx, to.Y}})
+				} else {
+					push([]Point{{cx, from.Y}, {cx, to.Y + to.H}})
+				}
+			}
+			gapY := (math.Max(from.Y+from.H, to.Y) + math.Min(from.Y+from.H, to.Y)) / 2
+			if to.Y > from.Y {
+				gapY = (from.Y + from.H + to.Y) / 2
+				push([]Point{{aCx, from.Y + from.H}, {aCx, gapY}, {bCx, gapY}, {bCx, to.Y}})
+			} else {
+				gapY = (to.Y + to.H + from.Y) / 2
+				push([]Point{{aCx, from.Y}, {aCx, gapY}, {bCx, gapY}, {bCx, to.Y + to.H}})
+			}
+			if mf.c1+1 <= mt.c0 {
+				for k := mf.c1 + 1; k <= mt.c0; k++ {
+					ch := boundary(k)
+					push([]Point{{from.X + from.W, aCy}, {ch, aCy}, {ch, bCy}, {to.X, bCy}})
+				}
+			}
+			if mt.c1+1 <= mf.c0 {
+				for k := mt.c1 + 1; k <= mf.c0; k++ {
+					ch := boundary(k)
+					push([]Point{{from.X, aCy}, {ch, aCy}, {ch, bCy}, {to.X + to.W, bCy}})
+				}
+			}
+			// Corridor route: horizontal runs live in the band BETWEEN lanes
+			// (always free of boxes), only the vertical crosses lanes — at a
+			// column boundary channel (checked against spanning nodes below).
+			bandBelow := func(l int) float64 { return plotTop + laneH*float64(l+1) }
+			bandAbove := func(l int) float64 { return plotTop + laneH*float64(l) }
+			if to.Y > from.Y {
+				y1, y2 := bandBelow(mf.lane), bandAbove(mt.lane)
+				for k := minInt(mf.c0, mt.c0); k <= maxInt(mf.c1, mt.c1)+1; k++ {
+					ch := boundary(k)
+					push([]Point{{aCx, from.Y + from.H}, {aCx, y1}, {ch, y1}, {ch, y2}, {bCx, y2}, {bCx, to.Y}})
+				}
+			} else {
+				y1, y2 := bandAbove(mf.lane), bandBelow(mt.lane)
+				for k := minInt(mf.c0, mt.c0); k <= maxInt(mf.c1, mt.c1)+1; k++ {
+					ch := boundary(k)
+					push([]Point{{aCx, from.Y}, {aCx, y1}, {ch, y1}, {ch, y2}, {bCx, y2}, {bCx, to.Y + to.H}})
+				}
+			}
+		}
+		var path []Point
+		for _, c := range cands {
+			if pathClear(c, edge.From, edge.To) {
+				path = c
+				break
+			}
+		}
+		if path == nil && len(cands) > 0 {
+			path = cands[0]
+		}
+		if len(path) < 2 {
+			continue
+		}
 		color := theme.TextSecondary
 		var dash []float64
 		if edge.Dashed {
 			dash = []float64{3, 3}
 		}
-		midX := (x0 + x1) / 2
-		segments := []Segment{
-			{X1: x0, Y1: y0, X2: midX, Y2: y0, Color: color, Width: 1.2},
-			{X1: midX, Y1: y0, X2: midX, Y2: y1, Color: color, Width: 1.2},
-			{X1: midX, Y1: y1, X2: x1 - 6, Y2: y1, Color: color, Width: 1.2},
-		}
-		for _, seg := range segments {
+		for i := 1; i < len(path); i++ {
+			seg := Segment{X1: path[i-1].X, Y1: path[i-1].Y, X2: path[i].X, Y2: path[i].Y, Color: color, Width: 1.2}
 			if dash != nil {
 				seg.Dash = dash
 			}
 			frag.Ops = append(frag.Ops, seg)
 		}
+		// Arrow direction follows the LAST segment, not just "y changed".
+		last, prev := path[len(path)-1], path[len(path)-2]
+		dx, dy := last.X-prev.X, last.Y-prev.Y
 		angle := 0.0
-		if y1 > y0+0.5 || y1 < y0-0.5 {
+		switch {
+		case math.Abs(dx) >= math.Abs(dy):
+			if dx < 0 {
+				angle = math.Pi
+			}
+		case dy < 0:
+			angle = -math.Pi / 2
+		default:
 			angle = math.Pi / 2
 		}
-		frag.Ops = append(frag.Ops, Arrow{X: x1 - 1, Y: y1, Size: 5, Angle: angle, Color: color})
+		frag.Ops = append(frag.Ops, Arrow{X: last.X, Y: last.Y, Size: 5, Angle: angle, Color: color})
 		label := edge.Label
 		if label == "" {
 			label = edge.Condition
 		}
 		if label != "" {
-			frag.Ops = append(frag.Ops, Glyph{X: midX + 3, Y: (y0+y1)/2 - 3, Size: labelSize - 1, Color: theme.TextSecondary, Anchor: "start", Text: clipLine(label, labelSize-1, 90)})
+			lx, ly := swimlaneLabelPos(path)
+			frag.Ops = append(frag.Ops, Glyph{X: lx, Y: ly, Size: labelSize - 1, Color: theme.TextSecondary, Anchor: "start", Text: clipLine(label, labelSize-1, 90)})
 		}
 	}
 	height = plotTop + laneH*float64(len(data.Lanes)) + 10
 	frag.Height = height
 	return frag
+}
+
+// swimlaneLabelPos places an edge label beside the longest path segment —
+// usually the vertical channel, which runs between boxes — never across the
+// whole route (the old midpoint placement landed on top of nodes).
+func swimlaneLabelPos(path []Point) (float64, float64) {
+	bi, bl := 1, -1.0
+	for i := 1; i < len(path); i++ {
+		l := math.Abs(path[i].X-path[i-1].X) + math.Abs(path[i].Y-path[i-1].Y)
+		if l > bl {
+			bl, bi = l, i
+		}
+	}
+	x1, y1 := path[bi-1].X, path[bi-1].Y
+	x2, y2 := path[bi].X, path[bi].Y
+	if math.Abs(y2-y1) > math.Abs(x2-x1) {
+		return (x1+x2)/2 + 4, (y1 + y2) / 2
+	}
+	return (x1 + x2) / 2, (y1+y2)/2 - 4
 }
 
 // ===== Treemap =====

@@ -521,6 +521,13 @@ func maxInt(a, b int) int {
 	return b
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // parseHexColor decodes #rrggbb into components.
 func parseHexColor(hex string) (r, g, b uint8, ok bool) {
 	if len(hex) != 7 || hex[0] != '#' {

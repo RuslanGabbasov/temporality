@@ -502,6 +502,143 @@ export function SankeyView({ component }: { component: { data?: unknown; props?:
   )
 }
 
+// ── Swimlane edge routing ─────────────────────────────────────────────────
+// Orthogonal router with obstacle checks: candidate paths (straight line,
+// staircase through the lane gap, column channels) are tried in order and
+// the first collision-free one wins. The old fixed midpoint elbow cut
+// straight through boxes whenever the target sat in the same column or to
+// the left of the source — the phantom «inner rectangles» on every node.
+
+export type SwimlaneRect = { x: number; y: number; w: number; h: number; lane: number; c0: number; c1: number }
+export type SwimlaneGeom = { labelW: number; marginX: number; colW: number; laneH: number; top0: number }
+type EdgeDir = 'right' | 'left' | 'up' | 'down'
+type Pt = [number, number]
+
+function swDirOf(pts: Pt[]): EdgeDir {
+  const last = pts[pts.length - 1]
+  const prev = pts[pts.length - 2]
+  const dx = last[0] - prev[0]
+  const dy = last[1] - prev[1]
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'right' : 'left'
+  return dy >= 0 ? 'down' : 'up'
+}
+
+function swLabelAt(pts: Pt[]): Pt {
+  // Label sits beside the longest segment — usually the vertical channel,
+  // which is free of boxes — never across the whole path.
+  let bi = 1
+  let bl = -1
+  for (let i = 1; i < pts.length; i++) {
+    const len = Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1])
+    if (len > bl) { bl = len; bi = i }
+  }
+  const [x1, y1] = pts[bi - 1]
+  const [x2, y2] = pts[bi]
+  if (Math.abs(y2 - y1) > Math.abs(x2 - x1)) return [(x1 + x2) / 2 + 4, (y1 + y2) / 2]
+  return [(x1 + x2) / 2, (y1 + y2) / 2 - 4]
+}
+
+export function swArrowPoints(x: number, y: number, dir: EdgeDir): string {
+  switch (dir) {
+    case 'left': return `${x},${y} ${x + 5.5},${y - 3.5} ${x + 5.5},${y + 3.5}`
+    case 'up': return `${x},${y} ${x - 3.5},${y + 5.5} ${x + 3.5},${y + 5.5}`
+    case 'down': return `${x},${y} ${x - 3.5},${y - 5.5} ${x + 3.5},${y - 5.5}`
+    default: return `${x},${y} ${x - 5.5},${y - 3.5} ${x - 5.5},${y + 3.5}`
+  }
+}
+
+/** Route one swimlane edge around the boxes. Exported for tests. */
+export function routeSwimlaneEdge(
+  a: SwimlaneRect, b: SwimlaneRect, geom: SwimlaneGeom, rects: Map<string, SwimlaneRect>,
+): { pts: Pt[]; dir: EdgeDir; label: Pt } {
+  const { labelW, marginX, colW, laneH, top0 } = geom
+  const boundary = (k: number) => labelW + marginX + colW * k
+  const aCy = a.y + a.h / 2
+  const bCy = b.y + b.h / 2
+  const aCx = a.x + a.w / 2
+  const bCx = b.x + b.w / 2
+  const clear = (p: Pt[]): boolean => {
+    for (let i = 1; i < p.length; i++) {
+      const minX = Math.min(p[i - 1][0], p[i][0])
+      const maxX = Math.max(p[i - 1][0], p[i][0])
+      const minY = Math.min(p[i - 1][1], p[i][1])
+      const maxY = Math.max(p[i - 1][1], p[i][1])
+      for (const r of rects.values()) {
+        if (r === a || r === b) continue
+        if (maxX > r.x + 1 && minX < r.x + r.w - 1 && maxY > r.y + 1 && minY < r.y + r.h - 1) return false
+      }
+    }
+    return true
+  }
+  const cands: Pt[][] = []
+  const push = (p: Pt[]) => { if (p.length > 1) cands.push(p) }
+
+  if (a.lane === b.lane) {
+    // Same lane: straight across, or over the top when a node sits between.
+    if (b.x >= a.x + a.w) push([[a.x + a.w, aCy], [b.x, bCy]])
+    else if (b.x + b.w <= a.x) push([[a.x, aCy], [b.x + b.w, bCy]])
+    const stripY = top0 + laneH * a.lane + 4 // the lane's top padding is always free
+    push([[aCx, a.y], [aCx, stripY], [bCx, stripY], [bCx, b.y]])
+  } else {
+    // Different lanes.
+    const oL = Math.max(a.x, b.x)
+    const oR = Math.min(a.x + a.w, b.x + b.w)
+    if (oL < oR) {
+      // Same column family: straight vertical.
+      const cx = (oL + oR) / 2
+      if (b.y > a.y) push([[cx, a.y + a.h], [cx, b.y]])
+      else push([[cx, a.y], [cx, b.y + b.h]])
+    }
+    // Staircase through the gap between the two lanes.
+    const gapY = b.y > a.y ? (a.y + a.h + b.y) / 2 : (b.y + b.h + a.y) / 2
+    if (b.y > a.y) push([[aCx, a.y + a.h], [aCx, gapY], [bCx, gapY], [bCx, b.y]])
+    else push([[aCx, a.y], [aCx, gapY], [bCx, gapY], [bCx, b.y + b.h]])
+    // Short exits through the gutter right after the source's column.
+    if (a.c1 + 1 <= b.c0) {
+      for (let k = a.c1 + 1; k <= b.c0; k++) {
+        const ch = boundary(k)
+        push([[a.x + a.w, aCy], [ch, aCy], [ch, bCy], [b.x, bCy]])
+      }
+    }
+    if (b.c1 + 1 <= a.c0) {
+      for (let k = b.c1 + 1; k <= a.c0; k++) {
+        const ch = boundary(k)
+        push([[a.x, aCy], [ch, aCy], [ch, bCy], [b.x + b.w, bCy]])
+      }
+    }
+    // Corridor route: horizontal runs live in the band BETWEEN lanes (always
+    // free of boxes), only the vertical crosses lanes — at a column boundary
+    // channel. Works for any lane distance; the channel is checked below.
+    const bandBelow = (l: number) => top0 + laneH * (l + 1)
+    const bandAbove = (l: number) => top0 + laneH * l
+    if (b.y > a.y) {
+      const y1 = bandBelow(a.lane)
+      const y2 = bandAbove(b.lane)
+      for (let k = Math.min(a.c0, b.c0); k <= Math.max(a.c1, b.c1) + 1; k++) {
+        const ch = boundary(k)
+        push([[aCx, a.y + a.h], [aCx, y1], [ch, y1], [ch, y2], [bCx, y2], [bCx, b.y]])
+      }
+    } else {
+      const y1 = bandAbove(a.lane)
+      const y2 = bandBelow(b.lane)
+      for (let k = Math.min(a.c0, b.c0); k <= Math.max(a.c1, b.c1) + 1; k++) {
+        const ch = boundary(k)
+        push([[aCx, a.y], [aCx, y1], [ch, y1], [ch, y2], [bCx, y2], [bCx, b.y + b.h]])
+      }
+    }
+  }
+
+  const pts = cands.find(clear) ?? (() => {
+    // Last resort: the legacy midpoint elbow (rare — only when every
+    // candidate is blocked by spanning nodes).
+    const x0 = a.x + a.w
+    const x1 = b.x
+    const midX = (x0 + x1) / 2
+    return [[x0, aCy], [midX, aCy], [midX, bCy], [x1, bCy]] as Pt[]
+  })()
+  return { pts, dir: swDirOf(pts), label: swLabelAt(pts) }
+}
+
 // ── Swimlane ----------------------------------------------------------------
 
 type SwimlaneNodeIR = { id: string; lane: string; label: string; status?: string; note?: string; start?: number; span?: number; ref?: { type: string; id: string } }
@@ -541,7 +678,8 @@ export function SwimlaneView({ component }: { component: { data?: unknown; props
       default: return 'var(--tm-chart-1)'
     }
   }
-  const rects = new Map<string, { x: number; y: number; w: number; h: number }>()
+  const rects = new Map<string, SwimlaneRect>()
+  const geom: SwimlaneGeom = { labelW, marginX, colW, laneH, top0: 10 }
   return (
     <figure className="presentation-chart">
       {props.title ? <figcaption className="presentation-chart-title">{props.title}</figcaption> : null}
@@ -559,7 +697,7 @@ export function SwimlaneView({ component }: { component: { data?: unknown; props
           const y = 10 + laneH * li + 10
           const w = colW * span - 18
           const h = laneH - 20
-          rects.set(node.id, { x, y, w, h })
+          rects.set(node.id, { x, y, w, h, lane: li, c0: node.start ?? 0, c1: (node.start ?? 0) + span - 1 })
           return (
             <g key={node.id}>
               <rect x={x} y={y} width={w} height={h} rx={5} fill="var(--tm-surface)" stroke={statusColor(node.status)} strokeWidth={1.6}>
@@ -574,20 +712,18 @@ export function SwimlaneView({ component }: { component: { data?: unknown; props
           const from = rects.get(edge.from)
           const to = rects.get(edge.to)
           if (!from || !to) return null
-          const x0 = from.x + from.w
-          const y0 = from.y + from.h / 2
-          const x1 = to.x
-          const y1 = to.y + to.h / 2
-          const midX = (x0 + x1) / 2
+          const { pts, dir, label } = routeSwimlaneEdge(from, to, geom, rects)
           const color = 'var(--tm-text-3)'
+          const last = pts[pts.length - 1]
+          const arrow = swArrowPoints(last[0], last[1], dir)
+          const d = 'M ' + pts.map((p) => `${p[0]} ${p[1]}`).join(' L ')
+          const text = edge.label || edge.condition
           return (
             <g key={`e${i}`} stroke={color} fill="none">
-              <line x1={x0} y1={y0} x2={midX} y2={y0} strokeWidth={1.2} strokeDasharray={edge.dashed ? '3 3' : undefined} />
-              <line x1={midX} y1={y0} x2={midX} y2={y1} strokeWidth={1.2} strokeDasharray={edge.dashed ? '3 3' : undefined} />
-              <line x1={midX} y1={y1} x2={x1 - 5} y2={y1} strokeWidth={1.2} strokeDasharray={edge.dashed ? '3 3' : undefined} />
-              <polygon points={`${x1 - 1},${y1} ${x1 - 6},${y1 - 3.5} ${x1 - 6},${y1 + 3.5}`} fill={color} stroke="none" />
-              {(edge.label || edge.condition) && (
-                <text x={midX + 3} y={(y0 + y1) / 2 - 3} fontSize={8.5} fill="var(--tm-text-3)" stroke="none">{clip(edge.label || edge.condition || '', 20)}</text>
+              <path d={d} strokeWidth={1.2} fill="none" strokeDasharray={edge.dashed ? '3 3' : undefined} />
+              <polygon points={arrow} fill={color} stroke="none" />
+              {text && (
+                <text x={label[0]} y={label[1]} fontSize={8.5} fill="var(--tm-text-3)" stroke="none">{clip(text, 20)}</text>
               )}
             </g>
           )
