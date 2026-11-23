@@ -2859,6 +2859,17 @@ button.header-nav-link {
   box-shadow: 0 18px 60px rgba(0,0,0,.4); padding: 0.7rem 0.85rem;
   border-radius: 10px;
 }
+/* Cumulative progress on the panel's bottom edge — the header carries only
+   the title and the window buttons now. Anchored to the padding box, so the
+   fill hugs the rounded corner (parent radius 10px − 1px border = 9px). */
+.lesson-runner-progress {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: var(--tm-border); border-radius: 0 0 9px 9px; overflow: hidden;
+}
+.lesson-runner-progress > span {
+  display: block; height: 100%; background: var(--tm-teal);
+  transition: width 0.25s ease;
+}
 .lesson-runner-min {
   display: inline-flex; align-items: center; gap: 0.45rem; width: auto;
   font: 0.72rem var(--tm-font); color: var(--tm-text-2);

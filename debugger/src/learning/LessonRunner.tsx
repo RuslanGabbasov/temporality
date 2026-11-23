@@ -200,24 +200,27 @@ export default function LessonRunner() {
 
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
-      <span className="learn-indicator learn-indicator-available">?</span>
-      <strong style={{ fontSize: '0.78rem' }}>{lesson.title}</strong>
-      {/* Step dots: a novice sees where they are and how long the road is
-          without reading numbers. */}
-      {session.status === 'active' && total > 0 && (
-        <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'center', marginLeft: '0.3rem' }} title={t('learning.runner.step_of', { current: String(Math.min(stepIndex + 1, total)), total: String(total) })}>
-          {Array.from({ length: total }, (_, i) => (
-            <span key={i} style={{ width: 5, height: 5, borderRadius: '50%', display: 'inline-block', background: i === stepIndex ? 'var(--tm-amber)' : i < stepIndex ? 'var(--tm-teal)' : 'var(--tm-border-strong)' }} />
-          ))}
-        </span>
-      )}
-      <span style={{ marginLeft: 'auto', fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>
-        {session.status === 'active' && total > 0 && t('learning.runner.step_of', { current: String(Math.min(stepIndex + 1, total)), total: String(total) })}
-      </span>
+      <strong style={{ fontSize: '0.78rem', flex: 1, minWidth: 0 }}>{lesson.title}</strong>
       <button className="toolbar-btn" style={{ padding: '0 0.35rem' }} title={t('learning.runner.pause')} disabled={busy} onClick={() => void advance('pause')}>⏸</button>
       <button className="toolbar-btn" style={{ padding: '0 0.35rem' }} title={t('learning.runner.abort')} disabled={busy} onClick={() => void advance('abort')}>✕</button>
     </div>
   )
+
+  // Cumulative progress on the panel's bottom edge — replaces the old
+  // dots + «Шаг N из M» line the header used to carry.
+  const progressPct = total > 0 ? Math.min(100, Math.round(((stepIndex + 1) / total) * 100)) : 0
+  const progressBar = total > 0 ? (
+    <div
+      className="lesson-runner-progress"
+      role="progressbar"
+      aria-valuenow={progressPct}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={t('learning.runner.step_of', { current: String(Math.min(stepIndex + 1, total)), total: String(total) })}
+    >
+      <span style={{ width: `${progressPct}%` }} />
+    </div>
+  ) : null
 
   // Completed: the factual mastery verdict + the chain into the next lesson.
   if (session.status === 'completed') {
@@ -240,6 +243,7 @@ export default function LessonRunner() {
             {t('learning.runner.back_to_center')}
           </button>
         </div>
+        {progressBar}
       </div>
     )
   }
@@ -254,6 +258,7 @@ export default function LessonRunner() {
           <button className="toolbar-btn primary" disabled={busy} onClick={() => void resume()}>{t('learning.runner.resume')}</button>
           <button className="toolbar-btn" disabled={busy} onClick={() => void advance('abort')}>{t('learning.runner.abort')}</button>
         </div>
+        {progressBar}
       </div>
     )
   }
@@ -261,9 +266,19 @@ export default function LessonRunner() {
   if (minimized) {
     return (
       <button className="lesson-runner lesson-runner-min" onClick={() => setMinimized(false)}>
-        <span className="learn-indicator learn-indicator-available">?</span>
         {lesson.title}
-        {total > 0 && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.66rem' }}>{t('learning.runner.step_of', { current: String(stepIndex + 1), total: String(total) })}</span>}
+        {total > 0 && (
+          <span
+            className="lesson-runner-progress"
+            role="progressbar"
+            aria-valuenow={progressPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={t('learning.runner.step_of', { current: String(Math.min(stepIndex + 1, total)), total: String(total) })}
+          >
+            <span style={{ width: `${progressPct}%` }} />
+          </span>
+        )}
       </button>
     )
   }
@@ -311,6 +326,7 @@ export default function LessonRunner() {
           <button className="toolbar-btn" style={{ marginLeft: 'auto', padding: '0 0.35rem' }} title={t('learning.runner.minimize')} onClick={() => setMinimized(true)}>—</button>
         </div>
         {error && <div style={{ marginTop: '0.4rem', color: '#ffb4ab', fontSize: '0.72rem' }}>{error}</div>}
+        {progressBar}
       </div>
     </>
   )
