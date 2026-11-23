@@ -717,6 +717,30 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id, status, answer string, 
 	return nil
 }
 
+// SettleRunStatus moves a still-live row to a terminal status WITHOUT
+// touching its answer — the journal-verdict heal of the orphan sweep: the run
+// ended (a terminal event exists in the journal) but the row never heard
+// about it and no view-heal can fire (the workflow is gone from Temporal, so
+// resolveRunState has nothing to resolve). The guard keeps a terminal status
+// intact. ErrNotFound means no row (journal-only delegated children) or
+// nothing to settle.
+func (s *Store) SettleRunStatus(ctx context.Context, id, status string) error {
+	if status == "" {
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_run SET status = $2, updated_at = $3
+			 WHERE id = $1 AND status IN ('started', 'running')`,
+		id, status, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SettleRunCancelled moves a still-active run to "cancelled" — the heal path
 // of POST /v1/agent/runs/{runID}/nudge when the workflow is gone from the
 // orchestrator. The guard keeps a terminal status intact: a completed or

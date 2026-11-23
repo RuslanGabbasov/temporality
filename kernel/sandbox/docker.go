@@ -782,6 +782,8 @@ type runContainerRef struct {
 	name        string
 	key         string
 	fingerprint string
+	runID       string
+	project     string
 }
 
 // listRunContainers lists the running containers this runner may own: the
@@ -791,17 +793,17 @@ type runContainerRef struct {
 func (d *Docker) listRunContainers(ctx context.Context) ([]runContainerRef, error) {
 	out, err := exec.CommandContext(ctx, d.Binary, "ps",
 		"--filter", "name="+SandboxNamePrefix,
-		"--format", "{{.ID}}\t{{.Names}}\t{{.Label \""+ScratchKeyLabel+"\"}}\t{{.Label \""+FingerprintLabel+"\"}}").CombinedOutput()
+		"--format", "{{.ID}}\t{{.Names}}\t{{.Label \""+ScratchKeyLabel+"\"}}\t{{.Label \""+FingerprintLabel+"\"}}\t{{.Label \""+RunLabel+"\"}}\t{{.Label \""+ProjectLabel+"\"}").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("list sandbox containers: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	var refs []runContainerRef
 	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.SplitN(strings.TrimSpace(line), "\t", 4)
-		if len(fields) != 4 {
+		fields := strings.SplitN(strings.TrimSpace(line), "\t", 6)
+		if len(fields) != 6 {
 			continue
 		}
-		refs = append(refs, runContainerRef{id: fields[0], name: fields[1], key: fields[2], fingerprint: fields[3]})
+		refs = append(refs, runContainerRef{id: fields[0], name: fields[1], key: fields[2], fingerprint: fields[3], runID: fields[4], project: fields[5]})
 	}
 	return refs, nil
 }
@@ -943,6 +945,12 @@ func (d *Docker) TeardownRun(key string) {
 type ScratchContainerInfo struct {
 	Key  string
 	Name string
+	// RunID and Project come from the observability labels (temporality.run,
+	// temporality.project): the real identifiers, with the slashes the scratch
+	// key lost to sanitization. Empty on ancient/foreign containers without
+	// the labels.
+	RunID   string
+	Project string
 }
 
 // ListScratchContainers lists every running sandbox container with its
@@ -955,7 +963,7 @@ func (d *Docker) ListScratchContainers(ctx context.Context) ([]ScratchContainerI
 	}
 	out := make([]ScratchContainerInfo, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, ScratchContainerInfo{Key: ref.key, Name: ref.name})
+		out = append(out, ScratchContainerInfo{Key: ref.key, Name: ref.name, RunID: ref.runID, Project: ref.project})
 	}
 	return out, nil
 }
@@ -1084,6 +1092,12 @@ const SandboxMarkerLabel = "temporality.sandbox"
 const (
 	ScratchKeyLabel  = "temporality.scratch_key"
 	FingerprintLabel = "temporality.run_fingerprint"
+	// RunLabel and ProjectLabel carry the real identifiers the scratch key
+	// sanitizes away: a delegated child's run id (root/delegate/01) loses its
+	// slashes in the key, but the label keeps it verbatim — the run-aware
+	// janitor resolves the row by it.
+	RunLabel     = "temporality.run"
+	ProjectLabel = "temporality.project"
 )
 
 // SandboxNamePrefix is the deterministic name prefix of every sandbox

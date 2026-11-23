@@ -323,10 +323,24 @@ func (g *ModelGate) Verdict(runID string, memoryMB, quotaMB, quotaRuns int, scra
 	if reason := g.blockedReasonLocked(runID, memoryMB, quotaScopeKey(quotaMB, quotaRuns), quotaMB, quotaRuns); reason != "" {
 		verdict.Reason = reason
 		verdict.WaitSeconds = 10
-		verdict.Position = len(g.order) + 1
+		verdict.Position = g.queuePositionLocked()
 		return verdict
 	}
 	return verdict
+}
+
+// queuePositionLocked counts the waiting runs ahead of the caller: order
+// entries without an admitted slot. Admitted holders sit in `order` too, and
+// counting them made the first queued run report position 7 behind six
+// running runs.
+func (g *ModelGate) queuePositionLocked() int {
+	position := 0
+	for _, id := range g.order {
+		if _, admitted := g.entries[id]; !admitted {
+			position++
+		}
+	}
+	return position + 1
 }
 
 // Acquire claims the budget for a run. A lost race with another run comes
@@ -473,7 +487,21 @@ func (g *ModelGate) Stats() (usedMB, budgetMB int, admitted int, maxRuns int, ho
 		}
 	}
 	sort.Strings(holders)
-	return usedMB, g.budgetMB, len(g.entries), g.max, holders, append([]string(nil), g.order...)
+	return usedMB, g.budgetMB, len(g.entries), g.max, holders, g.waitingLocked()
+}
+
+// waitingLocked lists the FIFO order entries that hold NO ledger slot: the
+// runs actually queued. `order` also carries admitted ids (Acquire appends on
+// entry), so reporting it verbatim showed running runs as queued — the panel
+// read «6 в очереди» while all six were executing.
+func (g *ModelGate) waitingLocked() []string {
+	waiting := make([]string, 0, len(g.order))
+	for _, id := range g.order {
+		if _, admitted := g.entries[id]; !admitted {
+			waiting = append(waiting, id)
+		}
+	}
+	return waiting
 }
 
 // ReconcileStats reports the reconciliation parameters for the panel hint

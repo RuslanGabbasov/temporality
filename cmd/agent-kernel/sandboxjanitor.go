@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"strings"
@@ -18,9 +19,16 @@ import (
 // arbiter they all lack is the run itself: when the workspace says the run is
 // TERMINAL, no workflow will ever re-attach, so abandoned op markers and
 // leftover processes are not "work" anymore — they are the leak. This janitor
-// force-removes containers of terminal runs after a grace period; rows that
-// do not exist are left alone (delegated child runs carry no workspace_run
-// row and are still very much alive).
+// force-removes containers of terminal runs after a grace period.
+//
+// Two lookup rules make the verdict cover the whole tree:
+//   - the real run id comes from the container's temporality.run label — the
+//     scratch key sanitizes slashes away, so a key can never address a
+//     delegated child's row (root/delegate/01 flattens to rootdelegate01);
+//   - a child with no row of its own climbs to its nearest ancestor that HAS
+//     a row (delegate/plan intermediates carry no rows either): the tree lives
+//     and dies with its root — a terminal root means no child workflow will
+//     ever resume into its container.
 type sandboxJanitor struct {
 	// sandbox lists live run containers and force-removes a key's containers.
 	// *sandbox.Swappable satisfies it; tests substitute a recorder.
@@ -71,23 +79,32 @@ func (j *sandboxJanitor) sweep(ctx context.Context) {
 		return
 	}
 	byKey := map[string][]string{}
+	infos := map[string]sandbox.ScratchContainerInfo{}
 	for _, c := range containers {
 		if strings.TrimSpace(c.Key) == "" {
 			continue // unlabelled/foreign container — the orphan reaper's domain
 		}
 		byKey[c.Key] = append(byKey[c.Key], c.Name)
+		infos[c.Key] = c
 	}
 	for key, names := range byKey {
-		project, runID, ok := splitScratchKey(key)
-		if !ok {
-			continue
+		info := infos[key]
+		project, runID := info.Project, info.RunID
+		if project == "" || runID == "" {
+			// No labels (ancient containers): fall back to the key — which can
+			// only ever resolve slash-free run ids.
+			p, r, ok := splitScratchKey(key)
+			if !ok {
+				continue
+			}
+			project, runID = p, r
 		}
-		row, err := j.run(ctx, runID)
+		row, err := j.resolveRunRow(ctx, runID)
 		if err != nil {
-			continue // no row (delegated children!) or a lookup failure: never a verdict
+			continue // no row anywhere in the tree, or a lookup failure: never a verdict
 		}
 		if liveRunStatus(row.Status) {
-			continue // the run owns its container
+			continue // the tree's root is alive: every child may still resume
 		}
 		if !time.Now().UTC().After(row.UpdatedAt.UTC().Add(j.grace)) {
 			continue // the run just finished: give the tail (answer delivery, presentations) its quiet minute
@@ -99,6 +116,33 @@ func (j *sandboxJanitor) sweep(ctx context.Context) {
 		j.sandbox.ForceRemoveRunContainers(key)
 	}
 }
+
+// resolveRunRow finds the workspace row governing a container's run: the run
+// itself first, then its ancestors (delegate/plan intermediates carry no rows
+// — the tree's root does). "Not found" at every level returns the lookup
+// error; the first row found decides.
+func (j *sandboxJanitor) resolveRunRow(ctx context.Context, runID string) (workspace.Run, error) {
+	id := runID
+	for hop := 0; ; hop++ {
+		row, err := j.run(ctx, id)
+		if err == nil {
+			return row, nil
+		}
+		if !errors.Is(err, workspace.ErrNotFound) || hop >= maxTreeClimbHops {
+			return workspace.Run{}, err
+		}
+		cut := strings.LastIndex(id, "/")
+		if cut <= 0 {
+			return workspace.Run{}, err // a root id with no row: the error wins
+		}
+		id = id[:cut]
+	}
+}
+
+// maxTreeClimbHops bounds the ancestor walk: delegation depth ≤ 2 plus plan
+// nesting — a handful. Past the bound a lookup failure is more likely a
+// corrupted id than a deep tree.
+const maxTreeClimbHops = 8
 
 // splitScratchKey parses the "<project>/<run>" scratch key. A run id carries
 // its own slashes (run/delegate/01), so the project is only ever the FIRST

@@ -22,6 +22,8 @@ type sweepStore struct {
 	terminal    map[string]string
 	sources     map[string]string
 	updated     map[string]string
+	settled     map[string]string
+	settleErrOn map[string]error
 	updateErrOn map[string]error
 	probed      []string
 }
@@ -52,6 +54,17 @@ func (s *sweepStore) UpdateRunStatus(ctx context.Context, id, status, answer str
 		return err
 	}
 	s.updated[id] = status
+	return nil
+}
+
+func (s *sweepStore) SettleRunStatus(ctx context.Context, id, status string) error {
+	if err, ok := s.settleErrOn[id]; ok {
+		return err
+	}
+	if s.settled == nil {
+		s.settled = map[string]string{}
+	}
+	s.settled[id] = status
 	return nil
 }
 
@@ -111,10 +124,13 @@ func TestSweepOrphanedRuns(t *testing.T) {
 
 	sweepOrphanedRuns(context.Background(), store, liveness, journal.URL, "token", "kernel-source", slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	// Only the truly lost run closes: live ones stay, terminal-journaled ones
-	// stay, probe errors stay (next restart decides), journal-less runs are
-	// never probed.
+	// Only the truly lost run closes: live ones stay, probe errors stay (next
+	// restart decides), journal-less runs are never probed. The
+	// terminal-journaled run's ROW settles to the journaled status — the row
+	// used to lie "started" forever (and the sandbox janitor trusted it),
+	// while the journal already held the verdict.
 	require.Equal(t, map[string]string{"lost-run": "failed"}, store.updated)
+	require.Equal(t, map[string]string{"already-ended": "completed"}, store.settled)
 	require.NotContains(t, store.probed, "no-journal")
 	mu.Lock()
 	defer mu.Unlock()

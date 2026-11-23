@@ -179,6 +179,48 @@ func TestModelGateReAcquireDoesNotDuplicateOrder(t *testing.T) {
 	}
 }
 
+// The queue reported to operators is the WAITING runs, not the ledger's FIFO
+// of everyone ever admitted: `order` carries admitted ids too, and reporting
+// it verbatim showed running runs as queued (the stand read «6 в очереди»
+// while all six were executing).
+func TestModelGateStatsQueueExcludesAdmitted(t *testing.T) {
+	g := newTestGate(10, 8192)
+	if err := g.Acquire("running-1", 1024, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Acquire("running-2", 6144, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	// The budget is nearly full: a third run queues.
+	verdict := g.Verdict("waiting", 2048, 0, 0, "")
+	if verdict.WaitSeconds == 0 || verdict.Reason == "" {
+		t.Fatalf("the third run must queue, got %+v", verdict)
+	}
+	if verdict.Position != 1 {
+		t.Fatalf("the first waiting run is position 1, got %d (admitted holders must not inflate it)", verdict.Position)
+	}
+	_, _, admitted, _, holders, queued := g.Stats()
+	if admitted != 2 {
+		t.Fatalf("admitted = %d, want 2", admitted)
+	}
+	if len(holders) != 2 {
+		t.Fatalf("holders = %v, want the two running runs", holders)
+	}
+	if len(queued) != 0 {
+		t.Fatalf("queued = %v, want empty — Verdict never admits, so nobody is on the books", queued)
+	}
+	// Free budget and admit the waiter: it joins the holders, the queue stays
+	// empty (Acquire's append makes it an admitted id, not a waiting one).
+	g.Release("running-1")
+	if err := g.Acquire("waiting", 2048, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, _, admitted, _, _, queued = g.Stats()
+	if admitted != 2 || len(queued) != 0 {
+		t.Fatalf("after admission: admitted=%d queued=%v, want 2 and none", admitted, queued)
+	}
+}
+
 func TestModelGateRenewKeepsAndReleaseFrees(t *testing.T) {
 	g := newTestGate(10, 1024)
 	if err := g.Acquire("solo", 1024, 0, 0, ""); err != nil {

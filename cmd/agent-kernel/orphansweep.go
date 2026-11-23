@@ -48,6 +48,7 @@ type orphanStore interface {
 	RunTerminalStatuses(ctx context.Context, runIDs []string) (map[string]string, error)
 	RunSourceID(ctx context.Context, project, runID string) (string, error)
 	UpdateRunStatus(ctx context.Context, id, status, answer string, turns int, runErr string) error
+	SettleRunStatus(ctx context.Context, id, status string) error
 }
 
 // runOutcome is the honest terminal truth of a run's workflow, resolved from
@@ -131,10 +132,24 @@ func sweepOrphanedRuns(ctx context.Context, store orphanStore, liveness clientSw
 		return
 	}
 
-	var closed []string
+	var closed, settled []string
 	for _, run := range candidates {
-		if terminal[run.ID] != "" {
-			continue // the journal already knows how this run ended
+		if journalStatus := terminal[run.ID]; journalStatus != "" {
+			// The journal already knows how this run ended — never re-probe or
+			// re-journal. But the ROW may not know: a run whose terminal event
+			// landed while the row stayed "started" (the workflow is gone from
+			// Temporal, so resolveRunState's view-heal has nothing to resolve)
+			// lied forever — and the run-aware sandbox janitor trusts the row,
+			// so the run's containers were reaped never (the trigger runs of
+			// 2026-10-21 sat with live containers for a month). Settle the row
+			// to the journaled status; journal-only children have no row and
+			// stay a no-op here.
+			if liveRunStatus(run.Status) {
+				if err := store.SettleRunStatus(ctx, run.ID, strings.TrimPrefix(journalStatus, "run.")); err == nil {
+					settled = append(settled, run.ID)
+				}
+			}
+			continue
 		}
 		// The workflow identity follows the run's own journal source: external
 		// agents (docs/external-agents.md) may run under a source other than
@@ -185,8 +200,8 @@ func sweepOrphanedRuns(ctx context.Context, store orphanStore, liveness clientSw
 		emitSweepEvent(ctx, journalURL, token, sourceID, run, kind, data, log)
 		closed = append(closed, run.ID)
 	}
-	if len(closed) > 0 {
-		log.Info("orphan sweep: repaired runs without a journal verdict", "runs", closed)
+	if len(closed) > 0 || len(settled) > 0 {
+		log.Info("orphan sweep: repaired runs without a journal verdict", "runs", closed, "rows_settled", settled)
 	}
 }
 

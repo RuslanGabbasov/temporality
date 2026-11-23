@@ -76,6 +76,53 @@ func TestSandboxJanitorRemovesOnlyTerminalRuns(t *testing.T) {
 	}
 }
 
+// TestSandboxJanitorClimbsToTheRootRow: a delegated/plan child has no
+// workspace row of its own, and its scratch key is sanitized (slashes gone) —
+// but the container's labels carry the real run id. The verdict climbs from
+// the child to the nearest ancestor row: a terminal root reaps the whole
+// tree's containers; a live root keeps every child (it may resume there).
+func TestSandboxJanitorClimbsToTheRootRow(t *testing.T) {
+	old := time.Now().UTC().Add(-2 * time.Hour)
+	runs := map[string]workspace.Run{
+		"root-done":            {RunID: "root-done", Status: "completed", UpdatedAt: old},
+		"root-done/plan2":      {}, // plan intermediates carry no row either
+		"root-done/plan2/04-x": {}, // nor does the child itself
+		"root-live":            {RunID: "root-live", Status: "running", UpdatedAt: old},
+	}
+	rec := &janitorSandbox{list: []sandbox.ScratchContainerInfo{
+		{Key: "omni/root-doneplan204x", Name: "c-plan-child", RunID: "root-done/plan2/04-x", Project: "omni"},
+		{Key: "omni/root-donedelegate01delegate01", Name: "c-deep-child", RunID: "root-done/delegate/01/delegate/01", Project: "omni"},
+		{Key: "omni/root-livedelegate01", Name: "c-live-child", RunID: "root-live/delegate/01", Project: "omni"},
+		{Key: "omni/orphanedtree01", Name: "c-no-row-anywhere", RunID: "no-rows/delegate/01", Project: "omni"},
+	}}
+	removedNames := []string{}
+	j := &sandboxJanitor{
+		sandbox: rec,
+		run: func(_ context.Context, runID string) (workspace.Run, error) {
+			row, ok := runs[runID]
+			if !ok || row.Status == "" {
+				return workspace.Run{}, workspace.ErrNotFound
+			}
+			return row, nil
+		},
+		grace:    30 * time.Minute,
+		interval: time.Hour,
+		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		removed: func(key, name string) {
+			removedNames = append(removedNames, name)
+		},
+	}
+
+	j.sweep(context.Background())
+
+	if len(rec.forced) != 2 || rec.forced[0] != "omni/root-doneplan204x" || rec.forced[1] != "omni/root-donedelegate01delegate01" {
+		t.Fatalf("force-removed = %v, want the terminal root's tree only", rec.forced)
+	}
+	if len(removedNames) != 2 || removedNames[0] != "c-plan-child" || removedNames[1] != "c-deep-child" {
+		t.Fatalf("removed names = %v, want both children of the done root", removedNames)
+	}
+}
+
 // TestSplitScratchKey: the run id carries slashes of its own
 // (run/delegate/01) — only the FIRST segment is the project.
 func TestSplitScratchKey(t *testing.T) {
