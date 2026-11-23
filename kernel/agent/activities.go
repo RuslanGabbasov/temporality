@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/temporality-project/temporality/kernel/cost"
 	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
@@ -81,7 +82,12 @@ type Activities struct {
 	// have no env gateway — without this resolver every gate run would abort
 	// before executing a single case (gate_run_aborted).
 	EvalModel func(ctx context.Context) (*llm.Client, error)
-	HTTP      *http.Client
+	// UsageReport resolves the consumption aggregates behind usage_report
+	// (self-monitoring, docs/usage-report.md): tokens, cost and human
+	// attention per org unit, employee, project, saga, model or provider.
+	// Injected by main from the cost API; nil disables the tool.
+	UsageReport func(ctx context.Context, q cost.UsageQuery) (cost.UsageReport, error)
+	HTTP        *http.Client
 	// TemporalityURL is the journal base URL (observations, hints, events).
 	TemporalityURL string
 	// WorkspaceURL is the base URL of the kernel's own workspace API
@@ -1817,6 +1823,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (result T
 		return a.handleSagaAttach(ctx, request)
 	case "saga_list":
 		return a.handleSagaList(ctx, request)
+	case "usage_report":
+		return a.handleUsageReport(ctx, request)
 	case "get_collaborators":
 		return a.handleGetCollaborators(ctx, request)
 	case "skill_inspect", "skill_validate", "skill_history", "skill_executions", "skill_memory":

@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/temporality-project/temporality/kernel/cost"
 	"github.com/temporality-project/temporality/kernel/harness"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/sandbox"
@@ -4830,9 +4831,9 @@ var readOnlyTools = map[string]bool{
 	"skill_inspect": true, "mcp__skill_inspect": true,
 	"artifact_search": true, "mcp__artifact_search": true,
 	"artifact_read": true, "mcp__artifact_read": true,
-	"artifact_feedback": true, "mcp__artifact_feedback": true,
-	"saga_list": true,
-}
+		"artifact_feedback": true, "mcp__artifact_feedback": true,
+		"saga_list": true, "usage_report": true,
+	}
 
 // browserReadOnlyActions are browser actions that only observe the page.
 // click/fill/evaluate can navigate, submit forms or run arbitrary JS — a
@@ -5137,6 +5138,8 @@ var policySafeTools = map[string]bool{
 	// Saga tools (docs/sagas.md) only write observation journal events — the
 	// system's own memory layer, no workspace or external effect.
 	"saga_register": true, "saga_attach": true,
+	// usage_report is a read-only journal fold (docs/usage-report.md).
+	"usage_report": true,
 	// Agent collaboration (docs/temporality-agent-collaboration-spec.md):
 	// get_collaborators is a read-only fold of the saga's journal. ask/answer
 	// write journaled signals gated by kernel-side scope checks; an approval
@@ -6315,6 +6318,12 @@ func KernelTools() []llm.ToolDef {
 		{Name: "saga_register", Description: "Register the current task's work as a saga — an explicitly tracked long-running effort that may span many runs, chat follow-ups and delegated agents. Call it once when starting work you expect to be long or multi-stage, or when asked to track a saga. The saga rides the task: every follow-up run and delegation joins it automatically. Registering an already-bound task returns the existing saga", Parameters: map[string]any{"type": "object", "properties": map[string]any{"title": map[string]any{"type": "string", "description": "Short human-readable saga title"}, "goal": map[string]any{"type": "string", "description": "Optional one-line goal/outcome of the saga"}}, "required": []string{"title"}}},
 		{Name: "saga_attach", Description: "Attach the current task to an existing saga (docs/sagas.md). Use it to join related efforts — for example when taking over work another agent already tracks in a saga. The saga_id comes from saga_list", Parameters: map[string]any{"type": "object", "properties": map[string]any{"saga_id": map[string]any{"type": "string", "description": "The saga to join, from saga_list"}, "note": map[string]any{"type": "string", "description": "Optional one-line reason for joining this saga"}}, "required": []string{"saga_id"}}},
 		{Name: "saga_list", Description: "List sagas registered in this project: saga_id, title, goal, bound tasks and registration time. Use it to find an existing saga before saga_attach instead of registering a duplicate", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
+		{Name: "usage_report", Description: "Consumption aggregates for self-monitoring and reporting (docs/usage-report.md): prompt/cached/completion tokens, cost USD from the price config and human attention (decisions, answers, HAB seconds of attention, HWT seconds of waiting, flow efficiency %) grouped by org_unit, employee, project, saga, model or provider over the last N calendar months. Read-only fold of the journal — use it for monthly reports, budget reviews and «куда уходят токены» questions; rows sort by cost descending", Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"group_by": map[string]any{"type": "string", "enum": cost.UsageDimensions, "description": "The cut: org_unit, employee, project, saga, model or provider"},
+			"project":  map[string]any{"type": "string", "description": "Optional project id; defaults to this run's project"},
+			"months":   map[string]any{"type": "integer", "description": "Window length in calendar months back from now, 1-12; default 1 = month to date"},
+			"limit":    map[string]any{"type": "integer", "description": "Max rows (default 50)"}},
+			"required": []string{"group_by"}}},
 		{Name: "get_collaborators", Description: "List the humans and agents participating in the CURRENT saga: id (agent:<id> / human:<id>), kind, role, task, status and run_id for agents. Scope is this saga only — its tasks and every delegation under them. Status completed/failed means the agent finished but can still be ASKED: ask_agent launches a short follow-up run of that agent to answer. Use this before ask_agent; humans are better reached with ask_human", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "ask_agent", Description: "Send a request or structured data to a collaborating AGENT of this saga (address from get_collaborators: agent:<id>, or run:<run_id> for a specific run). A live run receives the message at its next turn boundary; a FINISHED agent gets a CONTINUE run of the same agent — it resumes that work with your ask and its final completion message is the reply (the agent's own turn/restart budget applies, so long continuations are fine). Modes: async (default) — you get the continue run id and continue, the answer lands as that run's result and in your channels; wait — pause up to timeout_sec for the answer as this call's result. The payload may be text or arbitrary JSON. Addresses are validated kernel-side against your saga scope", Parameters: map[string]any{"type": "object", "properties": map[string]any{"to": map[string]any{"type": "string", "description": "Collaborator address: agent:<agent_id> from get_collaborators, or run:<run_id> for a specific run"}, "type": map[string]any{"type": "string", "description": "Short message type, e.g. compatibility.check, review.request, data.share"}, "payload": map[string]any{"description": "Text or arbitrary JSON: the question, task or structured data (bounded to ~4KB)"}, "mode": map[string]any{"type": "string", "enum": []string{"async", "wait"}, "description": "async (default): return immediately, the answer lands as the continue run's result; wait: block up to timeout_sec for the answer"}, "timeout_sec": map[string]any{"type": "integer", "description": "wait mode only: how long to wait (default 300, max 3600). On timeout the continue run keeps working — its result lands in the runs list"}}, "required": []string{"to", "type"}}},
 		{Name: "answer_agent", Description: "Reply to an agent message delivered to this run: pass the request_id from that message's framing and your answer payload (text or JSON). One answer per request — a duplicate is refused", Parameters: map[string]any{"type": "object", "properties": map[string]any{"request_id": map[string]any{"type": "string", "description": "request_id from the received agent message"}, "payload": map[string]any{"description": "Text or arbitrary JSON: the answer"}}, "required": []string{"request_id", "payload"}}},

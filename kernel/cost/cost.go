@@ -387,6 +387,9 @@ type CostAPI struct {
 	token      string
 	now        func() time.Time
 	factors    HumanFactors
+	// Label resolvers for the usage aggregates (workspace org/user names);
+	// installed once at boot via SetUsageResolvers — nil keeps raw keys.
+	usageResolvers UsageResolvers
 	// Per-project budget rollup cache (single-flight + short TTL): the Sagas
 	// tab's full-history scan runs once per TTL window instead of per load.
 	budgetMu sync.Mutex

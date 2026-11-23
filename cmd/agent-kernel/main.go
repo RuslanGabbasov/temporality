@@ -477,11 +477,40 @@ func main() {
 		}
 		costAPI.SetHumanFactors(habFactors)
 	}
+	// Usage aggregates (docs/usage-report.md): the label resolvers are the
+	// workspace's own identities — the same org position the boards use and
+	// the user list the contacts tool reads.
+	costAPI.SetUsageResolvers(cost.UsageResolvers{
+		OrgNodeForRun: ws.OrgNodeForRun,
+		OrgNodeName: func(ctx context.Context, orgNodeID string) (string, error) {
+			if orgNodeID == "" {
+				return "", nil
+			}
+			unit, err := ws.GetOrgUnit(ctx, orgNodeID)
+			if err != nil {
+				return "", err
+			}
+			return unit.Name, nil
+		},
+		UserName: func(ctx context.Context, userID string) (string, error) {
+			users, err := ws.ListUsers(ctx)
+			if err != nil {
+				return "", err
+			}
+			for _, u := range users {
+				if u.ID == userID {
+					return u.Name, nil
+				}
+			}
+			return "", fmt.Errorf("user %s not found", userID)
+		},
+	})
 	activities, err := agent.NewActivities(events)
 	if err != nil {
 		log.Error("configure activities", "error", err)
 		os.Exit(1)
 	}
+	activities.UsageReport = costAPI.UsageReport
 	// Memory budget gate (the OOM guard): every run declares its sandbox
 	// memory (the same --memory its container gets); the gate admits runs
 	// while the SUM of their requirements fits the host budget, and queues
@@ -1821,6 +1850,17 @@ func main() {
 		}
 		costAPI.TeamRunCostHandler(w, r)
 	})
+	// Usage aggregates (docs/usage-report.md): tokens, cost and human
+	// attention in one fold, cut by org unit, employee, project, saga, model
+	// or provider — the same numbers the agents' usage_report tool reads.
+	mux.HandleFunc("GET /v1/agent/usage", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader, r.URL.Query().Get("project")) {
+			return
+		}
+		costAPI.UsageReportHandler(w, r)
+	})
+	// The published monthly reports (usage.monthly_report journal events).
+	registerMonthlyUsageReports(mux, gate, observationURL)
 	liveness := &temporalLiveness{client: temporalClient}
 	// Orphaned-run sweep (docs/builtin-skills.md §3, run-lifecycle resilience):
 	// a stack rebuild while runs are in flight can leave workspace_run rows
@@ -8347,6 +8387,10 @@ func main() {
 	// into org_month_usage — the policy admission gate and the usage stats
 	// read the same rows.
 	StartOrgUsageLoop(ctx, log, ws, observationURL, journalToken, costPrices)
+	// Automatic monthly usage reports (docs/usage-report.md): fold every
+	// uncovered closed calendar month through the usage aggregates and
+	// journal usage.monthly_report — no more manual copies out of the UI.
+	StartUsageReportLoop(ctx, log, costAPI, observationURL, events.Enqueue)
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()

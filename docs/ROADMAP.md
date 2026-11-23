@@ -273,7 +273,7 @@ Source spec: `docs/inbound-messages.md`.
 ## P2 — Advanced
 
 - [ ] **Read-after-write probes** — operation → observable trace → probe → hint to operator. Probe gives a hint, does NOT automatically issue authoritative verdict. Первая реализация удалена как нерабочая по предпосылкам; вернуться к идее — с дизайном от реальной формы аргументов и внешних следов.
-- [ ] **Cost accounting v2** — cost per run / per project / per task / per saga ✅ (в Done выше); остаются org-уровневые токен-квоты
+- [ ] **Cost accounting v2** — cost per run / per project / per task / per saga ✅ (в Done выше); остаются org-уровневые токен-квоты; агрегаты потребления для агентов и людей (токены/деньги/HAB+HWT в разрезе org_unit, сотрудника, проекта, саги, модели, провайдера) — `usage_report` тул + `GET /v1/agent/usage` + автоматический ежемесячный отчёт в журнал (docs/usage-report.md) ✅
 - [ ] **Memory population overview** — counts over time; частично сделано: распределение состояний на странице знаний (lifecycle bar), метрики борда (`/org/work`) — остались тайм-серии
 - [ ] **Cross-project knowledge** — knowledge that spans multiple projects (scope promotion org_unit/organization есть; cross-project ноды — не делали)
 - [x] **Embeddings infrastructure** — shipped beyond the original scope: in-process model (rembed, `KERNEL_EMBEDDINGS_MODEL`), knowledge embeddings store, semantic hint tier, semantic search and the map in the knowledge explorer; lexical matching остался как дешёвый первый эшелон
