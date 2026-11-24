@@ -13,15 +13,66 @@ export const GROUP_LABEL_KEYS: Record<TodoGroup, string> = {
 
 export type TodoClusters = Record<TodoGroup, UserTodo[]>
 
+/** Local calendar-day key (YYYY-MM-DD) — the board's «today». */
+export function todayKey(now = new Date()): string {
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+/** The todo's due key (YYYY-MM-DD) or null when undated. */
+export function dueKey(todo: UserTodo): string | null {
+  return todo.due ? todo.due.slice(0, 10) : null
+}
+
+export type DueState = 'overdue' | 'today' | 'future'
+
+/** Due classification; done todos never classify — no alarm on finished work. */
+export function dueState(todo: UserTodo, today = todayKey()): DueState | null {
+  const key = dueKey(todo)
+  if (!key || todo.group === 'done') return null
+  if (key < today) return 'overdue'
+  if (key === today) return 'today'
+  return 'future'
+}
+
+/** Board order: dated todos first (by date), then the manual sort, then age. */
+export function byUrgency(a: UserTodo, b: UserTodo): number {
+  const ka = dueKey(a)
+  const kb = dueKey(b)
+  if (ka && kb && ka !== kb) return ka < kb ? -1 : 1
+  if (ka && !kb) return -1
+  if (!ka && kb) return 1
+  return a.sort - b.sort || (a.created_at ?? '').localeCompare(b.created_at ?? '')
+}
+
 /** Cluster the flat todo list by GTD group, in the canonical group order.
  *  Unknown groups fold into the inbox (same rule the kernel applies on
- *  write), so a stale row can never vanish from the board. */
+ *  write), so a stale row can never vanish from the board. Each section is
+ *  urgency-sorted: dated work surfaces first, manual order after it. */
 export function clusterTodos(todos: UserTodo[] | null | undefined): TodoClusters {
   const out = { inbox: [], next: [], waiting: [], someday: [], done: [] } as TodoClusters
   for (const todo of todos ?? []) {
     out[normalizeTodoGroup(todo.group)].push(todo)
   }
+  for (const g of TODO_GROUPS) out[g].sort(byUrgency)
   return out
+}
+
+/** «Сегодня» list: undone todos due today or earlier, most urgent first. */
+export function todayTodos(todos: UserTodo[] | null | undefined, today = todayKey()): UserTodo[] {
+  return (todos ?? [])
+    .filter((t) => { const s = dueState(t, today); return s === 'overdue' || s === 'today' })
+    .sort(byUrgency)
+}
+
+/** «24.11» short label for a due chip. */
+export function formatDue(due: string | undefined, locale = 'ru'): string {
+  if (!due) return ''
+  const d = new Date(due.length === 10 ? due + 'T00:00:00' : due)
+  if (Number.isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit' }).format(d)
 }
 
 export function todoTotal(clusters: TodoClusters): number {

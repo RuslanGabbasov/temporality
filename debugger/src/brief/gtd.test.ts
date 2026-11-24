@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { clusterTodos, formatCost, formatTokens, runLabel, todoTotal } from './gtd'
+import { byUrgency, clusterTodos, dueKey, dueState, formatCost, formatDue, formatTokens, runLabel, todoTotal, todayKey, todayTodos } from './gtd'
 import type { UserTodo } from '../kernelApi'
 
-function todo(group: string, text: string): UserTodo {
-  return { id: text, user_id: 'u', group: group as UserTodo['group'], text, sort: 0, created_at: '', updated_at: '' }
+function todo(group: string, text: string, extra: Partial<UserTodo> = {}): UserTodo {
+  return { id: text, user_id: 'u', group: group as UserTodo['group'], text, sort: 0, created_at: '', updated_at: '', ...extra }
 }
 
 describe('clusterTodos', () => {
@@ -24,6 +24,47 @@ describe('clusterTodos', () => {
   it('survives null/undefined lists', () => {
     expect(todoTotal(clusterTodos(null))).toBe(0)
     expect(todoTotal(clusterTodos(undefined))).toBe(0)
+  })
+})
+
+describe('due dates (TickTick-lite)', () => {
+  const today = '2026-11-24'
+
+  it('todayKey renders a local YYYY-MM-DD', () => {
+    expect(todayKey(new Date(2026, 10, 24, 23, 5))).toBe('2026-11-24')
+  })
+
+  it('classifies due state; done work never alarms', () => {
+    expect(dueState(todo('next', 'a', { due: '2026-11-20T00:00:00Z' }), today)).toBe('overdue')
+    expect(dueState(todo('next', 'b', { due: '2026-11-24' }), today)).toBe('today')
+    expect(dueState(todo('next', 'c', { due: '2026-12-01' }), today)).toBe('future')
+    expect(dueState(todo('next', 'd'))).toBeNull()
+    expect(dueState(todo('done', 'e', { due: '2026-11-20' }), today)).toBeNull()
+    expect(dueKey(todo('waiting', 'f', { due: '2026-11-24T13:45:00Z' }))).toBe('2026-11-24')
+  })
+
+  it('todayTodos lists undone due-today-and-overdue, urgent first', () => {
+    const list = [
+      todo('someday', 'undated'),
+      todo('done', 'finished', { due: '2026-11-01' }),
+      todo('next', 'future', { due: '2026-12-01' }),
+      todo('waiting', 'today', { due: '2026-11-24' }),
+      todo('inbox', 'overdue', { due: '2026-11-21' }),
+    ]
+    expect(todayTodos(list, today).map((t) => t.text)).toEqual(['overdue', 'today'])
+    expect(todayTodos(null)).toEqual([])
+  })
+
+  it('byUrgency puts dated work first, then manual sort', () => {
+    const a = todo('inbox', 'a', { sort: 5 })
+    const b = todo('inbox', 'b', { due: '2026-11-24' })
+    const c = todo('inbox', 'c', { sort: 1 })
+    expect([a, b, c].sort(byUrgency).map((t) => t.text)).toEqual(['b', 'c', 'a'])
+  })
+
+  it('formatDue renders a short label', () => {
+    expect(formatDue('2026-11-24')).toBe('24.11')
+    expect(formatDue(undefined)).toBe('')
   })
 })
 

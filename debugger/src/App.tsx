@@ -3,7 +3,6 @@ import Layout, { type AppState } from './Layout'
 import { I18nProvider } from './i18n'
 import { ThemePrefProvider } from './theme'
 import Dashboard from './Dashboard'
-import PersonalBrief from './brief/PersonalBrief'
 import Supervisor from './Supervisor'
 import KnowledgeExplorer from './KnowledgeExplorer'
 import AgentRuns from './AgentRuns'
@@ -69,10 +68,11 @@ const Routes = {
   learning: /^\/learning(\/|$)/,
 } as const
 
-type Page = 'brief' | 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'org/activity' | 'org/work' | 'org/flow' | 'channels' | 'inbound' | 'supervisor-model' | 'harness' | 'learning'
+type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'org/activity' | 'org/work' | 'org/flow' | 'channels' | 'inbound' | 'supervisor-model' | 'harness' | 'learning'
 
 function pageFor(pathname: string): Page {
-  if (Routes.brief.test(pathname)) return 'brief'
+  // /brief folded into the dashboard (navigate() rewrites the URL before
+  // pageFor runs) — no standalone brief page anymore.
   if (Routes.dashboard.test(pathname)) return 'dashboard'
   if (Routes.supervisor.test(pathname)) return 'supervisor'
   if (Routes.agents.test(pathname)) return 'agents'
@@ -111,6 +111,12 @@ export default function App() {
       if (window.location.pathname === '/knowledge-map') {
         window.history.replaceState(null, '', '/knowledge?view=map' + window.location.search.replace(/^\?/, '&'))
       }
+      // The standalone brief page folds into the dashboard's «Мой день» tab
+      // (docs/system-dashboard.md): the personal brief IS a dashboard tab
+      // now — old deep links (/brief) must stay shareable.
+      if (/^\/brief(\/|$)/.test(window.location.pathname)) {
+        window.history.replaceState(null, '', '/dashboard?tab=myday' + window.location.search.replace(/^\?/, '&'))
+      }
       setPage(pageFor(window.location.pathname))
     }
     navigate()
@@ -119,14 +125,15 @@ export default function App() {
   }, [])
 
   // Landing gate (docs/system-dashboard.md «Мой день»): users without the
-  // full operational dashboard land on their personal brief. Only the bare
-  // root redirects — an explicit deep link stays where it points.
+  // full operational dashboard land on their personal brief — the dashboard's
+  // myday tab. Only the bare root redirects — an explicit deep link stays
+  // where it points.
   useEffect(() => {
     let alive = true
     void whoami().then((w) => {
       if (alive && w.full_dashboard === false && (window.location.pathname === '/' || window.location.pathname === '')) {
-        window.history.replaceState(null, '', '/brief')
-        setPage('brief')
+        window.history.replaceState(null, '', '/dashboard?tab=myday')
+        setPage('dashboard')
       }
     }).catch(() => {})
     return () => { alive = false }
@@ -139,8 +146,6 @@ export default function App() {
     <Layout activePage={page}>
       {({ project, setProject, projectDefaultAgent, projectDefaultModel, refreshProjects }: AppState) => {
         switch (page) {
-          case 'brief':
-            return <PersonalBrief />
           case 'dashboard':
             return <Dashboard project={project} setProject={setProject} />
           case 'supervisor':

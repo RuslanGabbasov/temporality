@@ -14,7 +14,7 @@ function stubBrowser() {
   vi.stubGlobal('localStorage', storage)
   // The dashboard initializers read window.location (the ?tab= param) and
   // window.localStorage (the last-tab memory) — the test env is plain node.
-  vi.stubGlobal('window', { location: { search: '', pathname: '/dashboard' }, localStorage: storage })
+  vi.stubGlobal('window', { location: { search: '?tab=overview', pathname: '/dashboard' }, localStorage: storage })
 }
 
 afterEach(() => {

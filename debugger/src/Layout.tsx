@@ -48,13 +48,11 @@ interface LayoutProps {
 // Primary work surfaces — always visible in the header.
 const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
-  // «Мой день» (docs/system-dashboard.md): the personal brief — everyone's
-  // landing; the operational dashboard next to it stays gated (fullOnly).
-  { path: '/brief', label: 'nav.myday' },
-  // The system dashboard (docs/system-dashboard.md): health, quality, sagas
-  // and knowledge observability in one operational surface. The supervisor
-  // problem queue is a dashboard tab, not a separate nav destination.
-  { path: '/dashboard', label: 'nav.dashboard', fullOnly: true },
+  // The system dashboard (docs/system-dashboard.md) is everyone's surface
+  // now: «Мой день» is its first tab (the personal landing), the operational
+  // tabs (activity/supervisor/users/usage) stay gated inside the page by
+  // full_dashboard. No separate nav destination for the brief anymore.
+  { path: '/dashboard', label: 'nav.dashboard' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
   // Knowledge explorer is the main research surface (docs/human-knowledge-
@@ -633,11 +631,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
     void loadProjects()
   }
 
-  // «Мой день» always; the full operational dashboard only when whoami says
-  // the caller keeps it (admins, org-role holders, unit heads). Unknown
-  // (identity not yet loaded) keeps the dashboard — no flicker for admins,
-  // the gate lands a beat later for restricted users.
-  const navItems = NAV_ITEMS.filter((item) => !item.fullOnly || identity?.full_dashboard !== false)
+  // The dashboard gates its own operational tabs by full_dashboard; the nav
+  // item is always visible for everyone.
+  const navItems = NAV_ITEMS
 
   return (
     <Theme theme={resolved === 'light' ? 'g10' : 'g100'}>

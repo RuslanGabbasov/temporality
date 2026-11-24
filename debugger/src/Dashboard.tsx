@@ -7,12 +7,14 @@ import {
   storageOverview,
   systemHealth,
   readiness,
+  whoami,
   type ReadinessCheck,
   type ProjectsOverview,
   type StorageSnapshot,
   type SystemHealth,
   type SandboxContainerInfo,
 } from './kernelApi'
+import PersonalBrief from './brief/PersonalBrief'
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
 import OrgActivityBoard from './OrgActivityBoard'
@@ -35,7 +37,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'work' | 'activity' | 'sagas' | 'supervisor' | 'users' | 'usage'
+type Tab = 'myday' | 'overview' | 'work' | 'activity' | 'sagas' | 'supervisor' | 'users' | 'usage'
 // Every valid tab: the URL param and the last-tab memory validate against this
 // full set (the TAB_KEYS strip above it is only the initial-render order).
 // 'quality' was removed: the eval-loop table rendered all-dashes without
@@ -43,8 +45,12 @@ type Tab = 'overview' | 'work' | 'activity' | 'sagas' | 'supervisor' | 'users' |
 // flat tab the delivery list was contextless — awareness now reads ON the
 // timeline (dots + spread links there), and /org/flow stays as the detail
 // page the timeline dots and the work board deep-link into.
-const ALL_TABS: Tab[] = ['overview', 'work', 'activity', 'sagas', 'supervisor', 'users', 'usage']
-const TAB_KEYS: Tab[] = ['overview', 'sagas']
+const ALL_TABS: Tab[] = ['myday', 'overview', 'work', 'activity', 'sagas', 'supervisor', 'users', 'usage']
+// Tabs every signed-in user sees; the rest stay gated by full_dashboard
+// (admins, org-role holders, unit heads) — the personal landing («Мой
+// день») lives IN the dashboard now, not on a separate page.
+const COMMON_TABS: Tab[] = ['myday', 'overview', 'work', 'sagas']
+const TAB_KEYS: Tab[] = ['myday', 'overview', 'sagas']
 // The last open tab survives reloads and revisits: returning to the
 // supervisor triage mid-investigation must not land back on the overview.
 const LAST_TAB_KEY = 'dashboard.tab'
@@ -151,12 +157,29 @@ export default function Dashboard({ project, setProject }: Props) {
   const [tab, setTab] = useState<Tab>(
     initTab && ALL_TABS.includes(initTab) ? initTab
       : rememberedTab && ALL_TABS.includes(rememberedTab) ? rememberedTab
-        : 'overview',
+        : 'myday',
   )
+  // full_dashboard gate (whoami): admins/org-role holders/unit heads keep the
+  // operational tabs; everyone else sees only the common set. null = identity
+  // not loaded yet — render the common set, the extra tabs land a beat later
+  // (the same no-flicker trade the nav gate makes).
+  const [fullDash, setFullDash] = useState<boolean | null>(null)
+  useEffect(() => {
+    let alive = true
+    void whoami().then((w) => {
+      if (alive) setFullDash(w.full_dashboard !== false)
+    }).catch(() => { if (alive) setFullDash(false) })
+    return () => { alive = false }
+  }, [])
   const switchTab = useCallback((next: Tab) => {
     setTab(next)
     try { window.localStorage.setItem(LAST_TAB_KEY, next) } catch { /* private mode: memory-only */ }
   }, [])
+  // A remembered (or deep-linked) operational tab must not linger for a
+  // restricted viewer once the identity lands.
+  useEffect(() => {
+    if (fullDash === false && !COMMON_TABS.includes(tab)) switchTab('overview')
+  }, [fullDash, tab, switchTab])
   // In-dashboard deep links (pushState + popstate from the work board's
   // «open flow» buttons) re-read the tab here — the page itself does not
   // remount when only the query string changed.
@@ -354,6 +377,9 @@ export default function Dashboard({ project, setProject }: Props) {
   }
 
   const tabs: { key: Tab; label: string }[] = [
+    // The personal landing («Мой день», docs/system-dashboard.md): the first
+    // tab for everyone — the dashboard opens on YOUR day, not on org health.
+    { key: 'myday', label: t('dashboard.tab_myday') ?? 'My day' },
     { key: 'overview', label: t('dashboard.tab_overview') ?? 'Overview' },
     // The work observation console (docs/temporality-organizational-
     // operations-spec.md §10/§9/§12): the manager surfaces live here as
@@ -379,6 +405,9 @@ export default function Dashboard({ project, setProject }: Props) {
     // the work it produced, not inside unit configuration).
     { key: 'usage', label: t('dashboard.tab_usage') ?? 'Usage' },
   ]
+  // Restricted viewers: only the common set (identity still loading counts as
+  // restricted — the operational tabs land a beat later for admins).
+  const visibleTabs = tabs.filter((item) => fullDash === true || COMMON_TABS.includes(item.key))
 
   return (
     <div data-learn="page.dashboard" style={{ padding: '1rem' }}>
@@ -412,7 +441,7 @@ export default function Dashboard({ project, setProject }: Props) {
 
       {/* Tab strip */}
       <div style={{ display: 'flex', gap: '0.2rem', borderBottom: '1px solid var(--tm-border)', marginBottom: '0.9rem' }}>
-        {tabs.map((item) => (
+        {visibleTabs.map((item) => (
           <button
             key={item.key}
             onClick={() => switchTab(item.key)}
@@ -435,6 +464,8 @@ export default function Dashboard({ project, setProject }: Props) {
           </button>
         ))}
       </div>
+
+      {tab === 'myday' && <PersonalBrief />}
 
       {tab === 'overview' && (
         <>

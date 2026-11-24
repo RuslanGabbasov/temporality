@@ -178,6 +178,13 @@ export interface UserBriefMetrics {
   model_calls: number
 }
 
+// The GTD slice of the brief: undone todos due today / overdue (old stored
+// payloads may omit it).
+export interface UserBriefTodosFocus {
+  today: number
+  overdue: number
+}
+
 export interface UserBrief {
   day: string
   generated_at: string
@@ -188,6 +195,7 @@ export interface UserBrief {
   failed: UserBriefRun[]
   approvals: UserBriefApproval[]
   learning: UserBriefLearning
+  todos_focus?: UserBriefTodosFocus
   metrics: UserBriefMetrics
 }
 
@@ -197,6 +205,10 @@ export interface UserTodo {
   group: TodoGroup
   text: string
   note?: string
+  /** Due date YYYY-MM-DD (UTC midnight from the kernel's DATE column). */
+  due?: string
+  /** Where a checkbox-completed todo returns when unchecked. */
+  return_group?: TodoGroup
   sort: number
   created_at: string
   updated_at: string
@@ -211,11 +223,11 @@ export function dashboardTodos(): Promise<{ todos: UserTodo[] }> {
   return request('/v1/dashboard/todos')
 }
 
-export function createDashboardTodo(input: { group: TodoGroup; text: string; note?: string }): Promise<{ todo: UserTodo }> {
+export function createDashboardTodo(input: { group: TodoGroup; text: string; note?: string; due?: string }): Promise<{ todo: UserTodo }> {
   return request('/v1/dashboard/todos', { method: 'POST', body: JSON.stringify(input) })
 }
 
-export function updateDashboardTodo(id: string, patch: { group?: TodoGroup; text?: string; note?: string; sort?: number }): Promise<{ todo: UserTodo }> {
+export function updateDashboardTodo(id: string, patch: { group?: TodoGroup; text?: string; note?: string; due?: string; sort?: number }): Promise<{ todo: UserTodo }> {
   return request(`/v1/dashboard/todos/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) })
 }
 
