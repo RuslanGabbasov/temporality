@@ -15,6 +15,14 @@ import { workspaceApi, type Artifact, type ArtifactInboxEntry, type ArtifactRevi
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 ;(window as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub
 
+vi.mock('./kernelApi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./kernelApi')>()
+  return {
+    ...actual,
+    whoami: vi.fn(async () => ({ subject: 'me', role: 'writer', projects: ['*'], auth_enabled: false, user_id: 'me' })),
+  }
+})
+
 vi.mock('./workspaceApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./workspaceApi')>()
   return {
@@ -176,5 +184,80 @@ describe('approvals inbox freshness', () => {
     expect(activeTab?.textContent ?? '').toMatch(/(Review queue|Очередь согласования)/)
     expect(container.textContent ?? '').toMatch(/(Reviewers|Согласующие)/)
     expect(container.textContent ?? '').toContain('Me Me')
+  })
+})
+
+// An open mode=all round with my recorded vote is not my pending work: it
+// waits on the remaining reviewers. The queue must say so (and count it out
+// of the attention badge) instead of showing my approved rows as untouched.
+describe('inbox: my own vote is not pending work', () => {
+  function makeEntry(row: Artifact, review: ArtifactReview): ArtifactInboxEntry {
+    return {
+      review, artifact_id: row.id, artifact_title: row.title,
+      status: 'in_review', version: row.version ?? 1, matched: ['user:me'],
+      created_at: row.created_at, updated_at: row.updated_at,
+    }
+  }
+
+  function openAllRound(artifact: Artifact, id: string, decisions: ArtifactReview['decisions']): ArtifactReview {
+    return {
+      id, artifact_id: artifact.id, artifact_version: artifact.version ?? 1,
+      reviewers: ['me', 'colleague'], mode: 'all', status: 'open',
+      requested_by: 'someone-else', requested_at: '2026-11-03T10:00:00Z', decisions: decisions ?? {},
+    }
+  }
+
+  it('splits decided-by-me rows into a muted group and counts only pending ones', async () => {
+    const pendingRow = makeRow('a3', 'Runbook pending', 'in_review', 2)
+    const decidedRow = makeRow('a4', 'Runbook decided', 'in_review', 2)
+    rows = [pendingRow, decidedRow]
+    reviews = [
+      openAllRound(pendingRow, 'rev-pending', {}),
+      openAllRound(decidedRow, 'rev-decided', { me: { decision: 'approve', at: '2026-11-04T10:00:00Z', decided_by: 'me' } }),
+    ]
+    inboxEntries = [makeEntry(pendingRow, reviews[0]), makeEntry(decidedRow, reviews[1])]
+    await mountPage()
+
+    // The badge counts only rows still awaiting MY decision.
+    const inboxChip = [...container.querySelectorAll('button')]
+      .find((b) => /(На моём согласовании|My approvals)/.test(b.textContent ?? ''))
+    expect(inboxChip).toBeTruthy()
+    expect(inboxChip!.querySelector('span')?.textContent).toBe('1')
+
+    const text = container.textContent ?? ''
+    expect(text).toMatch(/(ты уже согласовал|you already approved)/)
+    expect(text).toMatch(/(ждём|waiting for)/)
+    // The decided rows are grouped under their own header, after the pending ones.
+    const headerAt = text.search(/(ты решил — ждём коллег|you decided — waiting on others)/)
+    expect(headerAt).toBeGreaterThanOrEqual(0)
+    expect(text.indexOf('Runbook pending')).toBeLessThan(headerAt)
+    expect(text.indexOf('Runbook decided')).toBeGreaterThan(headerAt)
+  })
+
+  it('flags my vote on the round card itself, buttons stay for a re-vote', async () => {
+    const row = makeRow('a5', 'Runbook decided', 'in_review', 2)
+    rows = [row]
+    reviews = [openAllRound(row, 'rev-d', { me: { decision: 'approve', at: '2026-11-04T10:00:00Z', decided_by: 'me' } })]
+    inboxEntries = [makeEntry(row, reviews[0])]
+    await mountPage()
+
+    // The queue row says my vote is in — and nothing is pending, no badge.
+    expect(container.textContent ?? '').toMatch(/(ты уже согласовал|you already approved)/)
+    const inboxChip = [...container.querySelectorAll('button')]
+      .find((b) => /(На моём согласовании|My approvals)/.test(b.textContent ?? ''))
+    expect(inboxChip!.querySelector('span')).toBeNull()
+
+    await selectRow('Runbook decided')
+    const reviewTab = [...container.querySelectorAll<HTMLElement>('[role="tab"]')]
+      .find((b) => /(Согласование|Review)/.test(b.textContent ?? ''))
+    expect(reviewTab).toBeTruthy()
+    await act(async () => { reviewTab!.click() })
+    await settle()
+
+    // The round card repeats the label (inbox row + card), Approve stays:
+    // changing one's vote is legal, the backend overwrites the decision.
+    const text = container.textContent ?? ''
+    expect((text.match(/ты уже согласовал|you already approved/g) ?? []).length).toBe(2)
+    expect(text).toMatch(/(Согласовать|Approve)/)
   })
 })

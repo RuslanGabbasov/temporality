@@ -1240,6 +1240,34 @@ export default function Artifacts({ project }: { project?: string }) {
 
   const fmtTime = (v?: string) => (v ? new Date(v).toLocaleString([uiLocale()]) : '')
 
+  // My own decision on a round: the concrete principal behind it (decided_by)
+  // is the truth of WHO decided — a shared seat (project_owner) decided by a
+  // colleague must not read as «you decided». An open mode=all round with my
+  // vote recorded stays open until every reviewer approves: without this the
+  // queue shows decided work as pending («why is my approved artifact still
+  // here?»).
+  const myRoundDecision = (r: ArtifactReview) => {
+    if (!myUserID) return null
+    for (const d of Object.values(r.decisions ?? {})) {
+      if (d.decided_by && d.decided_by === myUserID) return d
+    }
+    return null
+  }
+  // Reviewer seats an open mode=all round still waits on: entries without an
+  // approve decision on the table.
+  const awaitingReviewers = (r: ArtifactReview) =>
+    r.status === 'open' && r.mode === 'all'
+      ? r.reviewers.filter((who) => r.decisions?.[who]?.decision !== 'approve')
+      : []
+  const decidedLabel = (r: ArtifactReview) => {
+    const d = myRoundDecision(r)
+    if (!d) return ''
+    const verb = d.decision === 'approve' ? (t('artifacts.inbox_you_approved') ?? 'ты уже согласовал') : (t('artifacts.inbox_you_rejected') ?? 'ты уже отклонил')
+    const waiting = awaitingReviewers(r)
+    const tail = waiting.length > 0 ? ` · ${t('artifacts.inbox_waiting') ?? 'ждём'}: ${waiting.map(reviewerLabel).join(', ')}` : ''
+    return `✓ ${verb}${d.at ? ` (${fmtTime(d.at)})` : ''}${tail}`
+  }
+
   return (
     <div style={{ padding: '1rem' }}>
       {confirmDialogNode}
@@ -1264,12 +1292,14 @@ export default function Artifacts({ project }: { project?: string }) {
             </button>
             <button type="button" onClick={() => setInboxMode(true)} style={chipStyle(inboxMode)}>
               {t('artifacts.tab_inbox') ?? 'На моём согласовании'}
-              {(inbox?.length ?? 0) > 0 && (
+              {(inbox ?? []).some((entry) => !decidedLabel(entry.review)) && (
                 // The attention badge (runs-tab style): pending decisions are
                 // the work the user came for — it must be SEEN, not a gray
-                // suffix lost in the tab label.
+                // suffix lost in the tab label. It counts only rows awaiting
+                // MY decision: an open mode=all round I already voted on is
+                // waiting on colleagues, not on me.
                 <span style={{ marginLeft: '0.375rem', background: '#e0af68', color: '#1a1a1a', borderRadius: 999, fontSize: '0.68rem', fontWeight: 600, padding: '0.05rem 0.45rem', lineHeight: 1.4 }}>
-                  {inbox!.length}
+                  {(inbox ?? []).filter((entry) => !decidedLabel(entry.review)).length}
                 </span>
               )}
             </button>
@@ -1280,7 +1310,11 @@ export default function Artifacts({ project }: { project?: string }) {
               {!inboxBusy && (inbox ?? []).length === 0 && (
                 <Tile style={{ color: 'var(--tm-text-3)' }}>{t('artifacts.inbox_empty') ?? 'Открытых согласований на тебя нет.'}</Tile>
               )}
-              {(inbox ?? []).map((entry) => (
+              {/* An open mode=all round I already voted on is NOT my pending
+                  work — it waits on colleagues. Burying it among pending rows
+                  is how «approved» artifacts read as unapproved: pending first,
+                  then a muted «you decided — waiting on others» group. */}
+              {(inbox ?? []).filter((entry) => !decidedLabel(entry.review)).map((entry) => (
                 <div
                   key={entry.review.id}
                   style={{ ...rowStyle(selectedId === entry.artifact_id), borderLeft: '3px solid var(--tm-amber, #e0af68)' }}
@@ -1300,6 +1334,36 @@ export default function Artifacts({ project }: { project?: string }) {
                       {t('artifacts.inbox_matched') ?? 'ты рецензент как'}: {entry.matched.map((matched) => reviewerLabel(matched)).join(', ')}
                     </div>
                   )}
+                </div>
+              ))}
+              {(inbox ?? []).some((entry) => decidedLabel(entry.review)) && (
+                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--tm-text-3)', margin: '0.6rem 0 0.3rem' }}>
+                  {t('artifacts.inbox_waiting_group') ?? 'ты решил — ждём коллег'}
+                </div>
+              )}
+              {(inbox ?? []).filter((entry) => decidedLabel(entry.review)).map((entry) => (
+                <div
+                  key={entry.review.id}
+                  style={{ ...rowStyle(selectedId === entry.artifact_id), borderLeft: '3px solid var(--tm-teal, #7aa2f7)', opacity: 0.75 }}
+                  onClick={() => setSelectedId(entry.artifact_id)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                    <strong style={{ fontSize: '0.85rem' }}>{entry.artifact_title}</strong>
+                    <Tag type="purple" size="sm">{t('artifacts.inbox_review') ?? 'согласование'}</Tag>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.2rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    {entry.review.mode === 'all' ? (t('artifacts.inbox_mode_all') ?? 'все рецензенты') : (t('artifacts.inbox_mode_any') ?? 'любой рецензент')}
+                    {' · '}<TimeHint value={entry.review.requested_at}>{shortTime(entry.review.requested_at)}</TimeHint>
+                    {entry.origin_user ? ` · ${userNameOf(entry.origin_user)}` : ''}
+                  </div>
+                  {entry.matched.length > 0 && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)', marginTop: '0.2rem' }}>
+                      {t('artifacts.inbox_matched') ?? 'ты рецензент как'}: {entry.matched.map((matched) => reviewerLabel(matched)).join(', ')}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '0.72rem', color: 'var(--tm-teal, #7aa2f7)', marginTop: '0.2rem' }}>
+                    {decidedLabel(entry.review)}
+                  </div>
                 </div>
               ))}
             </>
@@ -1890,6 +1954,13 @@ export default function Artifacts({ project }: { project?: string }) {
                           <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginTop: '0.4rem' }}>
                             {t('artifacts.reviewers_label') ?? 'Reviewers'}: {r.reviewers.map((reviewer) => reviewerLabel(reviewer)).join(', ')}
                           </p>
+                          {/* My vote on an open round is recorded even while it
+                              waits on the rest — say so, or the round reads as
+                              «I haven't decided yet». Buttons stay: re-voting is
+                              legal, the backend overwrites the decision. */}
+                          {r.status === 'open' && decidedLabel(r) && (
+                            <p style={{ fontSize: '0.75rem', color: 'var(--tm-teal, #7aa2f7)', marginTop: '0.4rem' }}>{decidedLabel(r)}</p>
+                          )}
                           {r.status === 'open' && (
                             <div style={{ marginTop: '0.5rem' }}>
                               {roundManage?.reviewID === r.id ? (
