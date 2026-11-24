@@ -1369,6 +1369,161 @@ func TestAgentRunDelegatesToAnotherAgent(t *testing.T) {
 	require.True(t, sawChildAnswer, "parent must receive the child answer as the tool result")
 }
 
+// Background delegation (docs/agent-delegation.md, v1): the delegate call is
+// answered immediately with a launch receipt, the parent keeps working, and
+// the child's final answer arrives as a batched report. The run must NOT
+// complete on an answer produced before the child settled — the reopen
+// contract forces one more turn after the report lands.
+// Background delegation (docs/agent-delegation.md, v1): the delegate call is
+// answered immediately with a launch receipt, the parent keeps working, and
+// the child's final answer arrives as a batched report. The run must NOT
+// complete on an answer produced before the child settled — the reopen
+// contract forces one more turn after the report lands.
+func TestAgentRunBackgroundDelegationKeepsParentWorking(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	recorder := newEventRecorder()
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorder.record(event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	parentCalls := 0
+	sawReport := false
+	sawPremature := false
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if len(request.Messages) == 0 {
+			t.Fatalf("unexpected model request: %#v", request)
+		}
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "child done"}, nil
+		}
+		parentCalls++
+		for _, message := range request.Messages {
+			if message.Role == "user" && strings.Contains(message.Content, "Background delegations report") {
+				sawReport = true
+			}
+		}
+		if sawReport {
+			return llm.Completion{Content: "parent done"}, nil
+		}
+		// The model believes it is done while the child is still running: this
+		// answer must NOT complete the run — the reopen branch waits for the
+		// report and forces another turn.
+		sawPremature = true
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "delegate-1", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "review the diff", "background": true}}}}, nil
+		}
+		return llm.Completion{Content: "premature done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		require.Equal(t, "run-bgd/delegate/01", request.RunID)
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: "repo-a-reviewer", DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("delegate must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-bgd", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "delegate the review in the background", MaxTurns: 5})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "completed", result.Status)
+	// The premature answer never becomes the run's outcome: the report came
+	// first and the parent answered with it in the conversation.
+	require.Equal(t, "parent done", result.Answer)
+	require.True(t, sawPremature, "precondition: the model must have tried to finish early")
+	require.True(t, sawReport, "the parent must receive the batched background report")
+
+	recorded := recorder.snapshot()
+	var started, receipt, completed, reopened *observation.Event
+	for index := range recorded {
+		event := &recorded[index]
+		switch {
+		case event.Type == "delegation.started" && started == nil:
+			started = event
+		case event.Type == "tool.completed" && event.Data["tool"] == "delegate" && event.Data["background"] == true && receipt == nil:
+			receipt = event
+		case event.Type == "delegation.completed" && completed == nil:
+			completed = event
+		case event.Type == "turn.completed" && event.Data["reopened_by_background_delegation"] == true && reopened == nil:
+			reopened = event
+		}
+	}
+	require.NotNil(t, started, "delegation.started missing")
+	require.Equal(t, true, started.Data["background"])
+	require.NotNil(t, receipt, "the background call must be completed immediately with a launch receipt")
+	require.NotNil(t, reopened, "the premature finish must reopen the turn for the report")
+	require.NotNil(t, completed, "delegation.completed missing")
+	// The receipt precedes the child's completion: the call was answered
+	// without waiting, unlike the blocking delegate.
+	require.Less(t, receipt.EventID, completed.EventID, "launch receipt must land before the child completes")
+}
+
+// The forced-finale boundary must not strand a running background child: the
+// post-loop wait settles it, journals the outcome and the report rides into
+// the finale conversation.
+func TestAgentRunWaitsBackgroundDelegationsAtForcedFinale(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	recorder := newEventRecorder()
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorder.record(event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	finaleSawReport := false
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if len(request.Messages) == 0 {
+			t.Fatalf("unexpected model request: %#v", request)
+		}
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "child done"}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "system" && strings.Contains(message.Content, "turn budget is exhausted") {
+				for _, inner := range request.Messages {
+					if inner.Role == "user" && strings.Contains(inner.Content, "Background delegations report") && strings.Contains(inner.Content, "child done") {
+						finaleSawReport = true
+					}
+				}
+				return llm.Completion{Content: "final answer"}, nil
+			}
+		}
+		return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "delegate-1", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "review the diff", "background": true}}}}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: "repo-a-reviewer", DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-bgf", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "delegate and run out of turns", MaxTurns: 1})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "turn_limit", result.Status)
+	require.Equal(t, "final answer", result.Answer)
+	require.True(t, finaleSawReport, "the finale conversation must carry the settled background report")
+
+	completed := false
+	for _, event := range recorder.snapshot() {
+		if event.Type == "delegation.completed" {
+			completed = true
+		}
+	}
+	require.True(t, completed, "the child must settle before the run completes")
+}
+
 func TestAgentRunDelegationDepthLimit(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

@@ -64,6 +64,12 @@ const (
 	// but they wait for a free slot — launched in FIFO order, awaited in FIFO
 	// order, so the event stream stays deterministic for replay.
 	MaxDelegationWidth = 8
+	// MaxBackgroundDelegations bounds how many background children (delegate
+	// calls with background=true) one run may keep unresolved at once
+	// (docs/agent-delegation.md, background delegation). The gate settles the
+	// oldest in FIFO order — launch order and event order stay deterministic
+	// for replay.
+	MaxBackgroundDelegations = 8
 
 	// DefaultMaxTurns is the turn budget of runs that do not configure one.
 	DefaultMaxTurns = 8
@@ -1817,6 +1823,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// workflow-local and rebuilt deterministically during replay (the
 	// ExecuteActivity calls are history records).
 	background := map[string]*backgroundOp{}
+	// Background delegations (docs/agent-delegation.md): delegate calls with
+	// background=true start their child run here and the call is answered
+	// immediately («started in the background»); the parent keeps working and
+	// each child's final answer arrives with the next batched report. The run
+	// never completes past them (the reopen branch and every completion
+	// boundary waits them out), so a child is never stranded mid-work. The
+	// slice is workflow-local and rebuilt deterministically during replay (the
+	// ExecuteChildWorkflow calls are history records).
+	backgroundDelegations := []*pendingDelegation{}
 	// Agent collaboration state (docs/temporality-agent-collaboration-spec.md):
 	// incoming asks this run has not answered yet (request_id → original
 	// message, so answer_agent can route the reply), request ids already seen
@@ -2220,6 +2235,30 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				continue
 			}
+			// Background delegations (docs/agent-delegation.md): the model is
+			// done, but delegated children still run in the background — the run
+			// must NOT complete while they do (v1: the parent waits at its own
+			// finish line). Same reopen contract as background commands: wait
+			// for the first resolution (or a note), deliver the batched report,
+			// and give the model another turn to act on the answers. The loop
+			// exits naturally once every child has resolved and the model
+			// produces a final answer.
+			if len(backgroundDelegations) > 0 {
+				usedTokens += completion.Usage.TotalTokens
+				usedCostUSD += modelCallCostUSD(input, completion.Usage)
+				messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content})
+				_, delegationActivations, waitErr := awaitBackgroundDelegations(ctx, activityCtx, state, &messages, &backgroundDelegations, &subtree, input.Project)
+				if waitErr != nil {
+					return result, waitErr
+				}
+				if err := activateRuntimeCandidates(delegationActivations, turn); err != nil {
+					return result, err
+				}
+				if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "reopened_by_background_delegation": true}); err != nil {
+					return result, err
+				}
+				continue
+			}
 			// A reasoning model can end the turn with reasoning only and an empty
 			// content (xiaomi mimo does). Completing here would publish an empty
 			// answer after a full run's worth of work. Nudge the conversation
@@ -2442,6 +2481,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if v, ok := call.Args["max_turns"].(float64); ok {
 				delegateMaxTurns = int(v)
 			}
+			// Background delegation (docs/agent-delegation.md): the launch receipt
+			// answers the call immediately, the parent keeps working and the
+			// child's answer arrives as the batched background report. Replay-safe
+			// without a version gate: old histories never contain the argument,
+			// so the branches below are never taken on replay.
+			backgroundRequested, _ := call.Args["background"].(bool)
 			if strings.TrimSpace(delegateAgentID) == "" || strings.TrimSpace(delegatePrompt) == "" {
 				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "delegate", "error_type": "malformed_arguments", "effect": "none", "detail": "agent_id and prompt are required"}); err != nil {
 					return "", false, err
@@ -2475,7 +2520,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				inflight = inflight[1:]
 			}
-			if err := emit(activityCtx, state, "delegation.started", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "ordinal": delegations, "depth": input.DelegationDepth + 1, "prompt": truncate(delegatePrompt, 2000), "max_turns": delegateMaxTurns}); err != nil {
+			// Background width gate: the same FIFO discipline for background
+			// children — settle the oldest until a slot frees before starting
+			// another, so the registry stays bounded and the event order stays
+			// deterministic for replay. A note wake settles nothing; the loop
+			// blocks again until a child actually resolves.
+			for backgroundRequested && len(backgroundDelegations) >= MaxBackgroundDelegations {
+				if _, _, err := awaitBackgroundDelegations(ctx, activityCtx, state, &messages, &backgroundDelegations, &subtree, input.Project); err != nil {
+					return "", false, err
+				}
+			}
+			if err := emit(activityCtx, state, "delegation.started", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "ordinal": delegations, "depth": input.DelegationDepth + 1, "prompt": truncate(delegatePrompt, 2000), "max_turns": delegateMaxTurns, "background": backgroundRequested}); err != nil {
 				return "", false, err
 			}
 			childInput.ParentRunID = input.RunID
@@ -2500,6 +2555,21 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return "", false, err
 				}
 				return "Delegated run " + childRunID + " was rejected before execution, no effect (" + boundedFailureDetail(startErr) + "). The child agent never started, so nothing it could do has happened; it is safe to retry the delegation or do the work yourself.", false, nil
+			}
+			if backgroundRequested {
+				// v1 background delegation: answer the call NOW with the launch
+				// receipt and park the child in the background registry — the
+				// parent's turn closes freely and the child's answer arrives as
+				// the batched background report. No executed-pending entry:
+				// identical sibling calls answer from the receipt via the
+				// ordinary duplicate path, instead of parking a second tool
+				// message that would never land.
+				backgroundDelegations = append(backgroundDelegations, &pendingDelegation{callID: call.ID, operationID: operationID, argumentsHash: argumentsHash, childRunID: childRunID, agentID: delegateAgentID, future: childFuture})
+				content := "Delegated run " + childRunID + " to \"" + delegateAgentID + "\" started in the background. Do not wait idle: continue with other work, and the child's final answer arrives automatically as a follow-up message; this run still waits for the child before it completes. Check progress with trace_read or run_status."
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "delegate", "background": true, "child_run_id": childRunID, "output": compactJSON(content, 1000)}); err != nil {
+					return "", false, err
+				}
+				return content, false, nil
 			}
 			pending := &pendingDelegation{callID: call.ID, operationID: operationID, argumentsHash: argumentsHash, childRunID: childRunID, agentID: delegateAgentID, future: childFuture}
 			inflight = append(inflight, pending)
@@ -3519,6 +3589,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// its verdict — submit_review was the deliverable, not a final message,
 		// so the normal loop must not continue into another turn.
 		if reviewSubmitted {
+			// A reviewer completing with background children still running: wait
+			// them out like any other completion boundary — the verdict stands,
+			// the outcomes are journaled and their spend joins the subtree.
+			for len(backgroundDelegations) > 0 {
+				if _, _, err := awaitBackgroundDelegations(ctx, activityCtx, state, &messages, &backgroundDelegations, &subtree, input.Project); err != nil {
+					return result, err
+				}
+			}
 			result.Status = "completed"
 			result.Answer = strings.TrimSpace(reviewVerdict.Summary)
 			if result.Answer == "" {
@@ -3553,6 +3631,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			publishAnswerPresentations(ctx, activityCtx, &input, result.Answer)
 			startKnowledgeExtraction(ctx, activityCtx, state, input)
 			return result, nil
+		}
+	}
+	// Background delegations (v1, docs/agent-delegation.md): the run never
+	// strands a running child at a completion boundary. Natural completion
+	// reopens turns above; the post-loop boundary (forced finale, turn-limit
+	// continuation, note dropping) waits the children out — every outcome
+	// lands in the journal and its report rides into the finale conversation,
+	// no further per-child model turns.
+	for len(backgroundDelegations) > 0 {
+		if _, _, err := awaitBackgroundDelegations(ctx, activityCtx, state, &messages, &backgroundDelegations, &subtree, input.Project); err != nil {
+			return result, err
 		}
 	}
 	// Notes that arrived after the last drainable point (while the final turn's
@@ -5586,26 +5675,21 @@ func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, stat
 	wakeReason := ""
 	if ready == 0 {
 		selector := workflow.NewSelector(ctx)
-		woken := workflow.NewChannel(ctx)
 		wakeReason := ""
-		for id, op := range background {
-			id, op := id, op
+		for _, op := range background {
+			op := op
 			selector.AddFuture(op.future, func(workflow.Future) {
 				if wakeReason == "" {
 					wakeReason = "completed"
 				}
-				woken.Send(ctx, id)
 			})
 		}
 		selector.AddReceive(workflow.GetSignalChannel(ctx, UserNoteSignal), func(workflow.ReceiveChannel, bool) {
 			if wakeReason == "" {
 				wakeReason = "note"
 			}
-			woken.Send(ctx, "")
 		})
 		selector.Select(ctx)
-		var wakeID string
-		woken.Receive(ctx, &wakeID)
 	}
 	if wakeReason == "" {
 		wakeReason = "completed"
@@ -5679,6 +5763,163 @@ func awaitBackgroundOps(ctx workflow.Context, activityCtx workflow.Context, stat
 	}
 	*messages = append(*messages, llm.Message{Role: "user", Content: message})
 	return wakeReason, activations, nil
+}
+
+// awaitBackgroundDelegations blocks until at least one pending background
+// delegation resolves (the child AgentRun finished — normally or failed) or
+// a user note arrives, then drains every already-resolved child: each gets
+// the same journal events and outcome classification as the blocking await
+// (delegation.completed/failed, tool.completed/failed), its spend joins the
+// subtree rollup, and ONE batched report lands in the conversation so the
+// next model turn can act on the answers. Background delegate calls were
+// answered at launch («started in the background»), so nothing appends a
+// tool message here — the batched report is the only delivery. Returns the
+// wake reason ("completed" or "note") and the runtime activations of failed
+// children.
+func awaitBackgroundDelegations(ctx workflow.Context, activityCtx workflow.Context, state *eventState, messages *[]llm.Message, bgs *[]*pendingDelegation, subtree *subtreeTotals, project string) (string, []runtimeActivation, error) {
+	if len(*bgs) == 0 {
+		return "", nil, nil
+	}
+	// Fast path: children that resolved while the turn was still executing —
+	// no waiting, just the batch.
+	ready := 0
+	for _, pending := range *bgs {
+		if pending.future.IsReady() {
+			ready++
+		}
+	}
+	workflow.GetLogger(ctx).Debug("background delegation wait state", "pending", len(*bgs), "ready", ready)
+	wakeReason := ""
+	if ready == 0 {
+		selector := workflow.NewSelector(ctx)
+		wakeReason := ""
+		for _, pending := range *bgs {
+			pending := pending
+			selector.AddFuture(pending.future, func(workflow.Future) {
+				if wakeReason == "" {
+					wakeReason = "completed"
+				}
+			})
+		}
+		selector.AddReceive(workflow.GetSignalChannel(ctx, UserNoteSignal), func(workflow.ReceiveChannel, bool) {
+			if wakeReason == "" {
+				wakeReason = "note"
+			}
+		})
+		selector.Select(ctx)
+	}
+	if wakeReason == "" {
+		wakeReason = "completed"
+	}
+
+	// Drain EVERY child already resolved at wake time: one wake-up, one
+	// batched report — not one message per delegation. Settled children leave
+	// the registry; still-running ones keep their FIFO order.
+	lines := make([]string, 0, len(*bgs))
+	var activations []runtimeActivation
+	keep := make([]*pendingDelegation, 0, len(*bgs))
+	for _, pending := range *bgs {
+		if !pending.future.IsReady() {
+			keep = append(keep, pending)
+			continue
+		}
+		line, activation, settleErr := settleBackgroundDelegation(ctx, activityCtx, state, project, pending, subtree)
+		if settleErr != nil {
+			return "", nil, settleErr
+		}
+		lines = append(lines, line)
+		if activation != nil {
+			activations = append(activations, *activation)
+		}
+	}
+	*bgs = keep
+
+	stillRunning := make([]string, 0, len(*bgs))
+	for _, pending := range *bgs {
+		stillRunning = append(stillRunning, "- run "+pending.childRunID+" (\""+pending.agentID+"\")")
+	}
+	slices.Sort(stillRunning)
+
+	var message string
+	if len(lines) > 0 {
+		message = "[Background delegations report]\n" + strings.Join(lines, "\n")
+		if len(stillRunning) > 0 {
+			message += "\n\nStill running in the background:\n" + strings.Join(stillRunning, "\n")
+		}
+		message += "\n\nIncorporate these results and continue."
+	} else {
+		// Woken by a note before any child resolved: the note itself is
+		// appended by the caller's notes path; this marker keeps the wake
+		// visible in the conversation.
+		message = "[Background delegations] Still running:\n" + strings.Join(stillRunning, "\n")
+	}
+	*messages = append(*messages, llm.Message{Role: "user", Content: message})
+	return wakeReason, activations, nil
+}
+
+// settleBackgroundDelegation journals one resolved background child and
+// returns its report line. The failure path classifies the child's effects
+// exactly like the blocking await (docs/failure-reconciliation.md); success
+// adds the child's spend to the subtree rollup so run.completed totals stay
+// honest.
+func settleBackgroundDelegation(ctx workflow.Context, activityCtx workflow.Context, state *eventState, project string, pending *pendingDelegation, subtree *subtreeTotals) (string, *runtimeActivation, error) {
+	var child RunResult
+	childErr := pending.future.Get(ctx, &child)
+	if childErr == nil {
+		subtree.tokens += child.TotalTokens
+		subtree.costUSD += child.CostUSD
+	}
+	if childErr != nil {
+		if ctx.Err() != nil {
+			return "", nil, childErr
+		}
+		// The child is terminal now, so its whole event stream is already in
+		// the journal — classify it the same way the blocking await does.
+		summaryCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+		var summary ChildRunSummary
+		summaryErr := workflow.ExecuteActivity(summaryCtx, ActivitySummarizeChildRun, ChildRunSummaryRequest{Project: project, RunID: pending.childRunID}).Get(ctx, &summary)
+		if summaryErr != nil && ctx.Err() != nil {
+			return "", nil, summaryErr
+		}
+		effect := "uncertain"
+		if summaryErr == nil {
+			switch {
+			case summary.Unresolved > 0:
+				effect = "uncertain"
+			case summary.Total > 0:
+				effect = "occurred"
+			default:
+				effect = "none"
+			}
+		}
+		delegationFailed := map[string]any{"operation_id": pending.operationID, "child_run_id": pending.childRunID, "agent_id": pending.agentID, "error_type": "delegated_run_failed", "error": boundedFailureDetail(childErr), "background": true}
+		toolFailedData := map[string]any{"operation_id": pending.operationID, "arguments_hash": pending.argumentsHash, "tool": "delegate", "error_type": "delegated_run_failed", "effect": effect, "child_run_id": pending.childRunID, "background": true}
+		if summaryErr == nil {
+			delegationFailed["child_ops_total"] = summary.Total
+			delegationFailed["child_ops_unresolved"] = summary.Unresolved
+			toolFailedData["child_ops_total"] = summary.Total
+			toolFailedData["child_ops_unresolved"] = summary.Unresolved
+		}
+		if err := emit(activityCtx, state, "delegation.failed", delegationFailed); err != nil {
+			return "", nil, err
+		}
+		if err := emit(activityCtx, state, "tool.failed", toolFailedData); err != nil {
+			return "", nil, err
+		}
+		activation := runtimeActivation{Trigger: "tool.failed", Tool: "delegate", ErrorClass: "delegated_run_failed", ToolResult: boundedFailureDetail(childErr), SourceID: pending.operationID}
+		line := fmt.Sprintf("- run %s (\"%s\") FAILED: %s", pending.childRunID, pending.agentID, boundedFailureDetail(childErr))
+		return line, &activation, nil
+	}
+	if err := emit(activityCtx, state, "delegation.completed", map[string]any{"operation_id": pending.operationID, "child_run_id": pending.childRunID, "agent_id": pending.agentID, "child_status": child.Status, "turns": child.Turns, "background": true}); err != nil {
+		return "", nil, err
+	}
+	answer, _ := BoundedNarrative(child.Answer)
+	content := "Delegated agent \"" + pending.agentID + "\" (run " + pending.childRunID + ") finished with status " + child.Status + " after " + strconv.Itoa(child.Turns) + " turns."
+	if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": pending.operationID, "arguments_hash": pending.argumentsHash, "tool": "delegate", "background": true, "child_run_id": pending.childRunID, "output": compactJSON(content, 1000)}); err != nil {
+		return "", nil, err
+	}
+	line := fmt.Sprintf("- run %s (\"%s\") finished with status %s after %d turns. Final answer:\n  %s", pending.childRunID, pending.agentID, child.Status, child.Turns, strings.ReplaceAll(answer, "\n", "\n  "))
+	return line, nil, nil
 }
 
 // runningPlanChildren lists the plan's still-running children: the awaited
@@ -6355,7 +6596,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "run_status", Description: "List the earlier tasks the message sender started through this channel, with the current status and answer of each run. Use it for progress questions (\"what happened to my estimate?\") instead of starting new work", Parameters: map[string]any{"type": "object", "properties": map[string]any{"limit": map[string]any{"type": "integer", "description": "Optional cap, default 10"}}}},
 		{Name: "cancel_run", Description: "Cancel a run the sender started through this channel. Only runs produced from the sender's own messages may be cancelled; pass the run_id exactly as run_status reported it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"run_id": map[string]any{"type": "string", "description": "Target run id from run_status"}}, "required": []string{"run_id"}}},
 		{Name: "agent_propose", Description: "Propose an evolution of an agent definition grounded in evidence: what problem you observed, what change you propose and the expected effect. Additive by contract: omitted parts keep the current definition, and the agent's purpose (description) never changes through a proposal — a human edits that themselves. The proposal lands as pending and changes nothing until a human applies it in the Agents UI. Use it to turn repeated friction into a durable definition fix; capabilities cannot be proposed — a proposal never grants new powers", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent whose definition should change (usually you)"}, "problem": map[string]any{"type": "string", "description": "The observed problem: what kept going wrong or missing, grounded in concrete runs"}, "change": map[string]any{"type": "string", "description": "The proposed definition change: constraints or completion checks"}, "effect": map[string]any{"type": "string", "description": "Expected effect once a human applies it"}, "constraints": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Full replacement list of constraints (what the agent must never do)"}, "completion": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Full replacement list of completion checks (what to verify before declaring done)"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Run ids, knowledge ids or other refs supporting the problem"}}, "required": []string{"agent_id", "problem", "change"}}},
-		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it. Concurrent delegates share your project workspace with no isolation: parallel calls must touch disjoint files — chain mutating work (git, builds, the same files) instead of running it side by side", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 24–100 (values below 24 are raised): size it generously, a child that dies mid-work returns incomplete. Omitted: the agent's configured budget applies — see max_turns in the agents listing; real subtasks need 25+ turns"}}, "required": []string{"agent_id", "prompt"}}},
+		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. Pass background=true to launch without waiting: the call returns the run id immediately, you keep working, and the child's final answer arrives as an automatic follow-up message (this run still waits for its background children before it completes). The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it. Concurrent delegates share your project workspace with no isolation: parallel calls must touch disjoint files — chain mutating work (git, builds, the same files) instead of running it side by side", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 24–100 (values below 24 are raised): size it generously, a child that dies mid-work returns incomplete. Omitted: the agent's configured budget applies — see max_turns in the agents listing; real subtasks need 25+ turns"}, "background": map[string]any{"type": "boolean", "description": "Start the child run without waiting for it: continue your work and receive the child's final answer as a follow-up message when it finishes"}}, "required": []string{"agent_id", "prompt"}}},
 		{Name: "plan", Description: "Execute a plan of dependent subtasks as a DAG across agents, in one call. Each task names an agent and a self-contained prompt.\n\nHOW TO ASSEMBLE THE DAG — follow these rules exactly; the tool validates them:\n1. For EVERY task, before writing it, answer: \"what must already exist or be true before this task may start?\" EVERY such thing is a blocker — list its task id in depends_on. No blocker — no entry in depends_on.\n2. DEFAULT IS SEQUENTIAL. Chain tasks (a → b → c). Tasks may run in parallel ONLY if all three hold: disjoint file sets, no data flow between them, and neither runs build/tests/git — and only when you set parallel=true on the plan. The tool REJECTS a plan with several dependency-free tasks unless parallel=true: a missing dependency corrupts the work; an unnecessary one costs a little time.\n3. Typical blockers you must not miss: edits depend on the task that creates/changes the files they touch; build depends on the edits; tests depend on BOTH the code tasks they verify and the build; review depends on everything it reviews; the final summary depends on ALL tasks (list every id explicitly).\n4. A task consuming another task's result MUST depend on it: the answer is appended to the dependent task's prompt automatically, or place it inline with {{task-id.answer}}.\n5. All tasks run in the SAME shared project workspace with no isolation — parallel writers on the same tree clobber each other and fail. Never parallel-write.\n\nMECHANICS. A failed task skips only its transitive dependents; independent branches still finish. on_failure tunes what a failure costs you: continue (default) keeps everything independent running; stop — after the first failed or incomplete task no new task launches and the summary returns as soon as running ones settle (bounds the waste without killing healthy branches); abort — running tasks are cancelled and the summary returns immediately (only when the remaining work is pointless regardless). For step-by-step control use mode=\"wave\": the call returns after each ready batch settles instead of driving the whole DAG, so every outcome reaches you before the next batch — diagnose and re-issue the remainder corrected; completed results stay addressable as {{task-id.answer}}. A task with review_of is an acceptance gate: its run receives the submit_review tool, and a rework verdict sends the rejected tasks back with concrete feedback and re-runs their consumers (bounded by max_rework). Use this instead of several delegate calls whenever the work has ordering dependencies, can fan out read-only, or needs review gates.", Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
