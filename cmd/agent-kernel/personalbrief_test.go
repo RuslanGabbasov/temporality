@@ -88,33 +88,51 @@ func TestBriefDigestAndFactsDigest(t *testing.T) {
 	now := time.Date(2026, 11, 24, 8, 0, 0, 0, time.UTC)
 	payload := UserBriefPayload{
 		Day: briefDay(now), Source: "fallback",
-		Failed:    []UserBriefRun{{RunID: "r1", Title: "Импорт", Status: "failed"}},
-		Approvals: []UserBriefApproval{{ArtifactID: "a1", ArtifactTitle: "Отчёт"}},
-		Learning:  UserBriefLearning{Active: true, Done: 2, Total: 5, NextID: "runs-page"},
-		Metrics:   UserBriefMetrics{Month: briefMonth(now), Runs: 12, Tokens: 3400, CostUSD: 1.5},
+		Failed:     []UserBriefRun{{RunID: "r1", Title: "Импорт", Status: "failed"}},
+		Approvals:  []UserBriefApproval{{ArtifactID: "a1", ArtifactTitle: "Отчёт"}},
+		Learning:   UserBriefLearning{Active: true, Done: 2, Total: 5, NextID: "runs-page"},
+		TodosFocus: UserBriefTodosFocus{Today: 2, Overdue: 1},
+		Metrics:    UserBriefMetrics{Month: briefMonth(now), Runs: 12, Tokens: 3400, CostUSD: 1.5},
 	}
 	digest := briefDigest(payload)
 	if len(digest) == 0 {
 		t.Fatal("empty digest")
 	}
 	joined := strings.Join(digest, "\n")
-	for _, want := range []string{"неудачных", "согласования", "Обучение", "За месяц"} {
+	for _, want := range []string{"неудачных", "согласования", "Обучение", "Просрочено"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("digest missing %q:\n%s", want, joined)
 		}
 	}
+	// The focus carries no background statistics: running counts and month
+	// spend live on the cards below — a digest line for them is noise.
+	for _, noise := range []string{"Сейчас в работе", "За месяц", "за последние сутки"} {
+		if strings.Contains(strings.ToLower(joined), strings.ToLower(noise)) {
+			t.Fatalf("digest leaks background stats %q:\n%s", noise, joined)
+		}
+	}
 
 	facts := briefFactsDigest(payload)
-	for _, want := range []string{"неудачных за 3 дня: 1", "Импорт", "ждёт согласования: 1", "пройдено 2 из 5"} {
+	for _, want := range []string{"неудачных за 3 дня: 1", "Импорт", "ждёт согласования: 1", "пройдено 2 из 5", "просрочено 1, на сегодня 2"} {
 		if !strings.Contains(facts, want) {
 			t.Fatalf("facts digest missing %q:\n%s", want, facts)
 		}
 	}
+	for _, noise := range []string{"активные запуски", "за месяц"} {
+		if strings.Contains(facts, noise) {
+			t.Fatalf("facts digest leaks background stats %q:\n%s", noise, facts)
+		}
+	}
 
-	// The no-facts digest still renders sensible lines (no model needed).
+	// The no-facts digest stays honest and calm — no invented activity.
 	empty := briefDigest(UserBriefPayload{Metrics: UserBriefMetrics{Month: briefMonth(now)}})
-	if !strings.Contains(strings.Join(empty, "\n"), "активных запусков нет") {
+	if !strings.Contains(strings.Join(empty, "\n"), "Срочных дел нет") {
 		t.Fatalf("empty digest = %#v", empty)
+	}
+	// A today-only todo focus mentions the plan, not the overdue alarm.
+	calm := briefDigest(UserBriefPayload{TodosFocus: UserBriefTodosFocus{Today: 3}})
+	if !strings.Contains(strings.Join(calm, "\n"), "На сегодня запланировано задач: 3") {
+		t.Fatalf("today-only digest = %#v", calm)
 	}
 }
 
@@ -132,7 +150,7 @@ func TestCapBriefRuns(t *testing.T) {
 	runs := make([]UserBriefRun, 12)
 	for i := range runs {
 		// Newest-first, like ListRunsByActorSince returns them.
-		runs[i] = UserBriefRun{RunID: "r", At: time.Unix(int64(111 - i), 0)}
+		runs[i] = UserBriefRun{RunID: "r", At: time.Unix(int64(111-i), 0)}
 	}
 	capped := capBriefRuns(runs, 8)
 	if len(capped) != 8 {
@@ -144,6 +162,45 @@ func TestCapBriefRuns(t *testing.T) {
 	}
 	if capBriefRuns(runs[:3], 8) == nil || len(capBriefRuns(runs[:3], 8)) != 3 {
 		t.Fatal("short list must pass through")
+	}
+}
+
+func TestParseTodoDue(t *testing.T) {
+	due, err := parseTodoDue("2026-12-01")
+	if err != nil || due == nil {
+		t.Fatalf("valid due rejected: %v", err)
+	}
+	if got := due.Format("2006-01-02"); got != "2026-12-01" {
+		t.Fatalf("due = %q", got)
+	}
+	// Empty clears; whitespace folds.
+	if d, err := parseTodoDue("  "); err != nil || d != nil {
+		t.Fatalf("empty due = %v, %v", d, err)
+	}
+	// Junk is a 422-worthy error, not a silently dropped date.
+	for _, bad := range []string{"01.12.2026", "tomorrow", "2026-13-40"} {
+		if _, err := parseTodoDue(bad); err == nil {
+			t.Fatalf("bad due %q accepted", bad)
+		}
+	}
+}
+
+func TestApplyTodoGroupMove(t *testing.T) {
+	// Completing remembers the origin group; unchecking restores it.
+	todo := workspace.UserTodo{Group: "next"}
+	applyTodoGroupMove(&todo, "done")
+	if todo.Group != "done" || todo.ReturnGroup != "next" {
+		t.Fatalf("after done: group=%q return=%q", todo.Group, todo.ReturnGroup)
+	}
+	applyTodoGroupMove(&todo, "inbox")
+	if todo.Group != "inbox" || todo.ReturnGroup != "" {
+		t.Fatalf("after restore: group=%q return=%q", todo.Group, todo.ReturnGroup)
+	}
+	// done → done keeps the memory (a re-toggle must not lose the origin).
+	todo = workspace.UserTodo{Group: "waiting", ReturnGroup: "waiting"}
+	applyTodoGroupMove(&todo, "done")
+	if todo.ReturnGroup != "waiting" {
+		t.Fatalf("re-done lost return group: %q", todo.ReturnGroup)
 	}
 }
 

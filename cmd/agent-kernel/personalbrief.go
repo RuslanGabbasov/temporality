@@ -91,12 +91,20 @@ type UserBriefLearning struct {
 }
 
 type UserBriefMetrics struct {
-	Month      string  `json:"month"` // YYYY-MM
+	Month      string  `json:"month"`
 	Runs       int     `json:"runs"`
 	FailedRuns int     `json:"failed_runs"`
 	Tokens     int64   `json:"tokens"`
 	CostUSD    float64 `json:"cost_usd"`
 	ModelCalls int     `json:"model_calls"`
+}
+
+// UserBriefTodosFocus is the GTD slice of the brief: how many personal todos
+// carry a due date of today (or earlier) and are not done yet — the only todo
+// numbers the morning focus mentions; the full board renders below it.
+type UserBriefTodosFocus struct {
+	Today   int `json:"today"`
+	Overdue int `json:"overdue"`
 }
 
 // UserBriefPayload is what the UI renders: the model narrative (summary)
@@ -111,6 +119,7 @@ type UserBriefPayload struct {
 	Failed      []UserBriefRun      `json:"failed"`
 	Approvals   []UserBriefApproval `json:"approvals"`
 	Learning    UserBriefLearning   `json:"learning"`
+	TodosFocus  UserBriefTodosFocus `json:"todos_focus"`
 	Metrics     UserBriefMetrics    `json:"metrics"`
 }
 
@@ -222,6 +231,23 @@ func collectUserBriefFacts(ctx context.Context, ws *workspace.Store, userID, pri
 		}
 	}
 
+	// Todos focus: undone todos due today (or overdue) — the «Сегодня» half
+	// of the TickTick-lite board, echoed by the morning focus.
+	today := briefDay(now)
+	if todos, err := ws.ListUserTodos(ctx, userID); err == nil {
+		for _, td := range todos {
+			if td.Group == "done" || td.Due == nil {
+				continue
+			}
+			switch d := td.Due.UTC().Format("2006-01-02"); {
+			case d < today:
+				payload.TodosFocus.Overdue++
+			case d == today:
+				payload.TodosFocus.Today++
+			}
+		}
+	}
+
 	// Month metrics: DB run counts plus the journal-priced model spend.
 	monthStart := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
 	monthRuns, err := ws.ListRunsByActorSince(ctx, userID, monthStart, 2000)
@@ -259,23 +285,23 @@ func capBriefRuns(runs []UserBriefRun, n int) []UserBriefRun {
 // capBriefRunsLast keeps the LAST n rows (store order is oldest-first, so the
 // newest runs sit at the tail).
 
-// briefDigest renders the deterministic no-model summary: every line is a
-// fact already stored in the payload, phrased the way the model is asked to.
+// briefDigest renders the deterministic no-model summary. The focus is
+// strictly ACTIONABLE — failures, pending approvals, due todos, the next
+// learning step. Background counts (running/recent runs, month spend) are
+// deliberately absent: they sit on the cards right below, and a morning
+// digest that opens with «сейчас идёт 1 запуск» is noise, not focus.
 func briefDigest(p UserBriefPayload) []string {
 	var out []string
-	if len(p.Running) > 0 {
-		out = append(out, fmt.Sprintf("Сейчас в работе: %d запуск(ов).", len(p.Running)))
-	} else {
-		out = append(out, "Сейчас активных запусков нет.")
-	}
-	if len(p.Recent) > 0 {
-		out = append(out, fmt.Sprintf("За последние сутки завершено запусков: %d.", len(p.Recent)))
-	}
 	if len(p.Failed) > 0 {
 		out = append(out, fmt.Sprintf("Требуют внимания: %d неудачных запусков за 3 дня.", len(p.Failed)))
 	}
 	if len(p.Approvals) > 0 {
 		out = append(out, fmt.Sprintf("Ждут твоего согласования: %d артефакт(ов).", len(p.Approvals)))
+	}
+	if p.TodosFocus.Overdue > 0 {
+		out = append(out, fmt.Sprintf("Просрочено личных задач: %d.", p.TodosFocus.Overdue))
+	} else if p.TodosFocus.Today > 0 {
+		out = append(out, fmt.Sprintf("На сегодня запланировано задач: %d.", p.TodosFocus.Today))
 	}
 	if p.Learning.Active {
 		line := fmt.Sprintf("Обучение: пройдено %d из %d.", p.Learning.Done, p.Learning.Total)
@@ -284,17 +310,18 @@ func briefDigest(p UserBriefPayload) []string {
 		}
 		out = append(out, line)
 	}
-	out = append(out, fmt.Sprintf("За месяц: %d запусков, %d токенов, $%.2f.", p.Metrics.Runs, p.Metrics.Tokens, p.Metrics.CostUSD))
+	if len(out) == 0 {
+		out = append(out, "Срочных дел нет — спокойный день.")
+	}
 	return out
 }
 
 // briefFactsDigest renders the payload as the compact factual text the model
-// summarizes. Numbers only — no ids the narrative doesn't need.
+// summarizes. Deliberately narrow: only the actionable slices — the model
+// cannot echo background statistics it was never shown.
 func briefFactsDigest(p UserBriefPayload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "день: %s\n", p.Day)
-	fmt.Fprintf(&b, "активные запуски сейчас: %d\n", len(p.Running))
-	fmt.Fprintf(&b, "завершено за сутки: %d\n", len(p.Recent))
 	fmt.Fprintf(&b, "неудачных за 3 дня: %d\n", len(p.Failed))
 	for _, r := range p.Failed {
 		title := r.Title
@@ -307,26 +334,28 @@ func briefFactsDigest(p UserBriefPayload) string {
 	for _, a := range p.Approvals {
 		fmt.Fprintf(&b, "  - на согласовании: %s\n", a.ArtifactTitle)
 	}
+	if p.TodosFocus.Overdue > 0 || p.TodosFocus.Today > 0 {
+		fmt.Fprintf(&b, "личные задачи: просрочено %d, на сегодня %d\n", p.TodosFocus.Overdue, p.TodosFocus.Today)
+	}
 	if p.Learning.Active {
 		fmt.Fprintf(&b, "обучение: пройдено %d из %d", p.Learning.Done, p.Learning.Total)
 		if p.Learning.NextID != "" {
 			fmt.Fprintf(&b, ", следующий урок: %s", p.Learning.NextID)
 		}
 		b.WriteString("\n")
-	} else {
-		b.WriteString("обучение: активной программы нет\n")
 	}
-	fmt.Fprintf(&b, "за месяц: %d запусков (из них неудачных %d), %d токенов, $%.2f\n",
-		p.Metrics.Runs, p.Metrics.FailedRuns, p.Metrics.Tokens, p.Metrics.CostUSD)
 	return b.String()
 }
 
 const briefSystemPrompt = `Ты — супервайзер цифровой организации. Пишешь пользователю короткое утреннее резюме его рабочего дня («Мой день») на основе ТОЛЬКО приведённых фактов.
 Правила:
-- 3-6 пунктов, каждый — одна короткая фраза по-русски (до 200 символов).
-- Начинай с самого важного: неудачные запуски и ожидающие согласования — первыми.
+- 1-5 пунктов, каждый — одна короткая фраза по-русски (до 200 символов).
+- В фокус попадает только то, что требует действия сегодня: неудачные запуски, ожидающие согласования, просроченные или запланированные на сегодня личные задачи, следующий шаг обучения.
+- Не пересказывай фоновую статистику (активные и завершённые запуски, расходы за месяц) — она и так видна на карточках рядом.
+- Порядок важности: неудачные запуски и согласования — первыми.
 - Никаких выдумок: упоминай только числа, названия и статусы из фактов.
 - Никаких markdown-разметок, только текст пунктов.
+- Если срочных дел нет — скажи об этом одним спокойным пунктом.
 Ответь строго JSON вида {"summary": ["пункт 1", "пункт 2", ...]} без пояснений.`
 
 // sanitizeUserBriefSummary parses the model answer into narrative bullets:
@@ -504,6 +533,7 @@ func registerPersonalBriefRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 			Group string `json:"group"`
 			Text  string `json:"text"`
 			Note  string `json:"note"`
+			Due   string `json:"due"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
 			writeError(w, 400, err)
@@ -514,9 +544,14 @@ func registerPersonalBriefRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 			writeError(w, 422, err)
 			return
 		}
+		due, derr := parseTodoDue(req.Due)
+		if derr != nil {
+			writeError(w, 422, derr)
+			return
+		}
 		todo := &workspace.UserTodo{
 			ID: "todo-" + shortID(), UserID: userID,
-			Group: normalizeTodoGroup(req.Group), Text: text, Note: clampTodoNote(req.Note),
+			Group: normalizeTodoGroup(req.Group), Text: text, Note: clampTodoNote(req.Note), Due: due,
 		}
 		if err := ws.CreateUserTodo(r.Context(), todo); err != nil {
 			writeError(w, 500, err)
@@ -538,6 +573,7 @@ func registerPersonalBriefRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 			Group *string `json:"group"`
 			Text  *string `json:"text"`
 			Note  *string `json:"note"`
+			Due   *string `json:"due"`
 			Sort  *int    `json:"sort"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
@@ -561,7 +597,7 @@ func registerPersonalBriefRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 			return
 		}
 		if req.Group != nil {
-			todo.Group = normalizeTodoGroup(*req.Group)
+			applyTodoGroupMove(todo, normalizeTodoGroup(*req.Group))
 		}
 		if req.Text != nil {
 			text, err := todoTextOrError(*req.Text)
@@ -573,6 +609,14 @@ func registerPersonalBriefRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 		}
 		if req.Note != nil {
 			todo.Note = clampTodoNote(*req.Note)
+		}
+		if req.Due != nil {
+			due, derr := parseTodoDue(*req.Due)
+			if derr != nil {
+				writeError(w, 422, derr)
+				return
+			}
+			todo.Due = due
 		}
 		if req.Sort != nil {
 			todo.Sort = *req.Sort
@@ -691,6 +735,33 @@ func clampTodoNote(note string) string {
 	return note
 }
 
+// parseTodoDue reads the due date ("YYYY-MM-DD") into a UTC-midnight
+// pointer; an empty string clears it. Anything else is a 422-worthy error.
+func parseTodoDue(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, fmt.Errorf("due must be YYYY-MM-DD")
+	}
+	due := t.UTC()
+	return &due, nil
+}
+
+// applyTodoGroupMove updates the group with the TickTick-lite bookkeeping:
+// completing a todo remembers where it lived (unchecking restores it there),
+// and any move out of done clears the memory.
+func applyTodoGroupMove(todo *workspace.UserTodo, newGroup string) {
+	if newGroup == "done" && todo.Group != "done" {
+		todo.ReturnGroup = todo.Group
+	} else if newGroup != "done" {
+		todo.ReturnGroup = ""
+	}
+	todo.Group = newGroup
+}
+
 // registerInternalTodoRoutes mounts the agent-tool surface for the same
 // personal todos (docs/system-dashboard.md «Мой день»). The scope rule is
 // enforced twice: the routes only answer the kernel service identity (agent
@@ -741,6 +812,7 @@ func registerInternalTodoRoutes(mux *http.ServeMux, ws *workspace.Store) {
 			Group string `json:"group"`
 			Text  string `json:"text"`
 			Note  string `json:"note"`
+			Due   string `json:"due"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
 			writeError(w, 400, err)
@@ -756,9 +828,14 @@ func registerInternalTodoRoutes(mux *http.ServeMux, ws *workspace.Store) {
 			writeError(w, 422, err)
 			return
 		}
+		due, derr := parseTodoDue(req.Due)
+		if derr != nil {
+			writeError(w, 422, derr)
+			return
+		}
 		todo := &workspace.UserTodo{
 			ID: "todo-" + shortID(), UserID: actor,
-			Group: normalizeTodoGroup(req.Group), Text: text, Note: clampTodoNote(req.Note),
+			Group: normalizeTodoGroup(req.Group), Text: text, Note: clampTodoNote(req.Note), Due: due,
 		}
 		if err := ws.CreateUserTodo(r.Context(), todo); err != nil {
 			writeError(w, 500, err)
@@ -777,6 +854,7 @@ func registerInternalTodoRoutes(mux *http.ServeMux, ws *workspace.Store) {
 			Group *string `json:"group"`
 			Text  *string `json:"text"`
 			Note  *string `json:"note"`
+			Due   *string `json:"due"`
 			Sort  *int    `json:"sort"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
@@ -805,7 +883,7 @@ func registerInternalTodoRoutes(mux *http.ServeMux, ws *workspace.Store) {
 			return
 		}
 		if req.Group != nil {
-			todo.Group = normalizeTodoGroup(*req.Group)
+			applyTodoGroupMove(todo, normalizeTodoGroup(*req.Group))
 		}
 		if req.Text != nil {
 			text, err := todoTextOrError(*req.Text)
@@ -817,6 +895,14 @@ func registerInternalTodoRoutes(mux *http.ServeMux, ws *workspace.Store) {
 		}
 		if req.Note != nil {
 			todo.Note = clampTodoNote(*req.Note)
+		}
+		if req.Due != nil {
+			due, derr := parseTodoDue(*req.Due)
+			if derr != nil {
+				writeError(w, 422, derr)
+				return
+			}
+			todo.Due = due
 		}
 		if req.Sort != nil {
 			todo.Sort = *req.Sort

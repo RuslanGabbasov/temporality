@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // todoGroups is the closed GTD vocabulary (kernel folds unknown values into
@@ -53,6 +54,20 @@ func todoIDArg(request ToolRequest) (string, string) {
 		return "", "error: todo_id is required (from todo_list)"
 	}
 	return id, ""
+}
+
+// todoDueArg reads an optional due date ("YYYY-MM-DD"); a non-empty value
+// must parse, so the board never stores a date the UI cannot render.
+func todoDueArg(request ToolRequest, name string) (string, string) {
+	raw, _ := request.Arguments[name].(string)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	if _, err := time.Parse("2006-01-02", raw); err != nil {
+		return "", fmt.Sprintf("error: %s must be YYYY-MM-DD (e.g. 2026-12-01)", name)
+	}
+	return raw, ""
 }
 
 // handleTodoList lists the starter's todos, optionally filtered by GTD group.
@@ -100,6 +115,13 @@ func (a *Activities) handleTodoAdd(ctx context.Context, request ToolRequest) (To
 	if group != "" {
 		payload["group"] = group
 	}
+	due, errText := todoDueArg(request, "due")
+	if errText != "" {
+		return ToolResult{Content: errText}, nil
+	}
+	if due != "" {
+		payload["due"] = due
+	}
 	body, status, err := a.workspaceDo(ctx, http.MethodPost,
 		fmt.Sprintf("%s/v1/internal/todos", a.WorkspaceURL), payload)
 	if err != nil {
@@ -136,6 +158,13 @@ func (a *Activities) handleTodoUpdate(ctx context.Context, request ToolRequest) 
 	}
 	if v, ok := request.Arguments["note"]; ok {
 		payload["note"] = v
+	}
+	if _, ok := request.Arguments["due"]; ok {
+		due, errText := todoDueArg(request, "due")
+		if errText != "" {
+			return ToolResult{Content: errText}, nil
+		}
+		payload["due"] = due // empty string clears the date
 	}
 	if v, ok := request.Arguments["sort"]; ok {
 		payload["sort"] = v

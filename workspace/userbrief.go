@@ -51,23 +51,28 @@ func (s *Store) GetUserDailyBrief(ctx context.Context, userID, day string) (*Use
 	return &b, nil
 }
 
-// UserTodo is one personal todo note, clustered by a GTD group.
+// UserTodo is one personal todo note, clustered by a GTD group. Due is the
+// optional due date (UTC midnight from the DATE column) feeding the «Сегодня»
+// section and the brief's focus; ReturnGroup remembers where a todo lived
+// before the checkbox moved it to done, so unchecking restores it.
 type UserTodo struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Group     string    `json:"group"` // inbox | next | waiting | someday | done
-	Text      string    `json:"text"`
-	Note      string    `json:"note,omitempty"`
-	Sort      int       `json:"sort"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string     `json:"id"`
+	UserID      string     `json:"user_id"`
+	Group       string     `json:"group"` // inbox | next | waiting | someday | done
+	Text        string     `json:"text"`
+	Note        string     `json:"note,omitempty"`
+	Due         *time.Time `json:"due,omitempty"`
+	ReturnGroup string     `json:"return_group,omitempty"`
+	Sort        int        `json:"sort"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // ListUserTodos returns the caller's todos ordered for the widget: GTD group
 // first, then manual sort, then newest.
 func (s *Store) ListUserTodos(ctx context.Context, userID string) ([]UserTodo, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, grp, text, note, sort, created_at, updated_at
+		`SELECT id, user_id, grp, text, note, due, return_grp, sort, created_at, updated_at
 		 FROM user_todo WHERE user_id = $1
 		 ORDER BY grp, sort, created_at`, userID)
 	if err != nil {
@@ -77,7 +82,7 @@ func (s *Store) ListUserTodos(ctx context.Context, userID string) ([]UserTodo, e
 	result := []UserTodo{}
 	for rows.Next() {
 		var t UserTodo
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Group, &t.Text, &t.Note, &t.Sort, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Group, &t.Text, &t.Note, &t.Due, &t.ReturnGroup, &t.Sort, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, t)
@@ -91,20 +96,20 @@ func (s *Store) CreateUserTodo(ctx context.Context, t *UserTodo) error {
 	now := time.Now().UTC()
 	t.CreatedAt, t.UpdatedAt = now, now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO user_todo (id, user_id, grp, text, note, sort, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		t.ID, t.UserID, t.Group, t.Text, t.Note, t.Sort, t.CreatedAt, t.UpdatedAt)
+		`INSERT INTO user_todo (id, user_id, grp, text, note, due, return_grp, sort, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		t.ID, t.UserID, t.Group, t.Text, t.Note, t.Due, t.ReturnGroup, t.Sort, t.CreatedAt, t.UpdatedAt)
 	return err
 }
 
-// UpdateUserTodo rewrites group/text/note/sort of one OWN todo: the WHERE
+// UpdateUserTodo rewrites group/text/note/due/sort of one OWN todo: the WHERE
 // keeps user_id, so a forged id of another user's row updates nothing.
 func (s *Store) UpdateUserTodo(ctx context.Context, t *UserTodo) error {
 	t.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE user_todo SET grp = $3, text = $4, note = $5, sort = $6, updated_at = $7
+		`UPDATE user_todo SET grp = $3, text = $4, note = $5, due = $6, return_grp = $7, sort = $8, updated_at = $9
 		 WHERE id = $1 AND user_id = $2`,
-		t.ID, t.UserID, t.Group, t.Text, t.Note, t.Sort, t.UpdatedAt)
+		t.ID, t.UserID, t.Group, t.Text, t.Note, t.Due, t.ReturnGroup, t.Sort, t.UpdatedAt)
 	if err != nil {
 		return err
 	}
