@@ -39,6 +39,9 @@ export interface Whoami {
   auth_enabled: boolean
   user_id?: string // workspace_user id when the token belongs to a DB user
   org_unit_id?: string // caller's primary unit (docs/org-structure.md §11)
+  // Gate for the operational dashboard (health/users/usage tabs): admins,
+  // org-role holders and unit heads. Everyone else lands on «Мой день».
+  full_dashboard?: boolean
 }
 
 export interface LoginResponse {
@@ -123,6 +126,101 @@ export function operations(project?: string): Promise<{ operations: UncertainOpe
 
 export function whoami(): Promise<Whoami> {
   return request('/v1/agent/whoami')
+}
+
+// ---- Personal daily brief («Мой день») + GTD todos (docs: kernel routes
+// /v1/dashboard/…) ----
+
+export type TodoGroup = 'inbox' | 'next' | 'waiting' | 'someday' | 'done'
+
+export const TODO_GROUPS: TodoGroup[] = ['inbox', 'next', 'waiting', 'someday', 'done']
+
+// Unknown groups degrade to the inbox — same vocabulary fold the kernel does.
+export function normalizeTodoGroup(value: string | undefined): TodoGroup {
+  const g = (value ?? '').trim().toLowerCase() as TodoGroup
+  return TODO_GROUPS.includes(g) ? g : 'inbox'
+}
+
+export interface UserBriefRun {
+  run_id: string
+  task_id?: string
+  title?: string
+  project?: string
+  agent?: string
+  status: string
+  at: string
+  error?: string
+}
+
+export interface UserBriefApproval {
+  artifact_id: string
+  artifact_title: string
+  review_id: string
+  mode?: string
+  requested_at?: string
+  origin_user?: string
+}
+
+export interface UserBriefLearning {
+  active: boolean
+  done: number
+  total: number
+  next_id?: string
+  next_state?: string
+}
+
+export interface UserBriefMetrics {
+  month: string
+  runs: number
+  failed_runs: number
+  tokens: number
+  cost_usd: number
+  model_calls: number
+}
+
+export interface UserBrief {
+  day: string
+  generated_at: string
+  source: 'model' | 'fallback'
+  summary: string[]
+  running: UserBriefRun[]
+  recent: UserBriefRun[]
+  failed: UserBriefRun[]
+  approvals: UserBriefApproval[]
+  learning: UserBriefLearning
+  metrics: UserBriefMetrics
+}
+
+export interface UserTodo {
+  id: string
+  user_id: string
+  group: TodoGroup
+  text: string
+  note?: string
+  sort: number
+  created_at: string
+  updated_at: string
+}
+
+export function dashboardBrief(refresh?: boolean): Promise<{ brief: UserBrief; cached: boolean }> {
+  const suffix = refresh ? '?refresh=1' : ''
+  return request(`/v1/dashboard/brief${suffix}`)
+}
+
+export function dashboardTodos(): Promise<{ todos: UserTodo[] }> {
+  return request('/v1/dashboard/todos')
+}
+
+export function createDashboardTodo(input: { group: TodoGroup; text: string; note?: string }): Promise<{ todo: UserTodo }> {
+  return request('/v1/dashboard/todos', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function updateDashboardTodo(id: string, patch: { group?: TodoGroup; text?: string; note?: string; sort?: number }): Promise<{ todo: UserTodo }> {
+  return request(`/v1/dashboard/todos/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export function deleteDashboardTodo(id: string): Promise<{ ok: boolean }> {
+  return request(`/v1/dashboard/todos/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 // Federation login surface (docs/auth-federation.md §8-§9): which buttons the

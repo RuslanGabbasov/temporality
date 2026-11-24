@@ -3,6 +3,7 @@ import Layout, { type AppState } from './Layout'
 import { I18nProvider } from './i18n'
 import { ThemePrefProvider } from './theme'
 import Dashboard from './Dashboard'
+import PersonalBrief from './brief/PersonalBrief'
 import Supervisor from './Supervisor'
 import KnowledgeExplorer from './KnowledgeExplorer'
 import AgentRuns from './AgentRuns'
@@ -31,8 +32,10 @@ import Harness from './Harness'
 import LearningCenter from './learning/LearningCenter'
 import LessonRunner from './learning/LessonRunner'
 import LessonNudge from './learning/LessonNudge'
+import { whoami } from './kernelApi'
 
 const Routes = {
+  brief: /^\/brief(\/|$)/,
   dashboard: /^\/dashboard(\/|$)/,
   supervisor: /^\/supervisor(\/|$)/,
   experience: /^\/experience(\/|$)/,
@@ -66,9 +69,10 @@ const Routes = {
   learning: /^\/learning(\/|$)/,
 } as const
 
-type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'org/activity' | 'org/work' | 'org/flow' | 'channels' | 'inbound' | 'supervisor-model' | 'harness' | 'learning'
+type Page = 'brief' | 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'org/activity' | 'org/work' | 'org/flow' | 'channels' | 'inbound' | 'supervisor-model' | 'harness' | 'learning'
 
 function pageFor(pathname: string): Page {
+  if (Routes.brief.test(pathname)) return 'brief'
   if (Routes.dashboard.test(pathname)) return 'dashboard'
   if (Routes.supervisor.test(pathname)) return 'supervisor'
   if (Routes.agents.test(pathname)) return 'agents'
@@ -114,6 +118,20 @@ export default function App() {
     return () => window.removeEventListener('popstate', navigate)
   }, [])
 
+  // Landing gate (docs/system-dashboard.md «Мой день»): users without the
+  // full operational dashboard land on their personal brief. Only the bare
+  // root redirects — an explicit deep link stays where it points.
+  useEffect(() => {
+    let alive = true
+    void whoami().then((w) => {
+      if (alive && w.full_dashboard === false && (window.location.pathname === '/' || window.location.pathname === '')) {
+        window.history.replaceState(null, '', '/brief')
+        setPage('brief')
+      }
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+
   return (
     <ThemePrefProvider>
     <I18nProvider>
@@ -121,6 +139,8 @@ export default function App() {
     <Layout activePage={page}>
       {({ project, setProject, projectDefaultAgent, projectDefaultModel, refreshProjects }: AppState) => {
         switch (page) {
+          case 'brief':
+            return <PersonalBrief />
           case 'dashboard':
             return <Dashboard project={project} setProject={setProject} />
           case 'supervisor':

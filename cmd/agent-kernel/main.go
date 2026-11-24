@@ -905,11 +905,14 @@ func main() {
 		// Any authenticated role may see its own identity.
 		principal, ok := controlplane.FromContext(r.Context())
 		if !ok {
-			writeJSON(w, 200, map[string]any{"subject": "anonymous", "role": "admin", "projects": []string{"*"}, "auth_enabled": false})
+			writeJSON(w, 200, map[string]any{"subject": "anonymous", "role": "admin", "projects": []string{"*"}, "auth_enabled": false, "full_dashboard": true})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"subject": principal.Subject, "role": principal.Role.String(), "projects": principal.Projects, "auth_enabled": true, "user_id": principal.UserID, "org_unit_id": principal.OrgUnitID})
-	})
+		// full_dashboard gates the operational dashboard (health/users/usage
+		// tabs): admins, org-role holders and unit heads. Everyone else lands on
+		// their personal brief («Мой день») instead.
+		writeJSON(w, 200, map[string]any{"subject": principal.Subject, "role": principal.Role.String(), "projects": principal.Projects, "auth_enabled": true, "user_id": principal.UserID, "org_unit_id": principal.OrgUnitID, "full_dashboard": canSeeFullDashboard(r.Context(), ws, principal)})
+		})
 	// Password login exchanges name-or-email + password for the user's bearer
 	// token. The route is mounted outside the auth gate (see server setup
 	// below): unauthenticated callers may reach exactly this one endpoint.
@@ -8391,6 +8394,11 @@ func main() {
 	// uncovered closed calendar month through the usage aggregates and
 	// journal usage.monthly_report — no more manual copies out of the UI.
 	StartUsageReportLoop(ctx, log, costAPI, observationURL, events.Enqueue)
+	// Personal daily brief («Мой день») + the personal GTD todos: the landing
+	// surface for users without the full dashboard, pre-built hourly for
+	// users with recent activity (lazily on first GET for everybody else).
+	registerPersonalBriefRoutes(mux, gate, ws, observationURL, journalToken, costPrices, supervisorUsageClient, log)
+	StartPersonalBriefLoop(ctx, log, ws, observationURL, journalToken, costPrices, supervisorUsageClient)
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()

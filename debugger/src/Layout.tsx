@@ -48,10 +48,13 @@ interface LayoutProps {
 // Primary work surfaces — always visible in the header.
 const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
+  // «Мой день» (docs/system-dashboard.md): the personal brief — everyone's
+  // landing; the operational dashboard next to it stays gated (fullOnly).
+  { path: '/brief', label: 'nav.myday' },
   // The system dashboard (docs/system-dashboard.md): health, quality, sagas
   // and knowledge observability in one operational surface. The supervisor
   // problem queue is a dashboard tab, not a separate nav destination.
-  { path: '/dashboard', label: 'nav.dashboard' },
+  { path: '/dashboard', label: 'nav.dashboard', fullOnly: true },
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
   // Knowledge explorer is the main research surface (docs/human-knowledge-
@@ -630,6 +633,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
     void loadProjects()
   }
 
+  // «Мой день» always; the full operational dashboard only when whoami says
+  // the caller keeps it (admins, org-role holders, unit heads). Unknown
+  // (identity not yet loaded) keeps the dashboard — no flicker for admins,
+  // the gate lands a beat later for restricted users.
+  const navItems = NAV_ITEMS.filter((item) => !item.fullOnly || identity?.full_dashboard !== false)
+
   return (
     <Theme theme={resolved === 'light' ? 'g10' : 'g100'}>
       <Header aria-label="Temporality">
@@ -641,7 +650,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
         {/* Desktop nav — hidden below 1100px, and during onboarding */}
         {!onboarding && (
         <nav className="header-nav-desktop" aria-label="Main navigation">
-          {NAV_ITEMS.map(({ path, label }) => (
+          {navItems.map(({ path, label }) => (
             <a
               key={path}
               href={path}
@@ -894,7 +903,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
         {/* Mobile nav dropdown */}
         {mobileNavOpen && (
           <div className="header-mobile-nav">
-            {NAV_ITEMS.map(({ path, label }) => (
+            {navItems.map(({ path, label }) => (
               <a
                 key={path}
                 href={path}
