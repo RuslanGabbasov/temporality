@@ -155,10 +155,13 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
       row.conflict = {
         newID: String(event.data.knowledge_id),
         newProp: String(event.data.new_proposition ?? ''),
-        newProject: String(event.data.new_project ?? event.context?.project ?? ''),
+        // || not ??: payloads published with present-but-empty project strings
+        // (the predictor's meta scan missed the item) must fall through to the
+        // event context — ?? trusts an empty string.
+        newProject: String(event.data.new_project || event.context?.project || ''),
         oldID: String(event.data.neighbor_id),
         oldProp: String(event.data.old_proposition ?? ''),
-        oldProject: String(event.data.old_project ?? event.context?.project ?? ''),
+        oldProject: String(event.data.old_project || event.context?.project || ''),
         score: Number(event.data.score ?? 0),
       }
     }
@@ -243,12 +246,15 @@ function supervisorCaseRow(c: SupervisorQueue['cases'][number]): ClusterRow {
   }
   if (c.family === 'knowledge_conflict' && payload.knowledge_id && payload.neighbor_id) {
     row.conflict = {
+      // || not ??: present-but-empty payload projects (older predictor payloads
+      // whose meta scan missed the item) must fall back to the case project —
+      // an empty project string would 422 every invalidate.
       newID: String(payload.knowledge_id),
       newProp: String(payload.new_proposition ?? ''),
-      newProject: String(payload.new_project ?? c.project ?? ''),
+      newProject: String(payload.new_project || c.project || ''),
       oldID: String(payload.neighbor_id),
       oldProp: String(payload.old_proposition ?? ''),
-      oldProject: String(payload.old_project ?? c.project ?? ''),
+      oldProject: String(payload.old_project || c.project || ''),
       score: Number(payload.score ?? 0),
     }
   }
@@ -565,17 +571,26 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
 
   const resolveConflict = async (row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'invalidate_both' | 'keep_both') => {
     const conflict = row.conflict!
+    // A side whose project could not be resolved is skipped, not sent: the
+    // invalidate endpoint 422s on an empty project. Payloads published before
+    // the predictor attached per-side projects carry present-but-empty
+    // strings here — same skip rule as generalizeConflict.
+    const targetWorth = (target: { id: string; project: string }) => Boolean(target.project && target.id)
     setBusyCase(row.key)
     try {
       if (kind !== 'keep_both') {
-        const targets = kind === 'invalidate_both'
+        const targets = (kind === 'invalidate_both'
           ? [
               { id: conflict.newID, project: conflict.newProject },
               { id: conflict.oldID, project: conflict.oldProject },
             ]
           : [kind === 'invalidate_new'
               ? { id: conflict.newID, project: conflict.newProject }
-              : { id: conflict.oldID, project: conflict.oldProject }]
+              : { id: conflict.oldID, project: conflict.oldProject }]).filter(targetWorth)
+        if (targets.length === 0) {
+          setError(t('supervisor.conflict_no_project') ?? 'Could not resolve the projects of these knowledge items — they may be removed or invisible to your account.')
+          return
+        }
         for (const target of targets) {
           await observationApi.invalidate({
             knowledge_id: target.id,
@@ -691,15 +706,18 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
    *  reloads once at the end. */
   async function resolveConflictQuiet(row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'invalidate_both' | 'keep_both') {
     const conflict = row.conflict!
+    // Same empty-project guard as resolveConflict: an unresolvable side is
+    // skipped, never sent (the endpoint would 422); if nothing is left to
+    // invalidate the case just gets acknowledged by the caller.
     if (kind !== 'keep_both') {
-      const targets = kind === 'invalidate_both'
+      const targets = (kind === 'invalidate_both'
         ? [
             { id: conflict.newID, project: conflict.newProject },
             { id: conflict.oldID, project: conflict.oldProject },
           ]
         : [kind === 'invalidate_new'
             ? { id: conflict.newID, project: conflict.newProject }
-            : { id: conflict.oldID, project: conflict.oldProject }]
+            : { id: conflict.oldID, project: conflict.oldProject }]).filter((target) => Boolean(target.project && target.id))
       for (const target of targets) {
         try {
           await observationApi.invalidate({
