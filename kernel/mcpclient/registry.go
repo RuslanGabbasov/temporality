@@ -35,8 +35,9 @@ type ServerConfig struct {
 	Allow    []string          `json:"allowed_tools,omitempty"`
 	Approval []string          `json:"approval_tools,omitempty"`
 	Enabled  bool              `json:"enabled"`
-	// TimeoutMs caps one tool call against this server (§ the MCP timeout_ms
-	// convention): the caller's per-call budget is clamped to this ceiling.
+	// TimeoutMs is the hard per-call budget against this server — never
+	// stretched or shortened by a timeout_ms from the call arguments (a
+	// model-guessed ask used to kill long calls; see Client.Call).
 	// 0 = the kernel default (10 minutes). The shared HTTP client timeout
 	// scales to cover it (max + 30s headroom).
 	TimeoutMs int `json:"timeout_ms,omitempty"`

@@ -12,11 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -306,25 +304,15 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any, ide
 	if !ok {
 		return "", fmt.Errorf("MCP tool %q is not allowed", name)
 	}
-	// The tool's own timeout_ms (an MCP convention: the CALLER states how long
-	// it is willing to wait) bounds this call's context. Without it the shared
-	// HTTP client timeout is the only budget. Clamped to 1s..10m: a tool
-	// asking for zero or an hour is either broken or abusive.
-	// The MCP timeout_ms convention: the CALLER states how long it is willing
-	// to wait. The budget is clamped to the server's ceiling (TimeoutMs when
-	// configured, else 10 minutes) and the floor of 1s. The shared HTTP client
-	// timeout scales above the ceiling, so the two never fight.
-	ceiling := c.serverCallBudget()
-	budget := ceiling
-	if ms, ok := argTimeoutMs(args); ok {
-		budget = time.Duration(ms) * time.Millisecond
-		if budget < time.Second {
-			budget = time.Second
-		}
-		if budget > ceiling {
-			budget = ceiling
-		}
-	}
+	// One call's budget is this server's ceiling (TimeoutMs when configured,
+	// else the 10-minute default) — never a timeout_ms from the arguments.
+	// Honoring the model's ask killed Penpot export_shape at exactly the two
+	// minutes it guessed (timeout_ms: 120000): a guessed number must not cut
+	// off a legitimate long export, and a hung server is what the operator's
+	// ceiling already protects against (Settings → MCP, up to 24h). The
+	// argument still travels to the server verbatim — a server that enforces
+	// its own timeout_ms answers with a tool-level error the model can read.
+	budget := c.serverCallBudget()
 	callCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	ctx = callCtx
@@ -345,7 +333,7 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any, ide
 		}
 	}
 	if err != nil {
-		return "", err
+		return "", callTimeoutError(name, budget, err)
 	}
 	if result.IsError {
 		return "", errors.New(contentText(result.Content))
@@ -361,36 +349,16 @@ func callTool(ctx context.Context, session *mcp.ClientSession, name string, args
 	return session.CallTool(ctx, params)
 }
 
-// argTimeoutMs reads the MCP timeout_ms convention from the tool arguments:
-// json.Number/plain float (map[string]any decodes numbers as float64). A
-// missing or non-numeric value means «no explicit budget».
-func argTimeoutMs(args map[string]any) (int64, bool) {
-	if args == nil {
-		return 0, false
+// callTimeoutError attributes this call's own budget expiry: the raw
+// «context deadline exceeded» names no budget and no fix, so the tool.failed
+// timeline carries the tool, the expired ceiling and the operator's way out.
+// Only the sentinel counts — a server-side JSON-RPC timeout that merely
+// quotes the deadline text is not this kernel's budget and passes through.
+func callTimeoutError(tool string, budget time.Duration, err error) error {
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return err
 	}
-	switch raw := args["timeout_ms"].(type) {
-	case float64:
-		if raw > 0 && !math.IsNaN(raw) && !math.IsInf(raw, 0) {
-			return int64(raw), true
-		}
-	case int:
-		if raw > 0 {
-			return int64(raw), true
-		}
-	case int64:
-		if raw > 0 {
-			return raw, true
-		}
-	case json.Number:
-		if v, err := raw.Int64(); err == nil && v > 0 {
-			return v, true
-		}
-	case string:
-		if v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && v > 0 {
-			return v, true
-		}
-	}
-	return 0, false
+	return fmt.Errorf("MCP tool %q timed out after %s — the server did not answer within this server's call budget; raise the server's timeout_ms in Settings → MCP or split the work into smaller calls", tool, budget)
 }
 
 // isBrokenTransport reports whether err means the session's transport is dead
@@ -442,7 +410,7 @@ func isBrokenTransport(err error) bool {
 // calls no matter what the tool's own timeout_ms asked for. Now the timeout
 // scales with the server's configured per-call ceiling (TimeoutMs + 30s
 // headroom, default ceiling 10m); the per-call budget itself lives in
-// Call() — the caller's timeout_ms clamped to the ceiling.
+// Call() — always the ceiling, never the arguments' timeout_ms.
 func (c *Client) sharedHTTPClient() *http.Client {
 	if c.http == nil {
 		c.http = headerClient(&http.Client{Timeout: c.serverCallBudget() + 30*time.Second}, c.cfg.Headers)

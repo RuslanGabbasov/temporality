@@ -13,9 +13,10 @@ import (
 // transport: stdio (command + args + env), sse or http (url + headers).
 // AllowedTools/ApprovalTools store original tool names from the server;
 // empty AllowedTools exposes every tool the server advertises.
-// TimeoutMs caps one tool call against this server (the MCP timeout_ms
-// convention — the caller's budget, clamped by the server); 0 = the kernel
-// default (10 minutes).
+// TimeoutMs is the hard budget of one tool call against this server; 0 = the
+// kernel default (10 minutes). The call arguments' timeout_ms travels to the
+// server verbatim but does not bound the kernel's wait: a model-guessed ask
+// used to kill long calls (Penpot export_shape died at its 2-minute guess).
 type MCPServer struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`

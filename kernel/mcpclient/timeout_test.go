@@ -1,58 +1,54 @@
 package mcpclient
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
 
-// The MCP timeout_ms convention: the caller states its wait budget in the
-// tool arguments, and Call must honor it — the Penpot export_shape loop died
-// three times at the fixed 30.06s HTTP client timeout while the tool asked
-// for 120000ms.
-func TestArgTimeoutMs(t *testing.T) {
-	cases := []struct {
-		name string
-		args map[string]any
-		want int64
-		ok   bool
-	}{
-		{"float", map[string]any{"timeout_ms": float64(120000)}, 120000, true},
-		{"int", map[string]any{"timeout_ms": 5000}, 5000, true},
-		{"json.Number", map[string]any{"timeout_ms": json.Number("45000")}, 45000, true},
-		{"string", map[string]any{"timeout_ms": "30000"}, 30000, true},
-		{"missing", map[string]any{"other": 1}, 0, false},
-		{"nil args", nil, 0, false},
-		{"zero", map[string]any{"timeout_ms": float64(0)}, 0, false},
-		{"negative", map[string]any{"timeout_ms": float64(-5)}, 0, false},
-		{"garbage", map[string]any{"timeout_ms": "soon"}, 0, false},
+// One MCP call's budget is the server's ceiling — never a timeout_ms from the
+// call arguments. The kernel used to honor the model's ask and killed Penpot
+// export_shape at exactly its 2-minute guess (timeout_ms: 120000) while the
+// operator's ceiling allowed 10 minutes. Call now derives the budget from
+// serverCallBudget() alone; what is pinned here is the attribution: the
+// kernel's own deadline must surface as an actionable error, and everything
+// else must pass through untouched.
+func TestCallTimeoutErrorAttribution(t *testing.T) {
+	const tool = "mcp__penpot__export_shape"
+
+	wrapped := fmt.Errorf("call tool: %w", context.DeadlineExceeded)
+	err := callTimeoutError(tool, 10*time.Minute, wrapped)
+	if err == nil || !strings.Contains(err.Error(), tool) || !strings.Contains(err.Error(), "10m0s") {
+		t.Fatalf("the kernel's own deadline must name the tool and the expired budget, got %v", err)
 	}
-	for _, tc := range cases {
-		got, ok := argTimeoutMs(tc.args)
-		if got != tc.want || ok != tc.ok {
-			t.Fatalf("%s: got (%d, %v), want (%d, %v)", tc.name, got, ok, tc.want, tc.ok)
-		}
+
+	if direct := callTimeoutError(tool, 10*time.Minute, context.DeadlineExceeded); !strings.Contains(direct.Error(), "timed out after") {
+		t.Fatalf("a bare sentinel deadline must be attributed too, got %v", direct)
+	}
+
+	serverSide := errors.New("jsonrpc2: code -32000: context deadline exceeded")
+	if got := callTimeoutError(tool, 10*time.Minute, serverSide); got != serverSide {
+		t.Fatalf("a server-side timeout quoting the deadline text must pass through unchanged, got %v", got)
+	}
+
+	other := errors.New("connection reset")
+	if got := callTimeoutError(tool, 10*time.Minute, other); got != other {
+		t.Fatalf("non-deadline errors must pass through unchanged, got %v", got)
+	}
+
+	if canceled := callTimeoutError(tool, 10*time.Minute, context.Canceled); canceled != context.Canceled {
+		t.Fatalf("caller cancellation is not this budget's expiry and must pass through, got %v", canceled)
 	}
 }
 
-func TestArgTimeoutClampBounds(t *testing.T) {
-	// The clamp lives in Call; here we verify the constants indirectly: a
-	// huge ask cannot exceed the 10m ceiling. Direct call-budget testing
-	// needs a live session — the clamp math is trivially inspected via the
-	// same bounds the Call path applies.
-	huge := int64(3600 * 1000)
-	deadline := time.Duration(huge) * time.Millisecond
-	if deadline > 10*time.Minute {
-		deadline = 10 * time.Minute
+func TestServerCallBudgetDefault(t *testing.T) {
+	if got := (&Client{}).serverCallBudget(); got != 10*time.Minute {
+		t.Fatalf("a server without configured timeout_ms must keep the 10-minute default, got %v", got)
 	}
-	if deadline != 10*time.Minute {
-		t.Fatalf("huge ask must clamp to 10m, got %v", deadline)
-	}
-	tiny := time.Duration(1) * time.Millisecond
-	if tiny < time.Second {
-		tiny = time.Second
-	}
-	if tiny != time.Second {
-		t.Fatalf("tiny ask must clamp up to 1s, got %v", tiny)
+	if got := (&Client{cfg: ServerConfig{TimeoutMs: 60000}}).serverCallBudget(); got != time.Minute {
+		t.Fatalf("a configured timeout_ms must become the per-call budget verbatim, got %v", got)
 	}
 }
