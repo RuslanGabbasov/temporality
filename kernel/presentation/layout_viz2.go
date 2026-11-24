@@ -653,7 +653,15 @@ func layoutRadar(data RadarData, props RadarProps, width float64, theme Theme) D
 	if data.Min != nil {
 		min = *data.Min
 	}
-	max := 1.0
+	// Web parity: default scale tops out at the largest value across series.
+	max := 0.0
+	for _, series := range data.Series {
+		for _, v := range series.Values {
+			if v > max {
+				max = v
+			}
+		}
+	}
 	if data.Max != nil {
 		max = *data.Max
 	}

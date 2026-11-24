@@ -75,10 +75,15 @@ func translateOp(op DrawOp, dx, dy float64) DrawOp {
 		v.CY += dy
 		return v
 	case Poly:
-		for i := range v.Points {
-			v.Points[i].X += dx
-			v.Points[i].Y += dy
+		// Copy: Points may alias a shared slice (e.g. fill+stroke of the same
+		// shape), so in-place mutation would double-shift later translations.
+		pts := make([]Point, len(v.Points))
+		copy(pts, v.Points)
+		for i := range pts {
+			pts[i].X += dx
+			pts[i].Y += dy
 		}
+		v.Points = pts
 		return v
 	case Dot:
 		v.CX += dx
