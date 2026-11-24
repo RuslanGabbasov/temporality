@@ -509,21 +509,14 @@ func registerPersonalBriefRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 			writeError(w, 400, err)
 			return
 		}
-		text := strings.TrimSpace(req.Text)
-		if text == "" {
-			writeError(w, 422, errors.New("text is required"))
+		text, err := todoTextOrError(req.Text)
+		if err != nil {
+			writeError(w, 422, err)
 			return
-		}
-		if runes := []rune(text); len(runes) > 500 {
-			text = string(runes[:500])
-		}
-		note := strings.TrimSpace(req.Note)
-		if runes := []rune(note); len(runes) > 2000 {
-			note = string(runes[:2000])
 		}
 		todo := &workspace.UserTodo{
 			ID: "todo-" + shortID(), UserID: userID,
-			Group: normalizeTodoGroup(req.Group), Text: text, Note: note,
+			Group: normalizeTodoGroup(req.Group), Text: text, Note: clampTodoNote(req.Note),
 		}
 		if err := ws.CreateUserTodo(r.Context(), todo); err != nil {
 			writeError(w, 500, err)
@@ -571,22 +564,15 @@ func registerPersonalBriefRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 			todo.Group = normalizeTodoGroup(*req.Group)
 		}
 		if req.Text != nil {
-			text := strings.TrimSpace(*req.Text)
-			if text == "" {
-				writeError(w, 422, errors.New("text is required"))
+			text, err := todoTextOrError(*req.Text)
+			if err != nil {
+				writeError(w, 422, err)
 				return
-			}
-			if runes := []rune(text); len(runes) > 500 {
-				text = string(runes[:500])
 			}
 			todo.Text = text
 		}
 		if req.Note != nil {
-			note := strings.TrimSpace(*req.Note)
-			if runes := []rune(note); len(runes) > 2000 {
-				note = string(runes[:2000])
-			}
-			todo.Note = note
+			todo.Note = clampTodoNote(*req.Note)
 		}
 		if req.Sort != nil {
 			todo.Sort = *req.Sort
@@ -682,6 +668,186 @@ func generateDailyBriefs(ctx context.Context, log *slog.Logger, ws *workspace.St
 		}
 		generated++
 	}
+}
+
+// todoTextOrError validates/clamps the note text shared by the human routes
+// and the agent-tool routes below.
+func todoTextOrError(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", errors.New("text is required")
+	}
+	if runes := []rune(text); len(runes) > 500 {
+		text = string(runes[:500])
+	}
+	return text, nil
+}
+
+func clampTodoNote(note string) string {
+	note = strings.TrimSpace(note)
+	if runes := []rune(note); len(runes) > 2000 {
+		note = string(runes[:2000])
+	}
+	return note
+}
+
+// registerInternalTodoRoutes mounts the agent-tool surface for the same
+// personal todos (docs/system-dashboard.md «Мой день»). The scope rule is
+// enforced twice: the routes only answer the kernel service identity (agent
+// runs), and the ACTOR — the run's human starter — rides every call
+// explicitly. An agent can never address another user's list: the handler
+// pins every store call to that actor and ignores everything else.
+func registerInternalTodoRoutes(mux *http.ServeMux, ws *workspace.Store) {
+	mux.HandleFunc("GET /v1/internal/todos", func(w http.ResponseWriter, r *http.Request) {
+		if !isKernelInternal(r) {
+			writeError(w, 403, errors.New("kernel service identity required"))
+			return
+		}
+		actor := strings.TrimSpace(r.URL.Query().Get("actor"))
+		if actor == "" {
+			writeError(w, 422, errors.New("actor is required"))
+			return
+		}
+		todos, err := ws.ListUserTodos(r.Context(), actor)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		// Optional GTD filter. An out-of-vocabulary group is a 422, not a
+		// silent fold: a filtered list must never quietly read as another one.
+		if g := strings.TrimSpace(r.URL.Query().Get("group")); g != "" {
+			if !todoGroups[strings.ToLower(g)] {
+				writeError(w, 422, fmt.Errorf("unknown group %q — use inbox, next, waiting, someday, done", g))
+				return
+			}
+			filtered := todos[:0]
+			for _, t := range todos {
+				if t.Group == strings.ToLower(g) {
+					filtered = append(filtered, t)
+				}
+			}
+			todos = filtered
+		}
+		writeJSON(w, 200, map[string]any{"todos": todos})
+	})
+
+	mux.HandleFunc("POST /v1/internal/todos", func(w http.ResponseWriter, r *http.Request) {
+		if !isKernelInternal(r) {
+			writeError(w, 403, errors.New("kernel service identity required"))
+			return
+		}
+		var req struct {
+			Actor string `json:"actor"`
+			Group string `json:"group"`
+			Text  string `json:"text"`
+			Note  string `json:"note"`
+		}
+		if err := decodeJSON(w, r, &req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		actor := strings.TrimSpace(req.Actor)
+		if actor == "" {
+			writeError(w, 422, errors.New("actor is required"))
+			return
+		}
+		text, err := todoTextOrError(req.Text)
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		todo := &workspace.UserTodo{
+			ID: "todo-" + shortID(), UserID: actor,
+			Group: normalizeTodoGroup(req.Group), Text: text, Note: clampTodoNote(req.Note),
+		}
+		if err := ws.CreateUserTodo(r.Context(), todo); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"todo": todo})
+	})
+
+	mux.HandleFunc("PATCH /v1/internal/todos/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !isKernelInternal(r) {
+			writeError(w, 403, errors.New("kernel service identity required"))
+			return
+		}
+		var req struct {
+			Actor string  `json:"actor"`
+			Group *string `json:"group"`
+			Text  *string `json:"text"`
+			Note  *string `json:"note"`
+			Sort  *int    `json:"sort"`
+		}
+		if err := decodeJSON(w, r, &req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		actor := strings.TrimSpace(req.Actor)
+		if actor == "" {
+			writeError(w, 422, errors.New("actor is required"))
+			return
+		}
+		todos, err := ws.ListUserTodos(r.Context(), actor)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		var todo *workspace.UserTodo
+		for i := range todos {
+			if todos[i].ID == r.PathValue("id") {
+				todo = &todos[i]
+				break
+			}
+		}
+		if todo == nil {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		if req.Group != nil {
+			todo.Group = normalizeTodoGroup(*req.Group)
+		}
+		if req.Text != nil {
+			text, err := todoTextOrError(*req.Text)
+			if err != nil {
+				writeError(w, 422, err)
+				return
+			}
+			todo.Text = text
+		}
+		if req.Note != nil {
+			todo.Note = clampTodoNote(*req.Note)
+		}
+		if req.Sort != nil {
+			todo.Sort = *req.Sort
+		}
+		if err := ws.UpdateUserTodo(r.Context(), todo); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"todo": todo})
+	})
+
+	mux.HandleFunc("DELETE /v1/internal/todos/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !isKernelInternal(r) {
+			writeError(w, 403, errors.New("kernel service identity required"))
+			return
+		}
+		actor := strings.TrimSpace(r.URL.Query().Get("actor"))
+		if actor == "" {
+			writeError(w, 422, errors.New("actor is required"))
+			return
+		}
+		if err := ws.DeleteUserTodo(r.Context(), actor, r.PathValue("id")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
 }
 
 // canSeeFullDashboard gates the operational dashboard (health, users, usage

@@ -8398,6 +8398,11 @@ func main() {
 	// surface for users without the full dashboard, pre-built hourly for
 	// users with recent activity (lazily on first GET for everybody else).
 	registerPersonalBriefRoutes(mux, gate, ws, observationURL, journalToken, costPrices, supervisorUsageClient, log)
+	// Agent tool surface for the same personal todos: the run's human starter
+	// is the only scope (kernel-internal identity + explicit actor on every
+	// call), so an agent plans and executes the starter's tasks on their
+	// «Мой день» board without ever touching another user's list.
+	registerInternalTodoRoutes(mux, ws)
 	StartPersonalBriefLoop(ctx, log, ws, observationURL, journalToken, costPrices, supervisorUsageClient)
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.

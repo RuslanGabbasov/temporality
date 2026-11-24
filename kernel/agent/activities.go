@@ -1811,6 +1811,16 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (result T
 		return a.handleArtifactDeprecate(ctx, request)
 	case "artifact_return_to_draft":
 		return a.handleArtifactReturnToDraft(ctx, request)
+	case "todo_list":
+		return a.handleTodoList(ctx, request)
+	case "todo_add":
+		return a.handleTodoAdd(ctx, request)
+	case "todo_update":
+		return a.handleTodoUpdate(ctx, request)
+	case "todo_done":
+		return a.handleTodoDone(ctx, request)
+	case "todo_delete":
+		return a.handleTodoDelete(ctx, request)
 	case "secret_list":
 		return a.handleSecretList(ctx, request)
 	case "knowledge_lookup":
