@@ -25,4 +25,26 @@ describe('mermaidTheme', () => {
     document.documentElement.setAttribute('data-theme', 'dark')
     expect(mermaidTheme().darkMode).toBe(true)
   })
+
+  it('covers every branch a mindmap can number', () => {
+    // assignSections numbers root branches d%11 (0..10) and mermaid renders
+    // section styles only up to THEME_COLOR_LIMIT-2: a shorter ramp leaves the
+    // 8th+ branch with no fill rule — the box and the label both inherit the
+    // canvas text color (cream text on a cream box, invisible).
+    document.documentElement.setAttribute('data-theme', 'dark')
+    document.documentElement.style.setProperty('--tm-chart-3', '#f1c21b')
+    const { themeVariables } = mermaidTheme()
+    expect(themeVariables.THEME_COLOR_LIMIT).toBe('12')
+    for (let n = 0; n <= 11; n++) {
+      expect(themeVariables[`cScale${n}`], `cScale${n}`).toBeTruthy()
+      expect(themeVariables[`cScaleInv${n}`], `cScaleInv${n}`).toBeTruthy()
+      expect(themeVariables[`cScaleLabel${n}`], `cScaleLabel${n}`).toBeTruthy()
+    }
+    // The yellow band takes dark text ON the band (dark theme labels are
+    // per-fill now — the old uniform canvas color read as white on yellow).
+    expect(themeVariables.cScale3).toBe('#f1c21b')
+    expect(themeVariables.cScaleLabel3).toBe(readableOnFill(themeVariables.cScale3))
+    expect(themeVariables.cScaleLabel3).toBe('#14201D')
+    document.documentElement.style.removeProperty('--tm-chart-3')
+  })
 })

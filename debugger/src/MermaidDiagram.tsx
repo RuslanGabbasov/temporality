@@ -190,17 +190,23 @@ export function mermaidTheme(): { darkMode: boolean; themeVariables: Record<stri
   // color (xmind-like), and the label color is picked for contrast on the
   // fill — the yellow band gets dark text, the blue band white.
   const ramp: Record<string, string> = {}
-  for (let n = 1; n <= 8; n++) {
+  // mermaid paints section styles only for -1..THEME_COLOR_LIMIT-2, while
+  // assignSections numbers the root branches d%11 (0..10): the ramp must
+  // cover all eleven, or the 8th+ branch gets no fill rule at all — its box
+  // then inherits fill:currentColor from the svg (the canvas text color) and
+  // the label inherits it too: cream text on a cream box, invisible.
+  for (let n = 1; n <= 11; n++) {
     const fill = chart(((n - 1) % 6) + 1)
     ramp[`cScale${n}`] = fill
     ramp[`cScaleInv${n}`] = fill
-    // The neo look paints the node BOXES with mainBkg (the vivid colors live
-    // in the gradient borders and edges), so node labels must read against
-    // the canvas color — not against the band. The root's tspan variant is
-    // the one label that sits ON a vivid fill (the teal box).
-    ramp[`cScaleLabel${n}`] = text
+    // Dark theme: the label sits ON the vivid band, so pick per fill — the
+    // yellow band takes dark text. Light theme: keep the canvas text color
+    // (the «invisible text in the light theme» regression: light labels on
+    // light boxes).
+    ramp[`cScaleLabel${n}`] = darkMode ? readableOnFill(fill) : text
   }
   ramp.cScale0 = teal
+  ramp.cScaleInv0 = teal
   ramp.cScaleLabel0 = readableOnFill(teal)
   return {
     darkMode,
@@ -245,7 +251,9 @@ export function mermaidTheme(): { darkMode: boolean; themeVariables: Record<stri
       // Branch palette for mindmap/git-graph (see the ramp above).
       git0: teal,
       gitBranchLabel0: readableOnFill(teal),
-      THEME_COLOR_LIMIT: '8',
+      // mermaid's default 12: sections -1..10, exactly the d%11 branch
+      // numbering. Anything shorter silently unstyles the trailing branches.
+      THEME_COLOR_LIMIT: '12',
       ...ramp,
     },
   }
