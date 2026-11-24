@@ -56,7 +56,8 @@ type Glyph struct {
 	Bold   bool
 	Mono   bool
 	Color  string
-	Anchor string // "start" | "middle" | "end"
+	Anchor string  // "start" | "middle" | "end"
+	Rotate float64 // degrees clockwise around (X, Y); 0 = horizontal text
 	Text   string
 }
 

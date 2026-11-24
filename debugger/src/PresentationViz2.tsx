@@ -76,9 +76,9 @@ export function ScatterView({ component }: { component: { data?: unknown; props?
   const points = data.points ?? []
   if (points.length === 0) return <PlaceholderLike what="scatter without points" />
   const W = 560
-  const H = 320
-  const ml = 46
-  const mb = 38
+  const H = 344
+  const ml = 64
+  const mb = 56
   const plotW = W - ml - 16
   const plotH = H - mb - 14
   const [x0, x1] = niceDomain(points, (p) => p.x, data.x_min, data.x_max)
@@ -108,7 +108,7 @@ export function ScatterView({ component }: { component: { data?: unknown; props?
         ))}
         <line x1={ml} y1={14} x2={ml} y2={14 + plotH} stroke="var(--tm-border)" />
         <line x1={ml} y1={14 + plotH} x2={ml + plotW} y2={14 + plotH} stroke="var(--tm-border)" />
-        {data.y_title && <text x={0} y={24} fontSize={9.5} fill="var(--tm-text-3)">{clip(data.y_title, 12)}</text>}
+        {data.y_title && <text transform={`translate(12 ${14 + plotH / 2}) rotate(-90)`} textAnchor="middle" fontSize={9.5} fill="var(--tm-text-3)">{clip(data.y_title, 40)}</text>}
         {data.x_title && <text x={ml + plotW / 2} y={14 + plotH + 30} textAnchor="middle" fontSize={9.5} fill="var(--tm-text-3)">{data.x_title}</text>}
         {props.quadrant && (
           <g>
@@ -162,7 +162,7 @@ export function ScatterView({ component }: { component: { data?: unknown; props?
           )
         })}
         {(props.showLegend !== false && groups.length > 1) && groups.map((g, i) => (
-          <g key={g} transform={`translate(${16 + i * 110}, ${H - 8})`}>
+          <g key={g} transform={`translate(${16 + i * 110}, ${14 + plotH + 48})`}>
             <circle cx={5} cy={-3} r={4.5} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />
             <text x={14} y={0} fontSize={10} fill="var(--tm-text)">{clip(g, 16)}</text>
           </g>

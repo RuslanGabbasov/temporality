@@ -142,7 +142,7 @@ func layoutScatter(data ScatterData, props ScatterProps, width float64, theme Th
 		axisSize    = 10.5
 		labelSize   = 10.0
 		marginTop   = 6.0
-		marginLeft  = 46.0
+		marginLeft  = 64.0
 		marginRight = 16.0
 		marginBot   = 34.0
 		plotHeight  = 170.0
@@ -203,7 +203,10 @@ func layoutScatter(data ScatterData, props ScatterProps, width float64, theme Th
 		frag.Ops = append(frag.Ops, Glyph{X: fx, Y: plotTop + plotHeight + 14, Size: axisSize, Color: theme.TextSecondary, Anchor: "middle", Text: formatNumber(roundTick(value))})
 	}
 	if data.YTitle != "" {
-		frag.Ops = append(frag.Ops, Glyph{X: 0, Y: plotTop + 10, Size: axisSize, Color: theme.TextSecondary, Anchor: "start", Text: clipLine(data.YTitle, axisSize, marginLeft)})
+		// Rotated into the left margin: laid out horizontally the caption
+		// collided with the tick labels and marginLeft clipped it anyway. The
+		// available run is the plot height, not the margin width.
+		frag.Ops = append(frag.Ops, Glyph{X: 12, Y: plotTop + plotHeight/2, Size: axisSize, Color: theme.TextSecondary, Anchor: "middle", Rotate: -90, Text: clipLine(data.YTitle, axisSize, plotHeight-12)})
 	}
 	if data.XTitle != "" {
 		frag.Ops = append(frag.Ops, Glyph{X: marginLeft + plotW/2, Y: plotTop + plotHeight + 30, Size: axisSize, Color: theme.TextSecondary, Anchor: "middle", Text: clipLine(data.XTitle, axisSize, plotW)})

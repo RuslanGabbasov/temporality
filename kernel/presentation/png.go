@@ -270,6 +270,10 @@ func drawPNGText(canvas *image.RGBA, g Glyph, scale float64) {
 	if face == nil {
 		return
 	}
+	if g.Rotate != 0 {
+		drawPNGTextRotated(canvas, g, scale, face)
+		return
+	}
 	d := font.Drawer{
 		Dst:  canvas,
 		Src:  image.NewUniform(renderColor(g.Color)),
@@ -293,6 +297,70 @@ func drawPNGText(canvas *image.RGBA, g Glyph, scale float64) {
 	defer textMu.Unlock()
 	d.Dot = fixed.Point26_6{X: fixed.Int26_6(x * 64), Y: fixed.Int26_6(y * 64)}
 	d.DrawString(g.Text)
+}
+
+// drawPNGTextRotated lays the label out horizontally into a scratch buffer and
+// blits it back rotated around the anchor, so axis captions can run along the
+// margin. Every buffer pixel is mapped through the rotation matrix — exact for
+// the ±90° captions we ship, nearest-neighbour for any other angle.
+func drawPNGTextRotated(canvas *image.RGBA, g Glyph, scale float64, face font.Face) {
+	textMu.Lock()
+	defer textMu.Unlock()
+	advance := float64(font.MeasureString(face, g.Text)) / 64
+	metrics := face.Metrics()
+	ascent := float64(metrics.Ascent) / 64
+	descent := float64(metrics.Descent) / 64
+	// Left edge of the run relative to the anchor — the horizontal anchor
+	// handling, expressed in the rotated frame.
+	offset := 0.0
+	switch g.Anchor {
+	case "middle":
+		offset = -advance / 2
+	case "end":
+		offset = -advance
+	}
+	w := int(math.Ceil(advance)) + 2
+	h := int(math.Ceil(ascent+descent)) + 2
+	if w < 2 || h < 2 {
+		return
+	}
+	buf := image.NewRGBA(image.Rect(0, 0, w, h))
+	d := font.Drawer{
+		Dst:  buf,
+		Src:  image.NewUniform(renderColor(g.Color)),
+		Face: face,
+		Dot:  fixed.Point26_6{X: 0, Y: fixed.Int26_6(ascent * 64)},
+	}
+	d.DrawString(g.Text)
+
+	theta := g.Rotate * math.Pi / 180
+	cos, sin := math.Cos(theta), math.Sin(theta)
+	ax, ay := g.X*scale, g.Y*scale
+	for by := 0; by < h; by++ {
+		for bx := 0; bx < w; bx++ {
+			src := buf.RGBAAt(bx, by)
+			if src.A == 0 {
+				continue
+			}
+			u := float64(bx) + offset
+			v := float64(by) - ascent
+			cx := int(math.Round(ax + u*cos - v*sin))
+			cy := int(math.Round(ay + u*sin + v*cos))
+			if cx < 0 || cy < 0 || cx >= canvas.Bounds().Dx() || cy >= canvas.Bounds().Dy() {
+				continue
+			}
+			// Source-over on premultiplied RGBA: image.RGBA stores alpha
+			// premultiplied, so the blend is a plain weighted sum.
+			dst := canvas.RGBAAt(cx, cy)
+			inv := uint32(255 - src.A)
+			canvas.SetRGBA(cx, cy, color.RGBA{
+				R: src.R + uint8(uint32(dst.R)*inv/255),
+				G: src.G + uint8(uint32(dst.G)*inv/255),
+				B: src.B + uint8(uint32(dst.B)*inv/255),
+				A: src.A + uint8(uint32(dst.A)*inv/255),
+			})
+		}
+	}
 }
 
 // DebugWritePNG writes one rendered frame to a file — a developer aid for

@@ -77,8 +77,12 @@ func writeSVGOp(b *bytes.Buffer, op DrawOp) {
 		if v.Bold {
 			weight = "bold"
 		}
-		fmt.Fprintf(b, "<text x=%q y=%q font-size=%q font-family=%q font-weight=%q fill=%q text-anchor=%q>%s</text>\n",
-			number(v.X), number(v.Y), number(v.Size), family, weight, svgColor(v.Color), anchor, escapeXML(v.Text))
+		rot := ""
+		if v.Rotate != 0 {
+			rot = fmt.Sprintf(` transform="rotate(%s %s %s)"`, number(v.Rotate), number(v.X), number(v.Y))
+		}
+		fmt.Fprintf(b, "<text%s x=%q y=%q font-size=%q font-family=%q font-weight=%q fill=%q text-anchor=%q>%s</text>\n",
+			rot, number(v.X), number(v.Y), number(v.Size), family, weight, svgColor(v.Color), anchor, escapeXML(v.Text))
 	case Wedge:
 		path := wedgePath(v)
 		fmt.Fprintf(b, "<path d=%q fill=%q/>\n", path, svgColor(v.Color))

@@ -5,6 +5,9 @@ package presentation
 // deterministic non-empty ops, and the text fallback carries the semantics.
 
 import (
+	"bytes"
+	"image/png"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -156,5 +159,112 @@ func TestVizHeatmapTextCarriesMatrix(t *testing.T) {
 	joined := RenderText(doc)
 	if !strings.Contains(joined, "api: mon=3 ms; tue=—") {
 		t.Fatalf("heatmap text must carry the matrix row:\n%s", joined)
+	}
+}
+
+// The competitive map's axis captions: the Y title must stand vertically in
+// the left margin (laid out horizontally it sat on top of the tick labels and
+// marginLeft clipped it anyway), and the legend row must land below the X
+// title instead of on the same baseline.
+func TestScatterAxisCaptions(t *testing.T) {
+	doc := mustValid(t, vizDoc(`{"type":"scatter","data":{"points":[
+		{"x":1,"y":2,"group":"alpha"},{"x":2,"y":3,"group":"beta"}],
+		"x_title":"Reach","y_title":"Impact of the partnership"}}`))
+	frag := LayoutDocument(doc, LayoutOptions{})
+
+	var yTitle, xTitle, legend *Glyph
+	minTickX := 1e9
+	ticks := 0
+	for i := range frag.Ops {
+		g, ok := frag.Ops[i].(Glyph)
+		if !ok {
+			continue
+		}
+		switch {
+		case g.Rotate != 0:
+			yTitle = &g
+		case g.Text == "Reach":
+			xTitle = &g
+		case g.Text == "alpha":
+			legend = &g
+		case g.Anchor == "middle":
+			if _, err := strconv.ParseFloat(g.Text, 64); err == nil {
+				ticks++
+				if g.X < minTickX {
+					minTickX = g.X
+				}
+			}
+		}
+	}
+	if yTitle == nil {
+		t.Fatal("Y title must be emitted rotated into the left margin")
+	}
+	if yTitle.Rotate != -90 || yTitle.Anchor != "middle" {
+		t.Fatalf("Y title rotate=%v anchor=%q, want -90/middle", yTitle.Rotate, yTitle.Anchor)
+	}
+	if len(yTitle.Text) < 20 {
+		t.Fatalf("Y title clipped to %q: the vertical run has the whole plot height", yTitle.Text)
+	}
+	if ticks == 0 {
+		t.Fatal("expected numeric tick labels to compare the margin against")
+	}
+	if yTitle.X > minTickX-12 {
+		t.Fatalf("Y title X=%v runs into the tick labels at X=%v", yTitle.X, minTickX)
+	}
+	if xTitle == nil || legend == nil {
+		t.Fatalf("missing captions: xTitle=%t legend=%t", xTitle != nil, legend != nil)
+	}
+	if legend.Y <= xTitle.Y+5 {
+		t.Fatalf("legend Y=%v sits on the X title (Y=%v)", legend.Y, xTitle.Y)
+	}
+	if legend.Y >= frag.Height {
+		t.Fatalf("legend Y=%v falls outside the frame (height %v)", legend.Y, frag.Height)
+	}
+	svg := string(RenderSVG(frag))
+	if !strings.Contains(svg, `transform="rotate(-90`) {
+		t.Fatalf("SVG export must carry the rotation:\n%s", svg)
+	}
+}
+
+// The raster path has no text rotation of its own: the label is drawn
+// horizontally into a scratch buffer and blitted through the rotation matrix.
+// A -90° caption must move its ink into the column ABOVE the anchor and leave
+// the horizontal lane to the right empty (an unrotated label sits exactly
+// there).
+func TestRotatedGlyphPNG(t *testing.T) {
+	const w, h = 200.0, 170.0
+	raw, err := RenderPNG(Drawing{Width: w, Height: h, Ops: []DrawOp{
+		Glyph{X: 60, Y: 100, Size: 12, Anchor: "middle", Rotate: -90, Color: "#000000", Text: "VERTICAL AXIS LABEL"},
+	}})
+	if err != nil {
+		t.Fatalf("render png: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("decode png: %v", err)
+	}
+	scale := float64(img.Bounds().Dx()) / w
+	dark := func(x, y int) bool {
+		_, _, b, _ := img.At(x, y).RGBA()
+		return b>>8 < 128
+	}
+	inked := false
+	for y := int(40 * scale); y < int(80*scale) && !inked; y++ {
+		for x := int(48 * scale); x < int(64*scale); x++ {
+			if dark(x, y) {
+				inked = true
+				break
+			}
+		}
+	}
+	if !inked {
+		t.Fatal("rotated caption left no ink above the anchor — the blit did not move the text")
+	}
+	for y := int(94 * scale); y < int(106*scale); y++ {
+		for x := int(80 * scale); x < int(150*scale); x++ {
+			if dark(x, y) {
+				t.Fatalf("ink at (%d,%d): the caption was rendered horizontally", x, y)
+			}
+		}
 	}
 }
