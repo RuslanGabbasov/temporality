@@ -74,9 +74,15 @@ export default function LessonNudge({ page }: Props) {
     try {
       if (!cache || Date.now() - cache.at > SESSION_CACHE_TTL) {
         const [meta, state] = await Promise.all([fetchLearningLessonsMeta(), fetchLearningState()])
-        const done = new Set<string>((state.program?.items ?? [])
-          .filter((item: LearningProgramItem) => item.state === 'completed' || item.state === 'skipped' || item.state === 'not_applicable')
-          .map((item) => item.lesson_id))
+        const done = new Set<string>([
+          ...(state.program?.items ?? [])
+            .filter((item: LearningProgramItem) => item.state === 'completed' || item.state === 'skipped' || item.state === 'not_applicable')
+            .map((item) => item.lesson_id),
+          // Completions the program never saw: no program at all, or a
+          // catalog/generated lesson outside the program's item list (the
+          // audit fold — otherwise the nudge re-offers a learned lesson).
+          ...state.completed_lessons,
+        ])
         cache = { lessons: meta.lessons, done, pages: meta.pages, at: Date.now() }
       }
       // One lesson per page: first the program's pending item (the mentor's
@@ -202,7 +208,7 @@ export default function LessonNudge({ page }: Props) {
       <div className="learn-nudge" role="complementary" aria-label={t('learning.nudge.aria') ?? 'Lesson suggestion'}>
         <button className="learn-nudge-close" title={t('learning.nudge.collapse') ?? 'Свернуть'} onClick={() => setExpanded(false)}>✕</button>
         <div className="learn-nudge-mentor">
-          <span className="learn-indicator learn-indicator-available">?</span>
+          <span className="learn-nudge-dot" aria-hidden="true" />
           <span>{t('learning.nudge.mentor') ?? 'Наставник'}</span>
         </div>
         <div className="learn-nudge-title">{t('learning.generate.for_page') ?? 'Урок для этой страницы'}</div>
@@ -232,7 +238,7 @@ export default function LessonNudge({ page }: Props) {
     >
       <button className="learn-nudge-close" title={t('learning.nudge.collapse') ?? 'Свернуть'} onClick={() => setExpanded(false)}>✕</button>
       <div className="learn-nudge-mentor">
-        <span className="learn-indicator learn-indicator-available">?</span>
+        <span className="learn-nudge-dot" aria-hidden="true" />
         <span>{t('learning.nudge.mentor') ?? 'Наставник'}</span>
       </div>
       <div className="learn-nudge-title">{lesson.title}</div>

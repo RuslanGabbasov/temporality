@@ -111,6 +111,9 @@ export interface LearningState {
   capabilities: LearningCapabilityState[]
   has_program: boolean
   suggestions: LearningSuggestion[]
+  /** Lesson ids completed outside the program (the append-only audit fold) —
+   *  a program-less or off-program completion still counts as done. */
+  completed_lessons: string[]
 }
 
 async function kernelFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -129,6 +132,7 @@ export async function fetchLearningState(): Promise<LearningState> {
     capabilities: data.capabilities ?? [],
     has_program: !!data.has_program,
     suggestions: data.suggestions ?? [],
+    completed_lessons: data.completed_lessons ?? [],
   }
 }
 

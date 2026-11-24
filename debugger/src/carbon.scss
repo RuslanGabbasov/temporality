@@ -3480,7 +3480,14 @@ button.header-nav-link {
   font-size: 0.68rem; font-weight: 700; color: var(--tm-amber);
   text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem;
 }
-.learn-nudge-mentor .learn-indicator { animation: learn-nudge-breathe 2.2s ease 1; }
+/* The mentor line's pulse dot — the help-badge «?» glyph (LearningTarget's
+ * bare-text indicator) read here as a stray question mark glued to the
+ * word «Наставник». */
+.learn-nudge-mentor .learn-nudge-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--tm-amber); flex-shrink: 0;
+  animation: learn-nudge-breathe 2.2s ease 1;
+}
 .learn-nudge-close {
   position: absolute; top: 0.35rem; right: 0.5rem;
   background: none; border: none; color: var(--tm-text-3); cursor: pointer; font-size: 0.85rem;

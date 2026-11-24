@@ -113,6 +113,7 @@ export default function LearningCenter() {
   const capabilities = state?.capabilities ?? []
   const suggestions = (state?.suggestions ?? []).filter((s) => s.status === 'suggested')
   const programLessons = program?.items ?? []
+  const completedLessons = state?.completed_lessons ?? []
   // The mentor's ONE next step: the first not-yet-done item of the program —
   // a course led by the supervisor, not a catalog to browse.
   const nextItem = programLessons.find((item) => item.state !== 'completed' && item.state !== 'skipped' && item.state !== 'not_applicable') ?? null
@@ -246,12 +247,16 @@ export default function LearningCenter() {
         <h3 style={{ margin: '0 0 0.6rem' }}>{t('learning.lessons.title')}</h3>
         <div className="learn-grid">
           {lessons.map((lesson) => {
-            const inProgram = programLessons.some((item) => item.lesson_id === lesson.id && item.state === 'completed')
+            // The ✓ badge: program completion OR an off-program completion
+            // (the audit fold) — a learned lesson must not look unlearned
+            // just because no program ever contained it.
+            const done = completedLessons.includes(lesson.id) ||
+              programLessons.some((item) => item.lesson_id === lesson.id && item.state === 'completed')
             return (
               <div key={lesson.id} className="learn-card">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.3rem' }}>
                   <strong style={{ fontSize: '0.8rem' }}>{lesson.title}</strong>
-                  {inProgram && <span style={{ color: 'var(--tm-teal)', fontSize: '0.72rem' }}>✓</span>}
+                  {done && <span style={{ color: 'var(--tm-teal)', fontSize: '0.72rem' }}>✓</span>}
                 </div>
                 {lesson.goal && <div style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)', lineHeight: 1.5 }}>{lesson.goal}</div>}
                 <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>

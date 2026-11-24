@@ -221,6 +221,32 @@ func (s *Store) UpsertLearningProgress(ctx context.Context, p *LearningProgress)
 	return err
 }
 
+// CompletedLearningLessons lists the lesson ids this user has completed,
+// folded from the append-only access audit — independent of any program.
+// The completion paths that do NOT touch a program (no program built, a
+// catalog/generated lesson outside the program's item list) still land in
+// the audit, so this is the reliable «already learned» set; the per-feature
+// learning_progress row is a mastery slot and gets overwritten when the
+// next lesson for the same feature completes.
+func (s *Store) CompletedLearningLessons(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT entity_id FROM access_audit_log
+		 WHERE actor = $1 AND action = 'learning.lesson_completed' AND entity_kind = 'learning_lesson'`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // ListLearningProgress returns the user's capability evidence.
 func (s *Store) ListLearningProgress(ctx context.Context, userID string) ([]LearningProgress, error) {
 	rows, err := s.pool.Query(ctx,

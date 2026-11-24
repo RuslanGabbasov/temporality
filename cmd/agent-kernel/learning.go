@@ -214,11 +214,17 @@ func RegisterLearningRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *wor
 		program, err := ws.GetLearningProgram(r.Context(), userID)
 		hasProgram := err == nil && program != nil
 		suggestions, _ := ws.ListLearningSuggestions(r.Context(), userID)
+		// Completion facts beyond the program (docs/ai-guided-onboarding-and-learning.md
+		// §4.1): a lesson completed outside a program — or before the program
+		// existed — is still completed. The audit is append-only, so this never
+		// loses a completion the way the per-feature progress slot can.
+		completed, _ := ws.CompletedLearningLessons(r.Context(), userID)
 		writeJSON(w, 200, map[string]any{
-			"program":      program,
-			"capabilities": capabilities,
-			"has_program":  hasProgram,
-			"suggestions":  suggestions,
+			"program":           program,
+			"capabilities":      capabilities,
+			"has_program":       hasProgram,
+			"suggestions":       suggestions,
+			"completed_lessons": completed,
 		})
 	})
 
