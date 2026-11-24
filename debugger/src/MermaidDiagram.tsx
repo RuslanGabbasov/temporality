@@ -282,6 +282,10 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
   const t = { error: 'Diagram failed to render — showing the source' }
   const [svg, setSvg] = useState('')
   const [failed, setFailed] = useState(false)
+  // The renderer throws bare strings/Errors with no context; surfacing them
+  // turns a «failed to render» report into an actionable diagnostic (parse
+  // rejections have no message — the plain notice covers those).
+  const [errorText, setErrorText] = useState('')
   // Theme toggles rewrite attributes on <html> (theme.tsx writes data-theme);
   // watching them bumps this counter so the render effect below re-runs with
   // freshly computed themeVariables.
@@ -323,10 +327,13 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
         if (cancelled) return
         rendered.current = chart
         setSvg(renderedSvg)
-      } catch {
+      } catch (err) {
         // Belt and braces: remove any error container mermaid left behind.
         if (key) { document.getElementById(`d${key}`)?.remove(); document.getElementById(key)?.remove() }
-        if (!cancelled) setFailed(true)
+        if (!cancelled) {
+          setErrorText(err instanceof Error ? err.message : typeof err === 'string' ? err : '')
+          setFailed(true)
+        }
       }
     })()
     return () => { cancelled = true }
@@ -336,7 +343,8 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
     return (
       <div>
         <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)', marginBottom: '0.15rem' }}>{t.error}</div>
-        <pre style={{ padding: '0.5rem', background: 'var(--tm-raised)', color: 'var(--tm-text-2)', fontSize: '0.72rem', fontFamily: '"SFMono-Regular", Consolas, monospace', maxHeight: '260px', overflow: 'auto', borderRadius: '4px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{chart}</pre>
+        {errorText ? <div style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', marginBottom: '0.15rem', fontFamily: '"SFMono-Regular", Consolas, monospace' }}>{errorText}</div> : null}
+        <pre title={errorText || undefined} style={{ padding: '0.5rem', background: 'var(--tm-raised)', color: 'var(--tm-text-2)', fontSize: '0.72rem', fontFamily: '"SFMono-Regular", Consolas, monospace', maxHeight: '260px', overflow: 'auto', borderRadius: '4px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{chart}</pre>
       </div>
     )
   }

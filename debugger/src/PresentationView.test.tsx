@@ -5,7 +5,7 @@
 
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import PresentationView, { PresentationBlock, mindmapMermaid, resolveImageSource, type PresentationDocument } from './PresentationView'
+import PresentationView, { PresentationBlock, erMermaid, mindmapMermaid, resolveImageSource, translitId, type PresentationDocument } from './PresentationView'
 
 const sample: PresentationDocument = {
   version: '1.0',
@@ -193,6 +193,68 @@ describe('PresentationView', () => {
     expect(source!.split('\n')[1]).toBe('  root((a b))')
     expect(source).toContain('      (ok)')
   })
+
+describe('translitId', () => {
+  it('transliterates cyrillic into readable latin identifiers', () => {
+    expect(translitId('наименование', 'field')).toBe('naimenovanie')
+    expect(translitId('Поток ценности', 'entity')).toBe('Potok_tsennosti')
+    expect(translitId('Обязательство', 'entity')).toBe('Obyazatelstvo')
+    expect(translitId('хищный щегол', 'x')).toBe('khishchnyy_shchegol')
+    expect(translitId('объект-субъект', 'x')).toBe('obekt_subekt')
+  })
+
+  it('keeps ascii word chars, folds the rest to _, requires a letter first', () => {
+    expect(translitId('LLM-агент v2.0', 'x')).toBe('LLM_agent_v2_0')
+    expect(translitId('2 фасада', 'x')).toBe('x2_fasada')
+    expect(translitId('___', 'relates_to')).toBe('relates_to')
+    expect(translitId('', 'field')).toBe('field')
+    expect(translitId('   ', 'entity')).toBe('entity')
+  })
+})
+
+describe('erMermaid', () => {
+  it('transliterates names, quotes labels verbatim, keeps cyrillic in the comment column', () => {
+    const source = erMermaid({
+      entities: [
+        { name: 'ValueStream', attributes: ['UUID id', 'наименование потока string'] },
+        { name: 'Обязательство', attributes: ['срок исполнения date', 'статус string'] },
+      ],
+      relations: [
+        { from: 'ValueStream', to: 'Обязательство', label: 'порождает', cardinality: '1:N' },
+        { from: 'Поток ценности', to: 'Обязательство' },
+      ],
+    })
+    expect(source).toContain('    ValueStream {')
+    expect(source).toContain('        UUID id')
+    expect(source).toContain('        naimenovanie potoka_string "наименование потока string"')
+    expect(source).toContain('    Obyazatelstvo {')
+    expect(source).toContain('        srok ispolneniya_date "срок исполнения date"')
+    expect(source).toContain('        status string "статус string"')
+    expect(source).toContain('    ValueStream ||--o{ Obyazatelstvo : "порождает"')
+    expect(source).toContain('    Potok_tsennosti ||--o{ Obyazatelstvo : "relates_to"')
+    expect(source).not.toMatch(/_{3,}/)
+  })
+
+  it('skips entities without a name or attributes', () => {
+    expect(erMermaid({
+      entities: [
+        { name: '', attributes: ['a b'] },
+        { name: 'Empty', attributes: [] },
+        { name: 'Ok', attributes: ['int id'] },
+      ],
+      relations: [],
+    })).toBe('erDiagram\n    Ok {\n        int id\n    }')
+  })
+
+  it('strips quotes and folds newlines in labels and comments', () => {
+    const source = erMermaid({
+      entities: [{ name: 'A', attributes: ['int "id"'] }],
+      relations: [{ from: 'A', to: 'A', label: 'самосвязь \n вторая строка' }],
+    })
+    expect(source).toContain('        int id "int \'id\'"')
+    expect(source).toContain('    A ||--o{ A : "самосвязь вторая строка"')
+  })
+})
 
   it('renders a button as a static chip when no interaction handler is given', () => {
     const out = renderToStaticMarkup(

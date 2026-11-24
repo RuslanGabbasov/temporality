@@ -962,32 +962,81 @@ const CARDINALITY_MAP: Record<string, string> = {
   '0:N': '|o--o{',
 }
 
-function erMermaid(data: ERIR): string | undefined {
+// RU→Latin letter pairs for identifiers (ГОСТ-style: х→kh, щ→shch, hard/soft
+// signs dropped). Mermaid's ER/class grammars only lex ASCII word chars, so a
+// Cyrillic attribute or entity name has to become Latin — but TRANSLIT, not a
+// mask: `naimenovanie` still reads to a Russian speaker, while the old
+// `[^A-Za-z0-9_] → '_'` collapsed every such name into unreadable `____` runs
+// (and identifier-leading underscores then failed the render outright).
+const CYR_TRANSLIT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y',
+  к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f',
+  х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+}
+
+/** ASCII identifier from arbitrary text: Cyrillic transliterates, ASCII word
+ *  chars survive, everything else folds to `_` (runs trimmed); digits-leading
+ *  ids get an `x` prefix — mermaid's ER/class lexers demand a letter first.
+ *  Empty input or nothing salvageable returns the fallback. Exported for
+ *  tests. */
+export function translitId(value: unknown, fallback: string): string {
+  const raw = text(value).trim()
+  if (!raw) return fallback
+  let out = ''
+  for (const ch of raw) {
+    const lower = ch.toLowerCase()
+    const rep = CYR_TRANSLIT[lower]
+    if (rep !== undefined) out += ch === lower ? rep : rep.charAt(0).toUpperCase() + rep.slice(1)
+    else if (/[a-zA-Z0-9_]/.test(ch)) out += ch
+    else out += '_'
+  }
+  out = out.replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '')
+  if (!out) return fallback
+  if (!/^[A-Za-z]/.test(out)) out = `x${out}`
+  return out
+}
+
+/** Quote-free single-line label text for mermaid ER attribute comments and
+ *  relationship labels — the quoted forms accept arbitrary unicode, but only
+ *  after the double quotes and newlines are gone. */
+function quotedLabel(value: unknown): string {
+  return text(value).replace(/"/g, "'").replace(/\s+/g, ' ').trim()
+}
+
+export function erMermaid(data: ERIR): string | undefined {
   const entities = Array.isArray(data.entities) ? data.entities : []
   const relations = Array.isArray(data.relations) ? data.relations : []
   if (entities.length === 0) return undefined
-  const sanitize = (name: unknown) => text(name).replace(/[^A-Za-z0-9_]/g, '_')
   const lines = ['erDiagram']
   for (const entity of entities) {
-    const name = sanitize(entity.name)
+    if (!text(entity.name).trim()) continue
     const attrs = (entity.attributes ?? []).slice(0, 8)
-    if (!name || attrs.length === 0) continue
-    lines.push(`    ${name} {`)
+    if (attrs.length === 0) continue
+    lines.push(`    ${translitId(entity.name, 'entity')} {`)
     for (const attr of attrs) {
-      const parts = text(attr).split(/\s+/)
-      const type = (parts[0] || 'string').replace(/[^A-Za-z0-9_]/g, '_')
-      const rest = parts.slice(1).join('_').replace(/[^A-Za-z0-9_]/g, '_') || 'field'
-      lines.push(`        ${type} ${rest}`)
+      const parts = text(attr).split(/\s+/).filter(Boolean)
+      const type = translitId(parts[0], 'string')
+      const name = translitId(parts.slice(1).join('_'), 'field')
+      // The comment column keeps the model's original wording — the type/name
+      // pair is translit, the Russian description stays visible in the box.
+      // Pure ASCII attributes round-trip unchanged, no comment noise.
+      const comment = quotedLabel(attr)
+      const plain = /^[\w\s]+$/.test(text(attr))
+      const tail = !plain && comment ? ` "${comment.slice(0, 60)}"` : ''
+      lines.push(`        ${type} ${name}${tail}`)
     }
     lines.push('    }')
   }
   for (const relation of relations) {
-    const from = sanitize(relation.from)
-    const to = sanitize(relation.to)
-    if (!from || !to) continue
+    if (!text(relation.from).trim() || !text(relation.to).trim()) continue
+    const from = translitId(relation.from, 'entity')
+    const to = translitId(relation.to, 'entity')
     const crow = CARDINALITY_MAP[text(relation.cardinality)] ?? '||--o{'
-    const label = (text(relation.label).replace(/[^A-Za-z0-9_]/g, '_') || 'relates_to').slice(0, 40)
-    lines.push(`    ${from} ${crow} ${to} : ${label}`)
+    // Quoted labels carry Cyrillic/spaces/punctuation verbatim (mermaid 11
+    // strips the quotes for display); the old unquoted masked form destroyed
+    // them into `________`.
+    const label = quotedLabel(relation.label).slice(0, 60) || 'relates_to'
+    lines.push(`    ${from} ${crow} ${to} : "${label}"`)
   }
   return lines.length > 1 ? lines.join('\n') : undefined
 }
@@ -1017,11 +1066,10 @@ function classMermaid(data: ClassIR): string | undefined {
   const classes = Array.isArray(data.classes) ? data.classes : []
   const relations = Array.isArray(data.relations) ? data.relations : []
   if (classes.length === 0) return undefined
-  const sanitize = (name: unknown) => text(name).replace(/[^A-Za-z0-9_]/g, '_')
   const lines = ['classDiagram']
   for (const cls of classes) {
-    const name = sanitize(cls.name)
-    if (!name) continue
+    if (!text(cls.name).trim()) continue
+    const name = translitId(cls.name, 'class')
     const attrs = (cls.attributes ?? []).slice(0, 10)
     const methods = (cls.methods ?? []).slice(0, 10)
     if (attrs.length === 0 && methods.length === 0) {
@@ -1034,12 +1082,12 @@ function classMermaid(data: ClassIR): string | undefined {
     lines.push('    }')
   }
   for (const relation of relations) {
-    const from = sanitize(relation.from)
-    const to = sanitize(relation.to)
-    if (!from || !to) continue
+    if (!text(relation.from).trim() || !text(relation.to).trim()) continue
+    const from = translitId(relation.from, 'class')
+    const to = translitId(relation.to, 'class')
     const arrow = CLASS_RELATION_MAP[text(relation.kind)] ?? '-->'
     const label = text(relation.label)
-    lines.push(label ? `    ${from} ${arrow} ${to} : ${text(label).slice(0, 40)}` : `    ${from} ${arrow} ${to}`)
+    lines.push(label ? `    ${from} ${arrow} ${to} : ${quotedLabel(label).slice(0, 40)}` : `    ${from} ${arrow} ${to}`)
   }
   return lines.length > 1 ? lines.join('\n') : undefined
 }
