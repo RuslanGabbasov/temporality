@@ -216,6 +216,13 @@ td, th { border: 1px solid #d7dce1; padding: .3rem .5rem; text-align: left; }
 </style></head><body><main id="app"><p>…</p></main>
 <script>
 const TOKEN = ` + string(tokenJS) + `;
+// The page itself can be reached through whatever prefix fronts the kernel
+// (nginx forwards /kernel-api intact, the vite dev proxy the same, direct
+// :8090 access none) — derive the API base from the page's own path instead
+// of hard-coding root-relative /forms/... which only resolves behind the
+// same prefix and otherwise lands on some other service's routes (a bearer
+// 401 from the SPA/infra, not this form).
+const BASE = location.pathname.replace(/\/forms\/[^/]*$/, '');
 const app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const note = (cls, text) => { app.innerHTML = '<div class="note ' + cls + '">' + esc(text) + '</div><p style="font-size:.8rem;color:#7a848f">' + esc('You can close this tab.') + '</p>'; };
@@ -250,7 +257,7 @@ function fieldHTML(name, f, required) {
   return '<div class="field"><label>' + label + '</label><input type="' + itype + '"' + extra + ' data-f="' + esc(name) + '" data-t="' + (isNumber(f) ? 'num' : 'str') + '"' + (required ? ' data-req="1"' : '') + '/>' + desc + ph + '</div>';
 }
 function isNumber(f) { return f.type === 'number' || f.type === 'integer'; }
-fetch('/forms/' + encodeURIComponent(TOKEN) + '/data').then(async r => {
+fetch(BASE + '/forms/' + encodeURIComponent(TOKEN) + '/data').then(async r => {
   const body = await r.text();
   if (r.status !== 200) { note('bad', errText(r.status, body)); return; }
   const q = JSON.parse(body);
@@ -290,7 +297,7 @@ fetch('/forms/' + encodeURIComponent(TOKEN) + '/data').then(async r => {
     });
     const btn = document.getElementById('send');
     btn.disabled = true;
-    const resp = await fetch('/forms/' + encodeURIComponent(TOKEN) + '/answer', {
+    const resp = await fetch(BASE + '/forms/' + encodeURIComponent(TOKEN) + '/answer', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values })
     });
     const body = await resp.text();
