@@ -227,28 +227,47 @@ func MonitorTurnCase(ctx context.Context, model *llm.Client, in MonitorTurnInput
 	})
 }
 
-// ── B1: knowledge contradiction triage ──────────────────────────────────
+// ── B1: knowledge contradiction triage ──────────────────────────────
 
-// ConflictPredictionVerdict is the judge's answer to „do these two
-// propositions actually contradict each other“. Vector closeness only
-// nominates a candidate; this verdict decides whether a human ever sees it.
+// ConflictResolution is the closed action vocabulary the conflict judge may
+// return. "conflict" is the only outcome a human must see — the other three
+// are mechanical and the kernel's conflict sweep applies them without
+// bothering anyone (docs/supervisor-model.md §3, C5).
+const (
+	ConflictResolutionConflict  = "conflict"   // genuine contradiction — a human decides which side wins
+	ConflictResolutionGeneralize = "generalize" // two narrow wordings of one fact — replace both with one broader statement
+	ConflictResolutionOutdated  = "outdated"   // the existing statement is an older version — retire it in favor of the new one
+	ConflictResolutionKeepBoth  = "keep_both"  // valid in different scopes/aspects — both stay
+)
+
+// ConflictPredictionVerdict is the judge's answer to „what is the
+// relationship between these two propositions“. Vector closeness only
+// nominates a candidate; this verdict decides whether a human ever sees it
+// (resolution=conflict) or the sweep resolves it mechanically.
 type ConflictPredictionVerdict struct {
-	Conflict    bool   `json:"conflict"`
-	Explanation string `json:"explanation"`
+	Resolution              string `json:"resolution"`
+	GeneralizedProposition  string `json:"generalized_proposition"`
+	Explanation             string `json:"explanation"`
 }
 
-// ConflictPredictionPrompt asks the judge to separate real contradictions
-// (one asserts what the other denies, or they prescribe incompatible
-// actions) from merely-related statements — cosine closeness over-nominates.
+// ConflictPredictionPrompt asks the judge to classify a close-in-embedding
+// pair. Merely overlapping topics over-nominate "conflict": most pairs are
+// one fact phrased twice (generalize/outdated) or two facets of one subject
+// (keep_both) — exactly the cases a human should never have to triage.
 func ConflictPredictionPrompt(newProp, oldProp string) string {
-	return fmt.Sprintf(`Two knowledge statements look similar in embedding space. Decide whether they genuinely contradict each other: one asserts what the other denies, or following both would prescribe incompatible actions. Merely overlapping topics, different scopes or different aspects of one subject are NOT a contradiction.
+	return fmt.Sprintf(`Two knowledge statements look similar in embedding space. Classify their relationship:
+- "conflict": they genuinely contradict each other — one asserts what the other denies, or following both prescribes incompatible actions. Only a human should decide which side wins.
+- "generalize": both are narrow wordings of the same underlying fact; one broader statement covers both. Provide that statement in generalized_proposition.
+- "outdated": the existing statement is simply an older version of the same fact; the new one supersedes it.
+- "keep_both": related but valid in different scopes or aspects — both should stay.
+Merely overlapping topics, different aspects of one subject or rewordings are NOT a conflict.
 
 NEW: %s
 
 EXISTING: %s
 
 Respond with one JSON object:
-{"conflict": <true|false>, "explanation": "<1-2 sentences: what exactly contradicts, or why both can coexist>"}`, newProp, oldProp)
+{"resolution": "<conflict|generalize|outdated|keep_both>", "generalized_proposition": "<the merged statement, only when resolution is generalize, else empty>", "explanation": "<1-2 sentences: what the relationship is, or what exactly contradicts>"}`, newProp, oldProp)
 }
 
 // ConflictPredictionCase runs the judge over one candidate conflict pair.
@@ -265,6 +284,15 @@ func ConflictPredictionCase(ctx context.Context, model *llm.Client, newProp, old
 		var v ConflictPredictionVerdict
 		if err := parseCaseReply(content, &v); err != nil {
 			return v, err
+		}
+		v.Resolution = strings.TrimSpace(strings.ToLower(v.Resolution))
+		switch v.Resolution {
+		case ConflictResolutionConflict, ConflictResolutionGeneralize, ConflictResolutionOutdated, ConflictResolutionKeepBoth:
+		default:
+			return v, fmt.Errorf("model returned an unknown resolution %q", v.Resolution)
+		}
+		if v.Resolution == ConflictResolutionGeneralize && strings.TrimSpace(v.GeneralizedProposition) == "" {
+			return v, fmt.Errorf("model returned generalize without generalized_proposition")
 		}
 		if strings.TrimSpace(v.Explanation) == "" {
 			return v, fmt.Errorf("model returned an empty explanation")

@@ -124,3 +124,62 @@ func TestSkillCandidateCaseApproval(t *testing.T) {
 		t.Fatalf("verdict = %#v", verdict)
 	}
 }
+
+// The C5 judge now returns a closed RESOLUTION vocabulary, not a boolean:
+// only "conflict" reaches a human, the mechanical outcomes are applied by
+// the kernel's sweep.
+func TestConflictPredictionPromptMentionsVocabulary(t *testing.T) {
+	prompt := ConflictPredictionPrompt("новая формулировка", "старая формулировка")
+	for _, want := range []string{"новая формулировка", "старая формулировка", "conflict", "generalize", "outdated", "keep_both", "generalized_proposition"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}
+
+func TestConflictPredictionCaseParsesResolutions(t *testing.T) {
+	replies := map[string]string{
+		ConflictResolutionConflict:  `{"resolution": "conflict", "explanation": "одно отрицает другое"}`,
+		ConflictResolutionKeepBoth:  `{"resolution": "keep_both", "explanation": "разные scope"}`,
+		ConflictResolutionOutdated:  `{"resolution": "outdated", "explanation": "новая версия того же факта"}`,
+		ConflictResolutionGeneralize: `{"resolution": "generalize", "generalized_proposition": "деплой требует подписи QA", "explanation": "две узкие формулировки одного факта"}`,
+	}
+	for want, reply := range replies {
+		model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},
+			})
+		}))
+		verdict, err := ConflictPredictionCase(context.Background(), llm.New(llm.Config{BaseURL: model.URL, Model: "m"}), "новая", "старая")
+		model.Close()
+		if err != nil {
+			t.Fatalf("resolution %q: %v", want, err)
+		}
+		if verdict.Resolution != want {
+			t.Errorf("resolution = %q, want %q", verdict.Resolution, want)
+		}
+		if want == ConflictResolutionGeneralize && verdict.GeneralizedProposition != "деплой требует подписи QA" {
+			t.Errorf("generalized proposition = %q", verdict.GeneralizedProposition)
+		}
+	}
+}
+
+// Unknown resolutions and proposition-less generalize fail loudly — the
+// callers fail open (publish without a resolution) instead of guessing.
+func TestConflictPredictionCaseRejectsUnsafeReplies(t *testing.T) {
+	for _, reply := range []string{
+		`{"resolution": "nuke", "explanation": "x"}`,
+		`{"resolution": "generalize", "generalized_proposition": "", "explanation": "x"}`,
+		`{"resolution": "conflict"}`,
+	} {
+		model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},
+			})
+		}))
+		if _, err := ConflictPredictionCase(context.Background(), llm.New(llm.Config{BaseURL: model.URL, Model: "m"}), "новая", "старая"); err == nil {
+			t.Errorf("reply %s must fail", reply)
+		}
+		model.Close()
+	}
+}

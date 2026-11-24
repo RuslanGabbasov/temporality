@@ -163,13 +163,19 @@ func predictKnowledgeConflicts(ctx context.Context, log *slog.Logger, activities
 			}
 			newMeta := metaByKnowledge[id]
 			oldMeta := metaByKnowledge[neighbor.ID]
+			resolution := ""
+			generalized := ""
 			if client != nil {
 				verdict, vErr := agent.ConflictPredictionCase(ctx, client, newMeta.Proposition, oldMeta.Proposition)
 				if vErr != nil {
 					log.Warn("conflict prediction: judge", "pair", id+"~"+neighbor.ID, "error", vErr.Error())
-				} else if !verdict.Conflict {
-					log.Info("conflict prediction: judge rejected a look-alike pair", "pair", id+"~"+neighbor.ID, "explanation", verdict.Explanation)
-					break // this item's best neighbor is not a conflict — next item
+					// fail-open: publish without a resolution — the sweep re-judges later
+				} else {
+					resolution = verdict.Resolution
+					generalized = strings.TrimSpace(verdict.GeneralizedProposition)
+					if resolution == agent.ConflictResolutionConflict {
+						log.Info("conflict prediction: judge reserved a genuine conflict for a human", "pair", id+"~"+neighbor.ID, "explanation", verdict.Explanation)
+					}
 				}
 			}
 			subject := id + "~" + neighbor.ID
@@ -179,11 +185,32 @@ func predictKnowledgeConflicts(ctx context.Context, log *slog.Logger, activities
 			if project == "" {
 				project = newMeta.Project
 			}
-			if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseKnowledgeConflict, subject, project, summary, "Сопоставьте формулировки: схлопнуть, инвалидировать устаревшее или оставить оба в разных scope.", map[string]any{
+			// Empty projects are OMITTED, not published: an empty-string project
+			// in the payload once fell through the queue's `??` into invalidate
+			// calls and 422'd them; the sweep reads the case project as fallback.
+			payload := map[string]any{
 				"knowledge_id": id, "neighbor_id": neighbor.ID, "score": neighbor.Score, "model": model,
 				"new_proposition": newMeta.Proposition, "old_proposition": oldMeta.Proposition,
-				"old_project": oldMeta.Project, "new_project": newMeta.Project,
-			}); err != nil {
+			}
+			if oldMeta.Project != "" {
+				payload["old_project"] = oldMeta.Project
+			}
+			if newMeta.Project != "" {
+				payload["new_project"] = newMeta.Project
+			}
+			recommendation := "Сопоставьте формулировки: схлопнуть, инвалидировать устаревшее или оставить оба в разных scope."
+			if resolution != "" {
+				payload["resolution"] = resolution
+			}
+			if resolution != "" && resolution != agent.ConflictResolutionConflict {
+				// Mechanical outcomes self-heal: the sweep applies them without a
+				// human (the case is the audit trail, the queue shows it briefly).
+				recommendation = "Механическое разрешение судьи — будет применено автоматически (автозачистка конфликтов)."
+				if resolution == agent.ConflictResolutionGeneralize {
+					payload["generalized_proposition"] = generalized
+				}
+			}
+			if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseKnowledgeConflict, subject, project, summary, recommendation, payload); err != nil {
 				log.Warn("conflict prediction: publish", "error", err.Error())
 			}
 			break // one conflict verdict per fresh item per pass

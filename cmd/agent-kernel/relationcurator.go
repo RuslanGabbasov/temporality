@@ -419,7 +419,9 @@ func relationConflictJudgeAdapter(ctx context.Context, clientFn func(ctx context
 		if err != nil {
 			return false, "", err
 		}
-		return verdict.Conflict, verdict.Explanation, nil
+		// The curator only cares about the binary question; the sweep owns the
+		// mechanical resolutions (generalize/outdated/keep_both) of this verdict.
+		return verdict.Resolution == agent.ConflictResolutionConflict, verdict.Explanation, nil
 	}
 }
 

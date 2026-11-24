@@ -46,6 +46,10 @@ type supervisorCaseStore interface {
 	ListAgentVersions(ctx context.Context, agentID string) ([]workspace.AgentVersion, error)
 	ListAgentVersionMetrics(ctx context.Context, agentID string, version int, since time.Time) ([]workspace.AgentVersionMetrics, error)
 	ListRunsByAgent(ctx context.Context, agentID string, limit int) ([]workspace.Run, error)
+	// The conflict sweep (C5 auto-resolve) reads the open queue and closes
+	// mechanically-resolved cases — both are workspace.Store methods.
+	ListSupervisorQueue(ctx context.Context, filter workspace.SupervisorQueueFilter) (workspace.SupervisorQueue, error)
+	DecideSupervisorCase(ctx context.Context, caseKey, decision, reviewer string) (workspace.SupervisorCase, error)
 }
 
 func supervisorCasesEnabled() bool {
@@ -80,6 +84,7 @@ func runSupervisorCasesPass(ctx context.Context, log *slog.Logger, activities *a
 		client = nil // cases degrade to their deterministic fallbacks
 	}
 	triageKnowledgeCases(ctx, log, activities, observationURL, journalToken, client, done)
+	sweepKnowledgeConflicts(ctx, log, activities, ws, observationURL, journalToken, client)
 	proposeContractsFromClusters(ctx, log, activities, ws, observationURL, journalToken, client, done)
 	mineSkillCandidates(ctx, log, activities, ws, observationURL, journalToken, client, done)
 	detectUserFriction(ctx, log, activities, observationURL, journalToken, client, done)
