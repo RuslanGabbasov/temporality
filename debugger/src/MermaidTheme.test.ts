@@ -19,6 +19,20 @@ describe('mermaidTheme', () => {
     // ER attribute rows carry explicit tints (never the derived pastels).
     expect(themeVariables.attributeBackgroundColorEven).toBeTruthy()
     expect(themeVariables.attributeBackgroundColorOdd).toBeTruthy()
+    // The neo-look ER renderer reads rowEven/rowOdd (not the legacy vars
+    // above): unset, the base theme derives rowOdd = lighten(primaryColor,
+    // 75) — the «white text on light blue» dark-theme regression.
+    expect(themeVariables.rowOdd).toMatch(/^rgba\(/)
+    expect(themeVariables.rowEven).toMatch(/^rgba\(/)
+  })
+
+  it('keeps ER attribute rows inside the dark surface hierarchy', () => {
+    // Same contract in the dark theme: both stripes must stay translucent
+    // tints over the elevated box — never mermaid's derived pastel.
+    document.documentElement.setAttribute('data-theme', 'dark')
+    const { themeVariables } = mermaidTheme()
+    expect(themeVariables.rowOdd).toMatch(/^rgba\(255,255,255,/)
+    expect(themeVariables.rowEven).toMatch(/^rgba\(255,255,255,/)
   })
 
   it('follows the dark toggle', () => {

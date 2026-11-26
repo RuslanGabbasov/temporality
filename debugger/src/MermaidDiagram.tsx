@@ -245,9 +245,17 @@ export function mermaidTheme(): { darkMode: boolean; themeVariables: Record<stri
       // ER attribute rows: mermaid derives their fill from primaryColor and
       // lands on light pastels that clash with the theme text («white on
       // light» inside entity boxes). Explicit subtle tints keep the
-      // attribute text readable in both themes.
+      // attribute text readable in both themes. The legacy stylesheet vars
+      // below are NOT enough: the neo-look renderer paints rows from
+      // rowEven/rowOdd, and the base theme derives rowOdd as
+      // lighten(primaryColor, 75) — in the dark theme a near-white pastel on
+      // the brand hue, i.e. cream text on a light-blue band («white on
+      // light-blue» incident). Translucent tints keep both row stripes inside
+      // the surface hierarchy; the divider lines carry the structure.
       attributeBackgroundColorEven: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(15,31,29,0.05)',
       attributeBackgroundColorOdd: darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(15,31,29,0.09)',
+      rowEven: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(15,31,29,0.05)',
+      rowOdd: darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(15,31,29,0.09)',
       // Branch palette for mindmap/git-graph (see the ramp above).
       git0: teal,
       gitBranchLabel0: readableOnFill(teal),
