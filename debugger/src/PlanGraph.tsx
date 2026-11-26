@@ -157,16 +157,16 @@ export function foldPlans(events: ObservationEvent[]): PlanInfo[] {
   return order.map((key) => plans.get(key)!).filter((plan) => plan.tasks.length > 0)
 }
 
-/** Fetch all plan events for a run and fold them into per-plan DAG info. */
+/** Fetch all plan events for a run and fold them into per-plan DAG info.
+ *  ONE typed query instead of nine parallel per-type scans — same arithmetic
+ *  as fetchDelegations: the 10 s live poll per mounted graph under a slow
+ *  journal multiplied into hundreds of pending requests. desc keeps the
+ *  newest slice; reverse into journal order before folding. */
 export async function fetchPlans(project: string, runId: string): Promise<PlanInfo[]> {
-  const types = ['plan.started', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.incomplete', 'plan.task.skipped', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated'] as const
-  const pages = await Promise.all(types.map((type) =>
-    observationApi.events(project, undefined, undefined, undefined, { run: runId, type, limit: 100 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
-  ))
-  // Typed pages arrive grouped by type — sort back into journal order so the
-  // fold sees statuses in the sequence they actually happened.
-  const events = pages.flatMap((page) => page.events).sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
-  return foldPlans(events)
+  const types = ['plan.started', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.incomplete', 'plan.task.skipped', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated']
+  const page = await observationApi.events(project, undefined, undefined, undefined, { run: runId, types, limit: 500, order: 'desc' })
+    .catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
+  return foldPlans([...(page.events ?? [])].reverse())
 }
 
 /** Mini status glyph of a dependency, so a pending task shows how ready its inputs are. */
@@ -441,7 +441,14 @@ export default function PlanGraph({ project, runId, agents, live = false, onOpen
   const t = useT()
   const [plans, setPlans] = useState<PlanInfo[] | null>(null)
 
-  const refresh = useCallback(() => fetchPlans(project, runId).then(setPlans).catch(() => setPlans([])), [project, runId])
+  const refreshBusy = useRef(false)
+  const refresh = useCallback(() => {
+    // In-flight guard: a 10 s tick never fires on top of a hanging batch.
+    if (refreshBusy.current) return Promise.resolve()
+    refreshBusy.current = true
+    return fetchPlans(project, runId).then(setPlans).catch(() => setPlans([]))
+      .finally(() => { refreshBusy.current = false })
+  }, [project, runId])
   const hasRunning = Boolean(plans?.some((plan) => plan.tasks.some((task) => task.status === 'running' || task.status === 'pending')))
 
   useEffect(() => {

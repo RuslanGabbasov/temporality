@@ -51,13 +51,16 @@ export function chainRunIds(rows: { id: string; parent: string | null }[], selec
 
 /** Load the knowledge lifecycle events of every run in the chain and fold
  * them together: a dispute is knowledge proposed by one role and killed by a
- * different role, so both halves must come from one merged stream. */
+ * different role, so both halves must come from one merged stream. One typed
+ * query per run instead of six parallel per-type scans — a deep chain used
+ * to open 24+ journal connections in a single burst. */
 export async function fetchChainDisputes(project: string, runIds: string[]): Promise<MisleadSignal[]> {
-  const pages = await Promise.all(runIds.flatMap((runId) => DISPUTE_EVENT_TYPES.map((type) =>
-    observationApi.events(project, undefined, undefined, undefined, { run: runId, type, limit: 100 })
-      .catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
-  )))
-  const model = foldExperience(pages.flatMap((page) => page.events))
+  const pages = await Promise.all(runIds.map((runId) =>
+    observationApi.events(project, undefined, undefined, undefined, { run: runId, types: [...DISPUTE_EVENT_TYPES], limit: 500, order: 'desc' })
+      .then((page) => [...(page.events ?? [])].reverse())
+      .catch(() => [] as ObservationEvent[])
+  ))
+  const model = foldExperience(pages.flat())
   return detectMisleads(model.rows)
 }
 

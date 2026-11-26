@@ -748,23 +748,28 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   useEffect(() => {
     if (!project) return
     let alive = true
+    let busy = false
     const load = async () => {
-      if (document.visibilityState !== 'visible') return
+      if (document.visibilityState !== 'visible' || busy) return
+      busy = true
       try {
-        const startedPage = await observationApi.events(project, undefined, undefined, undefined, { type: 'run.started', limit: 100, order: 'desc' })
-        const terminals = await Promise.all(['run.completed', 'run.failed', 'run.cancelled'].map((type) =>
-          observationApi.events(project, undefined, undefined, undefined, { type, limit: 200, order: 'desc' })
-            .catch(() => ({ events: [] as ObservationEvent[] }))))
+        // One typed query covers starts and terminals (the four parallel scans
+        // of the old version taxed the journal every 30 s from every open tab).
+        const page = await observationApi.events(project, undefined, undefined, undefined, { types: ['run.started', 'run.completed', 'run.failed', 'run.cancelled'], limit: 500, order: 'desc' })
+        const events = page.events ?? []
         const ended = new Set<string>()
-        for (const page of terminals) for (const e of page.events ?? []) ended.add(e.context?.run ?? '')
+        for (const e of events) {
+          if (e.type !== 'run.started') ended.add(e.context?.run ?? '')
+        }
         const live = new Set<string>()
-        for (const e of startedPage.events ?? []) {
+        for (const e of events) {
+          if (e.type !== 'run.started') continue
           const run = e.context?.run ?? ''
           const task = typeof e.data?.task_id === 'string' ? e.data.task_id : ''
           if (run && task && !ended.has(run)) live.add(task)
         }
         if (alive) setLiveTaskRuns((prev) => prev.size === live.size && [...live].every((id) => prev.has(id)) ? prev : live)
-      } catch { /* journal unreachable — keep the last map */ }
+      } catch { /* journal unreachable — keep the last map */ } finally { busy = false }
     }
     void load()
     const timer = window.setInterval(() => { void load() }, 30000)

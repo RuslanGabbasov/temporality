@@ -61,12 +61,12 @@ describe('fetchChainDisputes', () => {
   it('detects a dispute across two runs of the chain', async () => {
     vi.mocked(observationApi.events).mockImplementation(async (_project, _cursor, _src, _evt, filters) => {
       const run = filters?.run ?? ''
-      const type = filters?.type ?? ''
+      const types = filters?.types ?? (filters?.type ? [filters.type] : [])
       const byRun: Record<string, ObservationEvent[]> = {
         'calc/coder': [knowledgeEvent('knowledge.proposed', '2026-09-24T13:02:58Z', 'calc/coder', { knowledge_id: 'auto/k1', proposition: 'Tests pass without the fixture', kind: 'claim' })],
         'calc/reviewer': [knowledgeEvent('knowledge.disproved', '2026-09-24T13:17:43Z', 'calc/reviewer', { knowledge_id: 'auto/k1', reason: 'reviewer found the missing fixture' })],
       }
-      const events = (byRun[run] ?? []).filter((event) => event.type === type)
+      const events = (byRun[run] ?? []).filter((event) => types.includes(event.type))
       return { events, count: events.length }
     })
 
@@ -81,11 +81,11 @@ describe('fetchChainDisputes', () => {
   it('stays silent when the same role corrects itself', async () => {
     vi.mocked(observationApi.events).mockImplementation(async (_project, _cursor, _src, _evt, filters) => {
       const run = filters?.run ?? ''
-      const type = filters?.type ?? ''
+      const types = filters?.types ?? (filters?.type ? [filters.type] : [])
       const events = [
         knowledgeEvent('knowledge.proposed', '2026-09-24T13:02:58Z', 'calc/coder', { knowledge_id: 'auto/k1', proposition: 'Claim', kind: 'claim' }),
         knowledgeEvent('knowledge.corrected', '2026-09-24T13:05:43Z', 'calc/coder', { knowledge_id: 'auto/k1', replacement_id: 'auto/k2' }),
-      ].filter((event) => event.type === type && (!run || event.context?.run === run))
+      ].filter((event) => types.includes(event.type) && (!run || event.context?.run === run))
       return { events, count: events.length }
     })
 

@@ -79,16 +79,18 @@ export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[
   return order.map((id) => nodes.get(id)!)
 }
 
-/** Fetch all delegation and plan-task events for a run and fold them into node info. */
+/** Fetch all delegation and plan-task events for a run and fold them into node info.
+ *  ONE typed query instead of ten parallel per-type scans: the 10 s live poll
+ *  fires from every mounted tree (a run paused on a human form keeps its tree
+ *  polling forever), and ten concurrent journal scans per tick per tree under
+ *  a slow journal avalanched into hundreds of pending requests. desc keeps the
+ *  newest slice (statuses are the tail's business); the fold needs journal
+ *  order, so reverse before folding. */
 export async function fetchDelegations(project: string, runId: string): Promise<DelegationNodeInfo[]> {
-  const types = ['delegation.started', 'delegation.completed', 'delegation.failed', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.incomplete', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated'] as const
-  const pages = await Promise.all(types.map((type) =>
-    observationApi.events(project, undefined, undefined, undefined, { run: runId, type, limit: 100 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
-  ))
-  // The typed queries are merged by type, not by time; rework rounds only fold
-  // correctly in chronological order.
-  const merged = pages.flatMap((p) => p.events).sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at))
-  return foldDelegations(merged)
+  const types = ['delegation.started', 'delegation.completed', 'delegation.failed', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.incomplete', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated']
+  const page = await observationApi.events(project, undefined, undefined, undefined, { run: runId, types, limit: 500, order: 'desc' })
+    .catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
+  return foldDelegations([...(page.events ?? [])].reverse())
 }
 
 /**
@@ -181,12 +183,18 @@ function DelegationNode({ project, info, agents, depth, expanded, toggleNode, on
     ? ((payload.events.find((e) => e.type === 'run.completed')?.data as Record<string, any> | undefined)?.turns ?? info.turns)
     : info.turns
 
+  const loadBusy = useRef(false)
   const load = useCallback(() => {
+    // In-flight guard: a 10 s tick must not fire a new walk while the previous
+    // one is still hanging (each walk is up to 8 journal pages) — overlap is
+    // how a slow journal turned the tree into a pending-request avalanche.
+    if (loadBusy.current) return Promise.resolve()
+    loadBusy.current = true
     setLoading(true)
     return fetchChildPayload(project, info.childRunId, info.status)
       .then(setPayload)
       .catch(() => setPayload({ events: [], answer: null, status: info.status, children: [] }))
-      .finally(() => setLoading(false))
+      .finally(() => { loadBusy.current = false; setLoading(false) })
   }, [project, info.childRunId, info.status])
 
   // Load on expand; while the child is running keep polling so the trace,
@@ -329,7 +337,15 @@ export default function DelegationTree({ project, runId, agents, live = false, o
     })
   }, [])
 
-  const refresh = useCallback(() => fetchDelegations(project, runId).then(setNodes).catch(() => setNodes([])), [project, runId])
+  const refreshBusy = useRef(false)
+  const refresh = useCallback(() => {
+    // In-flight guard: skip the tick while the previous batch is in flight —
+    // ten parallel scans landing on top of ten hanging ones is the storm.
+    if (refreshBusy.current) return Promise.resolve()
+    refreshBusy.current = true
+    return fetchDelegations(project, runId).then(setNodes).catch(() => setNodes([]))
+      .finally(() => { refreshBusy.current = false })
+  }, [project, runId])
   const hasRunning = Boolean(nodes?.some((node) => node.status === 'running'))
 
   useEffect(() => {

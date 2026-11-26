@@ -98,16 +98,46 @@ export interface KnowledgeListFilters {
   cursor?: string
 }
 
-async function request<T>(path: string, init?: RequestInit, query?: Record<string, string | number | undefined>): Promise<T> {
-  const response = await fetch(apiUrl(path, query), {
-    ...init,
-    headers: { Accept: 'application/json', ...authHeaders(), ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
-  })
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '')
-    throw new Error(`${response.status} ${response.statusText}${detail ? ` — ${detail}` : ''}`)
+/** Overall deadline for one journal call: a hung GET must fail instead of
+ *  pinning its socket forever. The events endpoint had NO timeout, so a wedged
+ *  journal (or an nginx hold — proxy_read_timeout is 10m there) piled up every
+ *  poller's requests as eternally-pending fetches until the renderer died
+ *  with net::ERR_INSUFFICIENT_RESOURCES. Mirrors workspaceApi's guard;
+ *  timeoutMs raises the deadline for long walks. */
+const REQUEST_TIMEOUT_MS = 60000
+
+async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }, query?: Record<string, string | number | undefined>): Promise<T> {
+  const timeoutMs = (init as { timeoutMs?: number } | undefined)?.timeoutMs ?? REQUEST_TIMEOUT_MS
+  const deadline = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    deadline.abort()
+  }, timeoutMs)
+  // A caller-supplied signal (knowledgeEmbeddingMap) keeps working through the
+  // deadline relay.
+  const callerSignal = init?.signal
+  const relayAbort = () => deadline.abort(callerSignal?.reason)
+  if (callerSignal?.aborted) relayAbort()
+  else callerSignal?.addEventListener('abort', relayAbort, { once: true })
+  try {
+    const response = await fetch(apiUrl(path, query), {
+      ...init,
+      headers: { Accept: 'application/json', ...authHeaders(), ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
+      signal: deadline.signal,
+    })
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`${response.status} ${response.statusText}${detail ? ` — ${detail}` : ''}`)
+    }
+    return response.json() as Promise<T>
+  } catch (e) {
+    if (timedOut) throw new Error(`408 request timed out after ${Math.round(timeoutMs / 1000)}s`)
+    throw e
+  } finally {
+    clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', relayAbort)
   }
-  return response.json() as Promise<T>
 }
 
 const post = <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) })
@@ -186,7 +216,7 @@ export const observationApi = {
   // failure beats a request that hangs forever with no feedback.
   knowledgeEmbeddingMap: async (opts?: { model?: string; project?: string; limit?: number; offset?: number; since?: string; ids?: string[] }) => {
     try {
-      return await request<{ items: Array<import('./semanticMap').MapItem>; model: string; total?: number; full_total?: number; knowledge_total?: number; states?: Record<string, number>; project_errors?: string[] }>('/v1/observations/knowledge/embeddings/map', { signal: AbortSignal.timeout(120_000) }, { model: opts?.model, project: opts?.project, limit: opts?.limit, offset: opts?.offset, since: opts?.since, ids: opts?.ids?.join(',') })
+      return await request<{ items: Array<import('./semanticMap').MapItem>; model: string; total?: number; full_total?: number; knowledge_total?: number; states?: Record<string, number>; project_errors?: string[] }>('/v1/observations/knowledge/embeddings/map', { signal: AbortSignal.timeout(120_000), timeoutMs: 120_000 }, { model: opts?.model, project: opts?.project, limit: opts?.limit, offset: opts?.offset, since: opts?.since, ids: opts?.ids?.join(',') })
     } catch (e) {
       if (e instanceof DOMException && (e.name === 'AbortError' || e.name === 'TimeoutError')) {
         throw new Error('journal did not answer the map request in 120 s — the knowledge projection is likely recomputing, see the journal log')

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   TextInput,
@@ -109,18 +109,21 @@ export default function Triggers({ project }: { project: string }) {
     ? [{ id: targetProject, name: targetProject }, ...projects]
     : projects
 
+  const loadBusy = useRef(false)
   const loadDeliveries = useCallback(async () => {
     // Global delivery feed when the filter is empty — the journal scopes an
     // unfiltered query to the caller's visible projects (docs/activity-scoping.md
     // §5), so deliveries of every visible project light up.
+    // One typed query instead of three parallel scans, and a tick never fires
+    // on top of a hanging one (the 15 s poll keeps running while the journal
+    // is slow — the guard keeps it from piling up).
+    if (loadBusy.current) return
+    loadBusy.current = true
     try {
-      const kinds = ['trigger.accepted', 'trigger.rejected', 'trigger.duplicate']
       const scope = project.trim() || undefined
-      const pages = await Promise.all(kinds.map((type) => observationApi.events(scope, undefined, undefined, undefined, { type, limit: 30 }).catch(() => ({ events: [] as ObservationEvent[] }))))
-      const merged = pages.flatMap((p) => p.events ?? [])
-      merged.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))
-      setDeliveries(merged.slice(0, 20))
-    } catch { setDeliveries([]) }
+      const page = await observationApi.events(scope, undefined, undefined, undefined, { types: ['trigger.accepted', 'trigger.rejected', 'trigger.duplicate'], limit: 100, order: 'desc' })
+      setDeliveries((page.events ?? []).slice(0, 20))
+    } catch { setDeliveries([]) } finally { loadBusy.current = false }
   }, [project])
 
   const load = useCallback(async () => {

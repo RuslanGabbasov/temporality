@@ -290,18 +290,19 @@ export default function Teams({ project }: { project: string }) {
     setVersions([])
     setMetrics(null)
     try {
-      const [versionData, startedPage, completedPage, failedPage, cancelledPage, metricsData] = await Promise.all([
+      // One typed query for all four lifecycle kinds instead of four parallel
+      // unscoped 500-row scans; the per-kind slices keep the fold's contract.
+      const [versionData, lifecyclePage, metricsData] = await Promise.all([
         workspaceApi.listTeamVersions(team.id).catch(() => ({ versions: [] as TeamVersion[] })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.started', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.completed', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.failed', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.cancelled', limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
+        observationApi.events(undefined, undefined, undefined, undefined, { types: ['team.started', 'team.completed', 'team.failed', 'run.cancelled'], limit: 500, order: 'desc' }).catch(() => ({ events: [] as ObservationEvent[] })),
         // Telemetry is project-scoped; the current project selection is the
         // honest default (teams usually run where you work with them).
         project.trim() ? workspaceApi.teamMetrics(team.id, project).catch(() => null) : Promise.resolve(null),
       ])
+      const lifecycle = lifecyclePage.events ?? []
+      const ofKind = (type: string) => lifecycle.filter((e) => e.type === type)
       setVersions(versionData.versions ?? [])
-      setRuns(teamRunsFromEvents(team.id, startedPage.events, completedPage.events, failedPage.events, cancelledPage.events))
+      setRuns(teamRunsFromEvents(team.id, ofKind('team.started'), ofKind('team.completed'), ofKind('team.failed'), ofKind('run.cancelled')))
       setMetrics(metricsData)
     } catch { /* per-team panels degrade to empty, the main list shows errors */ }
   }, [project])

@@ -28,6 +28,7 @@ import UserFactsDialog from './UserFactsDialog'
 import { FloatingComboBox } from './FloatingComboBox'
 import AppModal from './Modal'
 import { workspaceApi, type OrgUnit } from './workspaceApi'
+import { observationApi, type ObservationEvent } from './observationApi'
 import { flattenUnits } from './orgUnits'
 
 const KERNEL_API = '/kernel-api'
@@ -304,19 +305,23 @@ export default function Layout({ children, activePage }: LayoutProps) {
 
   useEffect(() => {
     if (!authToken()) return
+    // Busy guard: one poll in flight at a time — a hung batch must not stack
+    // with the next tick's (the observation timeout below bounds each batch).
+    let polling = false
     const poll = async () => {
+      if (polling) return
+      polling = true
       try {
         // Count unresolved approval requests and open questions in this project.
         // ONE journal query with an any-of types filter (the old version fired
         // 6-8 separate scans per poll — every open tab, every 30 seconds).
+        // Through observationApi so each call carries the client deadline —
+        // raw fetch used to pin the poll's sockets forever on a slow journal.
         const collectOpen = async (types: string[]): Promise<string[]> => {
           const ids: string[] = []
-          const resp = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&types=${types.join(',')}&limit=200`, { headers: { ...authHeaders() } })
-          if (resp.ok) {
-            const data = await resp.json()
-            for (const ev of (data.events ?? []) as { event_id?: string; type?: string; data?: { operation_id?: string } }[]) {
-              if (ev.data?.operation_id) ids.push(ev.data.operation_id)
-            }
+          const page = await observationApi.events(project || undefined, undefined, undefined, undefined, { types, limit: 200 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
+          for (const ev of page.events ?? []) {
+            if (typeof ev.data?.operation_id === 'string') ids.push(ev.data.operation_id)
           }
           return ids
         }
@@ -354,7 +359,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
           const inbox = await workspaceApi.artifactInbox()
           setArtifactInboxCount((inbox.entries ?? []).length)
         } catch { setArtifactInboxCount(0) }
-      } catch { /* ignore */ }
+      } catch { /* ignore */ } finally { polling = false }
     }
     void poll()
     const timer = window.setInterval(poll, 30000)
