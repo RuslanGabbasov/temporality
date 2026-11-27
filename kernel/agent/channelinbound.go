@@ -37,6 +37,9 @@ type InboundMessage struct {
 	// ReplyTo links the message to a previous one when the channel carries
 	// threading (slack/teams/mattermost threads, matrix replies).
 	ReplyTo string
+	// SourceThreadID preserves the transport thread anchor separately from a
+	// reply's exact target message ID.
+	SourceThreadID string
 	// Encrypted marks a message whose payload the transport cannot read
 	// (matrix E2EE). It answers nothing and starts nothing: the intake
 	// pipeline records and refuses it loudly so an encrypted room cannot
@@ -77,11 +80,14 @@ type PendingAsk struct {
 	UserID    string // resolved recipient: the chat owner the question was delivered to
 	// ThreadRef is the conversation thread of the delivered question on
 	// thread-capable transports (slack ts, docs/channels.md §9): a reply with
-	// ReplyTo == ThreadRef matches this ask exactly, before the chat+oldest
+	// ReplyTo == ThreadRef matches this ask exactly, before the chat+latest
 	// fallback. Empty on non-threaded channels and asks whose thread is not
 	// yet pinned — a first threaded reply backfills it.
 	ThreadRef string
-	CreatedAt time.Time
+	// SourceMessageRef addresses the exact posted question when the transport
+	// exposes it separately from the thread root.
+	SourceMessageRef string
+	CreatedAt        time.Time
 }
 
 // UserChats maps a workspace user to their enabled chat addresses of one
@@ -172,13 +178,15 @@ const channelReplySkew = 2 * time.Minute
 // channelCancelBodies decline the question instead of answering it.
 var channelCancelBodies = map[string]bool{"cancel": true, "отмена": true, "cancelled": true}
 
-// MatchChannelReplies maps messages to the asks they answer. A threaded
-// message (ReplyTo set) first tries the ask whose ThreadRef equals ReplyTo —
-// an exact conversation hit; without one it falls back to the chat+oldest
-// rule below, and a first threaded answer backfills the ask's ThreadRef so
-// the rest of the conversation threads exactly. The fallback rule: a message
-// answers the oldest still-unmatched ask whose recipient owns an enabled
-// chat of that channel for the message's chat id. The channel account's own
+// MatchChannelReplies maps messages to the asks they answer. A message reply
+// (ReplyTo set) first tries the ask whose ThreadRef equals ReplyTo — an exact
+// message/thread hit; without one it falls back to the chat+latest rule below,
+// and a first threaded answer backfills the ask's ThreadRef so the rest of
+// the conversation threads exactly. The fallback rule: a message answers the
+// latest still-unmatched ask whose recipient owns an enabled chat of that
+// channel for the message's chat id. This mirrors messenger behavior: a reply
+// targets the referenced message, while a plain message continues the most
+// recent pending exchange. The channel account's own
 // messages never match — they are the questions themselves. Messages older
 // than the ask (beyond clock skew) never match, so replayed history cannot
 // answer questions asked before it.
@@ -194,15 +202,15 @@ func MatchChannelReplies(messages []InboundMessage, asks []PendingAsk, users []U
 			set[chat] = true
 		}
 	}
-	// Eligible asks oldest-first: the first reply in a chat answers the oldest
-	// question the user saw there.
+	// Eligible asks newest-first: absent an explicit reply target, a message
+	// continues the latest pending exchange visible in that chat.
 	open := make([]PendingAsk, 0, len(asks))
 	for _, ask := range asks {
 		if ask.UserID != "" && len(chatsByUser[ask.UserID]) > 0 {
 			open = append(open, ask)
 		}
 	}
-	sort.SliceStable(open, func(i, j int) bool { return open[i].CreatedAt.Before(open[j].CreatedAt) })
+	sort.SliceStable(open, func(i, j int) bool { return open[i].CreatedAt.After(open[j].CreatedAt) })
 	answered := make(map[string]bool, len(open))
 	replies := []ChannelReply{}
 	match := func(message InboundMessage, index int) {
@@ -234,12 +242,12 @@ func MatchChannelReplies(messages []InboundMessage, asks []PendingAsk, users []U
 			continue
 		}
 		if message.ReplyTo != "" {
-			// Exact thread hit first (docs/channels.md §9): the reply names the
+			// Exact message/thread hit first: the reply names the
 			// conversation, the ask owns it — no age or chat arbitration needed
 			// beyond the sanity checks above.
 			matched := false
 			for i := range open {
-				if answered[open[i].RequestID] || open[i].ThreadRef != message.ReplyTo {
+				if answered[open[i].RequestID] || (open[i].ThreadRef != message.ReplyTo && open[i].SourceMessageRef != message.ReplyTo) {
 					continue
 				}
 				if !eligible(message, open[i]) {

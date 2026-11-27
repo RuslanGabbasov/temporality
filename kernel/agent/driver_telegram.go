@@ -42,6 +42,7 @@ func (telegramDriver) Spec() ChannelSpec {
 		Capabilities: ChannelCapabilities{
 			Text:        true,
 			TwoWay:      true,
+			Threads:     true,
 			FilesOut:    true,
 			FilesIn:     true,
 			Interactive: true,
@@ -108,19 +109,22 @@ func telegramParseRejected(status int, body string) bool {
 // telegramSendOne posts one text payload (parse_mode=HTML) and degrades to
 // plain text when the parser rejects the markup. Returns the posted
 // message's id when the response carries one.
-func telegramSendOne(ctx context.Context, client *http.Client, settings map[string]string, chatID string, text string, markup map[string]any) (string, error) {
+func telegramSendOne(ctx context.Context, client *http.Client, settings map[string]string, chatID string, text string, markup map[string]any, replyTo string) (string, error) {
 	endpoint, err := telegramEndpoint(settings, "sendMessage")
 	if err != nil {
 		return "", err
 	}
 	payload := map[string]any{
-		"chat_id":               chatID,
-		"text":                  text,
-		"link_preview_options":  map[string]any{"is_disabled": true},
-		"parse_mode":            "HTML",
+		"chat_id":              chatID,
+		"text":                 text,
+		"link_preview_options": map[string]any{"is_disabled": true},
+		"parse_mode":           "HTML",
 	}
 	if markup != nil {
 		payload["reply_markup"] = markup
+	}
+	if replyID, parseErr := strconv.ParseInt(strings.TrimSpace(replyTo), 10, 64); parseErr == nil && replyID > 0 {
+		payload["reply_parameters"] = map[string]any{"message_id": replyID, "allow_sending_without_reply": true}
 	}
 	body, status, err := postJSON(ctx, client, http.MethodPost, endpoint, payload, nil)
 	if err != nil {
@@ -185,16 +189,24 @@ func telegramMessageID(body string) string {
 // across messages when the body exceeds the 4096-character limit; the
 // interactive markup rides the first chunk only.
 func (telegramDriver) SendText(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) error {
+	_, err := (telegramDriver{}).SendTextThreaded(ctx, client, settings, address, msg)
+	return err
+}
+
+// SendTextThreaded returns the exact posted message id. Telegram replies name
+// that message id, so it is the interaction reference even when the chat has
+// no separate thread primitive.
+func (telegramDriver) SendTextThreaded(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) (string, error) {
 	chatID := address
 	if _, _, credErr := telegramCredentials(settings); credErr != nil || chatID == "" {
-		return errors.New("telegram transport is not configured")
+		return "", errors.New("telegram transport is not configured")
 	}
 	markup := telegramMarkup(msg)
 	chunks := telegramChunks(msg.Body)
 	if len(chunks) == 0 {
 		chunks = []string{msg.Body}
 	}
-	var postedID string
+	var firstPostedID string
 	var lastErr error
 	for i, chunk := range chunks {
 		// Buttons and the form link belong to the first chunk; the rest are
@@ -208,17 +220,20 @@ func (telegramDriver) SendText(ctx context.Context, client *http.Client, setting
 		if i > 0 {
 			rowMarkup = nil
 		}
-		id, err := telegramSendOne(ctx, client, settings, chatID, text, rowMarkup)
+		replyTo := ""
+		if i == 0 {
+			replyTo = msg.Thread
+		}
+		id, err := telegramSendOne(ctx, client, settings, chatID, text, rowMarkup, replyTo)
 		if err != nil {
 			lastErr = err
 			break
 		}
-		if id != "" {
-			postedID = id
+		if firstPostedID == "" && id != "" {
+			firstPostedID = id
 		}
 	}
-	_ = postedID // reported through the rich/threaded extensions; text sends stay fire-and-forget
-	return lastErr
+	return firstPostedID, lastErr
 }
 
 // SendTextRich delivers the body as a rich message (Bot API sendRichMessage):
@@ -236,8 +251,8 @@ func (telegramDriver) SendTextRich(ctx context.Context, client *http.Client, set
 		return "", err
 	}
 	payload := map[string]any{
-		"chat_id":       chatID,
-		"rich_message":  map[string]any{"markdown": msg.Body, "skip_entity_detection": true},
+		"chat_id":      chatID,
+		"rich_message": map[string]any{"markdown": msg.Body, "skip_entity_detection": true},
 	}
 	if markup := telegramMarkup(msg); markup != nil {
 		payload["reply_markup"] = markup

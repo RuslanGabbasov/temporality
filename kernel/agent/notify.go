@@ -62,6 +62,8 @@ type NotificationDelivery struct {
 	// thread-capable transports (slack ts; docs/channels.md §9): the posted
 	// message id, or the thread a follow-up joined. Empty otherwise.
 	ThreadRef string `json:"thread_ref,omitempty"`
+	// SourceMessageRef is the exact message id of the posted interaction.
+	SourceMessageRef string `json:"source_message_ref,omitempty"`
 	// DeliveredTo is the team fan-out breakdown (docs/inbound-messages.md §8):
 	// one entry per unit member. Empty for single-recipient requests.
 	DeliveredTo []DeliveryTarget `json:"delivered_to,omitempty"`
@@ -75,7 +77,8 @@ type DeliveryTarget struct {
 	Detail  string `json:"detail,omitempty"`
 	// ThreadRef is this member's conversation thread on thread-capable
 	// transports — slack-style threads are per posted copy.
-	ThreadRef string `json:"thread_ref,omitempty"`
+	ThreadRef        string `json:"thread_ref,omitempty"`
+	SourceMessageRef string `json:"source_message_ref,omitempty"`
 }
 
 // recipientChannels is the profile slice the delivery resolution needs.
@@ -228,7 +231,7 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 		if err != nil {
 			return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 300)}
 		}
-		return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(thread, postedID)}
+		return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(channel.Type, thread, postedID), SourceMessageRef: postedID}
 	}
 	detail := "web inbox"
 	if target.Preferred != "" && target.Preferred != "web" {
@@ -294,7 +297,7 @@ func (a *Activities) deliverToJobTitle(ctx context.Context, request NotifyChanne
 			targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "failed", Detail: truncate(sendErr.Error(), 300)})
 			continue
 		}
-		targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(thread, postedID)})
+		targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(channel.Type, thread, postedID), SourceMessageRef: postedID})
 		delivered++
 	}
 	status := "failed"
@@ -393,7 +396,7 @@ func (a *Activities) deliverToUnit(ctx context.Context, request NotifyChannelReq
 				targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 200)})
 				continue
 			}
-			targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(thread, postedID)})
+			targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(channel.Type, thread, postedID), SourceMessageRef: postedID})
 			delivered++
 			continue
 		}
@@ -429,12 +432,14 @@ func (a *Activities) recordHumanRequest(ctx context.Context, request NotifyChann
 	// thread_ref follows the same mirror — one conversation anchor per request.
 	resolvedUser, channel := delivery.Recipient, delivery.Channel
 	threadRef := delivery.ThreadRef
+	sourceMessageRef := delivery.SourceMessageRef
 	var deliveries []map[string]any
 	firstPicked := false
 	for _, target := range delivery.DeliveredTo {
 		if target.Status == "delivered" && !firstPicked {
 			resolvedUser, channel = target.UserID, target.Channel
 			threadRef = target.ThreadRef
+			sourceMessageRef = target.SourceMessageRef
 			firstPicked = true
 		}
 		status := target.Status
@@ -442,6 +447,12 @@ func (a *Activities) recordHumanRequest(ctx context.Context, request NotifyChann
 			status = "failed" // no copy was sent — nothing to answer
 		}
 		entry := map[string]any{"user_id": target.UserID, "channel": target.Channel, "status": status}
+		if target.ThreadRef != "" {
+			entry["thread_ref"] = target.ThreadRef
+		}
+		if target.SourceMessageRef != "" {
+			entry["source_message_ref"] = target.SourceMessageRef
+		}
 		if target.Detail != "" && status == "failed" {
 			entry["detail"] = target.Detail
 		}
@@ -460,6 +471,7 @@ func (a *Activities) recordHumanRequest(ctx context.Context, request NotifyChann
 		"status":                delivery.Status,
 		"channel":               channel,
 		"thread_ref":            threadRef,
+		"source_message_ref":    sourceMessageRef,
 		"timeout_seconds":       request.TimeoutSeconds,
 		"timeout_policy":        request.TimeoutPolicy,
 		"execution_identity_id": request.ExecutionIdentityID,
@@ -805,7 +817,10 @@ func (a *Activities) deliverSchemaWidget(ctx context.Context, driver ChannelDriv
 // follow-up that joined an existing thread keeps it (the posted message's ts
 // is only a leaf inside it); a top-level post becomes the thread root itself,
 // so its ts is the ref the user's threaded replies will carry as thread_ts.
-func conversationThreadRef(thread, postedID string) string {
+func conversationThreadRef(channel, thread, postedID string) string {
+	if channel == "telegram" {
+		return strings.TrimSpace(postedID)
+	}
 	if strings.TrimSpace(thread) != "" {
 		return strings.TrimSpace(thread)
 	}

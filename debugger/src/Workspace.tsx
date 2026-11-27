@@ -137,6 +137,7 @@ interface ChatStreamLine {
 }
 
 interface ChatMessage {
+  id?: string
   role: 'user' | 'assistant'
   content: string
   reasoning?: string
@@ -893,7 +894,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const projectId = c.projectId ?? (c.syncedFromServer ? '' : project)
         if (!projectId) continue
         const transcript = c.messages.map((m) => ({
-          role: m.role, content: m.content, at: m.timestamp,
+          id: m.id, role: m.role, content: m.content, at: m.timestamp,
           addenda: m.addenda ?? [], attachments: m.attachments ?? [],
           // Live-run identity: without these a restored transcript (another
           // device, wiped browser) cannot reconnect the stream or light the
@@ -944,6 +945,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           // such rows carry no readable transcript; skip instead of crashing.
           if (!Array.isArray(chat.transcript)) continue
           const messages = (chat.transcript as any[]).map((m) => ({
+            id: typeof m.id === 'string' ? m.id : undefined,
             role: m.role, content: m.content ?? '', timestamp: new Date(m.at ?? chat.updated_at),
             addenda: m.addenda ?? [], attachments: m.attachments ?? [],
             runId: typeof m.runId === 'string' ? m.runId : undefined,
@@ -1944,6 +1946,15 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             }
           } catch { /* totals stay hidden */ }
           updateMsg(convId, runId, { content: answer, status, totals, taskTotals })
+          const linkedConversation = conversations.find((conv) => conv.id === convId)
+          if (linkedConversation?.taskId) {
+            void workspaceApi.linkConversationTask(convId, {
+              origin_message_id: [...linkedConversation.messages].reverse().find((m) => m.role === 'user')?.id ?? '',
+              task_id: linkedConversation.taskId, run_id: runId,
+              project_id: linkedConversation.projectId ?? project,
+              status: status === 'completed' ? 'completed' : status,
+            }).catch(() => { /* run state remains authoritative if projection update is delayed */ })
+          }
           return
         }
       } catch { /* transient — keep polling */ }
@@ -2040,8 +2051,15 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
     const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: hintQueryForFollowUp(conv.messages) })
     const runId = result.run_id
+    const originMessage = [...conv.messages].reverse().find((m) => m.role === 'user')
+    if (originMessage?.id) {
+      await workspaceApi.linkConversationTask(conv.id, {
+        origin_message_id: originMessage.id, task_id: taskId, run_id: runId,
+        project_id: conv.projectId ?? project, status: 'active',
+      })
+    }
 
-    const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
+    const assistantMsg: ChatMessage = { id: randomUUID(), role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
     const withAssistant = { ...conv, taskId, messages: [...conv.messages, assistantMsg] }
     setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
 
@@ -2161,7 +2179,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       }
     }
 
-    const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date(), attachments: sendAttachments }
+    const userMsg: ChatMessage = { id: randomUUID(), role: 'user', content, timestamp: new Date(), attachments: sendAttachments }
     // Sending implies reading the reply: always follow it from the bottom,
     // even if the user was browsing history a moment ago.
     stickRef.current = true
@@ -2175,12 +2193,106 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
     const failedIdx = updatedConv.messages.length - 1
+    let directStream: EventSource | null = null
+    let directAssistantID: string | null = null
     try {
+      const route = await workspaceApi.routeConversationMessage(updatedConv.id, {
+        text: content, has_attachments: sentAttachments.length > 0,
+      })
+      const dispatchTask = route.execution === 'agent_execution' || route.execution === 'delegated_execution'
+      if (!dispatchTask) {
+        const projectId = updatedConv.projectId ?? project
+        if (!updatedConv.agentId) throw new Error('Choose a lead agent before starting a conversation.')
+        const transcript = (conversation: Conversation) => conversation.messages.map((m) => ({
+          id: m.id, role: m.role, content: m.content, at: m.timestamp,
+          addenda: m.addenda ?? [], attachments: m.attachments ?? [],
+          runId: m.runId, status: m.status,
+        }))
+        // The compatibility write imports any old transcript first. The
+        // normalized message API uses the same stable message id, so this
+        // import and the direct send collapse to one durable event.
+        await workspaceApi.putServerChat(updatedConv.id, {
+          project_id: projectId, agent_id: updatedConv.agentId, task_id: updatedConv.taskId ?? '',
+          title: updatedConv.title || 'Untitled', transcript: transcript(updatedConv),
+        })
+        try {
+          await workspaceApi.getConversation(updatedConv.id)
+        } catch (f) {
+          if (!(f instanceof ApiError && f.status === 404)) throw f
+          try {
+            await workspaceApi.createConversation({
+              id: updatedConv.id, agent_id: updatedConv.agentId, project_id: projectId,
+              title: updatedConv.title || 'Untitled',
+            })
+          } catch (createError) {
+            if (!(createError instanceof ApiError && createError.status === 409)) throw createError
+          }
+        }
+        directAssistantID = randomUUID()
+        const assistantPlaceholder: ChatMessage = {
+          id: directAssistantID, role: 'assistant', content: '', timestamp: new Date(), status: 'running',
+        }
+        setConversations((prev) => prev.map((c) => c.id === updatedConv.id
+          ? { ...c, messages: [...updatedConv.messages, assistantPlaceholder] } : c))
+        const token = localStorage.getItem('temporality_token') ?? ''
+        const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : ''
+        directStream = new EventSource(`/kernel-api/v1/conversations/${encodeURIComponent(updatedConv.id)}/messages/${encodeURIComponent(userMsg.id!)}/stream${tokenQuery}`)
+        const applyStreamText = (text: string, snapshot: boolean) => {
+          setConversations((prev) => prev.map((c) => c.id !== updatedConv.id ? c : ({
+            ...c,
+            messages: c.messages.map((m) => m.id !== directAssistantID ? m : {
+              ...m, content: snapshot ? text : m.content + text, status: 'running',
+            }),
+          })))
+        }
+        directStream.addEventListener('delta', (event) => {
+          try {
+            const tokenEvent = JSON.parse((event as MessageEvent).data)
+            if (typeof tokenEvent.text === 'string') applyStreamText(tokenEvent.text, false)
+          } catch { /* the durable response remains authoritative */ }
+        })
+        directStream.addEventListener('snapshot', (event) => {
+          try {
+            const tokenEvent = JSON.parse((event as MessageEvent).data)
+            if (typeof tokenEvent.text === 'string') applyStreamText(tokenEvent.text, true)
+          } catch { /* the durable response remains authoritative */ }
+        })
+        directStream.addEventListener('done', () => directStream?.close())
+        const result = await workspaceApi.postConversationMessage(updatedConv.id, {
+          id: userMsg.id!, content: { text: content }, attachments: sendAttachments,
+        })
+        directStream.close()
+        directStream = null
+        const responseBody = result.response?.content
+        const responseContent = typeof responseBody === 'string'
+          ? responseBody
+          : responseBody?.text ?? ''
+        if (!result.response || !responseContent.trim()) throw new Error('The lead agent returned no response.')
+        const assistantMsg: ChatMessage = {
+          id: result.response.id, role: 'assistant', content: responseContent,
+          timestamp: new Date(), status: 'completed',
+        }
+        const answeredConv = { ...updatedConv, messages: [...updatedConv.messages, assistantMsg] }
+        setConversations((prev) => prev.map((c) => c.id === answeredConv.id ? answeredConv : c))
+        await workspaceApi.putServerChat(answeredConv.id, {
+          project_id: projectId, agent_id: answeredConv.agentId, task_id: answeredConv.taskId ?? '',
+          title: answeredConv.title || 'Untitled', transcript: transcript(answeredConv),
+        })
+        clearSendErrors(conv.id)
+        directAssistantID = null
+        return
+      }
       await launchRun(updatedConv)
       // Success: the run prompt carried the whole history — any older
       // «not delivered» plates rode along in it; clear them.
       clearSendErrors(conv.id)
     } catch (f) {
+      directStream?.close()
+      if (directAssistantID) {
+        setConversations((prev) => prev.map((c) => c.id !== conv.id ? c : ({
+          ...c, messages: c.messages.filter((m) => m.id !== directAssistantID),
+        })))
+      }
       markSendError(conv.id, failedIdx, message(f))
     } finally { setLoading(false) }
   }
@@ -2204,7 +2316,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       }
       const result = await workspaceApi.startRun(taskId, { agent_id: conv.agentId || undefined, hint_query: hintQueryForFollowUp(conv.messages) })
       const runId2 = result.run_id
-      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId: runId2, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
+      const assistantMsg: ChatMessage = { id: randomUUID(), role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId: runId2, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
       setConversations((prev) => prev.map((c) => c.id === conv.id ? { ...c, taskId, messages: [...c.messages, assistantMsg] } : c))
       streamRun(runId2, conv.id)
     } catch (f) {

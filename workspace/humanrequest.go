@@ -18,7 +18,7 @@ import (
 // delivery row per member; the first answer wins and supersedes the rest.
 
 const humanRequestColumns = `id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context,
-options, schema, status, channel, thread_ref, response, answered_by, timeout_seconds, timeout_policy,
+options, schema, status, channel, thread_ref, source_message_ref, response, answered_by, timeout_seconds, timeout_policy,
 execution_identity_id, created_at, delivered_at, answered_at, expires_at`
 
 func scanHumanRequest(scanner interface{ Scan(dest ...any) error }) (HumanRequest, error) {
@@ -26,7 +26,7 @@ func scanHumanRequest(scanner interface{ Scan(dest ...any) error }) (HumanReques
 	var options, schema []byte
 	var deliveredAt, answeredAt, expiresAt *time.Time
 	err := scanner.Scan(&r.ID, &r.RunID, &r.ProjectID, &r.AgentID, &r.AgentVersion, &r.Recipient, &r.ResolvedUser,
-		&r.Question, &r.Context, &options, &schema, &r.Status, &r.Channel, &r.ThreadRef, &r.Response, &r.AnsweredBy,
+		&r.Question, &r.Context, &options, &schema, &r.Status, &r.Channel, &r.ThreadRef, &r.SourceMessageRef, &r.Response, &r.AnsweredBy,
 		&r.TimeoutSeconds, &r.TimeoutPolicy, &r.ExecutionIdentityID,
 		&r.CreatedAt, &deliveredAt, &answeredAt, &expiresAt)
 	if err != nil {
@@ -66,11 +66,11 @@ func (s *Store) CreateHumanRequest(ctx context.Context, r *HumanRequest) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO human_request
 		 (id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context, options, schema,
-		  status, channel, thread_ref, timeout_seconds, timeout_policy, execution_identity_id, created_at, expires_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),$18)
+		  status, channel, thread_ref, source_message_ref, timeout_seconds, timeout_policy, execution_identity_id, created_at, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now(),$19)
 		 ON CONFLICT (id) DO NOTHING`,
 		r.ID, r.RunID, r.ProjectID, r.AgentID, r.AgentVersion, r.Recipient, r.ResolvedUser, r.Question, r.Context,
-		marshalStrings(r.Options), nullableJSON(r.Schema), r.Status, r.Channel, r.ThreadRef, r.TimeoutSeconds, r.TimeoutPolicy,
+		marshalStrings(r.Options), nullableJSON(r.Schema), r.Status, r.Channel, r.ThreadRef, r.SourceMessageRef, r.TimeoutSeconds, r.TimeoutPolicy,
 		r.ExecutionIdentityID, expiresAt)
 	return err
 }
@@ -122,10 +122,11 @@ func (s *Store) AddHumanRequestDeliveries(ctx context.Context, requestID string,
 		if d.Status == "" {
 			d.Status = HumanDeliveryDelivered
 		}
-		batch.Queue(`INSERT INTO human_request_delivery (request_id, user_id, channel, status)
-			 VALUES ($1, $2, $3, $4)
-			 ON CONFLICT (request_id, user_id) DO UPDATE SET channel = EXCLUDED.channel, status = EXCLUDED.status`,
-			requestID, d.UserID, d.Channel, d.Status)
+		batch.Queue(`INSERT INTO human_request_delivery (request_id, user_id, channel, status, thread_ref, source_message_ref)
+				 VALUES ($1, $2, $3, $4, $5, $6)
+				 ON CONFLICT (request_id, user_id) DO UPDATE SET channel = EXCLUDED.channel, status = EXCLUDED.status,
+				 thread_ref = EXCLUDED.thread_ref, source_message_ref = EXCLUDED.source_message_ref`,
+			requestID, d.UserID, d.Channel, d.Status, d.ThreadRef, d.SourceMessageRef)
 	}
 	return s.pool.SendBatch(ctx, batch).Close()
 }
@@ -135,7 +136,7 @@ func (s *Store) AddHumanRequestDeliveries(ctx context.Context, requestID string,
 // answer the request.
 func (s *Store) ListOpenHumanRequestDeliveries(ctx context.Context) ([]HumanRequestDelivery, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT d.request_id, d.user_id, d.channel, d.status, d.created_at
+		`SELECT d.request_id, d.user_id, d.channel, d.status, d.thread_ref, d.source_message_ref, d.created_at
 		 FROM human_request_delivery d
 		 JOIN human_request h ON h.id = d.request_id
 		 WHERE h.status IN ('pending','delivered')
@@ -147,7 +148,7 @@ func (s *Store) ListOpenHumanRequestDeliveries(ctx context.Context) ([]HumanRequ
 	result := []HumanRequestDelivery{}
 	for rows.Next() {
 		var d HumanRequestDelivery
-		if err := rows.Scan(&d.RequestID, &d.UserID, &d.Channel, &d.Status, &d.CreatedAt); err != nil {
+		if err := rows.Scan(&d.RequestID, &d.UserID, &d.Channel, &d.Status, &d.ThreadRef, &d.SourceMessageRef, &d.CreatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, d)
@@ -187,6 +188,27 @@ func (s *Store) SetHumanRequestThreadRef(ctx context.Context, id, threadRef stri
 		// the caller.
 		if _, err := s.GetHumanRequest(ctx, id); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// SetHumanRequestSourceMessageRef pins the exact question message for
+// transports where a thread may contain several independently answerable
+// interactions. Fill-only semantics preserve the original address on retry.
+func (s *Store) SetHumanRequestSourceMessageRef(ctx context.Context, id, messageRef string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE human_request SET source_message_ref=$2 WHERE id=$1 AND source_message_ref=''`, id, messageRef)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM human_request WHERE id=$1)`, id).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
 		}
 	}
 	return nil

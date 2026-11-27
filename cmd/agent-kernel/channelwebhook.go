@@ -90,6 +90,11 @@ func (s webhookAckStore) InsertInboundMessage(ctx context.Context, m *workspace.
 	return s.channelInboundStore.InsertInboundMessage(ctx, m)
 }
 
+func (s webhookAckStore) conversationStore() (conversationIngressStore, bool) {
+	store, ok := s.channelInboundStore.(conversationIngressStore)
+	return store, ok
+}
+
 // inboundRowReader is the optional store surface the dedup repair path uses
 // to tell an unprocessed fence row from one the pipeline already advanced.
 // *workspace.Store satisfies it; test fakes may not.
@@ -165,7 +170,10 @@ func (r *channelWebhookReceiver) handle(w http.ResponseWriter, req *http.Request
 	if !serverAcked(req) {
 		// Direct caller: the legacy synchronous contract — process the whole
 		// batch before answering.
-		r.process(req.Context(), messages, channelSettings)
+		if !r.process(req.Context(), messages, channelSettings) {
+			http.Error(w, "message persistence unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		r.hook.Respond(w, req, body)
 		return
 	}
@@ -335,14 +343,19 @@ func (r *channelWebhookReceiver) runJob(job webhookJob) {
 	if len(job.adopt) > 0 {
 		loop.store = webhookAckStore{channelInboundStore: loop.store, adopt: job.adopt}
 	}
-	loop.routeMessages(job.ctx, []agent.InboundMessage{job.message}, job.settings)
+	if !loop.routeMessages(job.ctx, []agent.InboundMessage{job.message}, job.settings) {
+		r.mu.Lock()
+		delete(r.seen, job.message.ID)
+		r.mu.Unlock()
+		r.log.Warn("channel webhook route deferred after persistence failure", "channel", loop.driver.Type(), "message", job.message.ID)
+	}
 }
 
 // process is the legacy synchronous pipeline for direct handle callers: seen
 // dedup, identity refresh and the full route, then the response.
-func (r *channelWebhookReceiver) process(ctx context.Context, messages []agent.InboundMessage, channelSettings map[string]string) {
+func (r *channelWebhookReceiver) process(ctx context.Context, messages []agent.InboundMessage, channelSettings map[string]string) bool {
 	if len(messages) == 0 {
-		return
+		return true
 	}
 	r.mu.Lock()
 	now := time.Now()
@@ -358,11 +371,19 @@ func (r *channelWebhookReceiver) process(ctx context.Context, messages []agent.I
 	}
 	if len(fresh) == 0 {
 		r.mu.Unlock()
-		return
+		return true
 	}
 	loop := r.refreshIdentityLocked(ctx, channelSettings)
 	r.mu.Unlock()
-	loop.routeMessages(ctx, fresh, channelSettings)
+	if !loop.routeMessages(ctx, fresh, channelSettings) {
+		r.mu.Lock()
+		for _, message := range fresh {
+			delete(r.seen, message.ID)
+		}
+		r.mu.Unlock()
+		return false
+	}
+	return true
 }
 
 // sweepSeenLocked drops expired seen entries inline (receiver mutex held).

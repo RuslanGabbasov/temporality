@@ -163,13 +163,14 @@ func (p mattermostPoller) Poll(ctx context.Context, client *http.Client, setting
 				continue // seen before the cursor — replay safety, never a loss
 			}
 			messages = append(messages, InboundMessage{
-				ID:        post.ID,
-				Channel:   "mattermost",
-				ChatID:    post.ChannelID,
-				Sender:    post.UserID,
-				Text:      strings.TrimSpace(post.Message),
-				Timestamp: time.UnixMilli(post.CreateAt).UTC(),
-				ReplyTo:   post.RootID,
+				ID:             post.ID,
+				Channel:        "mattermost",
+				ChatID:         post.ChannelID,
+				Sender:         post.UserID,
+				Text:           strings.TrimSpace(post.Message),
+				Timestamp:      time.UnixMilli(post.CreateAt).UTC(),
+				ReplyTo:        post.RootID,
+				SourceThreadID: post.RootID,
 			})
 			if post.CreateAt > next {
 				next = post.CreateAt

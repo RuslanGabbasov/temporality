@@ -912,7 +912,7 @@ func main() {
 		// tabs): admins, org-role holders and unit heads. Everyone else lands on
 		// their personal brief («Мой день») instead.
 		writeJSON(w, 200, map[string]any{"subject": principal.Subject, "role": principal.Role.String(), "projects": principal.Projects, "auth_enabled": true, "user_id": principal.UserID, "org_unit_id": principal.OrgUnitID, "full_dashboard": canSeeFullDashboard(r.Context(), ws, principal)})
-		})
+	})
 	// Password login exchanges name-or-email + password for the user's bearer
 	// token. The route is mounted outside the auth gate (see server setup
 	// below): unauthenticated callers may reach exactly this one endpoint.
@@ -3319,13 +3319,17 @@ func main() {
 	RegisterSagaCurateRoutes(sagaCurateRoutesDeps{
 		mux: mux, gate: gate, events: events, costAPI: costAPI, ws: ws,
 		modelClient: supervisorUsageClient,
-		log: log,
+		log:         log,
 	})
 	// The same curation runs on a schedule: the supervisor keeps the saga
 	// bindings tidy without a human pressing anything.
 	StartSagaCurationLoop(ctx, log, ws, events, costAPI, supervisorUsageClient)
 	// Server-side chat persistence (docs/resilience-and-scale.md §4).
 	RegisterChatRoutes(mux, gate, ws)
+	// Normalized durable conversation/message API (conversational-runtime Phase 2).
+	RegisterConversationRoutes(mux, gate, ws, activities.Tokens, func(turnCtx context.Context, conversation workspace.Conversation, history []workspace.ConversationMessage, tokenKey string) (string, error) {
+		return runConversationTurn(turnCtx, activities, ws, conversation, history, tokenKey)
+	})
 	// Presentation Engine (docs/presentation-engine.md §9–§15): structured
 	// agent documents — create/update/lifecycle, static rendering (SVG/PNG/
 	// text/pdf), channel adaptation preview, the IR JSON Schema, the channel
@@ -7703,6 +7707,11 @@ func main() {
 		if req.ThreadRef != "" {
 			if err := ws.SetHumanRequestThreadRef(r.Context(), req.ID, req.ThreadRef); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 				log.Warn("pin human request thread", "id", req.ID, "error", err)
+			}
+		}
+		if req.SourceMessageRef != "" {
+			if err := ws.SetHumanRequestSourceMessageRef(r.Context(), req.ID, req.SourceMessageRef); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+				log.Warn("pin human request source message", "id", req.ID, "error", err)
 			}
 		}
 		emitHitlVerdict(r.Context(), events, req)

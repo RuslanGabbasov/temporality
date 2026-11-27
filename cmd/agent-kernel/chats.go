@@ -104,6 +104,17 @@ func RegisterChatRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws chatsSto
 			writeError(w, 400, err)
 			return
 		}
+		// Dual-write the existing UI transcript into normalized conversation
+		// storage. Legacy clients remain compatible while new runtime readers
+		// can consume the same durable sequence.
+		if syncer, ok := ws.(interface {
+			SyncLegacyChat(context.Context, workspace.Chat) error
+		}); ok {
+			if err := syncer.SyncLegacyChat(r.Context(), *chat); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+		}
 		writeJSON(w, 200, map[string]any{"id": id, "updated_at": chat.UpdatedAt})
 	})
 

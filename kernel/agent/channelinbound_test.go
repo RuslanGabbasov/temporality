@@ -46,14 +46,14 @@ func TestMatchChannelReplies(t *testing.T) {
 		}
 	})
 
-	t.Run("oldest ask in the chat wins", func(t *testing.T) {
+	t.Run("latest ask in the chat wins", func(t *testing.T) {
 		asks := []PendingAsk{
 			{RequestID: "newer", RunID: "run", UserID: "u1", CreatedAt: now.Add(-time.Minute)},
 			{RequestID: "older", RunID: "run", UserID: "u1", CreatedAt: now.Add(-2 * time.Hour)},
 		}
 		replies := MatchChannelReplies(messages(msg("!r1:hs", "@human:hs", now, "yes")), asks, users, bot)
-		if len(replies) != 1 || replies[0].Ask.RequestID != "older" {
-			t.Fatalf("oldest ask should win: %+v", replies)
+		if len(replies) != 1 || replies[0].Ask.RequestID != "newer" {
+			t.Fatalf("latest ask should win: %+v", replies)
 		}
 	})
 
@@ -65,7 +65,7 @@ func TestMatchChannelReplies(t *testing.T) {
 		replies := MatchChannelReplies(
 			messages(msg("!r1:hs", "@human:hs", now.Add(-time.Minute), "one"), msg("!r1:hs", "@human:hs", now, "two")),
 			asks, users, bot)
-		if len(replies) != 2 || replies[0].Ask.RequestID != "first" || replies[1].Ask.RequestID != "second" {
+		if len(replies) != 2 || replies[0].Ask.RequestID != "second" || replies[1].Ask.RequestID != "first" {
 			t.Fatalf("unexpected pairing: %+v", replies)
 		}
 	})
@@ -122,7 +122,7 @@ func TestMatchChannelReplies(t *testing.T) {
 
 // TestMatchChannelRepliesThreads pins the thread contract (docs/channels.md
 // §9): a threaded reply (ReplyTo) matches the ask whose ThreadRef equals it
-// exactly — before and regardless of the chat+oldest fallback; without an
+// exactly — before and regardless of the chat+latest fallback; without an
 // exact hit the fallback applies and a first threaded answer backfills the
 // ask's ThreadRef for the rest of the conversation.
 func TestMatchChannelRepliesThreads(t *testing.T) {
@@ -134,7 +134,7 @@ func TestMatchChannelRepliesThreads(t *testing.T) {
 		return InboundMessage{ChatID: chat, Sender: sender, Text: body, Timestamp: at, ReplyTo: replyTo}
 	}
 
-	t.Run("exact thread hit beats the oldest ask", func(t *testing.T) {
+	t.Run("exact thread hit beats the latest ask", func(t *testing.T) {
 		asks := []PendingAsk{
 			{RequestID: "older-threadless", RunID: "run", UserID: "u1", CreatedAt: now.Add(-2 * time.Hour)},
 			{RequestID: "newer-threaded", RunID: "run", UserID: "u1", ThreadRef: "1697000000.000100", CreatedAt: now.Add(-time.Minute)},
@@ -142,6 +142,28 @@ func TestMatchChannelRepliesThreads(t *testing.T) {
 		replies := MatchChannelReplies(messages(msg("C1", "U1", now, "yes", "1697000000.000100")), asks, users, bot)
 		if len(replies) != 1 || replies[0].Ask.RequestID != "newer-threaded" {
 			t.Fatalf("threaded reply must hit its thread's ask: %+v", replies)
+		}
+	})
+
+	t.Run("exact source message selects the interaction inside a shared thread", func(t *testing.T) {
+		asks := []PendingAsk{
+			{RequestID: "older", RunID: "run", UserID: "u1", ThreadRef: "root", SourceMessageRef: "question-1", CreatedAt: now.Add(-2 * time.Hour)},
+			{RequestID: "latest", RunID: "run", UserID: "u1", ThreadRef: "root", SourceMessageRef: "question-2", CreatedAt: now.Add(-time.Minute)},
+		}
+		replies := MatchChannelReplies(messages(msg("C1", "U1", now, "approve", "question-1")), asks, users, bot)
+		if len(replies) != 1 || replies[0].Ask.RequestID != "older" {
+			t.Fatalf("reply target must select its exact interaction: %+v", replies)
+		}
+	})
+
+	t.Run("plain message answers the latest open ask", func(t *testing.T) {
+		asks := []PendingAsk{
+			{RequestID: "older", RunID: "run", UserID: "u1", CreatedAt: now.Add(-2 * time.Hour)},
+			{RequestID: "latest", RunID: "run", UserID: "u1", CreatedAt: now.Add(-time.Minute)},
+		}
+		replies := MatchChannelReplies(messages(msg("C1", "U1", now, "yes", "")), asks, users, bot)
+		if len(replies) != 1 || replies[0].Ask.RequestID != "latest" {
+			t.Fatalf("plain message must target latest open ask: %+v", replies)
 		}
 	})
 
@@ -182,13 +204,13 @@ func TestMatchChannelRepliesThreads(t *testing.T) {
 			msg("C1", "U1", now.Add(-30*time.Second), "first", "1697000000.000900"),
 			msg("C1", "U1", now, "second", "1697000000.000900"),
 		), asks, users, bot)
-		// The first threaded answer took the oldest ask (fallback) and pinned
+		// The first threaded answer took the latest ask (fallback) and pinned
 		// its thread; the second lands in the same thread and must match that
-		// same ask's conversation, not the newer one.
+		// same ask's conversation rather than advancing by age.
 		if len(replies) != 2 {
 			t.Fatalf("expected two routed replies, got %+v", replies)
 		}
-		if replies[0].Ask.RequestID != "older" || replies[1].Ask.RequestID != "newer" {
+		if replies[0].Ask.RequestID != "newer" || replies[1].Ask.RequestID != "older" {
 			t.Fatalf("unexpected pairing: %+v", replies)
 		}
 	})

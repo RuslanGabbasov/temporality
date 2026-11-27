@@ -119,9 +119,8 @@ func TestParseMatrixSyncOrdersChronologically(t *testing.T) {
 	}
 }
 
-// A threaded answer must carry the thread root as ReplyTo: the reply matcher
-// matches the ask whose ThreadRef equals it, so a Matrix thread reply lands
-// on the right ask instead of the oldest one in the room.
+// A Matrix reply preserves both the exact replied-to event and the thread
+// root, so the matcher can select one interaction inside a shared thread.
 // TestParseMatrixSyncSurfacesEncryptedEvents: E2EE payloads the plaintext
 // transport cannot read surface as Encrypted messages instead of vanishing —
 // the pipeline must be able to refuse them loudly, or an encrypted room makes
@@ -172,7 +171,7 @@ func TestParseMatrixSyncThreadedReply(t *testing.T) {
 			{"type": "m.room.message", "event_id": "$reply1", "sender": "@user:org", "origin_server_ts": 2000,
 			 "content": {"msgtype": "m.text", "body": "threaded answer",
 				"m.relates_to": {"rel_type": "m.thread", "event_id": "$root",
-					"m.in_reply_to": {"event_id": "$root"}}}},
+					"m.in_reply_to": {"event_id": "$prompt2"}}}},
 			{"type": "m.room.message", "event_id": "$reply2", "sender": "@user:org", "origin_server_ts": 3000,
 			 "content": {"msgtype": "m.text", "body": "plain reply",
 				"m.in_reply_to": {"event_id": "$reply1"}}}
@@ -189,9 +188,9 @@ func TestParseMatrixSyncThreadedReply(t *testing.T) {
 	if messages[0].EventID != "$root" || messages[0].ReplyTo != "" {
 		t.Fatalf("root = %v replyTo %q, want empty", messages[0].EventID, messages[0].ReplyTo)
 	}
-	// The thread reply resolves to the thread root.
-	if messages[1].ReplyTo != "$root" {
-		t.Fatalf("threaded replyTo = %q, want $root", messages[1].ReplyTo)
+	// Preserve both the exact reply target and its thread anchor.
+	if messages[1].ReplyTo != "$prompt2" || messages[1].SourceThreadID != "$root" {
+		t.Fatalf("threaded reply target=%q thread=%q, want $prompt2/$root", messages[1].ReplyTo, messages[1].SourceThreadID)
 	}
 	// A plain reply keeps its replied-to event.
 	if messages[2].ReplyTo != "$reply1" {

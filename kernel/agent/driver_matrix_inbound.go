@@ -262,14 +262,15 @@ func matrixNormalized(messages []MatrixInboundMessage) []InboundMessage {
 	normalized := make([]InboundMessage, 0, len(messages))
 	for _, message := range messages {
 		entry := InboundMessage{
-			ID:        message.EventID,
-			Channel:   "matrix",
-			ChatID:    message.RoomID,
-			Sender:    message.Sender,
-			Text:      message.Body,
-			Timestamp: message.Timestamp,
-			ReplyTo:   message.ReplyTo,
-			Encrypted: message.Encrypted,
+			ID:             message.EventID,
+			Channel:        "matrix",
+			ChatID:         message.RoomID,
+			Sender:         message.Sender,
+			Text:           message.Body,
+			Timestamp:      message.Timestamp,
+			ReplyTo:        message.ReplyTo,
+			SourceThreadID: message.SourceThreadID,
+			Encrypted:      message.Encrypted,
 		}
 		if message.URL != "" {
 			entry.Files = []InboundFile{{Ref: message.URL, Name: message.Filename}}

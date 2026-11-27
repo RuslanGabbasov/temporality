@@ -260,6 +260,7 @@ type TelegramUpdate struct {
 	UpdateID     int64
 	ChatID       int64
 	SenderID     int64
+	ReplyTo      int64 // Telegram message_id named by message.reply_to_message
 	Text         string
 	Files        []InboundFile
 	Timestamp    time.Time
@@ -285,6 +286,10 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 		Result []struct {
 			UpdateID int64 `json:"update_id"`
 			Message  *struct {
+				MessageID      int64 `json:"message_id"`
+				ReplyToMessage *struct {
+					MessageID int64 `json:"message_id"`
+				} `json:"reply_to_message"`
 				Date int64 `json:"date"`
 				From *struct {
 					ID int64 `json:"id"`
@@ -309,10 +314,10 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 				From struct {
 					ID int64 `json:"id"`
 				} `json:"from"`
-				Data string `json:"data"`
+				Data    string `json:"data"`
 				Message *struct {
 					MessageID int64 `json:"message_id"`
-					Chat struct {
+					Chat      struct {
 						ID int64 `json:"id"`
 					} `json:"chat"`
 				} `json:"message"`
@@ -396,6 +401,7 @@ func ParseTelegramUpdates(body []byte, previousCursor string) ([]TelegramUpdate,
 			Kind:         "message",
 			ChatID:       message.Chat.ID,
 			SenderID:     message.From.ID,
+			ReplyTo:      telegramReplyTarget(message.ReplyToMessage),
 			Text:         strings.TrimSpace(message.Text),
 			Timestamp:    time.Unix(message.Date, 0).UTC(),
 			MediaGroupID: strings.TrimSpace(message.MediaGroup),
@@ -446,19 +452,34 @@ func telegramNormalized(updates []TelegramUpdate) []InboundMessage {
 }
 
 func telegramNormalizedOne(update TelegramUpdate) InboundMessage {
+	replyTo := ""
+	if update.ReplyTo != 0 {
+		replyTo = strconv.FormatInt(update.ReplyTo, 10)
+	}
 	return InboundMessage{
-		ID:        strconv.FormatInt(update.UpdateID, 10),
-		Channel:   "telegram",
-		ChatID:    strconv.FormatInt(update.ChatID, 10),
-		Sender:    strconv.FormatInt(update.SenderID, 10),
-		Text:      update.Text,
-		Files:     update.Files,
-		Timestamp: update.Timestamp,
+		ID:              strconv.FormatInt(update.UpdateID, 10),
+		Channel:         "telegram",
+		ChatID:          strconv.FormatInt(update.ChatID, 10),
+		Sender:          strconv.FormatInt(update.SenderID, 10),
+		Text:            update.Text,
+		Files:           update.Files,
+		Timestamp:       update.Timestamp,
+		ReplyTo:         replyTo,
+		SourceThreadID:  replyTo,
 		Kind:            update.Kind,
 		CallbackData:    update.CallbackData,
 		QueryID:         update.QueryID,
 		SourceMessageID: strconv.FormatInt(update.SourceMessageID, 10),
 	}
+}
+
+func telegramReplyTarget(message *struct {
+	MessageID int64 `json:"message_id"`
+}) int64 {
+	if message == nil {
+		return 0
+	}
+	return message.MessageID
 }
 
 // telegramAlbumBuffer parks media-group parts between polls: an album's parts

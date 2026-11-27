@@ -15,7 +15,7 @@ import (
 func TestScanHumanRequestIncludesThreadRef(t *testing.T) {
 	now := time.Now()
 	values := sliceRow{"op-2", "run-2", "proj", "agent-a", 3, "user:ruslan", "ruslan",
-		"Ship?", "", []byte(`[]`), nil, "delivered", "slackbot", "1697000000.000100", "", "",
+		"Ship?", "", []byte(`[]`), nil, "delivered", "slackbot", "1697000000.000100", "", "", "",
 		0, "fallback", "", now, nil, nil, nil}
 	request, err := scanHumanRequest(values)
 	require.NoError(t, err)
@@ -33,9 +33,9 @@ func TestThreadRefIsWrittenOnlyWhenEmpty(t *testing.T) {
 	require.NoError(t, err)
 	source := string(raw)
 
-	require.Contains(t, humanRequestColumns, "status, channel, thread_ref, response")
-	require.Contains(t, source, "&r.Status, &r.Channel, &r.ThreadRef, &r.Response")
-	require.Contains(t, source, "status, channel, thread_ref, timeout_seconds")
+	require.Contains(t, humanRequestColumns, "status, channel, thread_ref, source_message_ref, response")
+	require.Contains(t, source, "&r.Status, &r.Channel, &r.ThreadRef, &r.SourceMessageRef, &r.Response")
+	require.Contains(t, source, "status, channel, thread_ref, source_message_ref, timeout_seconds")
 
 	update := "UPDATE human_request SET thread_ref = $2 WHERE id = $1 AND thread_ref = ''"
 	require.Contains(t, source, update)

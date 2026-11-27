@@ -24,7 +24,8 @@ type MatrixInboundMessage struct {
 	// thread root event id via m.relates_to, or the replied-to event id via
 	// m.in_reply_to). A threaded answer names the conversation it belongs to
 	// — the reply matcher needs exactly that.
-	ReplyTo string
+	ReplyTo        string
+	SourceThreadID string
 	// File attachments (m.file/m.image/m.audio/m.video): URL is the mxc://
 	// content URI, Filename the original name. Text messages leave both empty.
 	URL      string
@@ -110,26 +111,29 @@ func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 				continue
 			}
 			text := strings.TrimSpace(event.Content.Body)
-			// The thread root wins over the replied-to event: a threaded answer
-			// names its conversation, which is what the reply matcher matches.
 			replyTo := event.Content.RelatesTo.InReplyTo.EventID
-			if replyTo == "" && event.Content.RelatesTo.RelType == "m.thread" {
-				replyTo = event.Content.RelatesTo.EventID
-			}
 			if replyTo == "" && event.Content.InReplyTo.EventID != "" {
 				replyTo = event.Content.InReplyTo.EventID
+			}
+			threadID := ""
+			if event.Content.RelatesTo.RelType == "m.thread" {
+				threadID = event.Content.RelatesTo.EventID
+				if replyTo == "" {
+					replyTo = threadID
+				}
 			}
 			if event.Content.MsgType == "m.text" {
 				if text == "" {
 					continue
 				}
 				messages = append(messages, MatrixInboundMessage{
-					EventID:   event.EventID,
-					RoomID:    roomID,
-					Sender:    event.Sender,
-					Body:      text,
-					Timestamp: time.UnixMilli(event.OriginServerTS),
-					ReplyTo:   replyTo,
+					EventID:        event.EventID,
+					RoomID:         roomID,
+					Sender:         event.Sender,
+					Body:           text,
+					Timestamp:      time.UnixMilli(event.OriginServerTS),
+					ReplyTo:        replyTo,
+					SourceThreadID: threadID,
 				})
 				continue
 			}
@@ -144,14 +148,15 @@ func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 				name = "attachment"
 			}
 			messages = append(messages, MatrixInboundMessage{
-				EventID:   event.EventID,
-				RoomID:    roomID,
-				Sender:    event.Sender,
-				Body:      text,
-				Timestamp: time.UnixMilli(event.OriginServerTS),
-				URL:       event.Content.URL,
-				Filename:  name,
-				ReplyTo:   replyTo,
+				EventID:        event.EventID,
+				RoomID:         roomID,
+				Sender:         event.Sender,
+				Body:           text,
+				Timestamp:      time.UnixMilli(event.OriginServerTS),
+				URL:            event.Content.URL,
+				Filename:       name,
+				ReplyTo:        replyTo,
+				SourceThreadID: threadID,
 			})
 		}
 	}

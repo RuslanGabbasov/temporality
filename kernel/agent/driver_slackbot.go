@@ -250,13 +250,14 @@ func (slackEventsWebhook) Parse(r *http.Request, body []byte) []InboundMessage {
 		id = event.TS
 	}
 	return []InboundMessage{{
-		ID:        id,
-		Channel:   "slackbot",
-		ChatID:    event.Channel,
-		Sender:    event.User,
-		Text:      event.Text,
-		Timestamp: timestamp,
-		ReplyTo:   event.ThreadTS,
+		ID:             id,
+		Channel:        "slackbot",
+		ChatID:         event.Channel,
+		Sender:         event.User,
+		Text:           event.Text,
+		Timestamp:      timestamp,
+		ReplyTo:        event.ThreadTS,
+		SourceThreadID: event.ThreadTS,
 	}}
 }
 

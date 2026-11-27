@@ -88,6 +88,7 @@ func (matrixDriver) Spec() ChannelSpec {
 		Capabilities: ChannelCapabilities{
 			Text:     true,
 			TwoWay:   true,
+			Threads:  true,
 			FilesOut: true,
 			FilesIn:  true,
 		},
@@ -120,20 +121,27 @@ func (matrixDriver) SendText(ctx context.Context, client *http.Client, settings 
 	// the plain body stays the fallback.
 	if len(msg.Schema) > 0 {
 		if card := matrixQuestionHTML(msg); card != "" {
-			_, err := matrixSendHTML(ctx, client, homeserver, accessToken, roomID, body, card)
+			_, err := matrixSendHTML(ctx, client, homeserver, accessToken, roomID, body, card, msg.Thread)
 			return err
 		}
 	}
-	_, err := matrixSendText(ctx, client, homeserver, accessToken, roomID, body)
+	_, err := matrixSendText(ctx, client, homeserver, accessToken, roomID, body, msg.Thread)
 	return err
 }
 
 // matrixSendText delivers one plain/markdown message and returns its event_id
 // (empty on failure) — the thread anchor for follow-ups and reactions.
-func matrixSendText(ctx context.Context, client *http.Client, homeserver, accessToken, roomID, body string) (string, error) {
-	txnID := "temporality-" + transactionFingerprint(roomID, body)
+func matrixSendText(ctx context.Context, client *http.Client, homeserver, accessToken, roomID, body, thread string) (string, error) {
+	txnID := "temporality-" + matrixMessageFingerprint(roomID, body, thread)
 	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
 	payload := map[string]any{"msgtype": "m.text", "body": body}
+	if thread != "" {
+		payload["m.relates_to"] = map[string]any{
+			"rel_type": "m.thread", "event_id": thread,
+			"is_falling_back": true,
+			"m.in_reply_to":   map[string]any{"event_id": thread},
+		}
+	}
 	// Agent answers are markdown; render them for HTML-capable clients
 	// (Element) via the custom format. The plain body stays the fallback for
 	// clients that ignore formatted_body.
@@ -157,10 +165,17 @@ func matrixSendText(ctx context.Context, client *http.Client, homeserver, access
 
 // matrixSendHTML delivers one message with an explicit HTML formatted_body
 // (the caller controls escaping) and returns its event_id.
-func matrixSendHTML(ctx context.Context, client *http.Client, homeserver, accessToken, roomID, body, html string) (string, error) {
-	txnID := "temporality-" + transactionFingerprint(roomID, body)
+func matrixSendHTML(ctx context.Context, client *http.Client, homeserver, accessToken, roomID, body, html, thread string) (string, error) {
+	txnID := "temporality-" + matrixMessageFingerprint(roomID, body, thread)
 	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
 	payload := map[string]any{"msgtype": "m.text", "body": body, "format": "org.matrix.custom.html", "formatted_body": html}
+	if thread != "" {
+		payload["m.relates_to"] = map[string]any{
+			"rel_type": "m.thread", "event_id": thread,
+			"is_falling_back": true,
+			"m.in_reply_to":   map[string]any{"event_id": thread},
+		}
+	}
 	body2, status, err := postJSON(ctx, client, http.MethodPut, endpoint, payload, map[string]string{"Authorization": "Bearer " + accessToken})
 	if err != nil {
 		return "", err
@@ -281,10 +296,10 @@ func (matrixDriver) SendTextThreaded(ctx context.Context, client *http.Client, s
 	body := msg.Body
 	if len(msg.Schema) > 0 {
 		if card := matrixQuestionHTML(msg); card != "" {
-			return matrixSendHTML(ctx, client, homeserver, accessToken, roomID, body, card)
+			return matrixSendHTML(ctx, client, homeserver, accessToken, roomID, body, card, msg.Thread)
 		}
 	}
-	return matrixSendText(ctx, client, homeserver, accessToken, roomID, body)
+	return matrixSendText(ctx, client, homeserver, accessToken, roomID, body, msg.Thread)
 }
 
 // SendFile uploads the bytes to the homeserver media store, then sends an
@@ -370,6 +385,13 @@ func (matrixDriver) SendFile(ctx context.Context, client *http.Client, settings 
 func transactionFingerprint(roomID, text string) string {
 	digest := sha256.Sum256([]byte(roomID + "\x00" + text))
 	return hex.EncodeToString(digest[:])[:16]
+}
+
+func matrixMessageFingerprint(roomID, text, thread string) string {
+	if thread != "" {
+		text += "\x00" + thread
+	}
+	return transactionFingerprint(roomID, text)
 }
 
 // matrixDMCache caches resolved DM rooms per (homeserver, mxid): the

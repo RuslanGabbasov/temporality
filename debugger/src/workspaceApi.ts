@@ -1599,6 +1599,22 @@ export const workspaceApi = {
       `/v1/workspace/chats?project=${encodeURIComponent(project)}`),
   putServerChat: (id: string, data: { project_id: string; agent_id?: string; task_id?: string; title: string; transcript: unknown[] }) =>
     request<{ id: string; updated_at: string }>(`/v1/workspace/chats/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  createConversation: (data: { id: string; agent_id: string; project_id: string; title?: string }) =>
+    request<{ id: string; owner_id: string; agent_id: string; status: string }>('/v1/conversations', { method: 'POST', body: JSON.stringify(data) }),
+  getConversation: (id: string) =>
+    request<{ id: string; owner_id: string; agent_id: string; status: string }>(`/v1/conversations/${encodeURIComponent(id)}`),
+  postConversationMessage: (conversationId: string, data: { id: string; content: { text: string }; attachments?: UploadedFile[] }) =>
+    request<{ message: { id: string; sequence: number }; response?: { id: string; content: { text?: string } | string }; duplicate: boolean }>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/messages`, { method: 'POST', body: JSON.stringify(data) }),
+  routeConversationMessage: (conversationId: string, data: { text: string; has_attachments: boolean }) =>
+    request<{ target: { type: string; id: string }; intent: string; operation: string; execution: string; confidence: number; requires_tools: boolean; requires_clarification: boolean }>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/route`, { method: 'POST', body: JSON.stringify(data) }),
+  linkConversationTask: (conversationId: string, data: { origin_message_id: string; task_id: string; run_id: string; project_id: string; status?: string }) =>
+    request<{ conversation_id: string; task_id: string; run_id: string; status: string }>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/tasks`, { method: 'POST', body: JSON.stringify(data) }),
+  getConversationInteractions: (conversationId: string) =>
+    request<{ interactions: { id: string; interaction_type: string; domain_object_type: string; domain_object_id: string; target_version?: number; assigned_to?: string; status: string; reference: { type: string; id: string; version?: number; source_message_id?: string } }[] }>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/interactions`),
   deleteServerChat: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/chats/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   startRun: (taskId: string, data?: { agent_id?: string; model?: string; hint_query?: string }) =>

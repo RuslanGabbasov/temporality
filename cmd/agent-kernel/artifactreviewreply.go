@@ -66,6 +66,7 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 	if errors.Is(err, workspace.ErrNotFound) {
 		// The round is gone (deleted artifact cascade) — close the stale row.
 		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
+		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "cancelled")
 		return
 	}
 	if err != nil {
@@ -76,6 +77,7 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 		// Decided elsewhere (UI) while the row was still matchable — close
 		// the row so the inbox stops counting it, tell the reviewer.
 		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
+		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "resolved")
 		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, "review_already"))
 		return
 	}
@@ -84,6 +86,7 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 	// the round stays open for the artifacts page.
 	if reply.Cancelled {
 		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
+		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "cancelled")
 		_ = l.store.RecordAccessAudit(ctx, actor, workspace.AuditHumanCancelled, "human_request", artifactReviewRequestID(reviewID), map[string]any{
 			"review_id": reviewID, "channel": l.driver.Type(),
 		})
@@ -118,6 +121,7 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 		// Lost a race with a parallel decision — same as the already-closed
 		// branch: close the row, keep the chat honest.
 		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
+		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "resolved")
 		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, "review_already"))
 		return
 	}
@@ -125,6 +129,7 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 		l.log.Warn("artifact review reply resolve", "review", reviewID, "actor", actor, "error", err)
 		return // row stays open — a retry (or the UI) can still decide
 	}
+	l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "resolved")
 
 	// Close the row as answered so the inbox badge drops immediately.
 	if _, _, err := l.store.AnswerHumanRequest(ctx, artifactReviewRequestID(reviewID), decisionResponse(approve, comment), actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {

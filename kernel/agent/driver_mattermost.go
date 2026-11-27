@@ -34,8 +34,9 @@ func (mattermostDriver) Spec() ChannelSpec {
 		AddressHint:       "Mattermost channel ID (26 chars) — the token's account must have access",
 		NotConfiguredHint: "Mattermost server URL + access token",
 		Capabilities: ChannelCapabilities{
-			Text:   true,
-			TwoWay: true,
+			Text:    true,
+			TwoWay:  true,
+			Threads: true,
 		},
 		Settings: []SettingField{
 			{Name: "base_url", Label: "Server URL, https://mattermost.example.com"},
@@ -73,28 +74,40 @@ func (mattermostDriver) Self(ctx context.Context, client *http.Client, settings 
 }
 
 func (mattermostDriver) SendText(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) error {
+	_, err := mattermostSendText(ctx, client, settings, address, msg)
+	return err
+}
+
+func (mattermostDriver) SendTextThreaded(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) (string, error) {
+	return mattermostSendText(ctx, client, settings, address, msg)
+}
+
+func mattermostSendText(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) (string, error) {
 	base, token, err := mattermostCredentials(settings)
 	if err != nil {
-		return err
+		return "", err
 	}
 	channelID := strings.TrimSpace(address)
 	if channelID == "" {
-		return errors.New("mattermost channel address is empty")
+		return "", errors.New("mattermost channel address is empty")
 	}
 	// The transport is two-way: replies in the channel route back into the
 	// paused run, so say so next to the question.
 	payload := map[string]any{"channel_id": channelID, "message": msg.Body + "\n\nReply in this channel to answer."}
+	if msg.Thread != "" {
+		payload["root_id"] = msg.Thread
+	}
 	body, err := mattermostAPI(ctx, client, http.MethodPost, base+"/api/v4/posts", token, payload)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var decoded struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &decoded); err != nil || decoded.ID == "" {
-		return errors.New("mattermost post returned no id")
+		return "", errors.New("mattermost post returned no id")
 	}
-	return nil
+	return decoded.ID, nil
 }
 
 func (mattermostDriver) SendFile(context.Context, *http.Client, map[string]string, string, OutboundFile) error {

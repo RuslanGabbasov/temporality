@@ -130,6 +130,14 @@ type channelInboundStore interface {
 	SaveChannelWidgetState(ctx context.Context, channel, chatID, messageID string, state json.RawMessage) error
 }
 
+type conversationInteractionProjector interface {
+	ResolveConversationSource(context.Context, string, string, string) (workspace.Conversation, error)
+	CreateConversation(context.Context, *workspace.Conversation) error
+	BindConversationSource(context.Context, string, string, string, string) error
+	UpsertConversationInteraction(context.Context, workspace.ConversationInteraction) error
+	SetConversationInteractionStatus(context.Context, string, string, string, string) error
+}
+
 // run cycles until the context is cancelled. A cycle error is logged and the
 // loop backs off briefly; the returned delay also paces idle re-checks. The
 // cursor is loaded once so restarts continue where the loop left off.
@@ -194,7 +202,9 @@ func (l *channelInboundLoop) cycle(ctx context.Context) (time.Duration, error) {
 	if err != nil {
 		return 5 * time.Second, fmt.Errorf("%s poll: %w", l.driver.Type(), err)
 	}
-	l.routeMessages(ctx, messages, channelSettings)
+	if !l.routeMessages(ctx, messages, channelSettings) {
+		return 5 * time.Second, errors.New("channel messages were not durably routed; cursor retained for retry")
+	}
 	if next != l.cursor {
 		l.cursor = next
 		l.saveCursor(ctx)
@@ -206,11 +216,11 @@ func (l *channelInboundLoop) cycle(ctx context.Context) (time.Duration, error) {
 // shared pipeline: replies match open asks first, everything else enters the
 // intake pipeline (docs/channels.md §5). The poll cycle and the webhook
 // receiver both land here — one routing core, two feeds.
-func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent.InboundMessage, channelSettings map[string]string) {
+func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent.InboundMessage, channelSettings map[string]string) bool {
 	asks, users, senders, err := l.openAsks(ctx)
 	if err != nil {
 		l.log.Warn("load open asks", "channel", l.driver.Type(), "error", err)
-		return
+		return false
 	}
 	// Interactive events route first and never touch the reply matching or
 	// the intake pipeline: a button press is not a dialog message (a group
@@ -229,9 +239,24 @@ func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent
 			plain = append(plain, message)
 		}
 	}
-	// Route first, persist after: a crash between the two re-delivers the
-	// batch (at-least-once) — the workflow side already tolerates duplicate
-	// answers.
+	// Persist every identified human message before reply matching, intake or
+	// workflow signaling. If storage fails, keep the poll cursor unchanged so
+	// the transport can redeliver the event after recovery.
+	for _, message := range plain {
+		if message.Sender == "" || message.Sender == l.selfID {
+			continue
+		}
+		actorID, _, _ := agent.IdentifyInboundSender(message, senders)
+		if actorID == "" {
+			continue // the legacy closed-world intake path records/rejects it
+		}
+		if err := l.persistChannelMessage(ctx, message, actorID); err != nil {
+			l.log.Warn("conversation message persistence", "channel", message.Channel, "message", message.ID, "error", err)
+			return false
+		}
+	}
+	// Reply matching runs only after the normalized event has been durably
+	// appended to its conversation.
 	replies := agent.MatchChannelReplies(plain, asks, users, l.selfID)
 	answered := make(map[string]bool, len(replies))
 	for _, reply := range replies {
@@ -252,6 +277,7 @@ func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent
 		}
 		l.handleIntake(ctx, message, channelSettings, senders)
 	}
+	return true
 }
 
 // widgetRateWindow is the interaction throttle: the transport already caps
@@ -308,12 +334,13 @@ func (l *channelInboundLoop) handleCallback(ctx context.Context, channelSettings
 		response = row.Options[idx]
 	}
 	ask := agent.PendingAsk{
-		RequestID: row.ID,
-		RunID:     row.RunID,
-		ProjectID: row.ProjectID,
-		UserID:    row.ResolvedUser,
-		ThreadRef: row.ThreadRef,
-		CreatedAt: row.CreatedAt,
+		RequestID:        row.ID,
+		RunID:            row.RunID,
+		ProjectID:        row.ProjectID,
+		UserID:           row.ResolvedUser,
+		ThreadRef:        row.ThreadRef,
+		SourceMessageRef: row.SourceMessageRef,
+		CreatedAt:        row.CreatedAt,
 	}
 	if l.resolveAsk(ctx, ask, response, cancelled, message.Sender, address) {
 		if cancelled {
@@ -461,12 +488,13 @@ func (l *channelInboundLoop) handleWidgetQuery(ctx context.Context, channelSetti
 		return // the ask closed meanwhile; the widget already shows done
 	}
 	ask := agent.PendingAsk{
-		RequestID: askRow.ID,
-		RunID:     askRow.RunID,
-		ProjectID: askRow.ProjectID,
-		UserID:    askRow.ResolvedUser,
-		ThreadRef: askRow.ThreadRef,
-		CreatedAt: askRow.CreatedAt,
+		RequestID:        askRow.ID,
+		RunID:            askRow.RunID,
+		ProjectID:        askRow.ProjectID,
+		UserID:           askRow.ResolvedUser,
+		ThreadRef:        askRow.ThreadRef,
+		SourceMessageRef: askRow.SourceMessageRef,
+		CreatedAt:        askRow.CreatedAt,
 	}
 	l.resolveAsk(ctx, ask, string(response), false, message.Sender, message.ChatID)
 }
@@ -547,10 +575,17 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 	// members received a copy through THIS channel (only their chats answer).
 	isTeamAsk := make(map[string]bool, len(deliveryRows))
 	membersOnChannel := make(map[string][]string, len(deliveryRows))
+	deliveriesByRequestUser := make(map[string]map[string]workspace.HumanRequestDelivery, len(deliveryRows))
 	for _, delivery := range deliveryRows {
 		isTeamAsk[delivery.RequestID] = true
 		if delivery.Channel == l.driver.Type() && delivery.Status == workspace.HumanDeliveryDelivered {
 			membersOnChannel[delivery.RequestID] = append(membersOnChannel[delivery.RequestID], delivery.UserID)
+			byUser := deliveriesByRequestUser[delivery.RequestID]
+			if byUser == nil {
+				byUser = map[string]workspace.HumanRequestDelivery{}
+				deliveriesByRequestUser[delivery.RequestID] = byUser
+			}
+			byUser[delivery.UserID] = delivery
 		}
 	}
 	asks := make([]agent.PendingAsk, 0, len(rows))
@@ -559,20 +594,30 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 	for _, row := range rows {
 		if isTeamAsk[row.ID] {
 			// One ask per member copy: a reply from any member's chat answers the
-			// shared RequestID; MatchChannelReplies pairs messages oldest-first and
+			// shared RequestID; MatchChannelReplies pairs messages latest-first and
 			// stops at the first answer.
 			for _, member := range membersOnChannel[row.ID] {
 				entry, ok := chatsByUser[member]
 				if !ok || len(entry.Chats) == 0 {
 					continue
 				}
+				delivery := deliveriesByRequestUser[row.ID][member]
+				threadRef := delivery.ThreadRef
+				if threadRef == "" {
+					threadRef = row.ThreadRef
+				}
+				sourceMessageRef := delivery.SourceMessageRef
+				if sourceMessageRef == "" {
+					sourceMessageRef = row.SourceMessageRef
+				}
 				asks = append(asks, agent.PendingAsk{
-					RequestID: row.ID,
-					RunID:     row.RunID,
-					ProjectID: row.ProjectID,
-					UserID:    member,
-					ThreadRef: row.ThreadRef,
-					CreatedAt: row.CreatedAt,
+					RequestID:        row.ID,
+					RunID:            row.RunID,
+					ProjectID:        row.ProjectID,
+					UserID:           member,
+					ThreadRef:        threadRef,
+					SourceMessageRef: sourceMessageRef,
+					CreatedAt:        row.CreatedAt,
 				})
 				if !seen[member] {
 					seen[member] = true
@@ -589,19 +634,99 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 			continue
 		}
 		asks = append(asks, agent.PendingAsk{
-			RequestID: row.ID,
-			RunID:     row.RunID,
-			ProjectID: row.ProjectID,
-			UserID:    row.ResolvedUser,
-			ThreadRef: row.ThreadRef,
-			CreatedAt: row.CreatedAt,
+			RequestID:        row.ID,
+			RunID:            row.RunID,
+			ProjectID:        row.ProjectID,
+			UserID:           row.ResolvedUser,
+			ThreadRef:        row.ThreadRef,
+			SourceMessageRef: row.SourceMessageRef,
+			CreatedAt:        row.CreatedAt,
 		})
 		if !seen[row.ResolvedUser] {
 			seen[row.ResolvedUser] = true
 			chats = append(chats, entry)
 		}
 	}
+	l.projectPendingInteractions(ctx, rows, asks, chatsByUser)
 	return asks, chats, senders, nil
+}
+
+// projectPendingInteractions mirrors open domain operations into the
+// conversation addressed by each recipient's transport chat. The legacy
+// HumanRequest / ArtifactReview rows remain authoritative for resolution.
+func (l *channelInboundLoop) projectPendingInteractions(ctx context.Context, rows []workspace.HumanRequest, asks []agent.PendingAsk, chatsByUser map[string]agent.UserChats) {
+	projector, ok := l.store.(conversationInteractionProjector)
+	if !ok {
+		return
+	}
+	requests := make(map[string]workspace.HumanRequest, len(rows))
+	for _, row := range rows {
+		requests[row.ID] = row
+	}
+	for _, ask := range asks {
+		row, ok := requests[ask.RequestID]
+		if !ok {
+			continue
+		}
+		interactionType, objectType, objectID := "human_request", "human_request", row.ID
+		var targetVersion *int
+		if reviewID, isReview := artifactReviewFromRequestRun(row.RunID); isReview {
+			interactionType, objectType, objectID = "artifact_review", "artifact_review", reviewID
+			if reviews, ok := l.store.(interface {
+				GetArtifactReview(context.Context, string) (workspace.ArtifactReview, error)
+			}); ok {
+				if review, err := reviews.GetArtifactReview(ctx, reviewID); err == nil {
+					version := review.ArtifactVersion
+					targetVersion = &version
+				}
+			}
+		}
+		for _, chatID := range chatsByUser[ask.UserID].Chats {
+			conversation, err := projector.ResolveConversationSource(ctx, "", l.driver.Type(), chatID)
+			if errors.Is(err, workspace.ErrNotFound) {
+				conversationID := stableConversationID(l.driver.Type(), chatID)
+				candidate := &workspace.Conversation{ID: conversationID, OwnerID: ask.UserID}
+				if createErr := projector.CreateConversation(ctx, candidate); createErr != nil && !errors.Is(createErr, workspace.ErrConflict) {
+					l.log.Warn("channel interaction conversation create", "channel", l.driver.Type(), "operation", ask.RequestID, "error", createErr)
+					continue
+				}
+				if bindErr := projector.BindConversationSource(ctx, "", l.driver.Type(), chatID, conversationID); bindErr != nil && !errors.Is(bindErr, workspace.ErrConflict) {
+					l.log.Warn("channel interaction conversation bind", "channel", l.driver.Type(), "operation", ask.RequestID, "error", bindErr)
+					continue
+				}
+				conversation, err = projector.ResolveConversationSource(ctx, "", l.driver.Type(), chatID)
+			}
+			if err != nil {
+				l.log.Warn("channel interaction conversation resolve", "channel", l.driver.Type(), "operation", ask.RequestID, "error", err)
+				continue
+			}
+			interaction := workspace.ConversationInteraction{
+				ID: "interaction-" + stableConversationKey(interactionType, objectID), ConversationID: conversation.ID,
+				InteractionType: interactionType, DomainObjectType: objectType, DomainObjectID: objectID,
+				TargetVersion: targetVersion, AssignedTo: ask.UserID, Status: "pending", SourceMessageID: ask.SourceMessageRef,
+			}
+			if err := projector.UpsertConversationInteraction(ctx, interaction); err != nil {
+				l.log.Warn("channel interaction projection", "channel", l.driver.Type(), "operation", ask.RequestID, "error", err)
+			}
+		}
+	}
+}
+
+func (l *channelInboundLoop) setConversationInteractionStatus(ctx context.Context, chatID, interactionType, domainObjectID, status string) {
+	projector, ok := l.store.(conversationInteractionProjector)
+	if !ok {
+		return
+	}
+	conversation, err := projector.ResolveConversationSource(ctx, "", l.driver.Type(), chatID)
+	if err != nil {
+		if !errors.Is(err, workspace.ErrNotFound) {
+			l.log.Warn("channel interaction resolve for status", "channel", l.driver.Type(), "object", domainObjectID, "error", err)
+		}
+		return
+	}
+	if err := projector.SetConversationInteractionStatus(ctx, conversation.ID, interactionType, domainObjectID, status); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+		l.log.Warn("channel interaction status", "channel", l.driver.Type(), "object", domainObjectID, "status", status, "error", err)
+	}
 }
 
 // routeReply signals the waiting workflow and closes the human request row.
@@ -622,9 +747,22 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 	// none yet (docs/channels.md §9): the rest of the thread matches exactly,
 	// and follow-up questions of the run join it. Best-effort — a failed pin
 	// only costs the exact-match fast path, never the answer itself.
-	if reply.Message.ReplyTo != "" {
-		if err := l.store.SetHumanRequestThreadRef(ctx, reply.Ask.RequestID, reply.Message.ReplyTo); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+	threadRef := reply.Message.SourceThreadID
+	if threadRef == "" {
+		threadRef = reply.Message.ReplyTo
+	}
+	if threadRef != "" {
+		if err := l.store.SetHumanRequestThreadRef(ctx, reply.Ask.RequestID, threadRef); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 			l.log.Warn("channel reply pin thread", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "error", err)
+		}
+	}
+	if reply.Message.ReplyTo != "" && reply.Ask.SourceMessageRef == "" {
+		if setter, ok := l.store.(interface {
+			SetHumanRequestSourceMessageRef(context.Context, string, string) error
+		}); ok {
+			if err := setter.SetHumanRequestSourceMessageRef(ctx, reply.Ask.RequestID, reply.Message.ReplyTo); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+				l.log.Warn("channel reply pin source message", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "error", err)
+			}
 		}
 	}
 	// Orphan-run rows are artifact review rounds (docs/artifact-lifecycle.md
@@ -688,6 +826,8 @@ func (l *channelInboundLoop) resolveAsk(ctx context.Context, ask agent.PendingAs
 	if cancelled {
 		if err := l.store.CancelHumanRequest(ctx, ask.RequestID, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 			l.log.Warn("channel reply cancel request", "operation", ask.RequestID, "error", err)
+		} else {
+			l.setConversationInteractionStatus(ctx, chat, "human_request", ask.RequestID, "cancelled")
 		}
 	} else if row, transitioned, err := l.store.AnswerHumanRequest(ctx, ask.RequestID, response, actor); err == nil {
 		// Terminal transition with a verdict → hitl.verdict.recorded
@@ -695,6 +835,7 @@ func (l *channelInboundLoop) resolveAsk(ctx context.Context, ask agent.PendingAs
 		// lost the race (the web answer already closed the row) stays silent.
 		if transitioned {
 			emitHitlVerdict(ctx, l.events, row)
+			l.setConversationInteractionStatus(ctx, chat, "human_request", ask.RequestID, "answered")
 		}
 	} else if !errors.Is(err, workspace.ErrNotFound) {
 		l.log.Warn("channel reply answer request", "operation", ask.RequestID, "error", err)

@@ -116,10 +116,9 @@ func (n *channelReviewNotifier) NotifyArtifactReviewRequested(ctx context.Contex
 		msg := agent.OutboundText{Body: body, Question: body}
 		var postedID string
 		var sendErr error
-		if poster, ok := driver.(agent.ThreadedTextPoster); ok && driver.Spec().Capabilities.Threads {
-			// Top-level post becomes the thread root: its id is the ref the
-			// reviewer's threaded replies carry, so they match this exact
-			// round (docs/channels.md §9) even with several rounds pending.
+		if poster, ok := driver.(agent.ThreadedTextPoster); ok {
+			// Save the posted message/thread reference: replies must route to this
+			// review round even when several rounds are open in the same chat.
 			postedID, sendErr = poster.SendTextThreaded(noticeCtx, n.client, settings.Channels[channel.Type], channel.Address, msg)
 		} else {
 			sendErr = driver.SendText(noticeCtx, n.client, settings.Channels[channel.Type], channel.Address, msg)
@@ -144,13 +143,15 @@ func (n *channelReviewNotifier) NotifyArtifactReviewRequested(ctx context.Contex
 	}
 	requestID := artifactReviewRequestID(review.ID)
 	row := &workspace.HumanRequest{
-		ID:        requestID,
-		RunID:     requestID, // orphan: matches no workflow, routes to the review
-		Recipient: strings.Join(review.Reviewers, ","),
-		Question:  body,
-		Options:   []string{"approve", "reject"},
-		Status:    workspace.HumanStatusDelivered,
-		Channel:   delivered[0].channel,
+		ID:               requestID,
+		RunID:            requestID, // orphan: matches no workflow, routes to the review
+		Recipient:        strings.Join(review.Reviewers, ","),
+		Question:         body,
+		Options:          []string{"approve", "reject"},
+		Status:           workspace.HumanStatusDelivered,
+		Channel:          delivered[0].channel,
+		ThreadRef:        delivered[0].postedID,
+		SourceMessageRef: delivered[0].postedID,
 	}
 	if err := n.ws.CreateHumanRequest(ctx, row); err != nil {
 		n.log.Warn("artifact review row", "review", review.ID, "error", err)
@@ -161,10 +162,21 @@ func (n *channelReviewNotifier) NotifyArtifactReviewRequested(ctx context.Contex
 			n.log.Warn("artifact review thread pin", "review", review.ID, "error", err)
 		}
 	}
+	if messageRef := firstPostedThread(delivered); messageRef != "" {
+		setter, ok := n.ws.(interface {
+			SetHumanRequestSourceMessageRef(context.Context, string, string) error
+		})
+		if ok {
+			if err := setter.SetHumanRequestSourceMessageRef(ctx, requestID, messageRef); err != nil {
+				n.log.Warn("artifact review source message pin", "review", review.ID, "error", err)
+			}
+		}
+	}
 	deliveries := make([]workspace.HumanRequestDelivery, 0, len(sent))
 	for _, d := range sent {
 		deliveries = append(deliveries, workspace.HumanRequestDelivery{
 			RequestID: requestID, UserID: d.userID, Channel: d.channel, Status: d.status,
+			ThreadRef: d.postedID, SourceMessageRef: d.postedID,
 		})
 	}
 	if err := n.ws.AddHumanRequestDeliveries(ctx, requestID, deliveries); err != nil {

@@ -117,7 +117,11 @@ type HumanRequest struct {
 	// thread-capable transports (slack ts; docs/channels.md §9): follow-ups of
 	// the same run join it and threaded replies match their ask exactly.
 	// Empty on web delivery and non-threaded channels.
-	ThreadRef           string     `json:"thread_ref,omitempty"`
+	ThreadRef string `json:"thread_ref,omitempty"`
+	// SourceMessageRef is the exact transport message id of this question.
+	// Unlike ThreadRef (which can be a thread root), it disambiguates several
+	// pending interactions posted in the same thread.
+	SourceMessageRef    string     `json:"source_message_ref,omitempty"`
 	Response            string     `json:"response,omitempty"`
 	AnsweredBy          string     `json:"answered_by,omitempty"`
 	TimeoutSeconds      int        `json:"timeout_seconds,omitempty"`
@@ -135,11 +139,13 @@ type HumanRequest struct {
 
 // HumanRequestDelivery is one member's copy of a team human request.
 type HumanRequestDelivery struct {
-	RequestID string    `json:"request_id"`
-	UserID    string    `json:"user_id"`
-	Channel   string    `json:"channel"`
-	Status    string    `json:"status"` // delivered | failed | superseded
-	CreatedAt time.Time `json:"created_at"`
+	RequestID        string    `json:"request_id"`
+	UserID           string    `json:"user_id"`
+	Channel          string    `json:"channel"`
+	Status           string    `json:"status"` // delivered | failed | superseded
+	ThreadRef        string    `json:"thread_ref,omitempty"`
+	SourceMessageRef string    `json:"source_message_ref,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // Valid timeout policies (docs/org-structure.md §33): what happens when a

@@ -53,6 +53,26 @@ func TestParseTelegramUpdatesTextMessage(t *testing.T) {
 	}
 }
 
+func TestParseTelegramUpdatesReplyTarget(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"ok": true,
+		"result": []any{telegramUpdateBody(105, 555, 555, "одобряю", map[string]any{
+			"message_id":       802,
+			"reply_to_message": map[string]any{"message_id": 799},
+		})},
+	})
+	updates, _, err := ParseTelegramUpdates(body, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 || updates[0].ReplyTo != 799 {
+		t.Fatalf("parsed reply target = %+v, want message 799", updates)
+	}
+	if got := telegramNormalizedOne(updates[0]).ReplyTo; got != "799" {
+		t.Fatalf("normalized reply target = %q, want 799", got)
+	}
+}
+
 func TestParseTelegramUpdatesDocumentWithCaption(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"ok": true,
