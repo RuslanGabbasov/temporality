@@ -104,14 +104,18 @@ function causeTag(cause: string): 'red' | 'warm-gray' | 'blue' {
 /** The trace deep-link of one run row. Behavior suspicions point straight at
  *  the alarm source: the trace opens FILTERED to agent.behavior events and
  *  searched by the guard pattern — hundreds of steps collapse to the two
- *  rows the case is about («фиг найдешь» fixed). Exported for tests. */
+ *  rows the case is about («фиг найдешь» fixed). semantic:N is the danger-
+ *  corpus INDEX, not text — no trace row contains it, so searching it landed
+ *  on a guaranteed-empty list («мусор в поиске»); the type filter alone
+ *  isolates those hits. Real pattern ids are searchable: agent.behavior
+ *  haystacks carry the id. Exported for tests. */
 export function traceHref(row: ClusterRow, run: string): string {
 	const query = new URLSearchParams({ project: row.project, run })
 	if (row.caseID === 'behavior_suspicion') {
 		query.set('view', 'trace')
 		query.set('traceType', 'agent.behavior')
 		const pattern = row.pattern.trim()
-		if (pattern) query.set('traceQ', pattern)
+		if (pattern && !/^semantic:\d+$/.test(pattern)) query.set('traceQ', pattern)
 	}
 	return `/agents?${query.toString()}`
 }

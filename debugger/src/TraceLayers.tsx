@@ -16,6 +16,12 @@ import ConsoleOutput from './ConsoleOutput'
 import TracePreview, { tracePreviewOf } from './TracePreview'
 import { ChevronDown, ChevronRight } from '@carbon/icons-react'
 
+/** The flat (filtered) list renders at most this many rows: a deep link or a
+ *  broad filter can match thousands of events, and mounting all of them is a
+ *  multi-second commit. Beyond the cap a «+N hidden» hint tells the reader to
+ *  refine. The unfiltered turn tree is unaffected — its turns fold. */
+const FLAT_RENDER_CAP = 400
+
 /**
  * The three-layer trace renderer (T2, v2-consolidated.md §4–§5, DoD-1/2/3/9).
  *
@@ -332,8 +338,22 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   // the flat list and the per-turn tree on the same run-wide rule: one marker
   // per route, re-shown only when the route changes.
   const traceEvents = useMemo(() => collapseRouteMarkers(events), [events])
-  const allItems = foldTrace(traceEvents, locale, t)
+  // foldTrace over a multi-thousand-event window costs real time — without the
+  // memo every unrelated render (the owner's 1 Hz live tick, every debounced
+  // keystroke anywhere on the page) re-folded the whole trace. The per-turn
+  // folds share a WeakMap keyed by the events array: foldTraceTree recreates
+  // the arrays only when the window changes, so live re-renders hit the cache.
+  const allItems = useMemo(() => foldTrace(traceEvents, locale, t), [traceEvents, locale, t])
   const tree = useMemo(() => foldTraceTree(traceEvents), [traceEvents])
+  const foldCache = useMemo(() => new WeakMap<ObservationEvent[], TraceItem[]>(), [locale, t])
+  const foldTurn = (turnEvents: ObservationEvent[]): TraceItem[] => {
+    let folded = foldCache.get(turnEvents)
+    if (!folded) {
+      folded = foldTrace(turnEvents, locale, t)
+      foldCache.set(turnEvents, folded)
+    }
+    return folded
+  }
   // Alias for the legacy chips row and the render loop below.
   const items = allItems
   // §8: with no filter state the trace renders as the turn tree (the spine of
@@ -343,12 +363,19 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   // so "activeFilter" means the state actually constrains something — an
   // empty state renders the turn tree, not the flat folded list.
   const activeFilter = Boolean(filterState && onFilterState) && filterState ? !isTraceStateEmpty(filterState) : false
-  const visibleItems = activeFilter
-    ? filterTraceItems(allItems, filterState!.filter, filterState!.chips, locale, t)
+  // Both passes walk the whole folded window, so they sit behind memos keyed
+  // to the COMMITTED state: the owner re-renders on every keystroke (the
+  // uncommitted draft lives in the panel), and none of that may re-filter —
+  // only a committed change re-runs these.
+  const visibleItems = useMemo(() => (activeFilter && filterState
+    ? filterTraceItems(allItems, filterState.filter, filterState.chips, locale, t)
     : items.filter((item) => matchesChip(item, chip))
-  const searchEntries = activeFilter && filterState!.query.trim()
-    ? searchItems(visibleItems, filterState!.query, locale, t, consoleSearchIndex(consoleStates, allItems))
-    : []
+  ), [activeFilter, filterState, allItems, chip, locale, t])
+  const searchEntries = useMemo(() => (
+    activeFilter && filterState && filterState.query.trim()
+      ? searchItems(visibleItems, filterState.query, locale, t, consoleSearchIndex(consoleStates, allItems))
+      : []
+  ), [activeFilter, filterState, visibleItems, consoleStates, allItems, locale, t])
   const keyOf = (item: TraceItem): string => {
     switch (item.kind) {
       case 'event': return `${item.event.source.id}:${item.event.event_id}`
@@ -406,7 +433,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   const renderSegment = (segment: { turn: TurnNode | null; events: ObservationEvent[] }, index: number): React.ReactNode => {
     if (segment.turn) {
       const turn = segment.turn
-      const innerItems = foldTrace(turn.events, locale, t)
+    const innerItems = foldTurn(turn.events)
       const expanded = turnExpanded(turn)
       const duration = turn.completed
         ? formatTurnDuration(turn.started.occurred_at, turn.completed.occurred_at)
@@ -499,7 +526,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
         </div>
       )
     }
-    const plainItems = foldTrace(segment.events, locale, t)
+    const plainItems = foldTurn(segment.events)
     return <Fragment key={`plain:${index}`}>{(newestFirst ? [...plainItems].reverse() : plainItems).map((item, itemIndex) => renderFolded(item, `plain${index}:${itemIndex}:`))}</Fragment>
   }
   const renderFolded = (item: TraceItem, keyPrefix: string): React.ReactNode => {
@@ -666,8 +693,26 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
         </div>
       )}
       {visibleItems.length === 0 && !activeFilter && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>{emptyHint ?? t('runs.layers.timeline.empty')}</div>}
+      {activeFilter && visibleItems.length === 0 && (
+        // A valid-but-empty dim filter (a stale deep link's traceType, a
+        // category with no events in the window) must say so and offer the
+        // way out — not render a silently blank list.
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>
+          <span>{t('runs.filters.no_matches')}</span>
+          <button
+            type="button"
+            onClick={() => onFilterState?.({ filter: { category: '', type: '', status: '', participant: '', minMs: 0 }, query: '', chips: new Set() })}
+            style={{ background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.1rem 0.45rem', borderRadius: '4px', lineHeight: 1.4 }}
+          >{t('runs.filters.reset')}</button>
+        </div>
+      )}
       {activeFilter ? (
-        visibleItems.map((item) => renderFolded(item, 'flat:'))
+        <>
+          {visibleItems.slice(0, FLAT_RENDER_CAP).map((item) => renderFolded(item, 'flat:'))}
+          {visibleItems.length > FLAT_RENDER_CAP && (
+            <div style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', padding: '0.35rem 0' }}>{t('runs.filters.more', { count: String(visibleItems.length - FLAT_RENDER_CAP) })}</div>
+          )}
+        </>
       ) : (
         (newestFirst ? [...tree].reverse() : tree).map((segment, index) => renderSegment(segment, index))
       )}

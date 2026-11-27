@@ -87,4 +87,10 @@ describe('traceHref', () => {
     expect(href).toContain('traceType=agent.behavior')
     expect(href).not.toContain('traceQ')
   })
+
+  it('a semantic-corpus pattern (semantic:N) skips the search — no trace row contains it', () => {
+    const href = traceHref(row({ caseID: 'behavior_suspicion', pattern: 'semantic:3' }), 'root')
+    expect(href).toContain('traceType=agent.behavior')
+    expect(href).not.toContain('traceQ')
+  })
 })

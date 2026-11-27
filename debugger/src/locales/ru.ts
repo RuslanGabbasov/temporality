@@ -3479,6 +3479,8 @@ export const ru: Record<string, string> = {
     'runs.filters.search_hint': 'Поиск по загруженному окну трассы и буферам вывода команд; серверный поиск по выводу недоступен (вывод не хранится).',
     'runs.filters.results': 'Найдено: {{count}}',
     'runs.filters.reset': 'Сбросить фильтры',
+    'runs.filters.no_matches': 'Ничего не найдено под текущие фильтры',
+    'runs.filters.more': 'Скрыто ещё {{count}} — уточните фильтр или поиск',
     'runs.chip.my_input': 'Только мой ввод',
 
     // Organization operations (docs/org-activity.md): the manager surfaces —

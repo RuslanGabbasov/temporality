@@ -3479,6 +3479,8 @@ export const en: Record<string, string> = {
     'runs.filters.search_hint': 'Search covers the loaded trace window and the held command-output buffers; server-side output search is unavailable (output is not persisted).',
     'runs.filters.results': 'Found: {{count}}',
     'runs.filters.reset': 'Reset filters',
+    'runs.filters.no_matches': 'Nothing matches the current filters',
+    'runs.filters.more': '{{count}} more hidden — refine the filter or search',
     'runs.chip.my_input': 'Only my input',
 
     // Organization operations (docs/org-activity.md): the manager surfaces —

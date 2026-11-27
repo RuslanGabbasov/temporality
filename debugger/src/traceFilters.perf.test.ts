@@ -113,4 +113,16 @@ describe('NFR-9: trace filtering and search never fetch', () => {
     expect(searchItems(items, 'gpt', RU, t)).toHaveLength(2)
     expect(fetchCalls).toHaveBeenCalledTimes(0)
   })
+
+  it('an agent.behavior row is findable by its guard pattern id and kind', () => {
+    const items = foldTrace(
+      [ev('agent.behavior', { kind: 'danger_content', pattern: 'rm_root', detail: 'rm -rf корня', tool: 'write_file' }, 5)],
+      RU, t,
+    )
+    // The supervisor deep link searches exactly these machine ids — without
+    // them in the haystack the pre-filled query landed on an empty list.
+    expect(searchItems(items, 'rm_root', RU, t)).toHaveLength(1)
+    expect(searchItems(items, 'danger_content', RU, t)).toHaveLength(1)
+    expect(searchItems(items, 'semantic:3', RU, t)).toHaveLength(0)
+  })
 })

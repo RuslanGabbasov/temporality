@@ -597,6 +597,30 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
   'saga.renamed': (d, { t }) => ({ title: t('runs.event.saga_renamed'), fact: squash(d.title).slice(0, 80) }),
   'saga.merged': (d, { t }) => ({ title: t('runs.event.saga_merged'), fact: Array.isArray(d.source_saga_ids) ? `+${d.source_saga_ids.length}` : '', status: 'ok' }),
   'saga.detached': (d, { t }) => ({ title: t('runs.event.saga_detached'), fact: squash(d.task_id), status: 'none' }),
+  // ── §5.8 behavior guard findings (docs/agent-behavior-monitoring.md): one
+  // row per hit, severity by kind — canary and secret_leak are red, the rest
+  // are informational. Without the override the type has no catalog meta and
+  // foldTrace drops the row entirely — deep-linked traceType filters showed
+  // an empty list. ──
+  'agent.behavior': (d, { t }) => {
+    const kind = String(d.kind ?? '')
+    const labels: Record<string, { icon: string; key: string }> = {
+      canary: { icon: '🚨', key: 'runs.event.behavior_canary' },
+      secret_leak: { icon: '🔑', key: 'runs.event.behavior_secret_leak' },
+      danger_content: { icon: '☢️', key: 'runs.event.behavior_danger' },
+      suspicious_arg: { icon: '🧭', key: 'runs.event.behavior_suspicious' },
+      test_edit: { icon: '🧪', key: 'runs.event.behavior_test_edit' },
+    }
+    const entry = labels[kind] ?? { icon: '🛡️', key: 'runs.event.behavior_generic' }
+    const severe = kind === 'canary' || kind === 'secret_leak'
+    return {
+      title: t(entry.key),
+      fact: String(d.detail ?? ''),
+      status: severe ? 'error' : 'none',
+      icon: entry.icon,
+      color: severe ? '#f7768e' : 'var(--tm-text-3)',
+    }
+  },
 }
 
 /** Semantic icon+color per catalog group (§4.1: category, not type). */
@@ -663,8 +687,8 @@ export function timelineRow(event: ObservationEvent, locale: Locale, t: Translat
   const row: TimelineRow = {
     type,
     category,
-    icon: look.icon,
-    color: look.color,
+    icon: overrideRow.icon ?? look.icon,
+    color: overrideRow.color ?? look.color,
     title,
     fact: baseTitle ? fact : '',
     duration: durationOf(d) || turnsOf(d),

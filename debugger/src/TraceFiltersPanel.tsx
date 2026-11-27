@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EventCategory, TranslateFn } from './eventPresentation'
 import { EVENT_GROUPS } from './eventCatalog'
 import type { ObservationEvent } from './observationApi'
 import type { Locale } from './locales'
+import { TRACE_DEBOUNCE_MS } from './useDebouncedValue'
 import {
   searchItems,
   type FilterChip,
@@ -127,6 +128,25 @@ export default function TraceFiltersPanel({ state, onState, items, consoleStates
 }) {
   const { filter, query, chips } = state
   const [typesOpen, setTypesOpen] = useState(false)
+  // Local echo of the search box: the committed state lives in the owner
+  // (URL-backed), but a fully controlled input re-rendered the whole page per
+  // keystroke — impossible to type over a big trace. The draft updates the
+  // input instantly; the owner sees it at the NFR-9 debounce cadence; any
+  // external change (deep link, reset ✕) re-syncs the draft.
+  const [queryDraft, setQueryDraft] = useState(query)
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const queryTimer = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (queryDraft !== query) setQueryDraft(query)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resync on external query changes only; the draft must not fight typing
+  }, [query])
+  useEffect(() => () => { if (queryTimer.current !== undefined) window.clearTimeout(queryTimer.current) }, [])
+  const onQueryDraft = (value: string) => {
+    setQueryDraft(value)
+    if (queryTimer.current !== undefined) window.clearTimeout(queryTimer.current)
+    queryTimer.current = window.setTimeout(() => onState({ ...stateRef.current, query: value }), TRACE_DEBOUNCE_MS)
+  }
   const consoleIndex = useMemo(
     () => consoleSearchIndex(consoleStates, items),
     [consoleStates, items],
@@ -255,11 +275,11 @@ export default function TraceFiltersPanel({ state, onState, items, consoleStates
       )}
       <input
         type="search"
-        value={query}
+        value={queryDraft}
         placeholder={t('runs.filters.search_placeholder')}
         title={t('runs.filters.search_hint')}
         aria-label={t('runs.filters.search_placeholder')}
-        onChange={(e) => onState({ ...state, query: e.target.value })}
+        onChange={(e) => onQueryDraft(e.target.value)}
         style={{ ...CONTROL_STYLE, marginLeft: 'auto', width: '11rem', paddingLeft: '0.45rem' }}
       />
     </div>

@@ -181,6 +181,10 @@ const PAYLOAD_PICKS: Array<{ types: RegExp; keys: string[] }> = [
   { types: /^(agent\.summary$)/, keys: ['answer'] },
   { types: /^(knowledge\.|hint\.)/, keys: ['proposition'] },
   { types: /^(plan\.task\.)/, keys: ['feedback'] },
+  // Behavior guard hits are findable by their machine ids: the supervisor's
+  // deep link pre-fills the trace search with the guard pattern id (rm_root,
+  // fork_bomb, …) — without it in the haystack the search landed empty.
+  { types: /^agent\.behavior$/, keys: ['pattern', 'kind'] },
 ]
 
 /** Human-form values beyond the timeline preview, in full (§8: «значения

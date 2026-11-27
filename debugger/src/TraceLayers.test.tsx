@@ -162,6 +162,22 @@ describe('TraceLayers (three layers, §4)', () => {
     expect(html).toContain('Трасса пуста')
   })
 
+  it('agent.behavior renders a real row, not the generic shell (deep-link regression)', () => {
+    // The type has no catalog meta — before its override existed, foldTrace
+    // dropped the row entirely and the supervisor's traceType deep link
+    // always landed on an empty list.
+    const html = renderLayers([
+      ev('agent.behavior', { kind: 'danger_content', pattern: 'rm_root', detail: 'rm -rf /', tool: 'write_file' }, 1),
+      ev('agent.behavior', { kind: 'canary', detail: 'ловушка сработала' }, 2),
+    ])
+    expect(html).toContain('Деструктивная конструкция в артефакте')
+    expect(html).toContain('☢️')
+    expect(html).toContain('rm -rf /')
+    expect(html).toContain('Сработала секрет-ловушка')
+    expect(html).toContain('🚨')
+    expect(html).not.toContain('Событие:')
+  })
+
   it('run_command rows carry the details discloser; secret rows carry none (P-2 surface)', () => {
     const withDetails = renderLayers([
       ev('tool.started', { tool: 'run_command', operation_id: 'op-1', arguments: '{"command":["ls"]}' }, 1),
@@ -169,6 +185,28 @@ describe('TraceLayers (three layers, §4)', () => {
     expect(withDetails).toContain('aria-label="Показать детали события: run_command"')
     const secret = renderLayers([ev('secret.issued', { secret: 'API_TOKEN' }, 1)])
     expect(secret).not.toContain('aria-label="Показать детали события')
+  })
+
+  it('an active filter with zero matches says so and offers the reset', () => {
+    // Dims, not the query: the query is a results-panel overlay on top of the
+    // dim-filtered list — only a dim filter (a stale deep link's traceType,
+    // here) can empty the rendered list itself.
+    const html = renderLayers([ev('run.started', {}, 1)], {
+      filterState: { filter: { category: '', type: 'agent.behavior', status: '', participant: '', minMs: 0 }, query: '', chips: new Set() },
+      onFilterState: () => {},
+    })
+    expect(html).toContain('Ничего не найдено под текущие фильтры')
+    expect(html).toContain('Сбросить фильтры')
+  })
+
+  it('the flat filtered list caps its render and says how much is hidden', () => {
+    const many: ObservationEvent[] = []
+    for (let i = 0; i < 450; i += 1) many.push(ev('model.completed', { turn: i + 1 }, 1))
+    const html = renderLayers(many, {
+      filterState: { filter: { category: '', type: 'model.completed', status: '', participant: '', minMs: 0 }, query: '', chips: new Set() },
+      onFilterState: () => {},
+    })
+    expect(html).toContain('Скрыто ещё 50')
   })
 })
 
