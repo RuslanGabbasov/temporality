@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -457,6 +458,61 @@ func canAccessConversation(r *http.Request, conversation workspace.Conversation)
 // redriving them forever (docs/conversational-runtime.md §17.1).
 var errConversationTurnPermanent = errors.New("conversation turn cannot succeed")
 
+// conversationToolMarkupNudge is the corrective turn for the single nudge
+// retry below, mirroring the provider-risk corrective pattern (activities
+// riskRetryInstruction): a user-role instruction is accepted by every
+// OpenAI-compatible provider, unlike a mid-conversation system message.
+const conversationToolMarkupNudge = "Your previous reply was tool-call markup, not a user-visible answer. This conversation has no executable tools — respond to the user's last message directly in plain text."
+
+// conversationToolMarkupFallback is the graceful answer when even the nudge
+// retry comes back empty. The turn completes with it so the user always gets
+// a reply and the stale-turn redrive loop stops re-dispatching (docs/
+// conversational-runtime.md §17.1).
+const conversationToolMarkupFallback = "Не смог обработать сообщение: модель вернула служебный вызов инструмента вместо ответа. Переформулируйте, пожалуйста."
+
+// conversationTurnModelCall abstracts the model invocation so the markup
+// fallback is unit-testable without a live provider.
+type conversationTurnModelCall func(context.Context, kernelagent.ModelRequest) (llm.Completion, error)
+
+// resolveConversationTurnAnswer turns a model completion into a user-visible
+// answer. Direct turns carry no tools: when the model answers with tool-call
+// markup as text, the transport rescue (kernel/llm toolcalldetect) extracts
+// it into ToolCalls and Content arrives empty — that used to fail the turn
+// with «empty response», redrive re-dispatched it every few minutes and the
+// user never got anything. Now: one nudge retry asking for plain prose; if
+// that still comes back empty, a graceful fallback completes the turn.
+func resolveConversationTurnAnswer(ctx context.Context, call conversationTurnModelCall, request kernelagent.ModelRequest) (string, error) {
+	completion, err := call(ctx, request)
+	if err != nil {
+		return "", err
+	}
+	if answer := strings.TrimSpace(completion.Content); answer != "" {
+		return answer, nil
+	}
+	if len(completion.ToolCalls) == 0 {
+		return "", errors.New("lead agent returned an empty response")
+	}
+	names := make([]string, 0, len(completion.ToolCalls))
+	for _, toolCall := range completion.ToolCalls {
+		names = append(names, toolCall.Name)
+	}
+	joined := strings.Join(names, ", ")
+	slog.Warn("conversation turn model answered with tool-call markup, nudging for prose", "run_id", request.RunID, "tools", joined)
+	retry := request
+	retry.Messages = append(append(make([]llm.Message, 0, len(request.Messages)+2), request.Messages...),
+		llm.Message{Role: "assistant", Content: "(attempted tool call: " + joined + ")"},
+		llm.Message{Role: "user", Content: conversationToolMarkupNudge},
+	)
+	completion, err = call(ctx, retry)
+	if err != nil {
+		return "", err
+	}
+	if answer := strings.TrimSpace(completion.Content); answer != "" {
+		return answer, nil
+	}
+	return conversationToolMarkupFallback, nil
+}
+
 func runConversationTurn(ctx context.Context, activities *kernelagent.Activities, store *workspace.Store, conversation workspace.Conversation, history []workspace.ConversationMessage, tokenKey string, directives ...string) (string, error) {
 	if activities.Tokens != nil && tokenKey != "" {
 		defer activities.Tokens.Close(tokenKey)
@@ -524,17 +580,9 @@ func runConversationTurn(ctx context.Context, activities *kernelagent.Activities
 	for i := len(selected) - 1; i >= 0; i-- {
 		messages = append(messages, selected[i])
 	}
-	completion, err := activities.CallModel(ctx, kernelagent.ModelRequest{
+	return resolveConversationTurnAnswer(ctx, activities.CallModel, kernelagent.ModelRequest{
 		Model: model, ProviderID: lead.Provider, Project: projectID, Messages: messages, RunID: tokenKey,
 	})
-	if err != nil {
-		return "", err
-	}
-	answer := strings.TrimSpace(completion.Content)
-	if answer == "" {
-		return "", errors.New("lead agent returned an empty response")
-	}
-	return answer, nil
 }
 
 func buildConversationRoutingContext(ctx context.Context, activities *kernelagent.Activities, store *workspace.Store, conversation workspace.Conversation, history []workspace.ConversationMessage, tokenKey, agentID string) (string, error) {
