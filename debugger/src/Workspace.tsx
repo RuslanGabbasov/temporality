@@ -184,6 +184,15 @@ interface Conversation {
   agentId: string
   taskId: string
   createdAt: Date
+  /** The project the chat belongs to: stamped at creation, confirmed from
+   *  the server copy at restore. The sync push sends THIS value, never the
+   *  currently selected project — the push walks every stored conversation,
+   *  and keying it to the selector migrated every chat into whichever
+   *  project the user switched to last (R&D chats re-emerging in omni).
+   *  Unset only on chats created before the field existed; the push then
+   *  falls back to the current project for local-only chats and leaves
+   *  server-known chats alone until their restore stamps them. */
+  projectId?: string
   /** True once the server listing CONFIRMED this chat as ours (the scoped
    *  ownership response contained it). A synced flag + absence from the next
    * scoped response = the chat left the user's server set (foreign copy from
@@ -873,6 +882,16 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     if (chatSyncTimer.current) window.clearTimeout(chatSyncTimer.current)
     chatSyncTimer.current = window.setTimeout(() => {
       for (const c of conversations) {
+        // Each chat pushes its OWN project, never the selector: this loop
+        // walks every stored conversation across projects, and keying the
+        // payload to the selected project re-attributed them all on every
+        // switch (the restore of the old project then pruned them locally —
+        // chats «moved» to the last opened project). A server-confirmed chat
+        // without a captured project (pre-field legacy) waits for its
+        // restore instead of guessing; a local-only one takes the current
+        // project as the best available attribution.
+        const projectId = c.projectId ?? (c.syncedFromServer ? '' : project)
+        if (!projectId) continue
         const transcript = c.messages.map((m) => ({
           role: m.role, content: m.content, at: m.timestamp,
           addenda: m.addenda ?? [], attachments: m.attachments ?? [],
@@ -883,7 +902,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           runId: m.runId, status: m.status,
         }))
         workspaceApi.putServerChat(c.id, {
-          project_id: project, agent_id: c.agentId ?? '', task_id: c.taskId ?? '',
+          project_id: projectId, agent_id: c.agentId ?? '', task_id: c.taskId ?? '',
           title: c.title || 'Untitled', transcript,
         }).catch(() => { /* server sync is best-effort; localStorage stays the cache */ })
       }
@@ -910,11 +929,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         for (const chat of page.chats ?? []) {
           if (known.has(chat.id)) {
             // The server just confirmed this row as ours — mark it so a
-            // future absence prunes it (foreign copies never get the mark).
+            // future absence prunes it (foreign copies never get the mark),
+            // and capture its project: the listing is project-scoped, so
+            // this is the authoritative attribution a legacy local copy
+            // (created before conversations carried a project) lacks.
             const local = known.get(chat.id)
-            if (local && !local.syncedFromServer) {
+            if (local && (!local.syncedFromServer || local.projectId !== chat.project_id)) {
               const idx = next.indexOf(local)
-              if (idx >= 0) next[idx] = { ...local, syncedFromServer: true }
+              if (idx >= 0) next[idx] = { ...local, syncedFromServer: true, projectId: chat.project_id || local.projectId }
             }
             continue // local copy wins: it may be newer
           }
@@ -931,6 +953,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           next.push({
             id: chat.id, title: chat.title || 'Chat', messages,
             agentId: chat.agent_id ?? '', taskId: chat.task_id ?? '', createdAt: new Date(chat.updated_at),
+            projectId: chat.project_id || project,
             syncedFromServer: true,
           })
         }
@@ -1111,10 +1134,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   })()
   void nowTick
 
-  // Client-side filter for the conversation list sidebar.
+  // Client-side filter for the conversation list sidebar. A chat lives in
+  // the project it was created in (its server copy is listed per project
+  // too) — a chat without a captured project (legacy, not yet restored)
+  // stays visible everywhere rather than vanishing until attribution lands.
   const [convFilter, setConvFilter] = useState('')
   const visibleConversations = sortConversationsByActivity(
-    conversations.filter((conv) => matchesFilter(convFilter, conv.title, conv.agentId ? agentName(conv.agentId) : ''))
+    conversations.filter((conv) => (!conv.projectId || conv.projectId === project)
+      && matchesFilter(convFilter, conv.title, conv.agentId ? agentName(conv.agentId) : ''))
   )
 
   const createConversation = () => {
@@ -1125,6 +1152,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       agentId: newChatAgentId,
       taskId: '',
       createdAt: new Date(),
+      projectId: project,
     }
     setConversations((prev) => [conv, ...prev])
     setActiveConvId(conv.id)
@@ -1162,6 +1190,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       agentId: conv.agentId,
       taskId: '',
       createdAt: new Date(),
+      projectId: conv.projectId ?? project,
     }
     setConversations((prev) => [branch, ...prev])
     setActiveConvId(branch.id)
