@@ -297,6 +297,18 @@ describe('runOrigin', () => {
     expect(runOrigin(started('task-r2'))).toBe('continuation')
   })
 
+  it('does not mistake a plan-task rework round for a turn-limit restart', () => {
+    // A rework round reuses the -rN suffix on a DELEGATED id that hangs off
+    // the plan runner, not off the task's own first attempt — it is a new
+    // delegation, not the same agent resuming (the ⟳ 7 incident).
+    expect(runOrigin(started('task/plan2/01-review-fix-r2', {}, 'task'))).toBe('delegated')
+    // The resume spawned for its undelivered ask IS a continuation — of that
+    // subtask: the parent matches the id minus the /continue/NN suffix.
+    expect(runOrigin(started('task/plan2/01-review-fix-r2/continue/01', {}, 'task/plan2/01-review-fix-r2'))).toBe('continuation')
+    // A reworked id whose parent is its own stripped base stays a restart.
+    expect(runOrigin(started('task/plan/01-review-r2', {}, 'task/plan/01-review'))).toBe('continuation')
+  })
+
   it('lands on the rows buildRunRows emits', () => {
     const rows = buildRunRows([
       started('task', undefined, undefined),
@@ -411,6 +423,28 @@ describe('attemptChain', () => {
   it('is a single-entry chain for a run with no continuations', () => {
     const rows = buildRunRows([started('task', at(0))], new Map())
     expect(chain(rows, 'task')).toEqual(['task'])
+  })
+
+  it('counts real attempts only — plan-task rework rounds stay out (the ⟳ 7 incident)', () => {
+    // 2026-11-27, run chto-u-nas-…-053915: two turn-limit restarts against a
+    // budget of 5, but the switcher read 1/7 — the plan's reworked tasks
+    // (…/plan2/01-x-r2, delegated retries) and their /continue resumes joined
+    // the head's chain through the bare -rN id fallback.
+    const rows = buildRunRows([
+      started('task', at(0)),
+      started('task-r1', at(10), 'task'),
+      started('task/plan/01-review-fix', at(15), 'task-r1'),
+      started('task/plan2/01-review-fix-r2', at(30), 'task-r1'),
+      started('task/plan2/01-review-fix-r2/continue/01', at(35), 'task/plan2/01-review-fix-r2'),
+      started('task/plan2/02-sec-audit-fix-r2', at(36), 'task-r1'),
+      started('task/plan2/02-sec-audit-fix-r2/continue/02', at(37), 'task/plan2/02-sec-audit-fix-r2'),
+      started('task-r1-r2', at(40), 'task-r1'),
+    ], new Map())
+    expect(chain(rows, 'task')).toEqual(['task', 'task-r1', 'task-r1-r2'])
+    // The reworked subtask keeps its own little chain for its own switcher.
+    expect(chain(rows, 'task/plan2/01-review-fix-r2')).toEqual([
+      'task/plan2/01-review-fix-r2', 'task/plan2/01-review-fix-r2/continue/01',
+    ])
   })
 
   it('keeps a delegated run and its continuations in their own chain', () => {

@@ -13,6 +13,13 @@ export type RunOrigin = 'root' | 'continuation' | 'delegated'
  *  parent being loaded: a continuation whose parent fell out of the list
  *  window still must not read as an independent run.
  *
+ *  A trailing `-rN` is a restart signal only when the parent IS the stripped
+ *  base run (or is unknown — the legacy journal). Plan-task rework rounds
+ *  reuse the same suffix for a DELEGATED retry: `<run>/plan2/01-x-r2` hangs
+ *  off the plan runner, not off the task's own first attempt, so counting it
+ *  as an attempt inflated the head's chain (a ⟳ 7 badge against a restart
+ *  budget of 5 — the kernel honored the budget, the classifier lied).
+ *
  *  Structurally typed so the runs list and the trace timeline (which holds a
  *  decoded payload rather than the whole event) share one implementation. */
 export function runOrigin(event: { data?: Record<string, unknown>; context?: { run?: string } }): RunOrigin {
@@ -21,7 +28,14 @@ export function runOrigin(event: { data?: Record<string, unknown>; context?: { r
   if (typeof explicit === 'number' && explicit > 0) return 'continuation'
   if (typeof explicit === 'string' && Number(explicit) > 0) return 'continuation'
   const id = event.context?.run ?? ''
-  if (/-r\d+$/.test(id) || /\/continue\/\d+$/.test(id)) return 'continuation'
+  const restart = /-r\d+$/.exec(id)
+  const resume = /\/continue\/\d+$/.exec(id)
+  if (restart || resume) {
+    const base = resume ? id.slice(0, -resume[0].length) : id.slice(0, -restart![0].length)
+    const parent = data.parent_run_id ? String(data.parent_run_id) : ''
+    if (!parent || parent === base) return 'continuation'
+    return 'delegated'
+  }
   const parent = data.parent_run_id ? String(data.parent_run_id) : ''
   return parent ? 'delegated' : 'root'
 }
