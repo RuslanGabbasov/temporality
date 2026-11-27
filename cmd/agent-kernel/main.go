@@ -8482,18 +8482,29 @@ func main() {
 	// else enters the intake pipeline. Poll loops idle (30s re-check) while
 	// the channel is not configured; cursors and account identity survive
 	// restarts in workspace_channel_cursor.
+	// The durable outbox (docs/conversational-runtime.md §13.3) needs one
+	// transport loop per channel: both construction paths below register
+	// themselves so the delivery loop can find a live driver for any event.
+	outboxLoops := map[string]*channelInboundLoop{}
+	channelTurn := func(turnCtx context.Context, conversation workspace.Conversation, history []workspace.ConversationMessage, tokenKey string, directives []string) (string, error) {
+		return runConversationTurn(turnCtx, activities, ws, conversation, history, tokenKey, directives...)
+	}
 	for _, driver := range agent.ChannelDrivers() {
 		if hook := driver.Webhook(); hook != nil {
 			receiver := &channelWebhookReceiver{
 				loop: &channelInboundLoop{
-					driver:     driver,
-					httpClient: activities.HTTP,
-					settings:   activities.ChannelSettings,
-					store:      ws,
-					resolveRun: resolveRunState,
-					journal:    runJournal,
-					sourceID:   activities.SourceID,
-					log:        log,
+					driver:      driver,
+					httpClient:  activities.HTTP,
+					settings:    activities.ChannelSettings,
+					store:       ws,
+					resolveRun:  resolveRunState,
+					journal:     runJournal,
+					sourceID:    activities.SourceID,
+					log:         log,
+					turn:        channelTurn,
+					classifyFor: func(conversation workspace.Conversation, lead workspace.Agent) ConversationMessageClassifier {
+						return modelConversationClassifier(activities, ws, conversation, lead)
+					},
 					// R1 (kernel-wedge-2026-10-21): this pipeline runs both
 					// from the channel webhook's HTTP request and from the
 					// poll loop — either way every signal/note rides the
@@ -8526,6 +8537,7 @@ func main() {
 				log:  log,
 			}
 			targetWatchers[driver.Type()] = receiver.loop.WatchTargetRun
+			outboxLoops[driver.Type()] = receiver.loop
 			mux.HandleFunc(hook.Route(), receiver.handle)
 			log.Info("channel webhook registered", "channel", driver.Type(), "route", hook.Route())
 			continue
@@ -8535,15 +8547,19 @@ func main() {
 			continue // outbound-only channel
 		}
 		loop := &channelInboundLoop{
-			driver:     driver,
-			poller:     poller,
-			httpClient: activities.HTTP,
-			settings:   activities.ChannelSettings,
-			store:      ws,
-			resolveRun: resolveRunState,
-			journal:    runJournal,
-			sourceID:   activities.SourceID,
-			log:        log,
+			driver:      driver,
+			poller:      poller,
+			httpClient:  activities.HTTP,
+			settings:    activities.ChannelSettings,
+			store:       ws,
+			resolveRun:  resolveRunState,
+			journal:     runJournal,
+			sourceID:    activities.SourceID,
+			log:         log,
+			turn:        channelTurn,
+			classifyFor: func(conversation workspace.Conversation, lead workspace.Agent) ConversationMessageClassifier {
+				return modelConversationClassifier(activities, ws, conversation, lead)
+			},
 			// R1 (kernel-wedge-2026-10-21): the poll-loop signals ride the
 			// temporal RPC deadline like every other handler-initiated RPC —
 			// failures keep the loop's existing log-and-skip handling.
@@ -8570,8 +8586,23 @@ func main() {
 			events:        events,
 		}
 		targetWatchers[driver.Type()] = loop.WatchTargetRun
+		outboxLoops[driver.Type()] = loop
 		go loop.run(ctx)
 	}
+	// Durable delivery (docs/conversational-runtime.md §13.3): one global
+	// outbox loop drains run answers and direct-turn messages; transports
+	// stay with the channel loops. onTurn redrives turns orphaned by a crash
+	// mid-model-call after the grace window.
+	go (&conversationOutboxLoop{
+		store:  ws,
+		lookup: func(channel string) *channelInboundLoop { return outboxLoops[channel] },
+		onTurn: func(message workspace.ConversationMessage) {
+			if loop := outboxLoops[message.Source]; loop != nil {
+				loop.redispatchStaleTurn(message)
+			}
+		},
+		log: log,
+	}).run(ctx)
 	// The gate wraps everything except the password-login route: an
 	// unauthenticated caller may reach exactly POST /v1/auth/login, every other
 	// path still requires a bearer token (or the anonymous pass-through when

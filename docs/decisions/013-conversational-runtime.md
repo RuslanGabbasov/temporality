@@ -27,3 +27,11 @@ The initial implementation reuses PostgreSQL, workspace migrations and existing 
 - Reuse `workspace_chat.transcript` as the normalized runtime store: rejected because it is UI-shaped, opaque to the backend and currently couples messages to task-oriented chat behavior.
 - Introduce a separate event broker: rejected for the first release because the current database/outbox mechanisms can support durable dispatch with fewer operational dependencies.
 - Make Temporal workflow history the conversation store: rejected because conversation lifetime and availability must remain independent of task execution.
+
+## Wave 2 additions (implemented)
+
+1. Conversation turn responses deliver through the durable conversation outbox (`migrations/workspace/0045_conversation_outbox.*`, `workspace/outbox.go`), not the lossy in-memory run watcher. The legacy watcher remains as a fallback for stores that do not implement the conversation outbox interface; the outbox loop owns live retry with a backoff ladder, terminal events that still produce a task result, and a two-hour give-up for events with no transport.
+2. Channels are runtime-first: channel intake keeps the intake engine for consequential work (task requests, files, agentless messages bypass the classifier), while conversational messages flow through the Conversation Runtime turn path with the same durable recovery (`redispatchStaleTurn`) as workspace chat.
+3. The Fast Intent Router cascade runs L2 on the conversation lead's model with a 3-second timeout (adopt at confidence ≥ 0.75, clarify below 0.55 or when `requires_clarification`), falling back to the lead on malformed or missing output; L3 is lead-first — an active task in the conversation routes directly without any classifier call. The web `/route` endpoint stays deterministic-only and never calls a model.
+4. Lead binding is fill-only: `AttachConversationLead` never overwrites an existing lead assignment.
+5. A crashed turn (kernel restart mid-turn) is recovered by the outbox loop's stale-turn redrive: `ListStaleConversationTurns` includes `processing` rows, the transport source is resolved from the conversation's channel binding, and a permanent failure (no lead, agent disabled, conversation outside a project) marks the turn `failed` instead of retrying forever.

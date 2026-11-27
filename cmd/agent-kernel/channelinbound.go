@@ -61,6 +61,15 @@ type channelInboundLoop struct {
 	// identified sender and returns its run id; nil disables the intake
 	// pipeline (messages are still recorded and rejected, never lost).
 	intake func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error)
+	// turn runs one lead-agent conversational turn for a runtime-first chat
+	// (docs/conversational-runtime.md Phase 7); nil keeps every message on the
+	// legacy intake dispatch.
+	turn func(ctx context.Context, conversation workspace.Conversation, history []workspace.ConversationMessage, tokenKey string, directives []string) (string, error)
+	// classifyFor builds the level-2 fast-model stage for one conversation
+	// (docs/conversational-runtime.md §11.1): the classifier is bound to the
+	// talk's lead agent (its model serves the classification); nil degrades
+	// routing to the deterministic level only.
+	classifyFor func(conversation workspace.Conversation, lead workspace.Agent) ConversationMessageClassifier
 	// emit journals one intake.* event (docs/inbound-messages.md §11); nil
 	// drops events (tests).
 	emit func(ctx context.Context, eventType string, message agent.InboundMessage, senderUserID string, data map[string]any)
@@ -995,6 +1004,14 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	if l.deliverUserNote(ctx, channelSettings, message, senderUserID) {
 		return
 	}
+	// Runtime-first (docs/conversational-runtime.md Phase 7): a chat whose
+	// conversation carries a bound lead agent talks instead of tasking — plain
+	// messages get conversational turns; task-shaped requests, files and
+	// agent-less chats keep the intake dispatch below (the existing Task
+	// Runtime stays the execution engine for consequential work).
+	if l.dispatchConversationMessage(ctx, channelSettings, message, senderUserID, row) {
+		return
+	}
 	// Attachments of an initiative message are saved before the intake run
 	// starts (docs/inbound-messages.md §12 phase 3): the staging paths land on
 	// the row, start_task copies them into the target project's inbox. A fetch
@@ -1022,17 +1039,19 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{IntakeRunID: runID})
 	l.log.Info("intake run started", "channel", l.driver.Type(), "message", message.ID, "run", runID, "sender", senderUserID)
 	// The whole point of the dialog: the intake agent's verdict reaches the
-	// sender's chat. The run answer is delivered when the run settles; the
-	// watcher is best-effort (a kernel restart drops the wait — the answer
-	// stays visible in the product UI).
-	go l.watchRunAnswer(ctx, row, runID, true)
+	// sender's chat. Delivery is durable (docs/conversational-runtime.md
+	// §13.3): the answer becomes an outbox row now and the delivery loop
+	// redrives it across restarts; stores without the outbox keep the legacy
+	// best-effort watcher.
+	l.enqueueRunAnswerDelivery(ctx, *row, runID, true)
 }
 
 // WatchTargetRun follows a start_task target run and delivers its final
 // answer to the message's chat — the public face of the loop's watcher for
-// the intake runner's routed-runs callback.
+// the intake runner's routed-runs callback. Delivery is durable when the
+// store carries the outbox: the event outlives the kernel.
 func (l *channelInboundLoop) WatchTargetRun(row workspace.InboundMessage, runID string) {
-	go l.watchRunAnswer(context.Background(), &row, runID, false)
+	l.enqueueRunAnswerDelivery(context.Background(), row, runID, false)
 }
 
 // watchRunAnswer polls a run to its terminal state and delivers the agent's
@@ -1168,6 +1187,414 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 		case <-time.After(pollEvery):
 		}
 	}
+}
+
+// enqueueRunAnswerDelivery makes the answer durable before the run even
+// starts producing it (docs/conversational-runtime.md §13.3): the outbox row
+// outlives the kernel, so a restart redrives the delivery instead of the old
+// watcher's silent drop. Stores without the outbox (narrow test fakes) keep
+// the legacy in-process watcher. The typing/progress companion goroutine
+// keeps the live chat experience — ephemeral by design, the outbox owns the
+// answer itself.
+func (l *channelInboundLoop) enqueueRunAnswerDelivery(ctx context.Context, row workspace.InboundMessage, runID string, markAnswered bool) {
+	enqueuer, canEnqueue := l.store.(interface {
+		EnqueueConversationOutboxEvent(context.Context, *workspace.ConversationOutboxEvent) error
+	})
+	if !canEnqueue {
+		go l.watchRunAnswer(ctx, &row, runID, markAnswered)
+		return
+	}
+	address := row.Room
+	if address == "" {
+		address = row.SenderRaw
+	}
+	payload := runAnswerPayload{
+		RunID: runID, Project: row.ProjectID, Channel: l.driver.Type(), Address: address,
+		InboundRowID: row.ID, MarkAnswered: markAnswered,
+	}
+	if resolver, ok := l.store.(conversationIngressStore); ok {
+		if conversation, err := resolver.ResolveConversationSource(ctx, "", l.driver.Type(), row.Room); err == nil {
+			payload.ConversationID = conversation.ID
+		}
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		go l.watchRunAnswer(ctx, &row, runID, markAnswered)
+		return
+	}
+	event := &workspace.ConversationOutboxEvent{
+		ID:        "outbox-run-" + stableConversationKey(l.driver.Type(), address, runID),
+		EventType: workspace.OutboxRunAnswer,
+		Payload:   payloadJSON,
+	}
+	if err := enqueuer.EnqueueConversationOutboxEvent(ctx, event); err != nil {
+		// The durable path is down; the legacy watcher still beats silence.
+		l.log.Warn("outbox enqueue", "channel", l.driver.Type(), "run", runID, "error", err)
+		go l.watchRunAnswer(ctx, &row, runID, markAnswered)
+		return
+	}
+	go l.watchRunProgress(ctx, row, runID)
+}
+
+// watchRunProgress keeps the live chat experience (typing marker, paced
+// phase lines) while the outbox owns the answer delivery. It sends nothing
+// but progress and never delivers the answer — a crashed watcher only costs
+// the chatter, never the result (docs/conversational-runtime.md §13.4:
+// typing is transport indication, not the critical path).
+func (l *channelInboundLoop) watchRunProgress(ctx context.Context, row workspace.InboundMessage, runID string) {
+	watchCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	defer cancel()
+	const pollEvery = 5 * time.Second
+	project := row.ProjectID
+	if project == "" {
+		project = IntakeProjectID
+	}
+	stored, sErr := l.settings(watchCtx)
+	if sErr != nil {
+		l.log.Warn("run progress watch", "channel", l.driver.Type(), "error", sErr)
+		return
+	}
+	settings := stored.OverlayEnv()
+	address := row.Room
+	if address == "" {
+		address = row.SenderRaw
+	}
+	typist, canType := l.driver.(interface {
+		SendTyping(ctx context.Context, client *http.Client, settings map[string]string, address string, typing bool) error
+	})
+	setTyping := func(typing bool) {
+		if !canType {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if tErr := typist.SendTyping(ctx, l.httpClient, settings.Channels[l.driver.Type()], address, typing); tErr != nil {
+			l.log.Warn("run progress typing", "channel", l.driver.Type(), "chat", address, "error", tErr)
+		}
+	}
+	lang := agent.DetectLang(row.Body)
+	progress := runProgress{startedAt: time.Now(), lang: lang}
+	setTyping(true)
+	if l.journal != nil {
+		l.sendProgress(watchCtx, settings, address, agent.ChannelText(lang, "on_it"), &progress)
+		progress.lastSent = time.Now().Add(-progressEvery)
+	}
+	for {
+		run, err := l.currentRun(watchCtx, project, runID)
+		if err != nil || !liveRunStatus(run.Status) {
+			// Terminal (or resolver hiccup): the delivery loop takes over from
+			// here; drop the marker so the chat doesn't show «печатает…» into
+			// the answer landing.
+			setTyping(false)
+			return
+		}
+		setTyping(true)
+		if l.journal != nil {
+			l.announceProgress(watchCtx, settings, address, runID, &progress)
+		}
+		select {
+		case <-watchCtx.Done():
+			setTyping(false)
+			return
+		case <-time.After(pollEvery):
+		}
+	}
+}
+
+// channelTurnTimeout bounds one conversational turn: the model answers in
+// seconds-minutes; past it the turn parks in retryable_failure and the
+// recovery scan redrives it (docs/conversational-runtime.md §17.1).
+const channelTurnTimeout = 8 * time.Minute
+
+// conversationClarifyDirective turns the direct turn into a safe
+// clarification (docs/conversational-runtime.md §6.6): the model asks ONE
+// short question instead of guessing an ambiguous request.
+const conversationClarifyDirective = "The message is ambiguous. Reply with ONE short clarifying question in the user's language. Do not start any work, do not guess."
+
+// dispatchConversationMessage routes an identified plain message into the
+// conversation runtime when the talk carries a bound lead agent (docs/
+// conversational-runtime.md Phase 7 — «перевести каналы»). Returns true when
+// the message was consumed: a direct/clarification turn is dispatched
+// asynchronously and the answer reaches the chat through the durable outbox.
+// Task-shaped requests, files and agent-less conversations return false —
+// the legacy intake dispatch (project resolution, staging, task creation)
+// stays the execution engine for consequential work.
+func (l *channelInboundLoop) dispatchConversationMessage(ctx context.Context, channelSettings map[string]string, message agent.InboundMessage, senderUserID string, row *workspace.InboundMessage) bool {
+	if l.turn == nil || message.Encrypted || len(message.Files) > 0 {
+		return false
+	}
+	store, canTurn := l.store.(conversationTurnStore)
+	resolver, canResolve := l.store.(conversationIngressStore)
+	if !canTurn || !canResolve {
+		return false
+	}
+	conversation, err := resolver.ResolveConversationSource(ctx, "", message.Channel, message.ChatID)
+	if err != nil {
+		return false
+	}
+	if conversation.AgentID == "" {
+		return false // no conversational voice bound yet — intake stays
+	}
+	lead, leadErr := store.GetAgent(ctx, conversation.AgentID)
+	if leadErr != nil {
+		return false
+	}
+	// Lead-first shortcut: active work in this talk means the message is a
+	// continuation — no classification round, the direct turn handles it.
+	tasks, err := store.ListConversationTasks(ctx, conversation.ID)
+	if err != nil {
+		tasks = nil
+	}
+	hasActiveTask := false
+	for _, task := range tasks {
+		if task.Status == "active" {
+			hasActiveTask = true
+			break
+		}
+	}
+	var classifier ConversationMessageClassifier
+	if l.classifyFor != nil {
+		classifier = l.classifyFor(conversation, lead)
+	}
+	decision := resolveConversationIntentCascade(ctx, classifier, conversation.ID, message.Text, len(message.Files) > 0, hasActiveTask)
+	switch decision.Execution {
+	case "agent_execution", "delegated_execution":
+		return false // consequential work goes through the Task Runtime dispatch
+	case "direct", "clarification":
+	default:
+		return false
+	}
+	if err := store.SetConversationMessageStatus(ctx, stableConversationMessageID(message.Channel, message.ChatID, message.ID), "queued"); err != nil {
+		l.log.Warn("conversation turn dispatch", "channel", message.Channel, "message", message.ID, "error", err)
+		return false
+	}
+	clarify := decision.Execution == "clarification"
+	rowCopy := *row
+	go l.runChannelConversationTurn(ctx, conversation, rowCopy, message, clarify)
+	l.log.Info("conversation turn dispatched", "channel", message.Channel, "chat", message.ChatID, "message", message.ID, "route", decision.Execution, "level", decision.RouterLevel)
+	return true
+}
+
+// runChannelConversationTurn executes one lead-agent turn for a channel
+// message: the same keyed lock + idempotent append + recovery contract as
+// the HTTP path, with the answer atomically coupled to its outbox delivery
+// (docs/conversational-runtime.md §7, §13.3).
+func (l *channelInboundLoop) runChannelConversationTurn(parent context.Context, conversation workspace.Conversation, row workspace.InboundMessage, message agent.InboundMessage, clarify bool) {
+	l.runChannelTurnByID(parent, conversation, row, message.Channel, stableConversationMessageID(message.Channel, message.ChatID, message.ID), clarify)
+}
+
+// runChannelTurnByID is the message-id form of the channel turn: recovery
+// calls it with the id hashed in the original dispatch, which a sha256 id
+// cannot give back.
+func (l *channelInboundLoop) runChannelTurnByID(parent context.Context, conversation workspace.Conversation, row workspace.InboundMessage, channel, messageID string, clarify bool) {
+	store, canTurn := l.store.(conversationTurnStore)
+	if !canTurn {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, channelTurnTimeout)
+	defer cancel()
+	var releaseTurn func()
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		release, acquired, lockErr := store.TryAcquireConversationTurn(ctx, conversation.ID, 0)
+		if lockErr != nil {
+			_ = store.SetConversationMessageStatus(ctx, messageID, "retryable_failure")
+			l.log.Warn("conversation turn lock", "conversation", conversation.ID, "error", lockErr)
+			return
+		}
+		if acquired {
+			releaseTurn = release
+			break
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			// Still a live turn in this talk: leave the message queued — the
+			// recovery scan redrives it after the grace window.
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	defer releaseTurn()
+	// A retry after a crash may already have a durable response — deliver it
+	// instead of paying for another model call.
+	if response, found := l.findExistingTurnResponse(ctx, store, conversation.ID, messageID); found {
+		l.deliverChannelTurnResponse(ctx, conversation, row, channel, response)
+		_ = store.SetConversationMessageStatus(ctx, messageID, "completed")
+		return
+	}
+	if err := store.SetConversationMessageStatus(ctx, messageID, "processing"); err != nil {
+		l.log.Warn("conversation turn processing mark", "conversation", conversation.ID, "error", err)
+		return
+	}
+	history, err := store.ListConversationMessages(ctx, conversation.ID, 0, 50)
+	if err != nil {
+		_ = store.SetConversationMessageStatus(ctx, messageID, "retryable_failure")
+		l.log.Warn("conversation turn history", "conversation", conversation.ID, "error", err)
+		return
+	}
+	directives := []string(nil)
+	if clarify {
+		directives = append(directives, conversationClarifyDirective)
+	}
+	tokenKey := conversationTokenStreamKey(conversation.ID, messageID)
+	answer, err := l.turn(ctx, conversation, history, tokenKey, directives)
+	if err != nil {
+		if errors.Is(err, errConversationTurnPermanent) {
+			// No retry can fix a missing/disabled lead — park the turn as
+			// failed so the recovery scan stops picking it up.
+			_ = store.SetConversationMessageStatus(ctx, messageID, "failed")
+			l.log.Warn("conversation turn failed permanently", "conversation", conversation.ID, "message", messageID, "error", err)
+			return
+		}
+		_ = store.SetConversationMessageStatus(ctx, messageID, "retryable_failure")
+		l.log.Warn("conversation turn", "conversation", conversation.ID, "message", messageID, "error", err)
+		return
+	}
+	content, err := json.Marshal(map[string]string{"text": answer})
+	if err != nil {
+		_ = store.SetConversationMessageStatus(ctx, messageID, "retryable_failure")
+		return
+	}
+	var thread string
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].SenderType == "human" && history[i].SourceThreadID != "" {
+			thread = history[i].SourceThreadID
+			break
+		}
+	}
+	address := row.Room
+	if address == "" {
+		address = row.SenderRaw
+	}
+	deliveryPayload, err := json.Marshal(conversationMessagePayload{
+		Text: answer, Channel: channel, Address: address, Thread: thread,
+		SourceMessageID: messageID,
+	})
+	if err != nil {
+		_ = store.SetConversationMessageStatus(ctx, messageID, "retryable_failure")
+		return
+	}
+	response, _, err := store.AppendConversationMessageWithOutbox(ctx, &workspace.ConversationMessage{
+		ID:              stableConversationMessageID("response", conversation.ID, messageID),
+		OrganizationID:  conversation.OrganizationID,
+		ConversationID:  conversation.ID,
+		ParentMessageID: messageID,
+		SenderType:      "agent",
+		SenderID:        conversation.AgentID,
+		MessageType:     "text",
+		Content:         content,
+		Source:          "conversation_turn",
+		SourceMessageID: messageID,
+		Status:          "completed",
+	}, &workspace.ConversationOutboxEvent{
+		ID:        "outbox-msg-" + stableConversationKey(channel, address, messageID),
+		EventType: workspace.OutboxConversationMessage,
+		Payload:   deliveryPayload,
+	})
+	if err != nil {
+		_ = store.SetConversationMessageStatus(ctx, messageID, "retryable_failure")
+		l.log.Warn("conversation turn response", "conversation", conversation.ID, "error", err)
+		return
+	}
+	_ = response
+	if err := store.SetConversationMessageStatus(ctx, messageID, "completed"); err != nil {
+		l.log.Warn("conversation turn complete", "conversation", conversation.ID, "error", err)
+	}
+	l.deliverChannelTurnRowAnswered(ctx, row)
+}
+
+// findExistingTurnResponse returns the durable response of a previous turn
+// attempt, if one committed before the crash. Long talks overflow the page:
+// the window rides on LastMessageSequence so the tail (where the response
+// was just appended) is always inside it.
+func (l *channelInboundLoop) findExistingTurnResponse(ctx context.Context, store conversationTurnStore, conversationID, messageID string) (workspace.ConversationMessage, bool) {
+	after := int64(0)
+	if conversation, err := store.GetConversation(ctx, conversationID); err == nil && conversation.LastMessageSequence > 100 {
+		after = conversation.LastMessageSequence - 100
+	}
+	following, err := store.ListConversationMessages(ctx, conversationID, after, 100)
+	if err != nil {
+		return workspace.ConversationMessage{}, false
+	}
+	for i := len(following) - 1; i >= 0; i-- {
+		candidate := following[i]
+		if candidate.ParentMessageID == messageID && candidate.SenderType == "agent" && candidate.Source == "conversation_turn" {
+			return candidate, true
+		}
+	}
+	return workspace.ConversationMessage{}, false
+}
+
+// deliverChannelTurnResponse re-delivers an already-committed response
+// through the outbox: the crash could have hit after the append but the
+// outbox row is idempotent by the same event id.
+func (l *channelInboundLoop) deliverChannelTurnResponse(ctx context.Context, conversation workspace.Conversation, row workspace.InboundMessage, channel string, response workspace.ConversationMessage) {
+	text := conversationMessageText(response.Content)
+	if text == "" {
+		return
+	}
+	enqueuer, ok := l.store.(interface {
+		EnqueueConversationOutboxEvent(context.Context, *workspace.ConversationOutboxEvent) error
+	})
+	if !ok {
+		return
+	}
+	address := row.Room
+	if address == "" {
+		address = row.SenderRaw
+	}
+	payload, err := json.Marshal(conversationMessagePayload{
+		Text: text, Channel: channel, Address: address, Thread: response.SourceThreadID,
+		SourceMessageID: response.SourceMessageID,
+	})
+	if err != nil {
+		return
+	}
+	event := &workspace.ConversationOutboxEvent{
+		ID:        "outbox-msg-" + stableConversationKey(channel, address, response.SourceMessageID),
+		EventType: workspace.OutboxConversationMessage,
+		Payload:   payload,
+	}
+	if err := enqueuer.EnqueueConversationOutboxEvent(ctx, event); err != nil {
+		l.log.Warn("outbox requeue on recovery", "conversation", conversation.ID, "error", err)
+	}
+}
+
+// deliverChannelTurnRowAnswered closes the Входящие row of a conversational
+// turn — the answer reached the conversation and its delivery is promised.
+func (l *channelInboundLoop) deliverChannelTurnRowAnswered(ctx context.Context, row workspace.InboundMessage) {
+	if row.ID == "" {
+		return
+	}
+	_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusAnswered})
+}
+
+// redispatchStaleTurn redrives one orphaned channel turn — dispatched, then
+// lost to a crash or a hung model call (docs/conversational-runtime.md
+// §17.2): the same turn path re-acquires the lock, reuses a durable response
+// if one committed, and otherwise pays for the model call again. The chat
+// address comes from the transport binding, the only place the original
+// chat id survives next to the hashed conversation id.
+func (l *channelInboundLoop) redispatchStaleTurn(message workspace.ConversationMessage) {
+	store, canTurn := l.store.(conversationTurnStore)
+	if !canTurn || l.turn == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conversation, err := store.GetConversation(ctx, message.ConversationID)
+	if err != nil || conversation.AgentID == "" {
+		return
+	}
+	channel, chatID, err := store.ConversationTransportSource(ctx, conversation.ID)
+	if err != nil || channel != l.driver.Type() {
+		return
+	}
+	row := workspace.InboundMessage{Channel: channel, Room: chatID, SenderRaw: chatID}
+	go l.runChannelTurnByID(context.Background(), conversation, row, channel, message.ID, false)
 }
 
 // progressEvery paces the chat progress lines: a fast tool loop must not

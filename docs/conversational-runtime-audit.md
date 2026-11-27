@@ -50,3 +50,11 @@ Repository baseline is the current commit/worktree state on 2026-11-27. No perfo
 ## Phase 0 exit
 
 The current component map, dependencies, existing entities, repeated interaction paths, and migration risks are recorded above. `MatchChannelReplies` now prefers exact reply/thread references and otherwise selects the latest open request. Telegram inbound normalization now preserves `reply_to_message.message_id`; Slack, Mattermost and Matrix already populate `ReplyTo` from their reply/thread metadata.
+
+## Wave 2 status (2026-11-27)
+
+Implemented: normalized `Conversation`/`ConversationMessage`/`ConversationTurn` storage with per-conversation sequence and advisory-lock serialization; durable conversation outbox for turn responses with backoff, terminal-task-result flush and stale-turn redrive after a crash; runtime-first channel intake (conversational messages go through the same turn path, task requests/files stay on the intake engine); Fast Intent Router cascade (deterministic → L2 classifier on the lead's model with 3s timeout and confidence thresholds → lead-first when a task is active); run results projected back into the conversation as task-linked turns; `GET /v1/conversations/{id}/tasks` plus task chips in the chat header linking to the run trace.
+
+Out of scope for this wave, per the ТЗ: §23 shadow-mode router comparisons, §24 conversation branching UI, knowledge/RAG integration in the Context Builder (§12.3 is stubbed to the existing knowledge store path).
+
+Regression corpus (§20) is not yet populated; router confidence thresholds (0.75 adopt / 0.55 clarify) are set from the design targets and need corpus validation before tuning.

@@ -79,6 +79,15 @@ function shortTime(iso: string) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
 }
 
+// Chat header task chips: one chip per task linked to the conversation
+// (latest projection row wins), oldest first, capped so a long-lived chat
+// doesn't overflow the header row.
+function taskChipRows(rows: { id: string; task_id: string; run_id?: string; status: string }[]) {
+  const byTask: Record<string, { id: string; task_id: string; run_id?: string; status: string }> = {}
+  for (const r of rows) if (r.task_id) byTask[r.task_id] = r
+  return Object.values(byTask).slice(-4)
+}
+
 const STATUS_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'> = {
   completed: 'green', failed: 'red', running: 'blue', turn_limit: 'warm-gray', pending: 'gray',
   started: 'blue', cancelled: 'warm-gray', canceled: 'warm-gray',
@@ -632,6 +641,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const [newChatAgentId, setNewChatAgentId] = useState('')
   const [attachments, setAttachments] = useState<UploadedFile[]>([])
   const [uploading, setUploading] = useState(false)
+  // Task chips in the chat header, keyed by conversation id. Absent entry =
+  // chips stay hidden (kernel without GET /tasks, or nothing linked yet).
+  const [convTasks, setConvTasks] = useState<Record<string, { id: string; task_id: string; run_id?: string; status: string }[]>>({})
+  const refreshConvTasks = useCallback((cid: string) => {
+    void workspaceApi.getConversationTasks(cid)
+      .then((r) => setConvTasks((prev) => ({ ...prev, [cid]: r.tasks })))
+      .catch(() => { /* chips stay hidden — projection endpoint unavailable */ })
+  }, [])
   const fileInputRef = useRef<HTMLInputElement>(null)
   // The chat input grows with its content — up to a third of the screen —
   // then scrolls internally. The composer sits at the column's bottom edge,
@@ -745,6 +762,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const tokenStreamRef = useRef<Map<string, EventSource>>(new Map())
 
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null
+
+  // Header task chips follow the open conversation; each conversation keeps
+  // its own cached list so switching back doesn't flash empty.
+  useEffect(() => { if (activeConv?.id) refreshConvTasks(activeConv.id) }, [activeConv?.id, refreshConvTasks]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live runs BY TASK (any start source: this chat, a trigger, a channel
   // intake, a delegation, a continuation): the chat list badge must not
@@ -1953,7 +1974,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
               task_id: linkedConversation.taskId, run_id: runId,
               project_id: linkedConversation.projectId ?? project,
               status: status === 'completed' ? 'completed' : status,
-            }).catch(() => { /* run state remains authoritative if projection update is delayed */ })
+            }).then(() => refreshConvTasks(convId)).catch(() => { /* run state remains authoritative if projection update is delayed */ })
           }
           return
         }
@@ -2057,6 +2078,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         origin_message_id: originMessage.id, task_id: taskId, run_id: runId,
         project_id: conv.projectId ?? project, status: 'active',
       })
+      refreshConvTasks(conv.id)
     }
 
     const assistantMsg: ChatMessage = { id: randomUUID(), role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [{ text: `${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}` }] }
@@ -2421,6 +2443,23 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid var(--tm-border)', background: 'var(--tm-surface)', display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
               <strong style={{ fontSize: '0.875rem' }}>{activeConv.title}</strong>
               {activeConv.agentId && <Tag type="blue" size="sm">{agentName(activeConv.agentId)}</Tag>}
+              {taskChipRows(convTasks[activeConv.id] ?? []).map((ct) => {
+                const color = STATUS_COLORS[ct.status] || (ct.status === 'active' ? 'blue' : 'gray')
+                const label = ct.task_id.length > 12 ? `${ct.task_id.slice(0, 8)}…` : ct.task_id
+                const url = ct.run_id ? runTraceUrl(project, ct.run_id) : null
+                const chip = <Tag type={color} size="sm">{label}</Tag>
+                return url ? (
+                  <a key={ct.task_id} href={url} onClick={(e: React.MouseEvent) => {
+                    e.preventDefault()
+                    window.history.pushState(null, '', url)
+                    window.dispatchEvent(new PopStateEvent('popstate'))
+                  }} style={{ textDecoration: 'none' }} title={`${ct.task_id} · ${ct.status}`}>
+                    {chip}
+                  </a>
+                ) : (
+                  <span key={ct.task_id} title={`${ct.task_id} · ${ct.status}`}>{chip}</span>
+                )
+              })}
             </div>
 
             {/* Chat messages */}

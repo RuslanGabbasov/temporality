@@ -1612,6 +1612,9 @@ export const workspaceApi = {
   linkConversationTask: (conversationId: string, data: { origin_message_id: string; task_id: string; run_id: string; project_id: string; status?: string }) =>
     request<{ conversation_id: string; task_id: string; run_id: string; status: string }>(
       `/v1/conversations/${encodeURIComponent(conversationId)}/tasks`, { method: 'POST', body: JSON.stringify(data) }),
+  getConversationTasks: (conversationId: string) =>
+    request<{ tasks: { id: string; conversation_id: string; origin_message_id?: string; task_id: string; run_id?: string; project_id?: string; status: string; created_at: string; completed_at?: string }[] }>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/tasks`),
   getConversationInteractions: (conversationId: string) =>
     request<{ interactions: { id: string; interaction_type: string; domain_object_type: string; domain_object_id: string; target_version?: number; assigned_to?: string; status: string; reference: { type: string; id: string; version?: number; source_message_id?: string } }[] }>(
       `/v1/conversations/${encodeURIComponent(conversationId)}/interactions`),

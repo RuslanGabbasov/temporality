@@ -297,6 +297,20 @@ func (s *Store) ResolveConversationSource(ctx context.Context, organizationID, s
 	return s.GetConversation(ctx, id)
 }
 
+// ConversationTransportSource returns the transport binding of a conversation
+// — the reverse of ResolveConversationSource. Outbox recovery needs it: a
+// stale queued turn stores only the hashed conversation id, and the chat
+// address for redelivery lives on the binding.
+func (s *Store) ConversationTransportSource(ctx context.Context, conversationID string) (source, sourceConversationID string, err error) {
+	err = s.pool.QueryRow(ctx,
+		`SELECT source, source_conversation_id FROM conversation_transport
+		 WHERE conversation_id=$1 ORDER BY created_at LIMIT 1`, conversationID).Scan(&source, &sourceConversationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	return source, sourceConversationID, err
+}
+
 // AddConversationParticipant records a participant the first time they speak
 // in a transport conversation.
 func (s *Store) AddConversationParticipant(ctx context.Context, conversationID, participantType, participantID string) error {
@@ -351,11 +365,84 @@ func scanConversationMessage(row interface{ Scan(...any) error }) (ConversationM
 // sequence and persists the event. Repeated transport events return the
 // original message with duplicate=true, including concurrent retries.
 func (s *Store) AppendConversationMessage(ctx context.Context, m *ConversationMessage) (ConversationMessage, bool, error) {
+	if err := prepareConversationMessage(m); err != nil {
+		return ConversationMessage{}, false, err
+	}
+	if existing, duplicate, err := s.findConversationMessageBySource(ctx, m); err != nil || duplicate {
+		return existing, duplicate, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return ConversationMessage{}, false, err
+	}
+	defer tx.Rollback(ctx)
+	created, duplicate, err := s.appendConversationMessageTx(ctx, tx, m)
+	if err != nil || duplicate {
+		return created, duplicate, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ConversationMessage{}, false, err
+	}
+	return created, false, nil
+}
+
+// AppendConversationMessageWithOutbox persists the message and its outbound
+// delivery unit in ONE transaction (docs/conversational-runtime.md §13.3):
+// a crash between the two can never leave an answer that is stored but never
+// delivered, or a delivery promise whose answer does not exist. A duplicate
+// message (turn retry after a crash that already committed both) returns the
+// stored row and enqueues nothing.
+func (s *Store) AppendConversationMessageWithOutbox(ctx context.Context, m *ConversationMessage, event *ConversationOutboxEvent) (ConversationMessage, bool, error) {
+	if event == nil || strings.TrimSpace(event.ID) == "" || strings.TrimSpace(event.EventType) == "" {
+		return ConversationMessage{}, false, errors.New("outbox event id and event_type are required")
+	}
+	if err := prepareConversationMessage(m); err != nil {
+		return ConversationMessage{}, false, err
+	}
+	if existing, duplicate, err := s.findConversationMessageBySource(ctx, m); err != nil || duplicate {
+		return existing, duplicate, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return ConversationMessage{}, false, err
+	}
+	defer tx.Rollback(ctx)
+	created, duplicate, err := s.appendConversationMessageTx(ctx, tx, m)
+	if err != nil || duplicate {
+		return created, duplicate, err
+	}
+	if event.OrganizationID == "" {
+		event.OrganizationID = m.OrganizationID
+	}
+	if event.ConversationID == "" {
+		event.ConversationID = m.ConversationID
+	}
+	payload := event.Payload
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO conversation_outbox (id, organization_id, conversation_id, event_type, payload, status)
+		 VALUES ($1,$2,$3,$4,$5,'pending') ON CONFLICT (id) DO NOTHING`,
+		event.ID, event.OrganizationID, event.ConversationID, event.EventType, payload); err != nil {
+		return ConversationMessage{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ConversationMessage{}, false, err
+	}
+	return created, false, nil
+}
+
+// prepareConversationMessage validates and defaults one message before the
+// append path. Shared by the plain and the outbox-coupled append.
+func prepareConversationMessage(m *ConversationMessage) error {
 	if m == nil || strings.TrimSpace(m.ID) == "" || strings.TrimSpace(m.ConversationID) == "" {
-		return ConversationMessage{}, false, errors.New("message id and conversation_id are required")
+		return errors.New("message id and conversation_id are required")
 	}
 	if !validConversationParticipantType(m.SenderType) {
-		return ConversationMessage{}, false, fmt.Errorf("invalid sender_type %q", m.SenderType)
+		return fmt.Errorf("invalid sender_type %q", m.SenderType)
 	}
 	if m.MessageType == "" {
 		m.MessageType = "text"
@@ -364,7 +451,7 @@ func (s *Store) AppendConversationMessage(ctx context.Context, m *ConversationMe
 		m.Status = "received"
 	}
 	if !json.Valid(m.Content) || (len(m.Attachments) > 0 && !json.Valid(m.Attachments)) || (len(m.Metadata) > 0 && !json.Valid(m.Metadata)) {
-		return ConversationMessage{}, false, errors.New("message content, attachments and metadata must be valid JSON")
+		return errors.New("message content, attachments and metadata must be valid JSON")
 	}
 	if len(m.Attachments) == 0 {
 		m.Attachments = json.RawMessage(`[]`)
@@ -372,26 +459,35 @@ func (s *Store) AppendConversationMessage(ctx context.Context, m *ConversationMe
 	if len(m.Metadata) == 0 {
 		m.Metadata = json.RawMessage(`{}`)
 	}
+	return nil
+}
 
-	if m.Source != "" && m.SourceMessageID != "" {
-		if existing, err := s.getConversationMessageBySource(ctx, m.OrganizationID, m.Source, m.SourceMessageID); err == nil {
-			if existing.ConversationID != m.ConversationID {
-				return ConversationMessage{}, false, ErrConflict
-			}
-			return existing, true, nil
-		} else if !errors.Is(err, ErrNotFound) {
-			return ConversationMessage{}, false, err
-		}
+// findConversationMessageBySource resolves the duplicate-delivery fast path:
+// a repeated transport event returns the original row without touching the
+// sequence counter.
+func (s *Store) findConversationMessageBySource(ctx context.Context, m *ConversationMessage) (ConversationMessage, bool, error) {
+	if m.Source == "" || m.SourceMessageID == "" {
+		return ConversationMessage{}, false, nil
 	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
+	if existing, err := s.getConversationMessageBySource(ctx, m.OrganizationID, m.Source, m.SourceMessageID); err == nil {
+		if existing.ConversationID != m.ConversationID {
+			return ConversationMessage{}, false, ErrConflict
+		}
+		return existing, true, nil
+	} else if !errors.Is(err, ErrNotFound) {
 		return ConversationMessage{}, false, err
 	}
-	defer tx.Rollback(ctx)
+	return ConversationMessage{}, false, nil
+}
+
+// appendConversationMessageTx runs the sequence allocation and the insert on
+// an open transaction, so callers can couple the append with further writes
+// (the outbox insert) atomically. lookupExisting resolves the 23505 race
+// against the same source key outside the aborted transaction.
+func (s *Store) appendConversationMessageTx(ctx context.Context, tx pgx.Tx, m *ConversationMessage) (ConversationMessage, bool, error) {
 	// Row update is the cross-process serialization point for sequence
 	// allocation. It does not hold a lock during model execution.
-	err = tx.QueryRow(ctx,
+	err := tx.QueryRow(ctx,
 		`UPDATE conversation SET last_message_sequence=last_message_sequence+1, updated_at=now()
 		 WHERE id=$1 RETURNING last_message_sequence, organization_id`, m.ConversationID).
 		Scan(&m.Sequence, &m.OrganizationID)
@@ -438,9 +534,6 @@ func (s *Store) AppendConversationMessage(ctx context.Context, m *ConversationMe
 			}
 			return ConversationMessage{}, false, lookupErr
 		}
-		return ConversationMessage{}, false, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return ConversationMessage{}, false, err
 	}
 	return created, false, nil
@@ -543,6 +636,90 @@ func (s *Store) TryAcquireConversationTurn(ctx context.Context, conversationID s
 	return release, true, nil
 }
 
+// FindConversationTaskByRunID returns the conversation link a run result
+// belongs to. Several conversations may theoretically reference one run id;
+// the product creates one link per run, so the first (oldest) row wins.
+func (s *Store) FindConversationTaskByRunID(ctx context.Context, runID string) (ConversationTask, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, conversation_id, COALESCE(origin_message_id,''), task_id, run_id, project_id,
+		 status, created_at, completed_at FROM conversation_task
+		 WHERE run_id=$1 ORDER BY created_at LIMIT 1`, runID)
+	if err != nil {
+		return ConversationTask{}, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return ConversationTask{}, ErrNotFound
+	}
+	var item ConversationTask
+	if err := rows.Scan(&item.ID, &item.ConversationID, &item.OriginMessageID, &item.TaskID,
+		&item.RunID, &item.ProjectID, &item.Status, &item.CreatedAt, &item.CompletedAt); err != nil {
+		return ConversationTask{}, err
+	}
+	return item, rows.Err()
+}
+
+// ListStaleConversationTurns returns channel turns that were dispatched but
+// never finished: a kernel restart between the dispatch and the turn
+// goroutine (or a crashed model call) leaves them in 'queued' or
+// 'retryable_failure'. Workspace-chat messages are excluded — the HTTP turn
+// path owns their lifecycle and surfaces errors to the user directly. The
+// grace window keeps live turns (a model call can take minutes) out of the
+// recovery set.
+func (s *Store) ListStaleConversationTurns(ctx context.Context, olderThan time.Duration, limit int) ([]ConversationMessage, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT m.id, m.organization_id, m.conversation_id, m.sequence, m.parent_message_id,
+		 m.sender_type, m.sender_id, m.message_type, m.content, m.attachments, m.source, m.source_message_id,
+		 m.source_thread_id, m.status, m.created_at, m.processed_at, m.metadata
+		 FROM conversation_message m
+		 JOIN conversation c ON c.id = m.conversation_id
+		 WHERE m.status IN ('queued','retryable_failure','processing')
+		   AND m.source NOT IN ('workspace_chat', 'workspace_chat_response')
+		   AND c.agent_id <> ''
+		   AND COALESCE(m.processed_at, m.created_at) < now() - $1
+		 ORDER BY COALESCE(m.processed_at, m.created_at)
+		 LIMIT $2`, olderThan, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ConversationMessage, 0)
+	for rows.Next() {
+		message, scanErr := scanConversationMessage(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, message)
+	}
+	return result, rows.Err()
+}
+
+// AttachConversationLead binds the lead agent (and project) a conversation's
+// work resolved to. Fill-only: the first binding wins, so a later run in the
+// same chat cannot silently re-target the conversation's voice.
+func (s *Store) AttachConversationLead(ctx context.Context, conversationID, agentID, projectID string) error {
+	if conversationID == "" || agentID == "" {
+		return errors.New("conversation id and agent id are required")
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE conversation SET
+		   agent_id = CASE WHEN agent_id='' THEN $2 ELSE agent_id END,
+		   metadata = CASE WHEN metadata ? 'project_id' THEN metadata
+		                   ELSE jsonb_set(metadata, '{project_id}', to_jsonb($3::text), true) END,
+		   updated_at = now()
+		 WHERE id=$1`, conversationID, agentID, projectID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetConversationMessageStatus advances the durable processing lifecycle.
 // Terminal states stamp processed_at; callers should persist the outbound
 // response as a separate message before marking the inbound event completed.
@@ -554,7 +731,7 @@ func (s *Store) SetConversationMessageStatus(ctx context.Context, id, status str
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE conversation_message SET status=$2,
-		 processed_at=CASE WHEN $2 IN ('completed','failed','cancelled') THEN now() ELSE processed_at END
+		 processed_at=CASE WHEN $2 IN ('completed','failed','cancelled','retryable_failure') THEN now() ELSE processed_at END
 		 WHERE id=$1`, id, status)
 	if err != nil {
 		return err

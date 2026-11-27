@@ -21,6 +21,7 @@ type memoryConversationStore struct {
 	conversations map[string]workspace.Conversation
 	messages      map[string][]workspace.ConversationMessage
 	sources       map[string]string
+	tasks         map[string][]workspace.ConversationTask
 }
 
 func newMemoryConversationStore() *memoryConversationStore {
@@ -28,6 +29,7 @@ func newMemoryConversationStore() *memoryConversationStore {
 		conversations: map[string]workspace.Conversation{},
 		messages:      map[string][]workspace.ConversationMessage{},
 		sources:       map[string]string{},
+		tasks:         map[string][]workspace.ConversationTask{},
 	}
 }
 
@@ -131,6 +133,12 @@ func (s *memoryConversationStore) SetConversationMessageStatus(_ context.Context
 
 func (s *memoryConversationStore) LinkConversationTask(context.Context, string, string, string, string, string, string) error {
 	return nil
+}
+
+func (s *memoryConversationStore) ListConversationTasks(_ context.Context, conversationID string) ([]workspace.ConversationTask, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tasks[conversationID], nil
 }
 
 func (s *memoryConversationStore) ListConversationInteractions(context.Context, string) ([]workspace.ConversationInteraction, error) {
