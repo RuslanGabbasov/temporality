@@ -78,16 +78,24 @@ func (s *Store) EnqueueConversationOutboxEvent(ctx context.Context, e *Conversat
 // kernels (or loop iterations) never double-deliver. Events stuck in
 // 'processing' past the lease are re-claimed — the crash that orphaned them
 // is exactly the failure the outbox exists to survive.
+// The lease rides as $2::interval: pgx v5 encodes time.Duration as interval,
+// but the bare `now()-$2` shape lets Postgres resolve the parameter to the
+// datetime category's PREFERRED type (timestamptz), turning `now()-$2` into
+// an interval and the comparison into `timestamptz <= interval` — 42883 on
+// EVERY claim, the whole delivery pipeline silently dead (only warn logs).
+// The explicit cast pins interval (same pattern as observation retention
+// sweep); a rehearsal against production caught it before any row ever
+// claimed.
 func (s *Store) ClaimDueConversationOutboxEvents(ctx context.Context, limit int, lease time.Duration) ([]ConversationOutboxEvent, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	rows, err := s.pool.Query(ctx, `
-		UPDATE conversation_outbox SET status='processing', next_attempt_at=now()+$2
+		UPDATE conversation_outbox SET status='processing', next_attempt_at=now()+$2::interval
 		WHERE id IN (
 			SELECT id FROM conversation_outbox
 			WHERE (status='pending' AND next_attempt_at <= now())
-			   OR (status='processing' AND next_attempt_at <= now()-$2)
+			   OR (status='processing' AND next_attempt_at <= now()-$2::interval)
 			ORDER BY next_attempt_at
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
@@ -128,7 +136,7 @@ func (s *Store) FailConversationOutboxEvent(ctx context.Context, id string, atte
 	}
 	_, err := s.pool.Exec(ctx,
 		`UPDATE conversation_outbox SET status=CASE WHEN $2 >= $3 THEN 'failed' ELSE 'pending' END,
-		 attempts=$2, last_error=$4, next_attempt_at=now()+$5
+		 attempts=$2, last_error=$4, next_attempt_at=now()+$5::interval
 		 WHERE id=$1`, id, attempt, MaxOutboxAttempts, message, outboxBackoff(attempt))
 	return err
 }
@@ -137,7 +145,7 @@ func (s *Store) FailConversationOutboxEvent(ctx context.Context, id string, atte
 // the attempt ladder: "the run is still live" is progress, not failure.
 func (s *Store) RetryConversationOutboxEvent(ctx context.Context, id string, delay time.Duration) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE conversation_outbox SET status='pending', next_attempt_at=now()+$2 WHERE id=$1 AND status='processing'`, id, delay)
+		`UPDATE conversation_outbox SET status='pending', next_attempt_at=now()+$2::interval WHERE id=$1 AND status='processing'`, id, delay)
 	return err
 }
 

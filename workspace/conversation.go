@@ -678,8 +678,8 @@ func (s *Store) ListStaleConversationTurns(ctx context.Context, olderThan time.D
 		 JOIN conversation c ON c.id = m.conversation_id
 		 WHERE m.status IN ('queued','retryable_failure','processing')
 		   AND m.source NOT IN ('workspace_chat', 'workspace_chat_response')
-		   AND c.agent_id <> ''
-		   AND COALESCE(m.processed_at, m.created_at) < now() - $1
+		 AND c.agent_id <> ''
+		 AND COALESCE(m.processed_at, m.created_at) < now() - $1::interval
 		 ORDER BY COALESCE(m.processed_at, m.created_at)
 		 LIMIT $2`, olderThan, limit)
 	if err != nil {
