@@ -720,6 +720,47 @@ func recentlyRejectedSkillPattern(sig string) bool {
 
 // ── C1: user friction patterns ──────────────────────────────────────────────
 
+// frictionAsk identifies one C1 repeat subject: who submitted and the
+// normalized what.
+type frictionAsk struct {
+	actor, title string
+}
+
+// frictionSubmissions folds run.started events into the C1 pattern input:
+// per (actor, normalized title) the set of DISTINCT tasks that submitted it.
+// Counting tasks, not raw run.started events, keeps one logical thread out of
+// the pattern: chat follow-up turns, «Давай продолжим» re-runs and amendment
+// runs all reuse the task (and its first-message title), so a long
+// conversation around an auto-restarted run used to read as «the same prompt
+// repeated 4x» — false friction. A run without a task row (POST
+// /v1/agent/run) stands in with its run id, so distinct runs still count as
+// distinct submissions. Intake/trigger/webhook runs carry the actor in the
+// event context, not in data — the fetch already flattened context.actor.id
+// into ActorID (the blank-actor friction cases came from reading data only).
+func frictionSubmissions(events []journalEvent) map[frictionAsk]map[string]bool {
+	submissions := map[frictionAsk]map[string]bool{}
+	for _, event := range events {
+		title, _ := event.Data["title"].(string)
+		if title == "" {
+			continue
+		}
+		norm := normalizeFrictionText(title)
+		if norm == "" {
+			continue
+		}
+		taskID, _ := event.Data["task_id"].(string)
+		if taskID == "" {
+			taskID = event.Run
+		}
+		key := frictionAsk{actor: event.ActorID, title: norm}
+		if submissions[key] == nil {
+			submissions[key] = map[string]bool{}
+		}
+		submissions[key][taskID] = true
+	}
+	return submissions
+}
+
 func detectUserFriction(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken string, client *llm.Client, done map[string]time.Time) {
 	started, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "run.started", 200)
 	if err != nil {
@@ -731,35 +772,16 @@ func detectUserFriction(ctx context.Context, log *slog.Logger, activities *agent
 		log.Warn("supervisor cases: list rejections", "error", err.Error())
 		return
 	}
-	// Pattern 1: the same normalized question from the same actor ≥3 times.
-	type ask struct {
-		actor, title string
-	}
-	counts := map[ask]int{}
-	for _, event := range started {
-		title, _ := event.Data["title"].(string)
-		actor := event.ActorID
-		if actor == "" {
-			// Intake/trigger/webhook runs carry the actor in the event
-			// context, not in data — the blank-actor friction cases («cannot
-			// identify the user») all came from reading data only. The fetch
-			// already flattened context.actor.id into ActorID.
-			actor = event.ActorID
-		}
-		if title == "" {
-			continue
-		}
-		norm := normalizeFrictionText(title)
-		if norm == "" {
-			continue
-		}
-		counts[ask{actor, norm}]++
-	}
+	// Pattern 1: the same normalized question submitted as ≥3 DISTINCT tasks
+	// by the same actor (see frictionSubmissions for why runs of one task
+	// collapse into a single submission).
+	submissions := frictionSubmissions(started)
 	published := 0
-	for key, n := range counts {
+	for key, ids := range submissions {
 		if published >= supervisorCasePassCap {
 			break
 		}
+		n := len(ids)
 		if n < 3 {
 			continue
 		}
@@ -767,15 +789,15 @@ func detectUserFriction(ctx context.Context, log *slog.Logger, activities *agent
 		if !caseDue(done, agent.CaseUserFriction, subject) {
 			continue
 		}
-		facts := []string{fmt.Sprintf("the same normalized prompt appeared %d times in the window by actor %q", n, key.actor)}
+		facts := []string{fmt.Sprintf("the same normalized request was submitted as %d distinct tasks in the window by actor %q", n, key.actor)}
 		verdict, err := agent.FrictionCase(ctx, client, agent.FrictionCaseInput{
-			Pattern: fmt.Sprintf("same prompt asked %dx by one user", n), Facts: facts,
+			Pattern: fmt.Sprintf("same prompt submitted %dx as separate tasks by one user", n), Facts: facts,
 		})
 		if err != nil {
 			log.Warn("supervisor cases: friction", "error", err.Error())
 			continue
 		}
-		summary := fmt.Sprintf("Один и тот же запрос повторён %d раз пользователем %s — %s", n, key.actor, verdict.Explanation)
+		summary := fmt.Sprintf("Один и тот же запрос отправлен %d отдельными задачами пользователем %s — %s", n, key.actor, verdict.Explanation)
 		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseUserFriction, subject, "", summary, verdict.Recommendation, map[string]any{
 			"repeats": n, "actor": key.actor,
 		}); err != nil {

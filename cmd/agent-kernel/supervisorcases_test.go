@@ -18,6 +18,58 @@ func TestNormalizeFrictionText(t *testing.T) {
 	}
 }
 
+// The C1 repeat pattern counts DISTINCT tasks per (actor, normalized title):
+// runs of one task — chat follow-up turns, «Давай продолжим» re-runs,
+// amendment runs around an auto-restarted long run — share the task's
+// first-message title and must not read as the user repeating the request.
+func TestFrictionSubmissionsCountDistinctTasks(t *testing.T) {
+	started := func(run, taskID, actor, title string) journalEvent {
+		return journalEvent{Run: run, ActorID: actor, Data: map[string]any{"task_id": taskID, "title": title}}
+	}
+	const title = "Нужно написать техпроект"
+	events := []journalEvent{
+		// One conversation: four runs of the same task (the first message plus
+		// follow-ups after the run hit its turn limit and auto-restarted).
+		started("t-1-20261126-100000", "t-1", "user-x", title),
+		started("t-1-20261126-110000", "t-1", "user-x", title),
+		started("t-1-20261126-120000", "t-1", "user-x", title),
+		started("t-1-20261126-130000", "t-1", "user-x", title),
+	}
+	subs := frictionSubmissions(events)
+	key := frictionAsk{actor: "user-x", title: normalizeFrictionText(title)}
+	if n := len(subs[key]); n != 1 {
+		t.Fatalf("four runs of one task must collapse into one submission, got %d", n)
+	}
+
+	// A run without a task row stands in with its run id: distinct runs stay
+	// distinct submissions.
+	events = append(events, started("adhoc-run-1", "", "user-x", title), started("adhoc-run-2", "", "user-x", title))
+	subs = frictionSubmissions(events)
+	if n := len(subs[key]); n != 3 {
+		t.Fatalf("two taskless runs must add two submissions, got %d", n)
+	}
+
+	// Distinct tasks with the same title by one actor are genuine repeats.
+	events = append(events, started("t-2-a", "t-2", "user-x", title))
+	subs = frictionSubmissions(events)
+	if n := len(subs[key]); n != 4 {
+		t.Fatalf("a distinct task with the same title must count separately, got %d", n)
+	}
+
+	// The same title from another actor stays their own subject.
+	other := frictionAsk{actor: "user-y", title: normalizeFrictionText(title)}
+	subs = frictionSubmissions([]journalEvent{started("t-3-a", "t-3", "user-y", title)})
+	if n := len(subs[other]); n != 1 {
+		t.Fatalf("another actor's submission must not merge, got %d", n)
+	}
+
+	// Untitled events (child runs, continuations) never count.
+	subs = frictionSubmissions([]journalEvent{{Run: "child-r1", ActorID: "user-x", Data: map[string]any{"task_id": "t-1", "restart_attempt": float64(1)}}})
+	if len(subs) != 0 {
+		t.Fatalf("untitled run.started must be skipped, got %d subjects", len(subs))
+	}
+}
+
 func TestCaseDueDedup(t *testing.T) {
 	done := map[string]time.Time{}
 	now := time.Now()
