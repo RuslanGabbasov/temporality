@@ -716,6 +716,22 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			writeError(w, 500, err)
 			return
 		}
+		// Shadow mode (docs/conversational-runtime.md §23): when the runtime
+		// router already scored this message at dispatch time, its verdict and
+		// the intake classification land in one shadow row. Best-effort — the
+		// comparison must never break the legacy lifecycle.
+		agreement := "incomparable"
+		if scored, err := r.ws.GetRouterShadow(req.Context(), row.ID); err == nil {
+			agreement = shadowAgreement(body.Classification, scored)
+			if agreement == "disagree" {
+				r.log.Warn("router shadow disagreement",
+					"channel", row.Channel, "message", row.MessageID,
+					"legacy", body.Classification, "runtime", scored.RuntimeExecution, "level", scored.RuntimeLevel)
+			}
+		}
+		if err := r.ws.RecordRouterShadowVerdict(req.Context(), row.ID, body.Classification, agreement); err != nil {
+			r.log.Warn("router shadow verdict", "message", row.ID, "error", err)
+		}
 		if emit != nil {
 			// The message text rides along (truncated): the intake-audit case
 			// judges the classification against what the user actually wrote —

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -93,6 +94,11 @@ type channelInboundLoop struct {
 	// budget must not copy a lock (telegram is a poller, so copies never
 	// contend; the pointer only keeps vet honest).
 	widgetThrottleState *interactionBudget
+	// shadowBroken latches the shadow recorder off after a persistence error
+	// (missing 0046 migration): one warn, then the loop stops paying for it.
+	// A pointer like widgetThrottleState — the loop struct is value-copied per
+	// webhook routing pass and must not copy a lock.
+	shadowBroken *atomic.Bool
 
 	cursor      string // opaque driver cursor; "" → fresh start (bounded history)
 	identityKey string // settings fingerprint the cursor and selfID belong to
@@ -1320,7 +1326,7 @@ const conversationClarifyDirective = "The message is ambiguous. Reply with ONE s
 // the legacy intake dispatch (project resolution, staging, task creation)
 // stays the execution engine for consequential work.
 func (l *channelInboundLoop) dispatchConversationMessage(ctx context.Context, channelSettings map[string]string, message agent.InboundMessage, senderUserID string, row *workspace.InboundMessage) bool {
-	if l.turn == nil || message.Encrypted || len(message.Files) > 0 {
+	if l.turn == nil || message.Encrypted {
 		return false
 	}
 	store, canTurn := l.store.(conversationTurnStore)
@@ -1328,15 +1334,33 @@ func (l *channelInboundLoop) dispatchConversationMessage(ctx context.Context, ch
 	if !canTurn || !canResolve {
 		return false
 	}
+	// Shadow scoring (docs/conversational-runtime.md §23) rides every decline
+	// path below: the message is about to fall to legacy intake, which is
+	// exactly the comparison shadow mode exists for.
+	shadow := func(conversation workspace.Conversation, decision ConversationIntentDecision, served bool) {
+		l.recordRouterShadow(ctx, channelSettings, message, conversation, decision, served)
+	}
+	if len(message.Files) > 0 {
+		// Runtime policy declines attachments (they belong to the intake
+		// staging area); the deterministic router still scores the message so
+		// the verdict can be compared.
+		shadow(workspace.Conversation{}, resolveConversationIntent("", message.Text, true), false)
+		return false
+	}
 	conversation, err := resolver.ResolveConversationSource(ctx, "", message.Channel, message.ChatID)
 	if err != nil {
+		shadow(workspace.Conversation{}, resolveConversationIntent("", message.Text, len(message.Files) > 0), false)
 		return false
 	}
 	if conversation.AgentID == "" {
-		return false // no conversational voice bound yet — intake stays
+		// No conversational voice bound yet — intake stays. This is the core
+		// shadow population: every legacy-served chat scores here.
+		shadow(conversation, resolveConversationIntent(conversation.ID, message.Text, len(message.Files) > 0), false)
+		return false
 	}
 	lead, leadErr := store.GetAgent(ctx, conversation.AgentID)
 	if leadErr != nil {
+		shadow(conversation, resolveConversationIntent(conversation.ID, message.Text, len(message.Files) > 0), false)
 		return false
 	}
 	// Lead-first shortcut: active work in this talk means the message is a
@@ -1359,15 +1383,21 @@ func (l *channelInboundLoop) dispatchConversationMessage(ctx context.Context, ch
 	decision := resolveConversationIntentCascade(ctx, classifier, conversation.ID, message.Text, len(message.Files) > 0, hasActiveTask)
 	switch decision.Execution {
 	case "agent_execution", "delegated_execution":
-		return false // consequential work goes through the Task Runtime dispatch
+		// Consequential work goes through the Task Runtime dispatch; the
+		// scored decision stays in the shadow table for the intake-verdict
+		// comparison.
+		shadow(conversation, decision, false)
+		return false
 	case "direct", "clarification":
 	default:
+		shadow(conversation, decision, false)
 		return false
 	}
 	if err := store.SetConversationMessageStatus(ctx, stableConversationMessageID(message.Channel, message.ChatID, message.ID), "queued"); err != nil {
 		l.log.Warn("conversation turn dispatch", "channel", message.Channel, "message", message.ID, "error", err)
 		return false
 	}
+	shadow(conversation, decision, true)
 	clarify := decision.Execution == "clarification"
 	rowCopy := *row
 	go l.runChannelConversationTurn(ctx, conversation, rowCopy, message, clarify)

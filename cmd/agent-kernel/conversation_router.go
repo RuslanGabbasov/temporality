@@ -36,7 +36,7 @@ type ConversationTarget struct {
 }
 
 var explicitTaskRequest = regexp.MustCompile(`(?i)^(?:(?:please|could you|can you|i need you to)[,!]?\s+)?(?:research|investigate|implement|build|fix|create(?: a file)?|write code|modify|update the code|run tests|deploy|search the web|audit(?: this repository)?|analyze this repository|refactor|migrate)(?:\s|$|[,.:!?])`)
-var explicitTaskRequestRU = regexp.MustCompile(`(?i)^(?:(?:пожалуйста|можешь|можете|нужно)[,!]?\s+)?(?:исследуй|изучи|реализуй|разработай|построй|исправь|создай|напиши код|измени код|обнови код|запусти тесты|разверни|проведи аудит|проанализируй|рефакторинг|мигрируй)(?:\s|$|[,.:!?])`)
+var explicitTaskRequestRU = regexp.MustCompile(`(?i)^(?:(?:пожалуйста|можешь|можете|нужно)[,!]?\s+)?(?:исследуй|изучи|реализуй|разработай|построй|исправь|создай|напиши код|измени код|обнови код|запусти(?:\s+тесты)?|разверни|проведи аудит|проанализируй|рефакторинг|мигрируй)(?:\s|$|[,.:!?])`)
 
 func resolveConversationIntent(conversationID, text string, hasAttachments bool) ConversationIntentDecision {
 	decision := ConversationIntentDecision{

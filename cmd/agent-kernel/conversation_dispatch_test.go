@@ -34,6 +34,7 @@ type fakeConversationInboundStore struct {
 	tasks         map[string][]workspace.ConversationTask
 	outbox        []*workspace.ConversationOutboxEvent
 	statusLog     []string
+	shadow        []*workspace.RouterShadowRow
 }
 
 func newFakeConversationInboundStore() *fakeConversationInboundStore {
@@ -102,6 +103,13 @@ func (s *fakeConversationInboundStore) ConversationTransportSource(_ context.Con
 }
 
 func (s *fakeConversationInboundStore) AddConversationParticipant(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *fakeConversationInboundStore) RecordRouterShadow(_ context.Context, row *workspace.RouterShadowRow) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shadow = append(s.shadow, row)
 	return nil
 }
 
@@ -341,6 +349,78 @@ func TestChannelDispatchClarificationSendsDirective(t *testing.T) {
 	require.Len(t, turnDirectives, 1)
 	require.Equal(t, conversationClarifyDirective, turnDirectives[0])
 	_ = row
+}
+
+// TestChannelDispatchRouterShadow pins the §23 shadow scoring on every
+// dispatch branch: a served direct turn records runtime_served, a declined
+// task request records the scored decision for the intake-verdict patch, an
+// unbound chat scores conversation-less, and the channel opt-out silences
+// the recorder.
+func TestChannelDispatchRouterShadow(t *testing.T) {
+	t.Run("served direct turn", func(t *testing.T) {
+		store := newFakeConversationInboundStore()
+		require.NoError(t, store.CreateConversation(context.Background(), &workspace.Conversation{ID: "conv-1", AgentID: "agent-1", OwnerID: "u1"}))
+		require.NoError(t, store.BindConversationSource(context.Background(), "", "matrix", "!r1:hs", "conv-1"))
+		store.agents["agent-1"] = workspace.Agent{ID: "agent-1", Enabled: true}
+		server := matrixIntakeHomeServer(t, "!r1:hs", nil, nil)
+		loop := newConversationDispatchLoop(t, server, store, func(context.Context, workspace.Conversation, []workspace.ConversationMessage, string, []string) (string, error) {
+			return "ответ", nil
+		})
+		message, row := dispatchMessage("как дела с экспортом?")
+		// The persisted human message precedes the dispatch — production
+		// appends it in persistChannelMessage before routing.
+		_, _, _ = store.AppendConversationMessage(context.Background(), &workspace.ConversationMessage{
+			ID: stableConversationMessageID("matrix", "!r1:hs", "$m1"), ConversationID: "conv-1", SenderType: "human", Status: "received",
+		})
+		require.True(t, loop.dispatchConversationMessage(context.Background(), nil, message, "u1", &row))
+		require.Len(t, store.shadow, 1)
+		require.True(t, store.shadow[0].RuntimeServed)
+		require.Equal(t, "direct", store.shadow[0].RuntimeExecution)
+		require.Equal(t, "conv-1", store.shadow[0].ConversationID)
+	})
+	t.Run("declined task request scores for the verdict", func(t *testing.T) {
+		store := newFakeConversationInboundStore()
+		require.NoError(t, store.CreateConversation(context.Background(), &workspace.Conversation{ID: "conv-1", AgentID: "agent-1", OwnerID: "u1"}))
+		require.NoError(t, store.BindConversationSource(context.Background(), "", "matrix", "!r1:hs", "conv-1"))
+		store.agents["agent-1"] = workspace.Agent{ID: "agent-1", Enabled: true}
+		server := matrixIntakeHomeServer(t, "!r1:hs", nil, nil)
+		loop := newConversationDispatchLoop(t, server, store, func(context.Context, workspace.Conversation, []workspace.ConversationMessage, string, []string) (string, error) {
+			t.Fatal("task request must not run a direct turn")
+			return "", nil
+		})
+		message, row := dispatchMessage("исследуй флейк на матрице")
+		require.False(t, loop.dispatchConversationMessage(context.Background(), nil, message, "u1", &row))
+		require.Len(t, store.shadow, 1)
+		require.False(t, store.shadow[0].RuntimeServed)
+		require.Equal(t, "agent_execution", store.shadow[0].RuntimeExecution)
+		require.Equal(t, "deterministic", store.shadow[0].RuntimeLevel)
+		require.NotEmpty(t, store.shadow[0].TextExcerpt)
+	})
+	t.Run("unbound chat scores conversation-less", func(t *testing.T) {
+		store := newFakeConversationInboundStore()
+		server := matrixIntakeHomeServer(t, "!r1:hs", nil, nil)
+		loop := newConversationDispatchLoop(t, server, store, func(context.Context, workspace.Conversation, []workspace.ConversationMessage, string, []string) (string, error) {
+			t.Fatal("unbound chat must not run a turn")
+			return "", nil
+		})
+		message, row := dispatchMessage("просто вопрос ни о чём")
+		require.False(t, loop.dispatchConversationMessage(context.Background(), nil, message, "u1", &row))
+		require.Len(t, store.shadow, 1)
+		require.Empty(t, store.shadow[0].ConversationID)
+		require.Equal(t, "deterministic", store.shadow[0].RuntimeLevel)
+	})
+	t.Run("channel opt-out silences the recorder", func(t *testing.T) {
+		store := newFakeConversationInboundStore()
+		require.NoError(t, store.CreateConversation(context.Background(), &workspace.Conversation{ID: "conv-1", OwnerID: "u1"}))
+		require.NoError(t, store.BindConversationSource(context.Background(), "", "matrix", "!r1:hs", "conv-1"))
+		server := matrixIntakeHomeServer(t, "!r1:hs", nil, nil)
+		loop := newConversationDispatchLoop(t, server, store, func(context.Context, workspace.Conversation, []workspace.ConversationMessage, string, []string) (string, error) {
+			return "", nil
+		})
+		message, row := dispatchMessage("любой текст")
+		require.False(t, loop.dispatchConversationMessage(context.Background(), map[string]string{"conversation_shadow_enabled": "off"}, message, "u1", &row))
+		require.Empty(t, store.shadow)
+	})
 }
 
 func TestChannelDispatchAgentlessConversationStaysIntake(t *testing.T) {
