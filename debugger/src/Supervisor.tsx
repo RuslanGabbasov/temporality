@@ -523,9 +523,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
 
   // Resolve the proposition texts behind conflict verdicts that were published
   // without them (older payloads, or verdicts whose kernel-side meta scan
-  // missed the item): one resolve request per missing id — the journal finds
-  // the owning project among the caller's visible ones (server-side, one
-  // request instead of the per-project probe loop that spammed 404s).
+  // missed the item): one batch resolve for ALL missing ids — the journal
+  // walks the caller's visible projects once and answers which project owns
+  // each id (server-side, one request instead of the per-project probe loop
+  // that spammed 404s, then one GET per side that spammed the network log on
+  // a backlog of 200 cases).
   // Results are stored under "project/id" AND the project-less "/id" key the
   // render reads when the verdict names no project; project carries where the
   // item was FOUND, so the dossier link opens the right project.
@@ -550,21 +552,23 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     let cancelled = false
     void (async () => {
       const next: Record<string, { text: string; project?: string }> = {}
-      for (const id of missingIDs) {
-        let found: { text: string; project?: string } | null = null
-        try {
-          const page = await observationApi.resolveKnowledge(id)
-          const proposition = page.knowledge?.[0]?.proposition ?? ''
-          if (proposition) found = { text: proposition, project: page.project }
-        } catch { /* not visible from this account */ }
-        // Store under the found project and the project-less render key; the
-        // bare entry also stops the effect from re-fetching on every render.
-        if (found) {
-          next[`${found.project}/${id}`] = found
-          next[`/${id}`] = found
-        } else {
-          next[`/${id}`] = { text: '' }
+      try {
+        const batch = await observationApi.resolveKnowledgeBatch(missingIDs)
+        for (const [id, hit] of Object.entries(batch.items)) {
+          const proposition = hit?.knowledge.proposition ?? ''
+          // Store under the found project and the project-less render key; the
+          // bare entry also stops the effect from re-fetching on every render.
+          if (proposition && hit) {
+            next[`${hit.project}/${id}`] = { text: proposition, project: hit.project }
+            next[`/${id}`] = { text: proposition, project: hit.project }
+          } else {
+            next[`/${id}`] = { text: '' }
+          }
         }
+      } catch {
+        // The whole batch failed (network, auth): mark the sides resolved-empty
+        // so the effect stops re-firing the same doomed request on every render.
+        for (const id of missingIDs) next[`/${id}`] = { text: '' }
       }
       if (cancelled) return
       propFallbackRef.current = { ...propFallbackRef.current, ...next }

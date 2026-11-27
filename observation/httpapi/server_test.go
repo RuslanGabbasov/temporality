@@ -2023,3 +2023,100 @@ func TestKnowledgeResolveScopesToPrincipal(t *testing.T) {
 		t.Fatalf("out-of-scope resolve status = %d, want 404", res.StatusCode)
 	}
 }
+
+func TestKnowledgeResolveBatch(t *testing.T) {
+	handler := newTestServer(t)
+	events := []observation.Event{
+		proposedEvent("lighthouse", "evt-1", "K1", "gatekeeper v3 authenticates via oauth device flow"),
+		proposedEvent("calc", "evt-2", "K2", "migrations run through make migrate"),
+	}
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// One request answers the whole supervisor queue: ids from different
+	// projects ride in the same batch, duplicates collapse, and an unknown
+	// id comes back as a null entry instead of an error that would kill the
+	// rest of the answer.
+	res, body := doJSON(t, handler, "POST", "/v1/observations/knowledge/resolve-batch",
+		map[string]any{"knowledge_ids": []string{"K1", "K2", "K2", "K-missing"}})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("batch resolve status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["requested"].(float64) != 3 {
+		t.Fatalf("requested = %v, want 3 (duplicates collapse)", body["requested"])
+	}
+	if body["found"].(float64) != 2 {
+		t.Fatalf("found = %v, want 2", body["found"])
+	}
+	items := body["items"].(map[string]any)
+	k1 := items["K1"].(map[string]any)
+	if k1["project"] != "lighthouse" {
+		t.Fatalf("K1 project = %v, want lighthouse", k1["project"])
+	}
+	if knowledge := k1["knowledge"].(map[string]any); knowledge["id"] != "K1" || knowledge["proposition"] != "gatekeeper v3 authenticates via oauth device flow" {
+		t.Fatalf("K1 knowledge = %v", knowledge)
+	}
+	if k2 := items["K2"].(map[string]any); k2["project"] != "calc" {
+		t.Fatalf("K2 project = %v, want calc", k2["project"])
+	}
+	if items["K-missing"] != nil {
+		t.Fatalf("missing entry = %v, want null", items["K-missing"])
+	}
+
+	// An empty id list is a client error, not an expensive no-op walk over
+	// every visible project.
+	res, _ = doJSON(t, handler, "POST", "/v1/observations/knowledge/resolve-batch", map[string]any{"knowledge_ids": []string{}})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty list status = %d, want 400", res.StatusCode)
+	}
+	res, _ = doJSON(t, handler, "POST", "/v1/observations/knowledge/resolve-batch", map[string]any{})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing field status = %d, want 400", res.StatusCode)
+	}
+
+	// The cap keeps a runaway client from indexing unbounded corpora in one
+	// request: one over the line trips 413, the line itself would be accepted.
+	overflow := make([]string, maxResolveBatchIDs+1)
+	for i := range overflow {
+		overflow[i] = fmt.Sprintf("K-overflow-%d", i)
+	}
+	res, _ = doJSON(t, handler, "POST", "/v1/observations/knowledge/resolve-batch", map[string]any{"knowledge_ids": overflow})
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("%d ids status = %d, want 413", len(overflow), res.StatusCode)
+	}
+}
+
+func TestKnowledgeResolveBatchScopesToPrincipal(t *testing.T) {
+	gate, err := controlplane.NewGate("write-all-1234567890:kernel:writer:*;read-lh-1234567890:alice:reader:lighthouse")
+	if err != nil {
+		t.Fatalf("NewGate: %v", err)
+	}
+	handler := New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), gate)
+	events := []observation.Event{
+		proposedEvent("lighthouse", "evt-1", "K1", "gatekeeper v3 authenticates via oauth device flow"),
+		proposedEvent("elsewhere", "evt-2", "K2", "secret project knowledge"),
+	}
+	if res, body := doJSONWithToken(t, handler, "POST", "/v1/observations/events", "write-all-1234567890", map[string]any{"events": events}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// Batch answers never leak out-of-scope items: the lighthouse-scoped
+	// principal sees its own id resolved, the foreign one comes back null —
+	// indistinguishable from «does not exist».
+	res, body := doJSONWithToken(t, handler, "POST", "/v1/observations/knowledge/resolve-batch", "read-lh-1234567890",
+		map[string]any{"knowledge_ids": []string{"K1", "K2"}})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("scoped batch status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["found"].(float64) != 1 {
+		t.Fatalf("scoped found = %v, want 1", body["found"])
+	}
+	items := body["items"].(map[string]any)
+	if k1 := items["K1"].(map[string]any); k1["project"] != "lighthouse" {
+		t.Fatalf("K1 project = %v, want lighthouse", k1["project"])
+	}
+	if items["K2"] != nil {
+		t.Fatalf("out-of-scope entry = %v, want null", items["K2"])
+	}
+}

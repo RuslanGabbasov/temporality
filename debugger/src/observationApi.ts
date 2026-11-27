@@ -238,6 +238,13 @@ export const observationApi = {
   // each miss surfaced as a 404 in the network log.
   resolveKnowledge: (knowledgeID: string) =>
     request<{ knowledge: KnowledgeItem[]; count: number; project?: string }>('/v1/observations/knowledge/resolve', undefined, { knowledge_id: knowledgeID }),
+  // Resolve many knowledge ids in ONE request (POST /v1/observations/knowledge/resolve-batch):
+  // the supervisor fallback used to fire one GET per conflict side and a backlog
+  // opened the tab with 350+ requests. A null entry means the id resolved to no
+  // visible project — the caller distinguishes that from ids it never asked about.
+  resolveKnowledgeBatch: (knowledgeIDs: string[]) =>
+    post<{ items: Record<string, { knowledge: KnowledgeItem; project: string } | null>; requested: number; found: number }>(
+      '/v1/observations/knowledge/resolve-batch', { knowledge_ids: knowledgeIDs }),
   // Vector neighbors of one knowledge item (docs/supervisor-model.md §6.6):
   // ids and cosine scores only — resolve each id via resolveKnowledge. The
   // model stays empty so the lookup spans whatever embedding space the

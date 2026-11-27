@@ -183,6 +183,7 @@ func NewServer(store observation.Store, log *slog.Logger, gate *controlplane.Gat
 	mux.HandleFunc("GET /v1/observations/stats/health", s.observationHealthStats)
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/resolve", s.resolveObservationKnowledge)
+	mux.HandleFunc("POST /v1/observations/knowledge/resolve-batch", s.resolveObservationKnowledgeBatch)
 	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/chain", s.knowledgeChain)
 	mux.HandleFunc("GET /v1/observations/runs/state", s.runState)
@@ -1003,6 +1004,104 @@ func (s *Server) resolveObservationKnowledge(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	writeError(w, http.StatusNotFound, observation.ErrKnowledgeNotFound)
+}
+
+// maxResolveBatchIDs bounds one batch resolve: the supervisor queue tops out
+// at a few hundred conflict sides (200 cases × 2), and a runaway client must
+// not ask the journal to index unbounded corpora in one request.
+const maxResolveBatchIDs = 500
+
+// resolveObservationKnowledgeBatch answers «which project owns each of these
+// knowledge ids?» in ONE request (POST /v1/observations/knowledge/resolve-batch,
+// {"knowledge_ids": [...]}): the supervisor panel resolved every conflict side
+// with a separate GET, and a backlog of conflict cases opened the tab with
+// 350+ requests — each walking the caller's visible projects serially. Here
+// the visible projects are enumerated once and each project's projection is
+// loaded once (the shared cache absorbs repeats); every requested id indexes
+// against the accumulated corpus. The ids ride the JSON body: hundreds of
+// ~100-char ids exceed sane query-string limits. Same scoping rules as the
+// single resolve; ids found in no visible project come back as null entries —
+// the caller distinguishes «resolved missing» from «not asked».
+func (s *Server) resolveObservationKnowledgeBatch(w http.ResponseWriter, r *http.Request) {
+	principal, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, "")
+	if !allowed {
+		return
+	}
+	var body struct {
+		KnowledgeIDs []string `json:"knowledge_ids"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid body: %w", err))
+		return
+	}
+	requested := make([]string, 0, len(body.KnowledgeIDs))
+	seen := map[string]bool{}
+	for _, id := range body.KnowledgeIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		requested = append(requested, id)
+	}
+	if len(requested) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("knowledge_ids is required"))
+		return
+	}
+	if len(requested) > maxResolveBatchIDs {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Errorf("at most %d ids per batch, got %d", maxResolveBatchIDs, len(requested)))
+		return
+	}
+	var projects []string
+	if visible, all := principal.AllowedProjects(); !all {
+		projects = visible
+	}
+	if len(projects) == 0 {
+		// Same rule as the single resolve: unscoped principals walk only the
+		// knowledge-bearing projects, not every projection.
+		lister, ok := s.store.(knowledgeProjectLister)
+		if !ok {
+			writeError(w, http.StatusNotImplemented, errors.New("the store cannot enumerate knowledge projects"))
+			return
+		}
+		all, err := lister.ListKnowledgeProjects(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("could not enumerate knowledge projects: %w", err))
+			return
+		}
+		projects = all
+	}
+	index := map[string]observation.Knowledge{}
+	owner := map[string]string{}
+	for _, candidate := range projects {
+		if len(index) == len(requested) {
+			break // every id already found — stop walking projects
+		}
+		knowledge, _, err := s.cachedKnowledge(r.Context(), candidate, nil, nil)
+		if err != nil {
+			continue // a broken projection must not hide items in other projects
+		}
+		for _, item := range knowledge {
+			if seen[item.ID] {
+				if _, have := index[item.ID]; !have {
+					index[item.ID] = item
+					owner[item.ID] = candidate
+				}
+			}
+		}
+	}
+	items := make(map[string]any, len(requested))
+	found := 0
+	for _, id := range requested {
+		item, ok := index[id]
+		if !ok {
+			items[id] = nil
+			continue
+		}
+		found++
+		items[id] = map[string]any{"knowledge": item, "project": owner[id]}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "requested": len(requested), "found": found})
 }
 
 func (s *Server) diffKnowledge(w http.ResponseWriter, r *http.Request) {
