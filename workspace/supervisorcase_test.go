@@ -54,4 +54,10 @@ func TestUpsertSupervisorCaseSQLShape(t *testing.T) {
 	// (three EXISTS subqueries) plus the last_event_id column — all TEXT
 	// contexts, one parameter, no conflict.
 	require.Equal(t, 5, strings.Count(supervisorCaseUpsertSQL, "$9"))
+	// The conflict branch must self-heal the project (a case first folded from
+	// a project-less verdict kept that empty project forever — the debugger's
+	// invalidate buttons refused to fire on the row), keeping any known value
+	// against an empty re-publish.
+	require.Contains(t, supervisorCaseUpsertSQL,
+		"project = COALESCE(NULLIF(EXCLUDED.project, ''), workspace_supervisor_case.project)")
 }

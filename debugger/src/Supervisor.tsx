@@ -315,6 +315,10 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   const t = useT()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // Row-scoped action failures report at the CARD, not the page-top banner:
+  // a conflict sits deep in the queue, and an error rendered above the
+  // filters reads as «the button did nothing».
+  const [rowError, setRowError] = useState<{ key: string; text: string } | null>(null)
   const [rows, setRows] = useState<ClusterRow[]>([])
   const [facets, setFacets] = useState<SupervisorQueue['facets'] | null>(null)
   const [sre, setSre] = useState<SreRollup[] | null>(null)
@@ -515,7 +519,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       setGeneralize(null)
       await load(true)
     } catch (failure) {
-      setError(message(failure))
+      setRowError({ key: row.key, text: message(failure) })
     } finally {
       setBusyCase('')
     }
@@ -566,9 +570,10 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
           }
         }
       } catch {
-        // The whole batch failed (network, auth): mark the sides resolved-empty
-        // so the effect stops re-firing the same doomed request on every render.
-        for (const id of missingIDs) next[`/${id}`] = { text: '' }
+        // The whole batch failed (network, auth): leave the sides unmarked so
+        // the next rows change retries them. Marking them resolved-empty here
+        // would mislabel a transport failure as «knowledge not found» — and
+        // disable the invalidate buttons for items that are alive.
       }
       if (cancelled) return
       propFallbackRef.current = { ...propFallbackRef.current, ...next }
@@ -582,21 +587,33 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     // A side whose project could not be resolved is skipped, not sent: the
     // invalidate endpoint 422s on an empty project. Payloads published before
     // the predictor attached per-side projects carry present-but-empty
-    // strings here — same skip rule as generalizeConflict.
-    const targetWorth = (target: { id: string; project: string }) => Boolean(target.project && target.id)
+    // strings here — same skip rule as generalizeConflict. The batch resolve
+    // fills the gap: it knows the project each side was FOUND in (the render
+    // uses the same fallback for dossier links), and a side it resolved as
+    // missing has nothing left to invalidate — sending would just 404.
+    const foundProject = (id: string) => propFallbackRef.current[`/${id}`]?.project
+    const knownMissing = (id: string) => propFallbackRef.current[`/${id}`]?.text === ''
     setBusyCase(row.key)
+    setRowError(null)
     try {
       if (kind !== 'keep_both') {
-        const targets = (kind === 'invalidate_both'
+        const candidates = (kind === 'invalidate_both'
           ? [
-              { id: conflict.newID, project: conflict.newProject },
-              { id: conflict.oldID, project: conflict.oldProject },
+              { id: conflict.newID, project: conflict.newProject || foundProject(conflict.newID) || '' },
+              { id: conflict.oldID, project: conflict.oldProject || foundProject(conflict.oldID) || '' },
             ]
           : [kind === 'invalidate_new'
-              ? { id: conflict.newID, project: conflict.newProject }
-              : { id: conflict.oldID, project: conflict.oldProject }]).filter(targetWorth)
+              ? { id: conflict.newID, project: conflict.newProject || foundProject(conflict.newID) || '' }
+              : { id: conflict.oldID, project: conflict.oldProject || foundProject(conflict.oldID) || '' }])
+        const targets = candidates.filter((target) => Boolean(target.project && target.id) && !knownMissing(target.id))
         if (targets.length === 0) {
-          setError(t('supervisor.conflict_no_project') ?? 'Could not resolve the projects of these knowledge items — they may be removed or invisible to your account.')
+          // The report lives at the card: from a conflict deep in the queue
+          // the page-top error line is invisible and the button reads dead.
+          // A known-missing side is the more diagnostic verdict — it means
+          // the item is gone, not merely unprojected.
+          setRowError({ key: row.key, text: candidates.some((target) => knownMissing(target.id))
+            ? (t('supervisor.conflict_missing_items') ?? 'Knowledge not found (removed or not visible to your account) — nothing to invalidate.')
+            : (t('supervisor.conflict_no_project') ?? 'Could not resolve the projects of these knowledge items — they may be removed or invisible to your account.') })
           return
         }
         for (const target of targets) {
@@ -612,7 +629,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       await closeCase(row, kind)
       await load(true)
     } catch (failure) {
-      setError(message(failure))
+      setRowError({ key: row.key, text: message(failure) })
     } finally {
       setBusyCase('')
     }
@@ -714,18 +731,22 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
    *  reloads once at the end. */
   async function resolveConflictQuiet(row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'invalidate_both' | 'keep_both') {
     const conflict = row.conflict!
-    // Same empty-project guard as resolveConflict: an unresolvable side is
-    // skipped, never sent (the endpoint would 422); if nothing is left to
-    // invalidate the case just gets acknowledged by the caller.
+    // Same guards as resolveConflict: an unresolvable side is skipped, never
+    // sent (the endpoint would 422), a batch-resolved-missing side has nothing
+    // to invalidate — and the found project fills an unnamed one. If nothing
+    // is left the case just gets acknowledged by the caller.
     if (kind !== 'keep_both') {
+      const foundProject = (id: string) => propFallbackRef.current[`/${id}`]?.project
+      const knownMissing = (id: string) => propFallbackRef.current[`/${id}`]?.text === ''
       const targets = (kind === 'invalidate_both'
         ? [
-            { id: conflict.newID, project: conflict.newProject },
-            { id: conflict.oldID, project: conflict.oldProject },
+            { id: conflict.newID, project: conflict.newProject || foundProject(conflict.newID) || '' },
+            { id: conflict.oldID, project: conflict.oldProject || foundProject(conflict.oldID) || '' },
           ]
         : [kind === 'invalidate_new'
-            ? { id: conflict.newID, project: conflict.newProject }
-            : { id: conflict.oldID, project: conflict.oldProject }]).filter((target) => Boolean(target.project && target.id))
+            ? { id: conflict.newID, project: conflict.newProject || foundProject(conflict.newID) || '' }
+            : { id: conflict.oldID, project: conflict.oldProject || foundProject(conflict.oldID) || '' }])
+          .filter((target) => Boolean(target.project && target.id) && !knownMissing(target.id))
       for (const target of targets) {
         try {
           await observationApi.invalidate({
@@ -1138,6 +1159,12 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                       const oldProp = cf.oldProp || fallbackOld?.text || ''
                       const newLinkProject = fallbackNew?.project || newProject
                       const oldLinkProject = fallbackOld?.project || oldProject
+                      // A side the batch resolve proved absent has nothing to
+                      // invalidate — a click would only 404 deep in the page-top
+                      // void. Disable the button and say why at the title.
+                      const newMissing = fallbackNew?.text === ''
+                      const oldMissing = fallbackOld?.text === ''
+                      const invalidateMissingHint = t('supervisor.action_invalidate_missing_hint') ?? 'Knowledge not found — nothing to invalidate'
                       const openDossier = (id: string, project: string) => (e: React.MouseEvent) => {
                         e.preventDefault()
                         // The knowledge page takes its project from the app
@@ -1167,7 +1194,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                                     : <span style={{ color: 'var(--tm-text-3)' }}>…</span>}
                               </div>
                               <div>
-                                <Button size="sm" kind="danger--ghost" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_new')} title={t('supervisor.action_invalidate_hint_new') ?? undefined}>
+                                <Button size="sm" kind="danger--ghost" disabled={busyCase === row.key || newMissing} onClick={() => void resolveConflict(row, 'invalidate_new')} title={newMissing ? invalidateMissingHint : (t('supervisor.action_invalidate_hint_new') ?? undefined)}>
                                   {busyCase === row.key ? '…' : t('supervisor.action_invalidate') ?? 'Invalidate'}
                                 </Button>
                               </div>
@@ -1182,7 +1209,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                                     : <span style={{ color: 'var(--tm-text-3)' }}>…</span>}
                               </div>
                               <div>
-                                <Button size="sm" kind="danger--ghost" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_old')} title={t('supervisor.action_invalidate_hint_old') ?? undefined}>
+                                <Button size="sm" kind="danger--ghost" disabled={busyCase === row.key || oldMissing} onClick={() => void resolveConflict(row, 'invalidate_old')} title={oldMissing ? invalidateMissingHint : (t('supervisor.action_invalidate_hint_old') ?? undefined)}>
                                   {busyCase === row.key ? '…' : t('supervisor.action_invalidate') ?? 'Invalidate'}
                                 </Button>
                               </div>
@@ -1193,6 +1220,9 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                               {t('supervisor.compare_hint') ?? 'Highlighted — words absent on the other side'}
                               {cf.score > 0 && ` · ${t('supervisor.compare_score', { score: cf.score.toFixed(2) })}`}
                             </div>
+                          )}
+                          {rowError?.key === row.key && (
+                            <div style={{ marginTop: '0.3rem', fontSize: '0.72rem', color: 'var(--tm-danger)' }}>{rowError.text}</div>
                           )}
                           {generalize?.rowKey === row.key ? (
                             <div style={{ marginTop: '0.35rem', display: 'grid', gap: '0.3rem' }}>
@@ -1219,7 +1249,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                               </Button>
                               {/* Both formulations outdated: retire the whole pair
                                   in one click — two invalidations + ack. */}
-                              <Button size="sm" kind="danger--ghost" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_both')} title={t('supervisor.action_invalidate_both_hint') ?? undefined}>
+                              <Button size="sm" kind="danger--ghost" disabled={busyCase === row.key || (newMissing && oldMissing)} onClick={() => void resolveConflict(row, 'invalidate_both')} title={t('supervisor.action_invalidate_both_hint') ?? undefined}>
                                 {busyCase === row.key ? '…' : t('supervisor.action_invalidate_both') ?? 'Invalidate both'}
                               </Button>
                               <Button

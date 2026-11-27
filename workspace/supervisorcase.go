@@ -121,6 +121,14 @@ const supervisorCaseUpsertSQL = `INSERT INTO workspace_supervisor_case
 	   last_seen = GREATEST(workspace_supervisor_case.last_seen, EXCLUDED.last_seen),
 	   last_event_id = EXCLUDED.last_event_id,
 	   cause = COALESCE(NULLIF(EXCLUDED.cause, ''), workspace_supervisor_case.cause),
+	   // Same self-heal as cause: a case first folded from a verdict published
+	   // without a project (older kernel, or the item's project resolved after
+	   // the fact) kept that empty project forever — re-publications bumped
+	   // occurrences but the queue row stayed project-less, and the debugger's
+	   // invalidate buttons refused to fire on it (empty project 422s). Newer
+	   // verdicts that name the project repair the row; an empty re-publish
+	   // never erases a known one.
+	   project = COALESCE(NULLIF(EXCLUDED.project, ''), workspace_supervisor_case.project),
 	   summary = EXCLUDED.summary,
 	   recommendation = EXCLUDED.recommendation,
 	   payload = EXCLUDED.payload`
