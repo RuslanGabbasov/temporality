@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>Conversational Runtime: repository audit — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/conversational-runtime-audit.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/tech/conversational-runtime-audit.html"><link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/tech/conversational-runtime-audit.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="Conversational Runtime: repository audit — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/conversational-runtime-audit.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Conversational Runtime: repository audit — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/conversational-runtime-audit.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="ai-guided-onboarding-and-learning.html">Техническое задание: AI-Guided Onboarding & Learning</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row active" href="conversational-runtime-audit.html">Conversational Runtime: repository audit</a>
+<a class="docs-nav-row" href="conversational-runtime.html">Техническое задание: Conversational Runtime — единая среда взаимодействия человека с агентной организацией Temporality</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="organizational-operations-implementation.html">Реализация: Organizational Operations</a>
+<a class="docs-nav-row" href="organizational-operations-survey.html">Техническое обследование: Organizational Operations</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine-ext.html">ТЗ: Развитие Presentation Engine — расширение выразительных средств визуализации</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="runtime-for-ai-org.html">ТЗ: Обновление сайта Temporality — Runtime for AI Organizations</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="subscription-providers-claude-codex.html">Подписки Claude Code и Codex как провайдеры моделей</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="usage-report.html">Usage aggregates and monthly reports</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Conversational Runtime: repository audit</h1>
+
+<p>Date: 2026-11-27<br>Scope: Phase 0 of <a href="conversational-runtime.html">conversational-runtime.md</a>.</p>
+<h2 id="current-component-map"><a class="anchor" href="#current-component-map" aria-label="Section link">#</a>Current component map</h2><table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Current implementation</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Channel ingress and intake</td>
+<td><code>kernel/agent/channelinbound.go</code>, <code>cmd/agent-kernel/channelinbound.go</code>, <code>cmd/agent-kernel/intake.go</code></td>
+<td><code>InboundMessage</code> normalizes transport input. The kernel loop handles polling, identity, reply matching, intake and routing. Intake owns the channel dialog/classification flow.</td>
+</tr>
+<tr>
+<td>Interactive replies</td>
+<td><code>kernel/agent/channelinbound.go</code>, <code>cmd/agent-kernel/channelinbound.go</code></td>
+<td><code>MatchChannelReplies</code> matches exact <code>ThreadRef</code> first, then falls back to the latest open request in an owned chat. Buttons/widgets are handled separately by the callback/widget paths.</td>
+</tr>
+<tr>
+<td>Human requests</td>
+<td><code>workspace/models.go</code>, <code>workspace/humanrequest.go</code>, <code>migrations/workspace/0009_human_request_schema.up.sql</code></td>
+<td><code>HumanRequest</code> is durable and tied to <code>run_id</code>; team fan-out is stored in <code>human_request_delivery</code>. Thread identity is an optional string on the request.</td>
+</tr>
+<tr>
+<td>Artifact approvals</td>
+<td><code>workspace/artifactlifecycle.go</code>, <code>cmd/agent-kernel/artifactreviewreply.go</code>, <code>cmd/agent-kernel/artifactnotify.go</code></td>
+<td>Review rounds are the source of truth. Channel replies resolve through <code>ResolveArtifactReview</code>, which checks reviewer membership and an open round. A synthetic human request row supplies channel delivery and inbox state.</td>
+</tr>
+<tr>
+<td>Workspace chat persistence</td>
+<td><code>workspace/chats.go</code>, <code>cmd/agent-kernel/chats.go</code>, <code>debugger/src/Workspace.tsx</code>, <code>debugger/src/workspaceApi.ts</code></td>
+<td>The backend stores the UI transcript as opaque JSON. Chat/task identity and ownership exist, but the model is separate from channel conversations and messages.</td>
+</tr>
+<tr>
+<td>Workflow execution</td>
+<td><code>cmd/agent-kernel/main.go</code>, <code>kernel/agent/workflow.go</code> and related agent workflow files</td>
+<td><code>AgentRun</code> executes on Temporal. HTTP/task entry points start workflows; channel intake has its own routing and workflow-start path. Human requests signal waiting workflows.</td>
+</tr>
+<tr>
+<td>Delivery</td>
+<td>Channel drivers under <code>kernel/agent</code> and <code>cmd/agent-kernel</code>; delivery and notification code under <code>cmd/agent-kernel</code></td>
+<td>Transport polling and protocol details are driver-owned; the kernel loop orchestrates send, reply, callbacks, widgets, cursors and retries. Workspace chat delivery is browser/API based.</td>
+</tr>
+</tbody></table>
+<h2 id="dependency-outline"><a class="anchor" href="#dependency-outline" aria-label="Section link">#</a>Dependency outline</h2><pre><code class="language-text">channel driver -&gt; InboundMessage -&gt; channelInboundLoop
+                                   |-&gt; MatchChannelReplies -&gt; HumanRequest -&gt; Temporal signal
+                                   |-&gt; artifact review resolver -&gt; ArtifactReview transition
+                                   `-&gt; intake classification/routing -&gt; task/run -&gt; Temporal AgentRun
+
+Workspace UI -&gt; Workspace API -&gt; workspace_chat (opaque transcript)
+</code></pre>
+<p>The shared persistence boundary is the workspace store, but the conversation models and execution paths are distinct. Interaction callbacks use opaque tokens and a separate resolution path; plain text replies use <code>PendingAsk</code> projections and thread/chat matching.</p>
+<h2 id="existing-entities-and-repeated-mechanisms"><a class="anchor" href="#existing-entities-and-repeated-mechanisms" aria-label="Section link">#</a>Existing entities and repeated mechanisms</h2><ul>
+<li>Existing durable entities: <code>HumanRequest</code>, <code>HumanRequestDelivery</code>, <code>ArtifactReview</code>, <code>Artifact</code>, <code>workspace_chat</code>, inbound-message rows, run/task records, channel cursor, callback/widget records.</li>
+<li>Existing address fields: human request ID, artifact review ID, channel <code>ThreadRef</code>, transport message IDs in normalized inbound messages, callback <code>SourceMessageID</code> and opaque <code>CallbackData</code>.</li>
+<li>Existing response paths: human-request workflow signal, artifact review state transition, widget/callback resolution, workspace chat transcript update. These paths have separate validation and lifecycle behavior.</li>
+<li>Existing concurrency controls include database transactions/row locks for artifact review transitions, workflow identity/deduplication, and per-loop/channel cursor processing. There is no unified per-conversation sequence or keyed conversation lock in the inspected ingress path.</li>
+</ul>
+<h2 id="risks-and-migration-points"><a class="anchor" href="#risks-and-migration-points" aria-label="Section link">#</a>Risks and migration points</h2><ol>
+<li>Reply matching now prefers the transport reply target and uses the latest open request in the chat when no target is present. This follows the clarified product rule; adapters must preserve reply identifiers, and transports whose reply metadata is not available will use the latest-request fallback.</li>
+<li><code>ThreadRef</code> is optional and transport-specific. A common interaction reference needs to preserve existing thread matching while supporting source message IDs and typed domain IDs.</li>
+<li>Artifact reviews currently piggyback on <code>HumanRequest</code> delivery. Migration must retain channel delivery, inbox counts, cancellation behavior and reviewer authorization while making the review ID explicit.</li>
+<li>Workspace transcript JSON is browser-shaped and task-linked. Introducing normalized <code>Conversation</code>/<code>ConversationMessage</code> storage needs dual-read/write or a deliberate migration path to avoid losing existing chats.</li>
+<li>Channel intake and Workspace chat have different execution and delivery entry points. A unified runtime will need adapter boundaries around these existing paths rather than assuming they already share a message contract.</li>
+</ol>
+<h2 id="baseline-and-audit-limits"><a class="anchor" href="#baseline-and-audit-limits" aria-label="Section link">#</a>Baseline and audit limits</h2><p>Repository baseline is the current commit/worktree state on 2026-11-27. No performance measurements or regression-corpus scores are recorded in this audit. Per the session instruction not to run or add tests unless requested, test suites and benchmarks were not run. Existing test files were located alongside the affected components; baseline numbers remain a Phase 0 follow-up before performance claims are made.</p>
+<h2 id="phase-0-exit"><a class="anchor" href="#phase-0-exit" aria-label="Section link">#</a>Phase 0 exit</h2><p>The current component map, dependencies, existing entities, repeated interaction paths, and migration risks are recorded above. <code>MatchChannelReplies</code> now prefers exact reply/thread references and otherwise selects the latest open request. Telegram inbound normalization now preserves <code>reply_to_message.message_id</code>; Slack, Mattermost and Matrix already populate <code>ReplyTo</code> from their reply/thread metadata.</p>
+<h2 id="wave-2-status-2026-11-27"><a class="anchor" href="#wave-2-status-2026-11-27" aria-label="Section link">#</a>Wave 2 status (2026-11-27)</h2><p>Implemented: normalized <code>Conversation</code>/<code>ConversationMessage</code>/<code>ConversationTurn</code> storage with per-conversation sequence and advisory-lock serialization; durable conversation outbox for turn responses with backoff, terminal-task-result flush and stale-turn redrive after a crash; runtime-first channel intake (conversational messages go through the same turn path, task requests/files stay on the intake engine); Fast Intent Router cascade (deterministic → L2 classifier on the lead&#39;s model with 3s timeout and confidence thresholds → lead-first when a task is active); run results projected back into the conversation as task-linked turns; <code>GET /v1/conversations/{id}/tasks</code> plus task chips in the chat header linking to the run trace.</p>
+<p>Out of scope for this wave, per the ТЗ: §23 shadow-mode router comparisons, §24 conversation branching UI, knowledge/RAG integration in the Context Builder (§12.3 is stubbed to the existing knowledge store path).</p>
+<p>Regression corpus (§20) is not yet populated; router confidence thresholds (0.75 adopt / 0.55 clarify) are set from the design targets and need corpus validation before tuning.</p>
+<h2 id="wave-3-status-2026-11-27-shadow-mode-regression-corpus"><a class="anchor" href="#wave-3-status-2026-11-27-shadow-mode-regression-corpus" aria-label="Section link">#</a>Wave 3 status (2026-11-27): shadow mode + regression corpus</h2><p>§20 corpus populated: <code>cmd/agent-kernel/testdata/conversation_corpus.json</code> covers all 20 minimum categories (23 cases), each pinning initial state, message, the deterministic-pass decision (level 1 + lead-first, no model), the cascade-pass decision with a scripted level-2 classifier, and the classifier-round budget. The harness (<code>TestRegressionCorpus</code>) asserts per-case intent/execution/router level in both passes, counts classifier rounds, and fails when a §20 category loses its only case; the corpus found and pinned two real behaviors: RU «запусти …» was added to the deterministic task verbs, and injection phrasing is pinned to route as a plain conversational turn (the anti-injection defenses live at the lead/system-tail and authorization layers, not in the route selector). Side-effect expectations stay declarative — the decision layer is what the corpus pins.</p>
+<p>§23 shadow mode live: every inbound channel message the runtime router scores also lands in <code>conversation_router_shadow</code> (migration 0046, one row per inbound message, runtime half at dispatch time). Messages that fall through to legacy intake get the intake verdict patched into the same row when the workflow posts <code>POST /v1/intake/runs/{runID}/decision</code>; the semantic mapping (<code>shadowAgreement</code>) counts legacy task/amendment against runtime agent_execution or lead-first continuation as agreement, and a bare deterministic direct on a legacy task as the disagreement the shadow exists to surface (warned in the kernel log). Shadow scoring is deterministic-only — no model call, no side effects; per-channel opt-out via the <code>conversation_shadow_enabled</code> channel setting, default on. Org-level feature flags from §23 are deliberately represented at channel granularity for now: channels are the deployment unit of the kernel loop, and a channel belongs to one organization in practice; per-org router flags remain open work if multi-org channels ever appear. Agreement data now accumulates in SQL (<code>agreement</code>, <code>verdict_at</code>, partial index) for a future dashboard; thresholds stay untuned until that data exists.</p>
+<p>Remaining from the ТЗ after this wave: normalized store as the authoritative chat store (dual-write with legacy transcript continues), legacy intake workflow removal after shadow data justifies it (§22 Phase 7 tail), SLO measurements (§25.2), runtime-specific metrics (§19), and ADRs for §26 items 6/9/11/12 (branching context, cache freshness, budget split, end-to-end observability).</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="context-compaction.html"><small>← Назад</small><strong>Компакция контекста: карточка состояния для длинных ранов</strong></a>
+    <a class="pager-next" href="conversational-runtime.html"><small>Далее →</small><strong>Техническое задание: Conversational Runtime — единая среда взаимодействия человека с агентной организацией Temporality</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

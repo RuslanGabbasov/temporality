@@ -1,0 +1,1516 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0F1F1D">
+<title>Техническое задание: Conversational Runtime — единая среда взаимодействия человека с агентной организацией Temporality — Temporality</title>
+<link rel="canonical" href="https://temporality.tech/docs/tech/conversational-runtime.html">
+<link rel="alternate" hreflang="ru" href="https://temporality.tech/docs/tech/conversational-runtime.html"><link rel="alternate" hreflang="x-default" href="https://temporality.tech/docs/tech/conversational-runtime.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Temporality">
+<meta property="og:title" content="Техническое задание: Conversational Runtime — единая среда взаимодействия человека с агентной организацией Temporality — Temporality">
+
+<meta property="og:url" content="https://temporality.tech/docs/tech/conversational-runtime.html">
+<meta property="og:image" content="https://temporality.tech/assets/run.webp">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Техническое задание: Conversational Runtime — единая среда взаимодействия человека с агентной организацией Temporality — Temporality">
+
+<meta name="twitter:image" content="https://temporality.tech/assets/run.webp">
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="dns-prefetch" href="https://fonts.googleapis.com"><link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.0a7e4158.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Инженерные документы</a><a href="../../#product">Продукт</a><a href="../../#guide">Руководство</a><a href="../../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/conversational-runtime.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Инженерные документы</div>
+<a class="docs-nav-row" href="DESIGN.html">Temporality — visual design specification</a>
+<a class="docs-nav-row" href="ROADMAP.html">Temporality Roadmap</a>
+<a class="docs-nav-row" href="activity-scoping.html">Пересмотр роли проектов: активность глобальна, проект — атрибуция [L1-3]</a>
+<a class="docs-nav-row" href="agent-async-operations.html">Асинхронные операции агента (background run_command)</a>
+<a class="docs-nav-row" href="agent-behavior-monitoring.html">Детекция опасного поведения агента</a>
+<a class="docs-nav-row" href="agent-delegation.html">Делегирование задач между агентами</a>
+<a class="docs-nav-row" href="agent-evolution.html">Эволюция агентов: версии, предложения, наблюдение (v2)</a>
+<a class="docs-nav-row" href="agent-knowledge-exploration.html">ТЗ: Knowledge Exploration — исследование предметной области и навигация по знаниям Temporality</a>
+<a class="docs-nav-row" href="agent-quality-loop.html">Контур качества агентов (Quality Loop)</a>
+<a class="docs-nav-row" href="agent-teams.html">Команды агентов</a>
+<a class="docs-nav-row" href="agent-turn-limit-restarts.html">Автопродолжение при упоре в лимит ходов (turn_limit_restarts)</a>
+<a class="docs-nav-row" href="ai-guided-onboarding-and-learning.html">Техническое задание: AI-Guided Onboarding & Learning</a>
+<a class="docs-nav-row" href="approval-model.html">Approval model (Phase 2)</a>
+<a class="docs-nav-row" href="architecture.html">Agent Kernel and Temporality architecture</a>
+<a class="docs-nav-row" href="artifact-lifecycle.html">Жизненный цикл артефактов (Artifact Lifecycle): создание агентами, согласование человеком</a>
+<a class="docs-nav-row" href="artifact-registry.html">Реестр артефактов (Artifact Registry)</a>
+<a class="docs-nav-row" href="auth-federation.html">Федеративная аутентификация и провижининг пользователей (Auth Federation)</a>
+<a class="docs-nav-row" href="builtin-skills.html">Предустановленные скилы: офисный пакет (builtin skills)</a>
+<a class="docs-nav-row" href="channels.html">Каналы коммуникации: единая абстракция (Channel Drivers)</a>
+<a class="docs-nav-row" href="chat-mentions.html">Упоминания сущностей в чате (@-mentions)</a>
+<a class="docs-nav-row" href="context-compaction.html">Компакция контекста: карточка состояния для длинных ранов</a>
+<a class="docs-nav-row" href="conversational-runtime-audit.html">Conversational Runtime: repository audit</a>
+<a class="docs-nav-row active" href="conversational-runtime.html">Техническое задание: Conversational Runtime — единая среда взаимодействия человека с агентной организацией Temporality</a>
+<a class="docs-nav-row" href="dev-stack-runs.html">Dev-стек: живучесть ранов при пересборках</a>
+<a class="docs-nav-row" href="evaluable-agent.html">Формирование системного промта агента</a>
+<a class="docs-nav-row" href="event-model.html">Event model audit (Phase 2)</a>
+<a class="docs-nav-row" href="experiment-9-corpus.html">Experiment 9 — corpus of experience evolution comprehension</a>
+<a class="docs-nav-row" href="failure-model.html">Agent Kernel failure and delivery model</a>
+<a class="docs-nav-row" href="failure-reconciliation.html">Side-effect and event reconciliation (Phase 2 audit)</a>
+<a class="docs-nav-row" href="filesystem-policy-implementation.html">Filesystem Policy: заметки к реализации (ветка feat/filesystem-policy)</a>
+<a class="docs-nav-row" href="filesystem-policy.html">ТЗ: Policy-based Filesystem Access и изоляция параллельной разработки в Temporality</a>
+<a class="docs-nav-row" href="harness-settings.html">Настройки харнеса: модели и бюджеты в одном месте</a>
+<a class="docs-nav-row" href="human-knowledge-explorer-plan.html">Knowledge Explorer — этап 1: аудит и технический план</a>
+<a class="docs-nav-row" href="human-knowledge-explorer.html">ТЗ: Knowledge Explorer — исследовательский интерфейс знаний Temporality</a>
+<a class="docs-nav-row" href="inbound-messages.html">Входящие сообщения: задачи по инициативе пользователя</a>
+<a class="docs-nav-row" href="interactive-HITL.html">HITL: унифицированный контракт для каналов и встроенного чата</a>
+<a class="docs-nav-row" href="knowledge-evolution.html">Разделение Experience, Knowledge, Skills и контекстной эволюции агента</a>
+<a class="docs-nav-row" href="knowledge-extraction.html">Knowledge Extraction из агентских траекторий</a>
+<a class="docs-nav-row" href="knowledge-model.html">Knowledge model</a>
+<a class="docs-nav-row" href="living-skills.html">Living Skills — эволюционирующие capabilities в Temporality</a>
+<a class="docs-nav-row" href="org-structure.html">Организационная структура и модель доступа Temporality</a>
+<a class="docs-nav-row" href="organizational-operations-implementation.html">Реализация: Organizational Operations</a>
+<a class="docs-nav-row" href="organizational-operations-survey.html">Техническое обследование: Organizational Operations</a>
+<a class="docs-nav-row" href="plan-evaluable-agent.html">План работ: Evaluable Agent — определение агента и компиляция системного промта</a>
+<a class="docs-nav-row" href="plan-hint-personalization.html">Персональные подсказки: фактор B6 «работало именно у этого пользователя»</a>
+<a class="docs-nav-row" href="plan-priming-relevance.html">Priming v2: от каталога знаний к полезным рекомендациям</a>
+<a class="docs-nav-row" href="presentation-engine-ext.html">ТЗ: Развитие Presentation Engine — расширение выразительных средств визуализации</a>
+<a class="docs-nav-row" href="presentation-engine.html">Техническое задание: Presentation Engine для Temporality</a>
+<a class="docs-nav-row" href="replay-model.html">Replay model (Phase 2 audit)</a>
+<a class="docs-nav-row" href="resilience-and-scale.html">Отказоустойчивость и масштабируемость</a>
+<a class="docs-nav-row" href="runbook.html">Runbook — Temporality</a>
+<a class="docs-nav-row" href="runtime-for-ai-org.html">ТЗ: Обновление сайта Temporality — Runtime for AI Organizations</a>
+<a class="docs-nav-row" href="runtime-knowledge-activation.html">Техническое задание: Runtime Knowledge Activation в Temporality</a>
+<a class="docs-nav-row" href="sagas.html">Саги: явная регистрация долгой работы (Sagas)</a>
+<a class="docs-nav-row" href="sandbox-profiles.html">Профили песочниц (Sandbox Profiles) [L1-360]</a>
+<a class="docs-nav-row" href="sandbox-security-matrix.html">Sandbox security matrix</a>
+<a class="docs-nav-row" href="sandbox-storage.html">Хранилище песочниц: инвентаризация, квоты и уборка (Sandbox Storage)</a>
+<a class="docs-nav-row" href="secrets-management.html">Управление секретами агентов (Secrets Management)</a>
+<a class="docs-nav-row" href="subscription-providers-claude-codex.html">Подписки Claude Code и Codex как провайдеры моделей</a>
+<a class="docs-nav-row" href="supervisor-model.html">Модель-супервайзер: роль, кейсы и метрики человеческого фактора</a>
+<a class="docs-nav-row" href="system-dashboard.html">Дашборд здоровья системы (System Dashboard)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-implementation.html">Межагентное взаимодействие: заметки к реализации (docs/temporality-agent-collaboration-spec.md)</a>
+<a class="docs-nav-row" href="temporality-agent-collaboration-spec.html">ТЗ: межагентное взаимодействие и обнаружение участников Saga</a>
+<a class="docs-nav-row" href="temporality-contract.html">Temporality event contract</a>
+<a class="docs-nav-row" href="temporality-organizational-operations-spec.html">Техническое задание: Organizational Operations для Temporality</a>
+<a class="docs-nav-row" href="triggers-and-escalations.html">Триггеры запуска операций и обращение агента к человеку</a>
+<a class="docs-nav-row" href="usage-report.html">Usage aggregates and monthly reports</a>
+<a class="docs-nav-row" href="web-research.html">Веб-исследования агентов (Web Research)</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Инженерные документы</div>
+<h1>Техническое задание: Conversational Runtime — единая среда взаимодействия человека с агентной организацией Temporality</h1>
+
+<p><strong>Статус:</strong> Предлагаемая архитектура<br><strong>Тип работ:</strong> Фундаментальный архитектурный рефакторинг<br><strong>Приоритет:</strong> Высокий<br><strong>Репозиторий:</strong> <code>RuslanGabbasov/temporality</code></p>
+<hr>
+<h1 id="1-цель-проекта"><a class="anchor" href="#1-цель-проекта" aria-label="Section link">#</a>1. Цель проекта</h1><p>Разработать единый Conversational Runtime — инфраструктурную подсистему Temporality, обеспечивающую быстрое, естественное и долговременное взаимодействие человека с агентной организацией.</p>
+<p>Система должна одинаково хорошо поддерживать два принципиально разных сценария:</p>
+<ol>
+<li><strong>Интерактивная работа:</strong> вопросы, консультации, обсуждения, совместное рассуждение, уточнение идей, быстрые операции.</li>
+<li><strong>Автономная работа:</strong> постановка задач, исследование, разработка, делегирование подчинённым агентам, длительное выполнение, согласования и получение результатов.</li>
+</ol>
+<p>Пользователь не должен выбирать между двумя режимами работы. Он просто взаимодействует с агентом, а система самостоятельно определяет необходимый способ обработки каждого сообщения.</p>
+<p>Основной продуктовый принцип:</p>
+<blockquote>
+<p>Temporality должен ощущаться как компетентный коллега, с которым можно непрерывно разговаривать, думать и принимать решения, но которому одновременно можно делегировать сложную работу на часы и дни.</p>
+</blockquote>
+<p>Conversational Runtime должен стать единой точкой входа для всех способов взаимодействия с Temporality:</p>
+<ul>
+<li>Workspace Chat;</li>
+<li>Matrix;</li>
+<li>Telegram;</li>
+<li>Slack;</li>
+<li>Mattermost;</li>
+<li>будущие мессенджеры;</li>
+<li>REST API;</li>
+<li>другие клиентские интерфейсы.</li>
+</ul>
+<p>При этом существующая инфраструктура автономного выполнения задач, Temporal, AgentRun, делегирования, саг, бюджетов, HITL, evidence и AgentSRE должна быть сохранена и интегрирована, а не заменена.</p>
+<h1 id="2-проблемы-существующей-реализации"><a class="anchor" href="#2-проблемы-существующей-реализации" aria-label="Section link">#</a>2. Проблемы существующей реализации</h1><p>До начала реализации необходимо провести аудит актуального состояния репозитория. Ниже зафиксированы проблемы, выявленные при изучении текущей реализации.</p>
+<h2 id="21-intake-перегружен-функциями"><a class="anchor" href="#21-intake-перегружен-функциями" aria-label="Section link">#</a>2.1. Intake перегружен функциями</h2><p>Текущий intake реализован как отдельный агентный процесс:</p>
+<ul>
+<li>создаётся AgentRun;</li>
+<li>запускается Temporal workflow;</li>
+<li>загружается конфигурация модели;</li>
+<li>загружается профиль пользователя;</li>
+<li>собирается история комнаты;</li>
+<li>выполняется классификация;</li>
+<li>вызываются инструменты маршрутизации;</li>
+<li>результат доставляется через watcher.</li>
+</ul>
+<p>Для простого вопроса или консультации это чрезмерно сложный жизненный цикл.</p>
+<p>Intake должен перестать быть самостоятельным агентом, обязательным для каждой входящей реплики.</p>
+<h2 id="22-смешаны-разные-измерения-классификации"><a class="anchor" href="#22-смешаны-разные-измерения-классификации" aria-label="Section link">#</a>2.2. Смешаны разные измерения классификации</h2><p>Текущие классы <code>task</code>, <code>amendment</code>, <code>status</code>, <code>cancel</code>, <code>chatter</code>, <code>reply</code> смешивают:</p>
+<ul>
+<li>смысл сообщения;</li>
+<li>объект, к которому оно относится;</li>
+<li>желаемую операцию;</li>
+<li>способ исполнения.</li>
+</ul>
+<p>Например, вопрос может требовать исследования, а задача может выполняться без полноценного автономного run.</p>
+<p>Нужна многоаспектная модель маршрутизации.</p>
+<h2 id="23-ненадёжная-адресация-согласований"><a class="anchor" href="#23-ненадёжная-адресация-согласований" aria-label="Section link">#</a>2.3. Ненадёжная адресация согласований</h2><p>В <code>kernel/agent/channelinbound.go</code>, <code>MatchChannelReplies</code>, используется FIFO-подбор открытого вопроса при отсутствии точного ReplyTo.</p>
+<p>Это недопустимо для параллельных согласований.</p>
+<p>Ответ должен быть привязан к конкретному Interaction, HumanRequest, ArtifactReview или Approval.</p>
+<p>Никакое неоднозначное сообщение не должно автоматически интерпретироваться как согласие.</p>
+<h2 id="24-контекст-привязан-к-комнате"><a class="anchor" href="#24-контекст-привязан-к-комнате" aria-label="Section link">#</a>2.4. Контекст привязан к комнате</h2><p>Текущая реконструкция диалога через последние сообщения комнаты не обеспечивает корректного разделения нескольких независимых разговоров, задач и интерактивных операций.</p>
+<p>Нужна самостоятельная сущность Conversation.</p>
+<h2 id="25-недостаточная-конкурентность"><a class="anchor" href="#25-недостаточная-конкурентность" aria-label="Section link">#</a>2.5. Недостаточная конкурентность</h2><p>Независимые разговоры не должны блокировать друг друга.</p>
+<p>Внутри одного разговора необходимо гарантировать порядок причинно связанных сообщений, но длительное выполнение задачи не должно блокировать продолжение беседы.</p>
+<h2 id="26-раздельные-модели-workspace-и-мессенджеров"><a class="anchor" href="#26-раздельные-модели-workspace-и-мессенджеров" aria-label="Section link">#</a>2.6. Раздельные модели Workspace и мессенджеров</h2><p>Workspace Chat и Channel Inbound используют разные пути обработки сообщений.</p>
+<p>Необходимо унифицировать backend-поведение и сохранить различия только в транспортных адаптерах и клиентском представлении.</p>
+<h1 id="3-архитектурные-принципы"><a class="anchor" href="#3-архитектурные-принципы" aria-label="Section link">#</a>3. Архитектурные принципы</h1><p>Реализация должна следовать следующим принципам.</p>
+<ol>
+<li>Conversation не равен комнате, проекту, задаче или AgentRun.</li>
+<li>Одна Conversation может содержать множество независимых задач и интерактивных операций.</li>
+<li>Задача может продолжать выполняться после завершения породившего её conversational turn.</li>
+<li>Быстрый ответ не должен создавать Temporal workflow.</li>
+<li>Не каждая реплика требует отдельного вызова классификатора.</li>
+<li>Детерминированные операции не должны передаваться LLM.</li>
+<li>LLM не имеет права самостоятельно подтверждать юридически или операционно значимые действия.</li>
+<li>Контекст организации, разговора и задачи должен быть разделён.</li>
+<li>Независимые Conversation должны обрабатываться параллельно.</li>
+<li>Сообщения одного Conversation должны иметь строгую причинную последовательность.</li>
+<li>Lead Agent остаётся ответственным за общение с пользователем и может делегировать работу подчинённым.</li>
+<li>Любая операция должна проходить проверку полномочий независимо от результата классификации.</li>
+<li>Durability не должна требовать полного workflow lifecycle для каждой реплики.</li>
+<li>Все исполнительные контуры должны использовать общую инфраструктуру знаний, идентичности, инструментов, прав и наблюдаемости.</li>
+</ol>
+<h1 id="4-целевая-архитектура"><a class="anchor" href="#4-целевая-архитектура" aria-label="Section link">#</a>4. Целевая архитектура</h1><h2 id="41-общая-схема"><a class="anchor" href="#41-общая-схема" aria-label="Section link">#</a>4.1. Общая схема</h2><pre><code class="language-text">                 MESSAGE SOURCES
+                        |
+       +----------------+----------------+
+       |                |                |
+    Workspace         Matrix          Telegram
+       |                |                |
+     Slack          Mattermost        REST API
+       |                |                |
+       +----------------+----------------+
+                        |
+                 MESSAGE GATEWAY
+                        |
+              NORMALIZATION LAYER
+                        |
+             IDENTITY / AUTHORIZATION
+                        |
+                EVENT PERSISTENCE
+                        |
+               CONVERSATION ROUTER
+                        |
+              INTERACTION RESOLVER
+                        |
+                CONTEXT BUILDER
+                        |
+                 INTENT ROUTER
+                        |
+          +-------------+-------------+
+          |             |             |
+       DIRECT       LIGHTWEIGHT     TASK
+      RESPONSE         TOOLS       DISPATCH
+          |             |             |
+          |             |        TASK RUNTIME
+          |             |             |
+          |             |       LEAD / WORKERS
+          |             |             |
+          +-------------+-------------+
+                        |
+                RESPONSE ASSEMBLER
+                        |
+                 UNIFIED DELIVERY
+                        |
+             WORKSPACE / MESSENGERS
+</code></pre>
+<p>Interaction Runtime является самостоятельным контуром маршрутизации интерактивных операций и может перехватывать сообщение до обращения к LLM.</p>
+<h2 id="42-компоненты"><a class="anchor" href="#42-компоненты" aria-label="Section link">#</a>4.2. Компоненты</h2><h3 id="message-gateway"><a class="anchor" href="#message-gateway" aria-label="Section link">#</a>Message Gateway</h3><p>Принимает события из всех поддерживаемых источников.</p>
+<p>Обязанности:</p>
+<ul>
+<li>аутентификация транспорта;</li>
+<li>идентификация пользователя;</li>
+<li>нормализация входящего сообщения;</li>
+<li>дедупликация;</li>
+<li>сохранение исходных идентификаторов;</li>
+<li>извлечение вложений;</li>
+<li>определение транспортного контекста;</li>
+<li>передача нормализованного события в runtime.</li>
+</ul>
+<p>Gateway не должен содержать бизнес-логику классификации.</p>
+<h3 id="conversation-runtime"><a class="anchor" href="#conversation-runtime" aria-label="Section link">#</a>Conversation Runtime</h3><p>Центральный компонент управления взаимодействием.</p>
+<p>Обязанности:</p>
+<ul>
+<li>создание и разрешение Conversation;</li>
+<li>управление последовательностью сообщений;</li>
+<li>построение контекста;</li>
+<li>выбор стратегии обработки;</li>
+<li>запуск быстрых ответов;</li>
+<li>запуск инструментов;</li>
+<li>передача работы Task Runtime;</li>
+<li>получение результатов делегирования;</li>
+<li>управление потоковой доставкой;</li>
+<li>восстановление незавершённых операций.</li>
+</ul>
+<p>Conversation Runtime не является отдельным универсальным агентом.</p>
+<h3 id="interaction-runtime"><a class="anchor" href="#interaction-runtime" aria-label="Section link">#</a>Interaction Runtime</h3><p>Обрабатывает адресованные человеку интерактивные операции.</p>
+<p>Поддерживает:</p>
+<ul>
+<li>HumanRequest;</li>
+<li>ArtifactReview;</li>
+<li>Approval;</li>
+<li>другие типы интерактивных запросов.</li>
+</ul>
+<p>Обязанности:</p>
+<ul>
+<li>точная идентификация объекта;</li>
+<li>проверка адресата;</li>
+<li>проверка версии;</li>
+<li>проверка прав;</li>
+<li>обработка решения;</li>
+<li>идемпотентность;</li>
+<li>фиксация результата;</li>
+<li>публикация события в Conversation.</li>
+</ul>
+<h3 id="context-builder"><a class="anchor" href="#context-builder" aria-label="Section link">#</a>Context Builder</h3><p>Формирует компактный контекст для конкретного conversational turn.</p>
+<p>Использует:</p>
+<ul>
+<li>историю Conversation;</li>
+<li>текущую ветку;</li>
+<li>активные задачи;</li>
+<li>ожидающие Interaction;</li>
+<li>знания организации;</li>
+<li>профиль пользователя;</li>
+<li>права;</li>
+<li>контекст проектов;</li>
+<li>доступные инструменты.</li>
+</ul>
+<p>Не должен автоматически загружать весь контекст организации или всю историю комнаты.</p>
+<h3 id="intent-router"><a class="anchor" href="#intent-router" aria-label="Section link">#</a>Intent Router</h3><p>Определяет смысл сообщения и необходимую стратегию обработки.</p>
+<p>Должен использовать каскад:</p>
+<ol>
+<li>Детерминированные правила.</li>
+<li>Быструю модель классификации при необходимости.</li>
+<li>Основную модель Lead, если отдельная классификация не требуется.</li>
+</ol>
+<h3 id="task-runtime"><a class="anchor" href="#task-runtime" aria-label="Section link">#</a>Task Runtime</h3><p>Сохраняет существующий механизм автономного выполнения:</p>
+<ul>
+<li>AgentRun;</li>
+<li>Temporal;</li>
+<li>Saga;</li>
+<li>delegation;</li>
+<li>task budgets;</li>
+<li>HITL;</li>
+<li>evidence;</li>
+<li>QA;</li>
+<li>AgentSRE.</li>
+</ul>
+<p>Интегрируется с Conversation через события и ссылки на задачи.</p>
+<h3 id="unified-delivery"><a class="anchor" href="#unified-delivery" aria-label="Section link">#</a>Unified Delivery</h3><p>Обеспечивает единое представление результатов независимо от транспорта.</p>
+<p>Поддерживает:</p>
+<ul>
+<li>текст;</li>
+<li>streaming;</li>
+<li>progressive response;</li>
+<li>task cards;</li>
+<li>interactive controls;</li>
+<li>attachments;</li>
+<li>artifacts;</li>
+<li>presentations;</li>
+<li>progress events;</li>
+<li>notifications.</li>
+</ul>
+<h1 id="5-модель-данных"><a class="anchor" href="#5-модель-данных" aria-label="Section link">#</a>5. Модель данных</h1><p>Требуется проработать и реализовать самостоятельную доменную модель Conversation.</p>
+<p>Ниже приведены логические сущности. Перед созданием новых таблиц необходимо проверить существующие модели Workspace и переиспользовать совместимые структуры.</p>
+<h2 id="51-conversation"><a class="anchor" href="#51-conversation" aria-label="Section link">#</a>5.1. Conversation</h2><p>Долговременная коммуникационная сессия.</p>
+<pre><code class="language-text">Conversation
+  id
+  organization_id
+  owner_id
+  agent_id
+  status
+  title
+  created_at
+  updated_at
+  last_message_sequence
+  context_version
+  metadata
+</code></pre>
+<p>Требования:</p>
+<ul>
+<li>Conversation не привязана обязательно к проекту.</li>
+<li>Может затрагивать несколько проектов.</li>
+<li>Может существовать без активных задач.</li>
+<li>Может иметь несколько участников.</li>
+<li>Может иметь несколько веток.</li>
+<li>Сохраняет историю независимо от жизненного цикла AgentRun.</li>
+<li>Поддерживает архивирование и возобновление.</li>
+</ul>
+<h2 id="52-conversationparticipant"><a class="anchor" href="#52-conversationparticipant" aria-label="Section link">#</a>5.2. ConversationParticipant</h2><pre><code class="language-text">ConversationParticipant
+  id
+  conversation_id
+  participant_type
+  participant_id
+  permissions
+  joined_at
+  left_at
+</code></pre>
+<p>Типы участников:</p>
+<ul>
+<li>human;</li>
+<li>agent;</li>
+<li>system;</li>
+<li>external_identity.</li>
+</ul>
+<h2 id="53-conversationmessage"><a class="anchor" href="#53-conversationmessage" aria-label="Section link">#</a>5.3. ConversationMessage</h2><pre><code class="language-text">ConversationMessage
+  id
+  conversation_id
+  sequence
+  parent_message_id
+  sender_type
+  sender_id
+  message_type
+  content
+  attachments
+  source
+  source_message_id
+  source_thread_id
+  status
+  created_at
+  processed_at
+  metadata
+</code></pre>
+<p>Требования:</p>
+<ul>
+<li>Глобально уникальный ID.</li>
+<li>Уникальность <code>(conversation_id, sequence)</code>.</li>
+<li>Идемпотентность входящих транспортных событий.</li>
+<li>Поддержка сообщений системы и агентов.</li>
+<li>Поддержка ответов и ветвления.</li>
+<li>Сохранение оригинальных транспортных идентификаторов.</li>
+<li>Отдельное хранение статуса доставки и статуса обработки.</li>
+</ul>
+<p>Необходимо разделить внутреннюю последовательность сообщений и порядок доставки в транспорт.</p>
+<h2 id="54-conversationbranch"><a class="anchor" href="#54-conversationbranch" aria-label="Section link">#</a>5.4. ConversationBranch</h2><pre><code class="language-text">ConversationBranch
+  id
+  conversation_id
+  parent_message_id
+  title
+  created_at
+  updated_at
+  context_snapshot
+</code></pre>
+<p>Ветка нужна для самостоятельных тем обсуждения внутри одного Conversation.</p>
+<p>Не требуется реализовывать сложную графовую модель на первом этапе. Достаточно обеспечить адресуемую ветку и корректное построение контекста.</p>
+<h2 id="55-conversationtask"><a class="anchor" href="#55-conversationtask" aria-label="Section link">#</a>5.5. ConversationTask</h2><p>Связь Conversation с существующей задачей.</p>
+<pre><code class="language-text">ConversationTask
+  id
+  conversation_id
+  origin_message_id
+  task_id
+  run_id
+  project_id
+  status
+  created_at
+  completed_at
+</code></pre>
+<p>Один Conversation может содержать множество ConversationTask.</p>
+<p>Одна задача может иметь несколько связанных сообщений и продолжений.</p>
+<p>Необходимо сохранить существующую модель Task и не создавать параллельную систему управления задачами.</p>
+<h2 id="56-conversationinteraction"><a class="anchor" href="#56-conversationinteraction" aria-label="Section link">#</a>5.6. ConversationInteraction</h2><p>Единая маршрутизируемая проекция интерактивных операций.</p>
+<pre><code class="language-text">ConversationInteraction
+  id
+  conversation_id
+  origin_message_id
+  interaction_type
+  domain_object_type
+  domain_object_id
+  target_version
+  assigned_to
+  status
+  created_at
+  expires_at
+  resolved_at
+</code></pre>
+<p>Доменные объекты остаются источниками истины.</p>
+<p>Interaction обеспечивает общую маршрутизацию, адресацию и отображение.</p>
+<h2 id="57-interactionreference"><a class="anchor" href="#57-interactionreference" aria-label="Section link">#</a>5.7. InteractionReference</h2><p>Объект адресации интерактивного события.</p>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;artifact_review&quot;,
+  &quot;id&quot;: &quot;review-123&quot;,
+  &quot;version&quot;: 4,
+  &quot;source_message_id&quot;: &quot;message-456&quot;
+}
+</code></pre>
+<p>Reference должен передаваться через доступные механизмы транспорта.</p>
+<p>Нельзя считать текст сообщения достаточным идентификатором операции.</p>
+<h1 id="6-message-processing-pipeline"><a class="anchor" href="#6-message-processing-pipeline" aria-label="Section link">#</a>6. Message Processing Pipeline</h1><h2 id="61-этап-1-normalization"><a class="anchor" href="#61-этап-1-normalization" aria-label="Section link">#</a>6.1. Этап 1. Normalization</h2><p>Все входящие события приводятся к общей структуре:</p>
+<pre><code class="language-text">InboundMessage
+  id
+  organization_id
+  actor
+  source
+  source_message_id
+  source_thread_id
+  conversation_id
+  reply_to
+  interaction_reference
+  content
+  attachments
+  timestamp
+  transport_metadata
+</code></pre>
+<p>Обязательно сохранять:</p>
+<ul>
+<li>исходный текст;</li>
+<li>sender identity;</li>
+<li>адрес комнаты;</li>
+<li>ID исходного сообщения;</li>
+<li>ID треда;</li>
+<li>ID callback;</li>
+<li>ссылки на вложения;</li>
+<li>сведения о транспортном времени.</li>
+</ul>
+<h2 id="62-этап-2-idempotency"><a class="anchor" href="#62-этап-2-idempotency" aria-label="Section link">#</a>6.2. Этап 2. Idempotency</h2><p>Для входящего события должна обеспечиваться идемпотентность.</p>
+<p>Повторная доставка одного и того же сообщения не должна:</p>
+<ul>
+<li>создавать вторую ConversationMessage;</li>
+<li>повторно запускать задачу;</li>
+<li>повторно выполнять согласование;</li>
+<li>создавать повторные side effects.</li>
+</ul>
+<p>Ключ идемпотентности должен учитывать транспорт, организацию и исходный ID события.</p>
+<h2 id="63-этап-3-deterministic-routing"><a class="anchor" href="#63-этап-3-deterministic-routing" aria-label="Section link">#</a>6.3. Этап 3. Deterministic Routing</h2><p>До вызова LLM выполняются:</p>
+<ol>
+<li>Проверка идентичности отправителя.</li>
+<li>Проверка доступа к Conversation.</li>
+<li>Проверка InteractionReference.</li>
+<li>Проверка точного ReplyTo.</li>
+<li>Проверка известных callback.</li>
+<li>Проверка команд отмены и специальных операций.</li>
+<li>Проверка существующих интерактивных запросов.</li>
+</ol>
+<p>При наличии точной ссылки на интерактивную операцию сообщение передаётся соответствующему обработчику.</p>
+<p>При отсутствии ссылки система не должна автоматически подставлять старейший ожидающий Interaction.</p>
+<p>Неоднозначность consequential action требует уточнения.</p>
+<h2 id="64-этап-4-context-resolution"><a class="anchor" href="#64-этап-4-context-resolution" aria-label="Section link">#</a>6.4. Этап 4. Context Resolution</h2><p>Собирается RoutingContext.</p>
+<pre><code class="language-text">RoutingContext
+  actor
+  conversation
+  current_branch
+  recent_messages
+  active_tasks
+  pending_interactions
+  referenced_entities
+  organization_context
+  permissions
+  available_capabilities
+</code></pre>
+<p>Требования:</p>
+<ul>
+<li>Контекст должен быть компактным.</li>
+<li>История ограничивается релевантными сообщениями и бюджетом токенов.</li>
+<li>Ссылки на артефакты и задачи должны быть адресуемыми.</li>
+<li>Повторно используемые данные должны кэшироваться.</li>
+<li>Кэш должен инвалидироваться по версиям и событиям.</li>
+<li>Секреты и недоступные пользователю данные не должны попадать в prompt.</li>
+</ul>
+<h2 id="65-этап-5-intent-resolution"><a class="anchor" href="#65-этап-5-intent-resolution" aria-label="Section link">#</a>6.5. Этап 5. Intent Resolution</h2><p>Вводится структурированная модель решения.</p>
+<p>Пример:</p>
+<pre><code class="language-json">{
+  &quot;target&quot;: {
+    &quot;type&quot;: &quot;conversation&quot;,
+    &quot;id&quot;: &quot;conversation-123&quot;
+  },
+  &quot;intent&quot;: &quot;discussion&quot;,
+  &quot;operation&quot;: &quot;respond&quot;,
+  &quot;execution&quot;: &quot;direct&quot;,
+  &quot;confidence&quot;: 0.97,
+  &quot;requires_tools&quot;: false,
+  &quot;requires_clarification&quot;: false
+}
+</code></pre>
+<h3 id="target"><a class="anchor" href="#target" aria-label="Section link">#</a>Target</h3><ul>
+<li><code>conversation</code>;</li>
+<li><code>task</code>;</li>
+<li><code>interaction</code>;</li>
+<li><code>knowledge</code>;</li>
+<li><code>organization</code>;</li>
+<li><code>new</code>.</li>
+</ul>
+<h3 id="intent"><a class="anchor" href="#intent" aria-label="Section link">#</a>Intent</h3><ul>
+<li><code>discussion</code>;</li>
+<li><code>question</code>;</li>
+<li><code>information_request</code>;</li>
+<li><code>task_request</code>;</li>
+<li><code>task_amendment</code>;</li>
+<li><code>task_status</code>;</li>
+<li><code>cancellation</code>;</li>
+<li><code>approval</code>;</li>
+<li><code>feedback</code>;</li>
+<li><code>instruction</code>;</li>
+<li><code>greeting</code>;</li>
+<li><code>unknown</code>.</li>
+</ul>
+<h3 id="execution"><a class="anchor" href="#execution" aria-label="Section link">#</a>Execution</h3><ul>
+<li><code>direct</code>;</li>
+<li><code>lightweight_tools</code>;</li>
+<li><code>agent_execution</code>;</li>
+<li><code>delegated_execution</code>;</li>
+<li><code>clarification</code>.</li>
+</ul>
+<p>Эти измерения независимы.</p>
+<p>Например:</p>
+<ul>
+<li><code>question + direct</code>;</li>
+<li><code>question + lightweight_tools</code>;</li>
+<li><code>task_request + agent_execution</code>;</li>
+<li><code>discussion + delegated_execution</code>.</li>
+</ul>
+<p>Классификатор не должен самостоятельно выполнять consequential actions.</p>
+<h2 id="66-этап-6-execution-selection"><a class="anchor" href="#66-этап-6-execution-selection" aria-label="Section link">#</a>6.6. Этап 6. Execution Selection</h2><h3 id="direct"><a class="anchor" href="#direct" aria-label="Section link">#</a>Direct</h3><p>Непосредственный ответ основной моделью.</p>
+<p>Не создаёт AgentRun и Temporal workflow.</p>
+<h3 id="lightweight-tools"><a class="anchor" href="#lightweight-tools" aria-label="Section link">#</a>Lightweight Tools</h3><p>Быстрые инструменты без полноценной задачи.</p>
+<p>Примеры:</p>
+<ul>
+<li>поиск в доступной базе знаний;</li>
+<li>получение статуса;</li>
+<li>чтение конкретного артефакта;</li>
+<li>вычисления;</li>
+<li>получение информации о проекте.</li>
+</ul>
+<h3 id="agent-execution"><a class="anchor" href="#agent-execution" aria-label="Section link">#</a>Agent Execution</h3><p>Передача работы существующему Task Runtime.</p>
+<h3 id="delegated-execution"><a class="anchor" href="#delegated-execution" aria-label="Section link">#</a>Delegated Execution</h3><p>Передача работы Lead подчинённым агентам.</p>
+<h3 id="clarification"><a class="anchor" href="#clarification" aria-label="Section link">#</a>Clarification</h3><p>Короткий вопрос пользователю, если неопределённость препятствует безопасному продолжению.</p>
+<h1 id="7-conversation-runtime"><a class="anchor" href="#7-conversation-runtime" aria-label="Section link">#</a>7. Conversation Runtime</h1><h2 id="71-общие-требования"><a class="anchor" href="#71-общие-требования" aria-label="Section link">#</a>7.1. Общие требования</h2><p>Conversation Runtime должен обеспечивать:</p>
+<ul>
+<li>быстрые ответы;</li>
+<li>потоковую генерацию;</li>
+<li>параллельную обработку независимых разговоров;</li>
+<li>последовательную обработку причинно связанных сообщений;</li>
+<li>сохранение состояния;</li>
+<li>восстановление после перезапуска;</li>
+<li>интеграцию с Task Runtime;</li>
+<li>поддержку нескольких активных задач в одном Conversation.</li>
+</ul>
+<h2 id="72-lightweight-execution"><a class="anchor" href="#72-lightweight-execution" aria-label="Section link">#</a>7.2. Lightweight Execution</h2><p>Обычный conversational turn не должен создавать полноценный AgentRun.</p>
+<p>Порядок обработки:</p>
+<ol>
+<li>Принять сообщение.</li>
+<li>Сохранить событие.</li>
+<li>Разрешить Conversation.</li>
+<li>Собрать RoutingContext.</li>
+<li>Выполнить deterministic routing.</li>
+<li>При необходимости выполнить Intent Resolution.</li>
+<li>Подготовить контекст для Lead.</li>
+<li>Выполнить генерацию.</li>
+<li>Сохранить ответ.</li>
+<li>Передать его в Unified Delivery.</li>
+</ol>
+<p>Для прямого ответа запрещены обязательные:</p>
+<ul>
+<li>планирование;</li>
+<li>декомпозиция;</li>
+<li>делегирование;</li>
+<li>Reviewer;</li>
+<li>QA;</li>
+<li>формирование evidence package;</li>
+<li>создание презентации;</li>
+<li>обновление базы знаний.</li>
+</ul>
+<p>Все перечисленные операции могут выполняться, когда это действительно требуется.</p>
+<h2 id="73-streaming"><a class="anchor" href="#73-streaming" aria-label="Section link">#</a>7.3. Streaming</h2><p>Необходимо поддержать потоковую передачу ответа.</p>
+<p>События:</p>
+<pre><code class="language-text">message.accepted
+message.processing
+message.classified
+message.generating
+message.delta
+message.completed
+message.failed
+</code></pre>
+<p>Дополнительные события:</p>
+<pre><code class="language-text">task.created
+task.started
+task.progress
+task.completed
+task.failed
+task.cancelled
+
+delegation.created
+delegation.started
+delegation.completed
+
+interaction.created
+interaction.resolved
+</code></pre>
+<p>Для транспорта, не поддерживающего streaming, применяется адаптация.</p>
+<h2 id="74-progressive-response"><a class="anchor" href="#74-progressive-response" aria-label="Section link">#</a>7.4. Progressive Response</h2><p>Поддержать следующие стратегии:</p>
+<ul>
+<li><code>immediate</code> — немедленная генерация ответа;</li>
+<li><code>streaming</code> — потоковая генерация;</li>
+<li><code>progressive</code> — предварительный ответ, затем результаты инструментов;</li>
+<li><code>delegated</code> — подтверждение передачи работы, затем итоговый ответ.</li>
+</ul>
+<p>При длительной операции Lead должен иметь возможность сначала сообщить полезную информацию, а затем продолжить исследование.</p>
+<h2 id="75-conversation-не-блокируется-задачами"><a class="anchor" href="#75-conversation-не-блокируется-задачами" aria-label="Section link">#</a>7.5. Conversation не блокируется задачами</h2><p>Запуск Task Runtime не должен блокировать возможность отправлять следующие сообщения.</p>
+<p>Например:</p>
+<pre><code class="language-text">Message 1: Проверь архитектуру.
+  -&gt; Task 142 started
+
+Message 2: А пока объясни разницу между подходами.
+  -&gt; Direct response
+
+Message 3: Добавь ещё один вариант в исследование.
+  -&gt; Amendment to Task 142
+
+Message 4: Что уже удалось выяснить?
+  -&gt; Task status response
+</code></pre>
+<p>Каждое сообщение должно быть связано с правильным контекстом.</p>
+<h1 id="8-concurrency-и-порядок-обработки"><a class="anchor" href="#8-concurrency-и-порядок-обработки" aria-label="Section link">#</a>8. Concurrency и порядок обработки</h1><h2 id="81-изоляция-conversation"><a class="anchor" href="#81-изоляция-conversation" aria-label="Section link">#</a>8.1. Изоляция Conversation</h2><p>Обработка независимых Conversation должна выполняться параллельно.</p>
+<p>Для каждого Conversation необходим механизм последовательной фиксации событий и изменения состояния.</p>
+<p>Варианты реализации:</p>
+<ul>
+<li>keyed serial executor;</li>
+<li>partitioned queue;</li>
+<li>optimistic concurrency с sequence number;</li>
+<li>другой существующий механизм, если он обеспечивает аналогичные гарантии.</li>
+</ul>
+<p>Необходимо изучить текущую инфраструктуру очередей и persistence до выбора реализации.</p>
+<h2 id="82-последовательность"><a class="anchor" href="#82-последовательность" aria-label="Section link">#</a>8.2. Последовательность</h2><p>Для каждого Conversation:</p>
+<ul>
+<li>каждое принятое сообщение получает sequence;</li>
+<li>последовательность фиксируется атомарно;</li>
+<li>причинно связанные сообщения обрабатываются в правильном порядке;</li>
+<li>результаты генерации проверяют актуальность контекста;</li>
+<li>устаревшие ответы не должны незаметно перезаписывать новое состояние.</li>
+</ul>
+<p>Необходимо различать:</p>
+<ol>
+<li>Порядок приёма.</li>
+<li>Порядок обработки.</li>
+<li>Порядок завершения.</li>
+<li>Порядок доставки.</li>
+</ol>
+<p>Эти порядки не обязаны совпадать.</p>
+<h2 id="83-несколько-активных-turns"><a class="anchor" href="#83-несколько-активных-turns" aria-label="Section link">#</a>8.3. Несколько активных turns</h2><p>Длительный вызов модели или выполнение задачи не должны удерживать блокировку Conversation.</p>
+<p>При необходимости допускается несколько одновременно выполняющихся операций, если они не нарушают причинную последовательность.</p>
+<p>Ответы должны быть привязаны к исходным сообщениям.</p>
+<h1 id="9-lead-agent-и-делегирование"><a class="anchor" href="#9-lead-agent-и-делегирование" aria-label="Section link">#</a>9. Lead Agent и делегирование</h1><h2 id="91-роль-lead"><a class="anchor" href="#91-роль-lead" aria-label="Section link">#</a>9.1. Роль Lead</h2><p>Lead Agent остаётся основным собеседником пользователя.</p>
+<p>Он:</p>
+<ul>
+<li>понимает историю разговора;</li>
+<li>отвечает самостоятельно;</li>
+<li>определяет необходимость исследования;</li>
+<li>инициирует Task;</li>
+<li>делегирует подчинённым;</li>
+<li>собирает результаты;</li>
+<li>продолжает диалог;</li>
+<li>сообщает о неопределённости;</li>
+<li>запрашивает HITL при необходимости.</li>
+</ul>
+<h2 id="92-подчинённые-агенты"><a class="anchor" href="#92-подчинённые-агенты" aria-label="Section link">#</a>9.2. Подчинённые агенты</h2><p>Подчинённые выполняют работу, но не становятся самостоятельными собеседниками пользователя без явного обращения к ним.</p>
+<p>Результаты делегирования поступают Lead через события.</p>
+<p>Lead решает, как интегрировать их в разговор.</p>
+<h2 id="93-передача-контекста"><a class="anchor" href="#93-передача-контекста" aria-label="Section link">#</a>9.3. Передача контекста</h2><p>При создании Task необходимо передавать:</p>
+<ul>
+<li>исходное сообщение;</li>
+<li>релевантную историю;</li>
+<li>сформулированную цель;</li>
+<li>связанные артефакты;</li>
+<li>ограничения пользователя;</li>
+<li>контекст организации;</li>
+<li>права и полномочия;</li>
+<li>ссылки на существующие решения;</li>
+<li>критерии завершения.</li>
+</ul>
+<p>Нельзя ограничиваться кратким пересказом исходного сообщения.</p>
+<h2 id="94-несколько-задач"><a class="anchor" href="#94-несколько-задач" aria-label="Section link">#</a>9.4. Несколько задач</h2><p>Один Conversation может содержать несколько независимых Task.</p>
+<p>Каждая задача имеет собственные:</p>
+<ul>
+<li>статусы;</li>
+<li>бюджеты;</li>
+<li>делегирования;</li>
+<li>evidence;</li>
+<li>HITL;</li>
+<li>артефакты.</li>
+</ul>
+<p>Завершение одной задачи не завершает Conversation.</p>
+<h1 id="10-interaction-runtime"><a class="anchor" href="#10-interaction-runtime" aria-label="Section link">#</a>10. Interaction Runtime</h1><h2 id="101-поддерживаемые-типы"><a class="anchor" href="#101-поддерживаемые-типы" aria-label="Section link">#</a>10.1. Поддерживаемые типы</h2><ul>
+<li>HumanRequest;</li>
+<li>ArtifactReview;</li>
+<li>Approval;</li>
+<li>другие существующие и будущие интерактивные операции.</li>
+</ul>
+<h2 id="102-точная-адресация"><a class="anchor" href="#102-точная-адресация" aria-label="Section link">#</a>10.2. Точная адресация</h2><p>Каждая интерактивная операция должна иметь устойчивый идентификатор.</p>
+<p>Для ArtifactReview дополнительно обязательна версия артефакта.</p>
+<p>При поступлении ответа:</p>
+<ol>
+<li>Определить InteractionReference.</li>
+<li>Загрузить соответствующий доменный объект.</li>
+<li>Проверить организацию.</li>
+<li>Проверить адресата.</li>
+<li>Проверить права.</li>
+<li>Проверить статус.</li>
+<li>Проверить версию.</li>
+<li>Выполнить доменную транзакцию.</li>
+<li>Сохранить результат.</li>
+<li>Опубликовать событие в Conversation.</li>
+</ol>
+<p>Все действия должны быть идемпотентны.</p>
+<h2 id="103-отсутствие-ссылки"><a class="anchor" href="#103-отсутствие-ссылки" aria-label="Section link">#</a>10.3. Отсутствие ссылки</h2><p>Если пользователь пишет «одобряю» без идентификатора:</p>
+<ul>
+<li>при одном однозначном ожидающем взаимодействии допускается предложить его для подтверждения в соответствии с политикой безопасности;</li>
+<li>при нескольких возможных взаимодействиях требуется уточнение;</li>
+<li>при отсутствии ожидающего взаимодействия сообщение рассматривается как обычная реплика.</li>
+</ul>
+<p>Нельзя использовать FIFO как автоматическое подтверждение.</p>
+<h2 id="104-обратная-совместимость"><a class="anchor" href="#104-обратная-совместимость" aria-label="Section link">#</a>10.4. Обратная совместимость</h2><p>Необходимо сохранить существующие:</p>
+<ul>
+<li>HumanRequest;</li>
+<li>ArtifactReview;</li>
+<li>Approval;</li>
+<li>обработчики ответов;</li>
+<li>проверки полномочий;</li>
+<li>evidence и audit trail.</li>
+</ul>
+<p>Interaction Runtime становится общей точкой маршрутизации, а не заменяет доменную логику.</p>
+<h1 id="11-fast-intent-router"><a class="anchor" href="#11-fast-intent-router" aria-label="Section link">#</a>11. Fast Intent Router</h1><h2 id="111-общая-модель"><a class="anchor" href="#111-общая-модель" aria-label="Section link">#</a>11.1. Общая модель</h2><p>Необходимо реализовать каскад обработки.</p>
+<h3 id="уровень-1-deterministic"><a class="anchor" href="#уровень-1-deterministic" aria-label="Section link">#</a>Уровень 1. Deterministic</h3><p>Без LLM.</p>
+<p>Обрабатывает:</p>
+<ul>
+<li>callback;</li>
+<li>точные ссылки на Interaction;</li>
+<li>известные команды;</li>
+<li>точные ответы на интерактивные запросы;</li>
+<li>известные системные события.</li>
+</ul>
+<h3 id="уровень-2-fast-model"><a class="anchor" href="#уровень-2-fast-model" aria-label="Section link">#</a>Уровень 2. Fast Model</h3><p>Компактная быстрая модель для неоднозначных сообщений.</p>
+<p>Требования:</p>
+<ul>
+<li>низкая задержка;</li>
+<li>структурированный JSON;</li>
+<li>ограниченный контекст;</li>
+<li>ограниченный output;</li>
+<li>строгая схема;</li>
+<li>отсутствие выполнения инструментов;</li>
+<li>отсутствие самостоятельных consequential actions.</li>
+</ul>
+<h3 id="уровень-3-lead-first"><a class="anchor" href="#уровень-3-lead-first" aria-label="Section link">#</a>Уровень 3. Lead-first</h3><p>Если сообщение является обычным продолжением разговора, отдельный вызов классификатора может быть пропущен.</p>
+<p>Основная модель Lead получает сообщение и принимает решение о непосредственном ответе или запуске работы.</p>
+<h2 id="112-сравнение-стратегий"><a class="anchor" href="#112-сравнение-стратегий" aria-label="Section link">#</a>11.2. Сравнение стратегий</h2><p>Необходимо реализовать экспериментальный выбор:</p>
+<ul>
+<li><code>router-first</code>;</li>
+<li><code>lead-first</code>;</li>
+<li><code>deterministic-first</code>.</li>
+</ul>
+<p>Сравнивать:</p>
+<ul>
+<li>latency;</li>
+<li>стоимость;</li>
+<li>точность маршрутизации;</li>
+<li>количество лишних запусков Task;</li>
+<li>количество ошибочных классификаций;</li>
+<li>количество ненужных уточнений.</li>
+</ul>
+<h2 id="113-confidence"><a class="anchor" href="#113-confidence" aria-label="Section link">#</a>11.3. Confidence</h2><p>Confidence используется как вспомогательный сигнал.</p>
+<p>Необходимо предусмотреть:</p>
+<ul>
+<li>безопасные default routes;</li>
+<li>отдельные пороги для разных классов операций;</li>
+<li>уточнение при неоднозначности;</li>
+<li>отсутствие автоматического принятия consequential decisions.</li>
+</ul>
+<h1 id="12-context-builder"><a class="anchor" href="#12-context-builder" aria-label="Section link">#</a>12. Context Builder</h1><h2 id="121-источники"><a class="anchor" href="#121-источники" aria-label="Section link">#</a>12.1. Источники</h2><ul>
+<li>Conversation history;</li>
+<li>Conversation branches;</li>
+<li>активные Task;</li>
+<li>связанные AgentRun;</li>
+<li>Interaction;</li>
+<li>Organization knowledge;</li>
+<li>профиль пользователя;</li>
+<li>права;</li>
+<li>проектный контекст;</li>
+<li>инструменты;</li>
+<li>артефакты.</li>
+</ul>
+<h2 id="122-стратегия-сборки"><a class="anchor" href="#122-стратегия-сборки" aria-label="Section link">#</a>12.2. Стратегия сборки</h2><p>Контекст должен строиться по принципу минимально необходимой информации.</p>
+<p>Примеры:</p>
+<table>
+<thead>
+<tr>
+<th>Запрос</th>
+<th>Контекст</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>«Почему?»</td>
+<td>Последняя реплика и предыдущие аргументы</td>
+</tr>
+<tr>
+<td>«А что если иначе?»</td>
+<td>Активная ветка обсуждения</td>
+</tr>
+<tr>
+<td>«Как продвигается задача?»</td>
+<td>Связанная ConversationTask</td>
+</tr>
+<tr>
+<td>«Проверь код»</td>
+<td>Репозиторий и исходная постановка</td>
+</tr>
+<tr>
+<td>«Одобряю»</td>
+<td>Interaction и адресация</td>
+</tr>
+<tr>
+<td>«Что мы решили неделю назад?»</td>
+<td>Поиск по истории и knowledge</td>
+</tr>
+</tbody></table>
+<h2 id="123-knowledge-integration"><a class="anchor" href="#123-knowledge-integration" aria-label="Section link">#</a>12.3. Knowledge Integration</h2><p>Интегрировать существующую систему Temporality:</p>
+<ul>
+<li>временную модель знаний;</li>
+<li>подтверждения и опровержения;</li>
+<li>источники;</li>
+<li>актуальность;</li>
+<li>invalidation;</li>
+<li>knowledge hints.</li>
+</ul>
+<p>Conversational Runtime не должен превращаться в самостоятельную RAG-систему.</p>
+<p>Необходимо использовать существующий корпоративный контур знаний.</p>
+<h2 id="124-кэширование"><a class="anchor" href="#124-кэширование" aria-label="Section link">#</a>12.4. Кэширование</h2><p>Допускается кэшировать:</p>
+<ul>
+<li>профили;</li>
+<li>разрешения;</li>
+<li>структуру Conversation;</li>
+<li>активные задачи;</li>
+<li>компактные контекстные проекции;</li>
+<li>справочную информацию.</li>
+</ul>
+<p>Обязательны версии и механизмы инвалидации.</p>
+<p>Кэш не должен использоваться для принятия consequential decisions без повторной проверки актуального состояния.</p>
+<h1 id="13-unified-delivery"><a class="anchor" href="#13-unified-delivery" aria-label="Section link">#</a>13. Unified Delivery</h1><h2 id="131-общая-модель-ответа"><a class="anchor" href="#131-общая-модель-ответа" aria-label="Section link">#</a>13.1. Общая модель ответа</h2><pre><code class="language-text">OutboundEvent
+  id
+  conversation_id
+  source_message_id
+  event_type
+  payload
+  created_at
+</code></pre>
+<p>Поддерживаемые payload:</p>
+<ul>
+<li>текст;</li>
+<li>delta;</li>
+<li>task reference;</li>
+<li>progress;</li>
+<li>interaction;</li>
+<li>artifact;</li>
+<li>presentation;</li>
+<li>attachment;</li>
+<li>notification.</li>
+</ul>
+<h2 id="132-transport-adapters"><a class="anchor" href="#132-transport-adapters" aria-label="Section link">#</a>13.2. Transport Adapters</h2><p>Каждый транспорт реализует собственный адаптер.</p>
+<p>Адаптер отвечает за:</p>
+<ul>
+<li>отправку текста;</li>
+<li>редактирование сообщений, если доступно;</li>
+<li>threading;</li>
+<li>callback;</li>
+<li>вложения;</li>
+<li>typing indicators;</li>
+<li>rich text;</li>
+<li>presentation rendering.</li>
+</ul>
+<p>Бизнес-логика обработки пользовательских сообщений в адаптерах запрещена.</p>
+<h2 id="133-надёжность-доставки"><a class="anchor" href="#133-надёжность-доставки" aria-label="Section link">#</a>13.3. Надёжность доставки</h2><p>Необходимо реализовать transactional outbox либо эквивалентный механизм.</p>
+<p>Гарантии:</p>
+<ul>
+<li>сохранение ответа до отправки;</li>
+<li>повторная доставка;</li>
+<li>идемпотентность;</li>
+<li>фиксация ошибок;</li>
+<li>восстановление после перезапуска;</li>
+<li>независимость обработки от доступности транспорта.</li>
+</ul>
+<p>Нельзя терять ответ из-за падения watcher или перезапуска kernel.</p>
+<h2 id="134-typing-и-progress"><a class="anchor" href="#134-typing-и-progress" aria-label="Section link">#</a>13.4. Typing и Progress</h2><p>Typing indicator используется только как транспортная индикация.</p>
+<p>Он не заменяет реальные события прогресса.</p>
+<p>Для долгих задач должны показываться:</p>
+<ul>
+<li>принятие задачи;</li>
+<li>начало выполнения;</li>
+<li>значимые этапы;</li>
+<li>запросы к человеку;</li>
+<li>завершение;</li>
+<li>ошибки.</li>
+</ul>
+<p>Не нужно отправлять пользователю частые бессодержательные сообщения.</p>
+<h1 id="14-workspace-chat-integration"><a class="anchor" href="#14-workspace-chat-integration" aria-label="Section link">#</a>14. Workspace Chat Integration</h1><p>Workspace должен использовать тот же Conversational Runtime, что и мессенджеры.</p>
+<h2 id="141-backend-api"><a class="anchor" href="#141-backend-api" aria-label="Section link">#</a>14.1. Backend API</h2><p>Предлагаемый контракт:</p>
+<pre><code class="language-http">POST /v1/conversations/{id}/messages
+GET  /v1/conversations/{id}
+GET  /v1/conversations/{id}/messages
+GET  /v1/conversations/{id}/stream
+
+POST /v1/conversations/{id}/interactions/{interaction_id}
+GET  /v1/conversations/{id}/tasks
+</code></pre>
+<p>Это предварительный контракт. Его необходимо согласовать с существующей системой API и авторизации.</p>
+<h2 id="142-ui"><a class="anchor" href="#142-ui" aria-label="Section link">#</a>14.2. UI</h2><p>Workspace должен отображать:</p>
+<ul>
+<li>сообщения пользователя;</li>
+<li>ответы Lead;</li>
+<li>потоковую генерацию;</li>
+<li>активные задачи;</li>
+<li>делегирование;</li>
+<li>прогресс;</li>
+<li>согласования;</li>
+<li>артефакты;</li>
+<li>результаты.</li>
+</ul>
+<p>Задачи должны быть самостоятельными интерактивными объектами внутри разговора, а не искусственно превращаться в обычные текстовые сообщения.</p>
+<h2 id="143-совместимость"><a class="anchor" href="#143-совместимость" aria-label="Section link">#</a>14.3. Совместимость</h2><p>Необходимо сохранить доступ к историческим AgentRun, сообщениям, трассам и артефактам.</p>
+<p>Не требуется одномоментно переносить всю старую историю в новую схему, если возможно обеспечить совместимое отображение через адаптер.</p>
+<h1 id="15-messenger-integration"><a class="anchor" href="#15-messenger-integration" aria-label="Section link">#</a>15. Messenger Integration</h1><p>Все существующие каналы переводятся на общий Message Gateway.</p>
+<h2 id="151-сохранить"><a class="anchor" href="#151-сохранить" aria-label="Section link">#</a>15.1. Сохранить</h2><ul>
+<li>Matrix;</li>
+<li>Telegram;</li>
+<li>Slack;</li>
+<li>Mattermost;</li>
+<li>polling и webhook;</li>
+<li>вложения;</li>
+<li>rich text;</li>
+<li>presentations;</li>
+<li>threads;</li>
+<li>callback;</li>
+<li>typing;</li>
+<li>read receipts;</li>
+<li>существующие channel settings.</li>
+</ul>
+<h2 id="152-удалить-из-транспортных-адаптеров"><a class="anchor" href="#152-удалить-из-транспортных-адаптеров" aria-label="Section link">#</a>15.2. Удалить из транспортных адаптеров</h2><ul>
+<li>самостоятельную классификацию;</li>
+<li>самостоятельный выбор Task;</li>
+<li>восстановление контекста из произвольной истории комнаты;</li>
+<li>FIFO-маршрутизацию согласований;</li>
+<li>отдельные правила conversational execution.</li>
+</ul>
+<h2 id="153-особенности-транспорта"><a class="anchor" href="#153-особенности-транспорта" aria-label="Section link">#</a>15.3. Особенности транспорта</h2><p>Если транспорт не поддерживает полноценные threads, система должна использовать Conversation mapping.</p>
+<p>Если транспорт поддерживает callback, идентификатор Interaction должен передаваться через callback payload.</p>
+<p>Ограничения конкретного транспорта не должны изменять внутреннюю доменную модель.</p>
+<h1 id="16-security-и-authorization"><a class="anchor" href="#16-security-и-authorization" aria-label="Section link">#</a>16. Security и Authorization</h1><p>Безопасность должна быть независимой от классификатора и поведения модели.</p>
+<p>Обязательные требования:</p>
+<ol>
+<li>Проверка идентичности пользователя при каждом входящем событии.</li>
+<li>Проверка доступа к Conversation.</li>
+<li>Проверка прав на каждую задачу и операцию.</li>
+<li>Проверка прав при делегировании.</li>
+<li>Проверка прав при доступе к артефактам.</li>
+<li>Проверка полномочий при обработке Interaction.</li>
+<li>Проверка актуальной версии артефакта.</li>
+<li>Защита от повторного исполнения.</li>
+<li>Защита от prompt injection в истории и вложениях.</li>
+<li>Разделение данных организаций.</li>
+<li>Сохранение audit trail.</li>
+<li>Ограничение расходов и ресурсов.</li>
+</ol>
+<p>Результат классификации не является основанием для выдачи полномочий.</p>
+<p>Агент не может расширить собственный мандат через conversational routing.</p>
+<h1 id="17-durability-и-восстановление"><a class="anchor" href="#17-durability-и-восстановление" aria-label="Section link">#</a>17. Durability и восстановление</h1><p>Conversational Runtime должен быть устойчивым к:</p>
+<ul>
+<li>рестарту kernel;</li>
+<li>падению модели;</li>
+<li>таймауту инструмента;</li>
+<li>недоступности транспорта;</li>
+<li>дублированию событий;</li>
+<li>повторной доставке webhook;</li>
+<li>частичному выполнению операции;</li>
+<li>потере сетевого соединения;</li>
+<li>параллельным сообщениям.</li>
+</ul>
+<h2 id="171-состояния-сообщения"><a class="anchor" href="#171-состояния-сообщения" aria-label="Section link">#</a>17.1. Состояния сообщения</h2><pre><code class="language-text">received
+  -&gt; persisted
+  -&gt; queued
+  -&gt; processing
+  -&gt; completed
+
+processing
+  -&gt; retryable_failure
+  -&gt; failed
+  -&gt; cancelled
+</code></pre>
+<p>Состояние должно позволять определить:</p>
+<ul>
+<li>принято ли сообщение;</li>
+<li>началась ли обработка;</li>
+<li>есть ли незавершённая генерация;</li>
+<li>сохранён ли ответ;</li>
+<li>доставлен ли ответ;</li>
+<li>требуется ли повторная попытка.</li>
+</ul>
+<h2 id="172-разделение-durability"><a class="anchor" href="#172-разделение-durability" aria-label="Section link">#</a>17.2. Разделение durability</h2><p>Необходимо разделить:</p>
+<ul>
+<li>durability входящих сообщений;</li>
+<li>durability conversational turns;</li>
+<li>durability задач;</li>
+<li>durability интерактивных операций;</li>
+<li>durability исходящей доставки.</li>
+</ul>
+<p>Для быстрых turns не нужно создавать Temporal workflow.</p>
+<p>Для долговременных задач остаётся существующий Task Runtime.</p>
+<h1 id="18-performance-и-slo"><a class="anchor" href="#18-performance-и-slo" aria-label="Section link">#</a>18. Performance и SLO</h1><p>Целевые значения должны быть подтверждены нагрузочными тестами.</p>
+<table>
+<thead>
+<tr>
+<th>Операция</th>
+<th align="right">Цель</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Deterministic routing</td>
+<td align="right">p95 до 50 мс</td>
+</tr>
+<tr>
+<td>Persistence входящего сообщения</td>
+<td align="right">p95 до 100 мс</td>
+</tr>
+<tr>
+<td>Context assembly</td>
+<td align="right">p95 до 200 мс</td>
+</tr>
+<tr>
+<td>Fast intent routing</td>
+<td align="right">p95 до 500 мс</td>
+</tr>
+<tr>
+<td>First useful response</td>
+<td align="right">p95 до 2 секунд</td>
+</tr>
+<tr>
+<td>Lightweight tools</td>
+<td align="right">p95 до 5 секунд</td>
+</tr>
+<tr>
+<td>Task dispatch acknowledgement</td>
+<td align="right">p95 до 2 секунд</td>
+</tr>
+<tr>
+<td>Interaction routing без LLM</td>
+<td align="right">p95 до 100 мс</td>
+</tr>
+</tbody></table>
+<p>Время генерации модели и сетевой задержки внешних API необходимо учитывать отдельно.</p>
+<p>Указанные SLO не должны достигаться за счёт отказа от persistence или проверок безопасности.</p>
+<h2 id="181-масштабирование"><a class="anchor" href="#181-масштабирование" aria-label="Section link">#</a>18.1. Масштабирование</h2><p>Система должна поддерживать горизонтальное масштабирование.</p>
+<p>Необходимо предусмотреть:</p>
+<ul>
+<li>несколько экземпляров Message Gateway;</li>
+<li>несколько Conversation workers;</li>
+<li>независимые очереди по ключу Conversation;</li>
+<li>ограничение параллелизма по организации;</li>
+<li>ограничение параллелизма по пользователю;</li>
+<li>ограничение запросов к моделям;</li>
+<li>backpressure;</li>
+<li>приоритеты интерактивных операций.</li>
+</ul>
+<h2 id="182-приоритеты"><a class="anchor" href="#182-приоритеты" aria-label="Section link">#</a>18.2. Приоритеты</h2><p>Рекомендуемый порядок:</p>
+<ol>
+<li>Consequential Interaction и безопасность.</li>
+<li>Обычные conversational turns.</li>
+<li>Lightweight tools.</li>
+<li>Task dispatch.</li>
+<li>Фоновые операции и обслуживание знаний.</li>
+</ol>
+<p>Приоритет не должен нарушать порядок причинно связанных сообщений одного разговора.</p>
+<h1 id="19-observability-и-agentsre"><a class="anchor" href="#19-observability-и-agentsre" aria-label="Section link">#</a>19. Observability и AgentSRE</h1><p>Conversational Runtime должен стать полноценной наблюдаемой подсистемой.</p>
+<p>Для каждого сообщения фиксировать:</p>
+<ul>
+<li>conversation_id;</li>
+<li>message_id;</li>
+<li>actor_id;</li>
+<li>route;</li>
+<li>intent;</li>
+<li>execution;</li>
+<li>модель;</li>
+<li>время каждого этапа;</li>
+<li>количество токенов;</li>
+<li>стоимость;</li>
+<li>вызовы инструментов;</li>
+<li>ошибки;</li>
+<li>время первого ответа;</li>
+<li>время полного завершения;</li>
+<li>статус доставки.</li>
+</ul>
+<h2 id="191-метрики"><a class="anchor" href="#191-метрики" aria-label="Section link">#</a>19.1. Метрики</h2><p>Обязательные метрики:</p>
+<pre><code class="language-text">conversation_messages_total
+conversation_active_total
+conversation_turn_duration
+conversation_first_response_duration
+conversation_queue_wait_duration
+conversation_context_build_duration
+conversation_router_duration
+
+conversation_model_tokens_total
+conversation_model_cost_total
+
+conversation_tool_calls_total
+conversation_tool_duration
+
+conversation_routing_accuracy
+conversation_clarification_rate
+conversation_unnecessary_task_rate
+
+conversation_delivery_failures_total
+conversation_retries_total
+
+interaction_resolution_duration
+interaction_ambiguous_total
+interaction_misroute_total
+
+conversation_active_tasks
+conversation_delegations_total
+</code></pre>
+<h2 id="192-trace"><a class="anchor" href="#192-trace" aria-label="Section link">#</a>19.2. Trace</h2><p>Каждое сообщение должно иметь корреляционный trace:</p>
+<pre><code class="language-text">Inbound Event
+  -&gt; Normalization
+  -&gt; Persistence
+  -&gt; Conversation Resolution
+  -&gt; Interaction Routing
+  -&gt; Context Builder
+  -&gt; Intent Router
+  -&gt; Model
+  -&gt; Tool / Task
+  -&gt; Response Assembly
+  -&gt; Outbox
+  -&gt; Delivery
+</code></pre>
+<p>Делегированные задачи должны сохранять связь с исходным сообщением и Conversation.</p>
+<h2 id="193-agentsre"><a class="anchor" href="#193-agentsre" aria-label="Section link">#</a>19.3. AgentSRE</h2><p>Необходимо обеспечить возможность анализа:</p>
+<ul>
+<li>задержек;</li>
+<li>стоимости;</li>
+<li>качества маршрутизации;</li>
+<li>количества лишних вызовов;</li>
+<li>неудачных делегирований;</li>
+<li>ошибок адресации;</li>
+<li>потерянных сообщений;</li>
+<li>повторных side effects;</li>
+<li>нагрузки по организациям.</li>
+</ul>
+<h1 id="20-regression-corpus-и-evaluation"><a class="anchor" href="#20-regression-corpus-и-evaluation" aria-label="Section link">#</a>20. Regression Corpus и Evaluation</h1><p>До реализации необходимо создать набор реальных сценариев для проверки маршрутизации.</p>
+<p>Минимальные категории:</p>
+<ol>
+<li>Простые вопросы.</li>
+<li>Обсуждение идей.</li>
+<li>Продолжение обсуждения.</li>
+<li>Резкая смена темы.</li>
+<li>Запрос на исследование.</li>
+<li>Запрос на разработку.</li>
+<li>Изменение существующей задачи.</li>
+<li>Запрос статуса.</li>
+<li>Отмена.</li>
+<li>Ответ на HumanRequest.</li>
+<li>Согласование артефакта.</li>
+<li>Несколько параллельных согласований.</li>
+<li>Сообщение с несколькими возможными адресатами.</li>
+<li>Вопрос во время активной задачи.</li>
+<li>Несколько задач в одной Conversation.</li>
+<li>Сообщения из разных источников.</li>
+<li>Дублирование сообщений.</li>
+<li>Вложения.</li>
+<li>Неоднозначные команды.</li>
+<li>Сообщения с недоверенными инструкциями.</li>
+</ol>
+<p>Для каждого сценария фиксировать:</p>
+<ul>
+<li>исходное состояние;</li>
+<li>входящее сообщение;</li>
+<li>ожидаемый target;</li>
+<li>ожидаемый intent;</li>
+<li>ожидаемый execution;</li>
+<li>допустимые side effects;</li>
+<li>недопустимые side effects;</li>
+<li>ожидаемый результат.</li>
+</ul>
+<p>Необходимо использовать regression corpus для сравнения Router-first и Lead-first.</p>
+<h1 id="21-тестирование"><a class="anchor" href="#21-тестирование" aria-label="Section link">#</a>21. Тестирование</h1><h2 id="211-unit-tests"><a class="anchor" href="#211-unit-tests" aria-label="Section link">#</a>21.1. Unit Tests</h2><ul>
+<li>нормализация;</li>
+<li>разрешение Conversation;</li>
+<li>sequence allocation;</li>
+<li>дедупликация;</li>
+<li>deterministic routing;</li>
+<li>Interaction Reference;</li>
+<li>проверка версии;</li>
+<li>Context Builder;</li>
+<li>Intent Schema;</li>
+<li>Execution Selection;</li>
+<li>outbox;</li>
+<li>delivery retry.</li>
+</ul>
+<h2 id="212-integration-tests"><a class="anchor" href="#212-integration-tests" aria-label="Section link">#</a>21.2. Integration Tests</h2><ul>
+<li>Matrix → Conversation → Lead;</li>
+<li>Telegram → Conversation → Lead;</li>
+<li>Workspace → Conversation → Lead;</li>
+<li>Conversation → Task Runtime;</li>
+<li>Lead → delegated workers;</li>
+<li>Interaction → domain handler;</li>
+<li>Task completion → Conversation;</li>
+<li>перезапуск kernel с незавершённым turn.</li>
+</ul>
+<h2 id="213-concurrency-tests"><a class="anchor" href="#213-concurrency-tests" aria-label="Section link">#</a>21.3. Concurrency Tests</h2><p>Обязательные сценарии:</p>
+<ul>
+<li>20 независимых Conversation;</li>
+<li>20 сообщений одного Conversation;</li>
+<li>10 параллельных согласований;</li>
+<li>5 одновременно работающих Task;</li>
+<li>новые сообщения во время выполнения Task;</li>
+<li>одновременное поступление сообщения и результата делегирования;</li>
+<li>повторная доставка событий;</li>
+<li>падение worker во время обработки.</li>
+</ul>
+<h2 id="214-security-tests"><a class="anchor" href="#214-security-tests" aria-label="Section link">#</a>21.4. Security Tests</h2><ul>
+<li>доступ к чужой Conversation;</li>
+<li>доступ к чужому артефакту;</li>
+<li>подмена Interaction ID;</li>
+<li>устаревшая версия артефакта;</li>
+<li>повторное подтверждение;</li>
+<li>prompt injection;</li>
+<li>межорганизационная утечка;</li>
+<li>попытка расширения мандата через сообщение.</li>
+</ul>
+<h1 id="22-этапы-реализации"><a class="anchor" href="#22-этапы-реализации" aria-label="Section link">#</a>22. Этапы реализации</h1><h2 id="phase-0-repository-audit-amp-baseline"><a class="anchor" href="#phase-0-repository-audit-amp-baseline" aria-label="Section link">#</a>Phase 0. Repository Audit &amp; Baseline</h2><p>Провести полный аудит:</p>
+<ul>
+<li>intake.go;</li>
+<li>channelinbound.go;</li>
+<li>kernel/agent/channelinbound.go;</li>
+<li>artifactreviewreply.go;</li>
+<li>workspace conversation model;</li>
+<li>Workspace API;</li>
+<li>chatPrompt.ts;</li>
+<li>Workspace.tsx;</li>
+<li>persistence;</li>
+<li>Temporal workflows;</li>
+<li>delivery watchers;</li>
+<li>channel drivers;</li>
+<li>существующие HumanRequest, ArtifactReview, Approval.</li>
+</ul>
+<p>Результат:</p>
+<ul>
+<li>карта текущих компонентов;</li>
+<li>карта зависимостей;</li>
+<li>перечень существующих сущностей;</li>
+<li>перечень повторяющихся механизмов;</li>
+<li>baseline performance;</li>
+<li>regression corpus.</li>
+</ul>
+<p>Ничего не переписывать до завершения аудита.</p>
+<h2 id="phase-1-interaction-runtime"><a class="anchor" href="#phase-1-interaction-runtime" aria-label="Section link">#</a>Phase 1. Interaction Runtime</h2><ul>
+<li>Ввести InteractionReference.</li>
+<li>Реализовать точную адресацию.</li>
+<li>Убрать автоматический FIFO fallback для consequential interactions.</li>
+<li>Унифицировать обработку callback.</li>
+<li>Сохранить доменные обработчики.</li>
+<li>Добавить тесты параллельных согласований.</li>
+</ul>
+<p>Критерий завершения: ни одно решение по согласованию не может быть применено к неправильному объекту из-за неоднозначной адресации.</p>
+<h2 id="phase-2-conversation-core"><a class="anchor" href="#phase-2-conversation-core" aria-label="Section link">#</a>Phase 2. Conversation Core</h2><ul>
+<li>Ввести Conversation.</li>
+<li>Ввести ConversationMessage.</li>
+<li>Ввести sequence.</li>
+<li>Реализовать message persistence.</li>
+<li>Реализовать дедупликацию.</li>
+<li>Реализовать keyed concurrency.</li>
+<li>Реализовать Conversation Context.</li>
+<li>Реализовать lightweight response.</li>
+</ul>
+<p>Критерий завершения: обычный вопрос обрабатывается без создания AgentRun и Temporal workflow.</p>
+<h2 id="phase-3-fast-intent-router"><a class="anchor" href="#phase-3-fast-intent-router" aria-label="Section link">#</a>Phase 3. Fast Intent Router</h2><ul>
+<li>Ввести независимые target, intent и execution.</li>
+<li>Реализовать deterministic routing.</li>
+<li>Реализовать fast model routing.</li>
+<li>Реализовать lead-first.</li>
+<li>Добавить regression evaluation.</li>
+<li>Реализовать безопасное уточнение.</li>
+</ul>
+<p>Критерий завершения: маршрутизация проходит regression corpus с согласованными показателями качества.</p>
+<h2 id="phase-4-task-runtime-integration"><a class="anchor" href="#phase-4-task-runtime-integration" aria-label="Section link">#</a>Phase 4. Task Runtime Integration</h2><ul>
+<li>Связать Conversation с существующими Task.</li>
+<li>Реализовать создание задач из сообщения.</li>
+<li>Передавать контекст.</li>
+<li>Реализовать task events.</li>
+<li>Реализовать делегирование.</li>
+<li>Обеспечить несколько активных задач.</li>
+<li>Возвращать результаты Lead.</li>
+</ul>
+<p>Критерий завершения: пользователь может обсуждать тему, запустить исследование, продолжать разговор и получать результаты исследования в том же Conversation.</p>
+<h2 id="phase-5-unified-delivery"><a class="anchor" href="#phase-5-unified-delivery" aria-label="Section link">#</a>Phase 5. Unified Delivery</h2><ul>
+<li>Ввести общую модель OutboundEvent.</li>
+<li>Реализовать transactional outbox.</li>
+<li>Реализовать streaming.</li>
+<li>Реализовать progressive response.</li>
+<li>Сохранить rich text и presentations.</li>
+<li>Реализовать восстановление доставки.</li>
+</ul>
+<p>Критерий завершения: ответ не теряется при перезапуске runtime и недоступности транспорта.</p>
+<h2 id="phase-6-workspace-migration"><a class="anchor" href="#phase-6-workspace-migration" aria-label="Section link">#</a>Phase 6. Workspace Migration</h2><ul>
+<li>Перевести Workspace на Conversation API.</li>
+<li>Добавить отображение задач.</li>
+<li>Добавить streaming.</li>
+<li>Добавить Interaction UI.</li>
+<li>Сохранить исторические AgentRun.</li>
+<li>Сохранить существующие функции Workspace.</li>
+</ul>
+<p>Критерий завершения: Workspace использует тот же backend runtime, что и мессенджеры.</p>
+<h2 id="phase-7-messenger-migration"><a class="anchor" href="#phase-7-messenger-migration" aria-label="Section link">#</a>Phase 7. Messenger Migration</h2><ul>
+<li>Перевести Matrix.</li>
+<li>Перевести Telegram.</li>
+<li>Перевести Slack.</li>
+<li>Перевести Mattermost.</li>
+<li>Удалить дублирующую бизнес-логику.</li>
+<li>Сохранить транспортные особенности.</li>
+<li>Удалить legacy intake workflow после проверки совместимости.</li>
+</ul>
+<p>Критерий завершения: все каналы используют единый Conversational Runtime.</p>
+<h1 id="23-обратная-совместимость-и-миграция"><a class="anchor" href="#23-обратная-совместимость-и-миграция" aria-label="Section link">#</a>23. Обратная совместимость и миграция</h1><p>Рефакторинг должен выполняться постепенно.</p>
+<p>Требования:</p>
+<ul>
+<li>старые сообщения остаются доступны;</li>
+<li>исторические AgentRun остаются доступны;</li>
+<li>старые ссылки на артефакты работают;</li>
+<li>старые Interaction остаются разрешимыми;</li>
+<li>существующие channel settings сохраняются;</li>
+<li>старые клиенты могут временно работать через compatibility adapter.</li>
+</ul>
+<p>Рекомендуется использовать feature flags:</p>
+<pre><code class="language-text">conversation_runtime_enabled
+conversation_workspace_enabled
+conversation_matrix_enabled
+conversation_telegram_enabled
+conversation_slack_enabled
+conversation_mattermost_enabled
+
+interaction_runtime_enabled
+fast_intent_router_enabled
+lead_first_enabled
+conversation_streaming_enabled
+</code></pre>
+<p>Переключение должно выполняться независимо по организациям и каналам.</p>
+<p>Необходимо поддержать shadow mode: новая маршрутизация получает копию событий, но не производит side effects. Её решения сравниваются с legacy intake.</p>
+<h1 id="24-что-не-входит-в-объём-первого-релиза"><a class="anchor" href="#24-что-не-входит-в-объём-первого-релиза" aria-label="Section link">#</a>24. Что не входит в объём первого релиза</h1><p>Не следует одновременно реализовывать:</p>
+<ul>
+<li>сложный визуальный редактор Conversation Branches;</li>
+<li>произвольное переключение между Lead Agents;</li>
+<li>полноценный group chat с множеством независимых AI-собеседников;</li>
+<li>новую систему управления задачами;</li>
+<li>замену Temporal;</li>
+<li>новую систему знаний;</li>
+<li>новую систему авторизации;</li>
+<li>собственный универсальный event broker;</li>
+<li>отдельную RAG-инфраструктуру.</li>
+</ul>
+<p>Архитектура должна предусматривать расширение, но не требовать реализации всех этих возможностей.</p>
+<h1 id="25-критерии-приёмки"><a class="anchor" href="#25-критерии-приёмки" aria-label="Section link">#</a>25. Критерии приёмки</h1><h2 id="251-пользовательский-опыт"><a class="anchor" href="#251-пользовательский-опыт" aria-label="Section link">#</a>25.1. Пользовательский опыт</h2><ol>
+<li>Пользователь может вести обычный разговор без запуска Task Runtime.</li>
+<li>Агент способен быстро отвечать на вопросы и продолжать обсуждение.</li>
+<li>Агент не превращает каждую реплику в полноценное исследование.</li>
+<li>Пользователь может запустить длительную работу прямо из разговора.</li>
+<li>Во время выполнения задачи пользователь может продолжать обсуждение.</li>
+<li>Lead самостоятельно делегирует работу подчинённым.</li>
+<li>Результаты делегирования возвращаются в исходный Conversation.</li>
+<li>Один Conversation поддерживает несколько параллельных задач.</li>
+<li>Workspace и мессенджеры имеют одинаковую семантику взаимодействия.</li>
+</ol>
+<h2 id="252-производительность"><a class="anchor" href="#252-производительность" aria-label="Section link">#</a>25.2. Производительность</h2><p>Целевые SLO:</p>
+<ul>
+<li>deterministic routing p95 ≤ 50 мс;</li>
+<li>persistence p95 ≤ 100 мс;</li>
+<li>context assembly p95 ≤ 200 мс;</li>
+<li>fast intent routing p95 ≤ 500 мс;</li>
+<li>first useful response p95 ≤ 2 секунды;</li>
+<li>lightweight tools p95 ≤ 5 секунд;</li>
+<li>task dispatch acknowledgement p95 ≤ 2 секунды.</li>
+</ul>
+<p>Измерять отдельно инфраструктурную задержку, время модели и сетевые задержки.</p>
+<h2 id="253-надёжность"><a class="anchor" href="#253-надёжность" aria-label="Section link">#</a>25.3. Надёжность</h2><ul>
+<li>отсутствие потерянных входящих сообщений;</li>
+<li>отсутствие повторных consequential side effects;</li>
+<li>отсутствие ошибочного сопоставления согласований;</li>
+<li>восстановление после рестарта;</li>
+<li>сохранение истории;</li>
+<li>надёжная доставка ответов;</li>
+<li>независимость Conversation от Task lifecycle.</li>
+</ul>
+<h2 id="254-масштабирование"><a class="anchor" href="#254-масштабирование" aria-label="Section link">#</a>25.4. Масштабирование</h2><ul>
+<li>параллельная обработка независимых Conversation;</li>
+<li>отсутствие глобальной сериализации по каналу;</li>
+<li>ограничение нагрузки на уровне организации;</li>
+<li>отсутствие неограниченного роста очередей;</li>
+<li>управляемый backpressure.</li>
+</ul>
+<h2 id="255-безопасность"><a class="anchor" href="#255-безопасность" aria-label="Section link">#</a>25.5. Безопасность</h2><ul>
+<li>независимая авторизация каждого действия;</li>
+<li>отсутствие расширения полномочий через LLM;</li>
+<li>точная адресация consequential interactions;</li>
+<li>защита от повторного исполнения;</li>
+<li>изоляция организаций;</li>
+<li>полный audit trail.</li>
+</ul>
+<h1 id="26-архитектурные-решения-обязательные-к-фиксации-до-начала-разработки"><a class="anchor" href="#26-архитектурные-решения-обязательные-к-фиксации-до-начала-разработки" aria-label="Section link">#</a>26. Архитектурные решения, обязательные к фиксации до начала разработки</h1><p>На этапе Phase 0 команда должна подготовить ADR по следующим вопросам:</p>
+<ol>
+<li>Где физически хранить Conversation и ConversationMessage: расширять существующий workspace store или создавать отдельный модуль в нём?</li>
+<li>Как реализовать keyed concurrency с учётом существующей инфраструктуры kernel?</li>
+<li>Как обеспечить transactional outbox без введения избыточного брокера?</li>
+<li>Как связать существующие Task и AgentRun с Conversation без дублирования доменных сущностей?</li>
+<li>Как обеспечить streaming одновременно через Workspace и мессенджеры?</li>
+<li>Как хранить ветки Conversation и формировать их контекст?</li>
+<li>Как реализовать InteractionReference для каждого транспорта?</li>
+<li>Как организовать восстановление незавершённых conversational turns?</li>
+<li>Как обеспечить актуальность кэшированных прав и контекста?</li>
+<li>Как обеспечить совместимость исторических сообщений и старых клиентов?</li>
+<li>Как разделить бюджеты conversational turns и автономных задач?</li>
+<li>Как организовать наблюдаемость от входящего сообщения до результата делегирования?</li>
+</ol>
+<p>Решения должны учитывать текущие технологии, структуры данных и принятые в Temporality архитектурные ограничения. Не вводить новые инфраструктурные зависимости без обоснования.</p>
+<h1 id="27-ожидаемый-результат"><a class="anchor" href="#27-ожидаемый-результат" aria-label="Section link">#</a>27. Ожидаемый результат</h1><p>После реализации Temporality должен предоставлять единую среду взаимодействия человека с агентной организацией.</p>
+<p>Пользователь может:</p>
+<ul>
+<li>задать простой вопрос и получить быстрый ответ;</li>
+<li>обсуждать архитектуру и идеи;</li>
+<li>вести несколько тематических разговоров;</li>
+<li>возвращаться к старым обсуждениям;</li>
+<li>поручать исследование и разработку;</li>
+<li>продолжать разговор во время выполнения задач;</li>
+<li>получать результаты работы подчинённых агентов;</li>
+<li>согласовывать артефакты;</li>
+<li>отвечать на HumanRequest;</li>
+<li>принимать consequential decisions;</li>
+<li>работать через Workspace или привычный мессенджер.</li>
+</ul>
+<p>При этом агентная организация сохраняет:</p>
+<ul>
+<li>долговременную память;</li>
+<li>автономное выполнение;</li>
+<li>делегирование;</li>
+<li>бюджеты;</li>
+<li>контроль полномочий;</li>
+<li>evidence;</li>
+<li>HITL;</li>
+<li>наблюдаемость;</li>
+<li>устойчивость к сбоям.</li>
+</ul>
+<p><strong>Итоговый принцип архитектуры:</strong></p>
+<p>Conversation — это основной интерфейс взаимодействия человека с агентной организацией.</p>
+<p>Task — это единица делегированной работы.</p>
+<p>AgentRun — это единица исполнения.</p>
+<p>Interaction — это адресуемая операция, требующая участия человека.</p>
+<p>Knowledge — это общая информационная основа организации.</p>
+<p>Conversational Runtime связывает эти сущности в единую систему, не смешивая их жизненные циклы.</p>
+<p>Temporality должен перейти от модели «пользователь запускает агентные процессы» к модели «пользователь работает с агентной организацией, которая сама выбирает способ достижения результата».</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="conversational-runtime-audit.html"><small>← Назад</small><strong>Conversational Runtime: repository audit</strong></a>
+    <a class="pager-next" href="dev-stack-runs.html"><small>Далее →</small><strong>Dev-стек: живучесть ранов при пересборках</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
