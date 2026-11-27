@@ -90,7 +90,6 @@ var channelMessages = map[string][2]string{
 	"review_by":         {" by %s", " — %s"},
 	"review_already":    {"This review round is already resolved — see the Temporality artifacts page.", "Этот круг согласования уже закрыт — смотрите страницу артефактов Temporality."},
 	"review_not_yours":  {"You are not a reviewer of this review round.", "Вы не согласующий этого круга ревью."},
-	"review_how_to":     {"Reply “approve [comment]” or “reject [comment]” to decide, or use the Temporality artifacts page.", "Ответьте «одобрить [комментарий]» или «отклонить [комментарий]», либо решите на странице артефактов Temporality."},
 	"review_left_open":  {"Noted — the review round stays open; decide in the Temporality artifacts page.", "Принято — круг согласования остаётся открытым; решение — на странице артефактов Temporality."},
 }
 

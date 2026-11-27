@@ -25,6 +25,7 @@ var (
 		"approve": true, "approved": true, "lgtm": true, "accept": true,
 		"ok": true, "ок": true, "окей": true,
 		"одобрить": true, "одобряю": true, "одобрено": true, "согласен": true, "согласна": true,
+		"согласовано": true,
 	}
 	artifactReviewRejectWords = map[string]bool{
 		"reject": true, "rejected": true,
@@ -54,33 +55,19 @@ func parseArtifactReviewDecision(text string) (approve bool, comment string, ok 
 }
 
 // routeArtifactReviewReply resolves one review round from a channel reply.
-// Every branch confirms in the reviewer's chat in the dialog language
-// (detected from the reply text); the row and the round stay consistent:
-// the row closes only when the round actually resolved (or the reviewer
-// explicitly declined to answer).
-func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, channelSettings map[string]string, reply agent.ChannelReply, reviewID string) {
+// It reports whether the message was consumed as a review answer: ONLY a
+// recognized decision keyword (or an explicit cancel) is an answer. Any
+// other text must stay unconsumed — it re-enters the pipeline as ordinary
+// chat; swallowing it here starved whole chats (the 2026-11-27 intake
+// outage: every message of a room with an open review ask matched it and
+// died in a «review_how_to» notice, the agent never answered).
+// Every consuming branch confirms in the reviewer's chat in the dialog
+// language (detected from the reply text); the row and the round stay
+// consistent: the row closes only when the round actually resolved (or the
+// reviewer explicitly declined to answer).
+func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, channelSettings map[string]string, reply agent.ChannelReply, reviewID string) bool {
 	actor := reply.Ask.UserID // anyone in the chat answers as the chat owner (MVP)
 	lang := agent.DetectLang(reply.Message.Text)
-
-	review, err := l.store.GetArtifactReview(ctx, reviewID)
-	if errors.Is(err, workspace.ErrNotFound) {
-		// The round is gone (deleted artifact cascade) — close the stale row.
-		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
-		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "cancelled")
-		return
-	}
-	if err != nil {
-		l.log.Warn("artifact review reply load", "review", reviewID, "error", err)
-		return
-	}
-	if review.Status != "open" {
-		// Decided elsewhere (UI) while the row was still matchable — close
-		// the row so the inbox stops counting it, tell the reviewer.
-		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
-		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "resolved")
-		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, "review_already"))
-		return
-	}
 
 	// Explicit "cancel" declines answering: stop asking through the channel,
 	// the round stays open for the artifacts page.
@@ -92,19 +79,43 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 		})
 		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, "review_left_open"))
 		l.log.Info("artifact review reply declined", "review", reviewID, "sender", reply.Message.Sender)
-		return
+		return true
 	}
 
 	approve, comment, ok := parseArtifactReviewDecision(reply.Message.Text)
 	if !ok {
-		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, "review_how_to"))
-		return // row stays open — a real answer may still come
+		// Not a decision keyword — not an answer. The message falls through
+		// to intake / the conversational agent, the round stays open for a
+		// real keyword (the delivery notice already named them).
+		return false
+	}
+
+	review, err := l.store.GetArtifactReview(ctx, reviewID)
+	if errors.Is(err, workspace.ErrNotFound) {
+		// The round is gone (deleted artifact cascade) — close the stale row;
+		// the message itself stays unconsumed, the dialog learns the review
+		// no longer exists from the intake answer instead of dead air.
+		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
+		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "cancelled")
+		return false
+	}
+	if err != nil {
+		l.log.Warn("artifact review reply load", "review", reviewID, "error", err)
+		return true // consumed: the ask is still live, a retry may yet decide
+	}
+	if review.Status != "open" {
+		// Decided elsewhere (UI) while the row was still matchable — close
+		// the row so the inbox stops counting it, tell the reviewer.
+		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
+		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "resolved")
+		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, "review_already"))
+		return true
 	}
 
 	users, err := l.store.ListUsers(ctx)
 	if err != nil {
 		l.log.Warn("artifact review reply users", "review", reviewID, "error", err)
-		return
+		return true // consumed: the ask is still live, a retry may yet decide
 	}
 	units, _ := l.store.ListOrgUnits(ctx)
 	entries := workspace.MatchArtifactReviewers(actor, users, units, review.Reviewers)
@@ -113,7 +124,7 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 		// never resolve through this chat.
 		l.log.Warn("artifact review reply not a reviewer", "review", reviewID, "actor", actor)
 		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, "review_not_yours"))
-		return
+		return true
 	}
 
 	resolved, artifact, err := l.store.ResolveArtifactReview(ctx, reviewID, entries, actor, approve, comment)
@@ -123,11 +134,11 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 		l.cancelReviewRow(ctx, artifactReviewRequestID(reviewID), actor)
 		l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "resolved")
 		l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, "review_already"))
-		return
+		return true
 	}
 	if err != nil {
 		l.log.Warn("artifact review reply resolve", "review", reviewID, "actor", actor, "error", err)
-		return // row stays open — a retry (or the UI) can still decide
+		return true // row stays open — a retry (or the UI) can still decide
 	}
 	l.setConversationInteractionStatus(ctx, reply.Message.ChatID, "artifact_review", reviewID, "resolved")
 
@@ -166,6 +177,7 @@ func (l *channelInboundLoop) routeArtifactReviewReply(ctx context.Context, chann
 	}
 	l.sendRoomNotice(ctx, channelSettings, reply.Message.ChatID, agent.ChannelText(lang, key, artifact.Title, resolved.ArtifactVersion, suffix))
 	l.log.Info("artifact review decided from channel", "review", reviewID, "artifact", review.ArtifactID, "decision", decision, "actor", actor, "channel", l.driver.Type())
+	return true
 }
 
 // cancelReviewRow closes a review round's channel row best-effort. ErrNotFound

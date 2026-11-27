@@ -33,6 +33,7 @@ func TestParseArtifactReviewDecision(t *testing.T) {
 		{"reject.", false, "", true},
 		{"Отклоняю — слишком сыро", false, "— слишком сыро", true},
 		{"согласен", true, "", true},
+		{"согласовано", true, "", true},
 		{"maybe approve later", false, "", false}, // keyword not first
 		{"да", false, "", false},                  // ambiguous on purpose
 		{"нет", false, "", false},
@@ -143,7 +144,7 @@ func TestRouteArtifactReviewReplyApproves(t *testing.T) {
 	var notices []string
 	loop := reviewReplyLoop(store, &notices)
 
-	loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1")
+	require.True(t, loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1"))
 
 	// The round closed as approved, the row closed as answered, the chat got
 	// a confirmation, the audit trail carries the artifact action.
@@ -168,7 +169,7 @@ func TestRouteArtifactReviewReplyRejects(t *testing.T) {
 	var notices []string
 	loop := reviewReplyLoop(store, &notices)
 
-	loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1")
+	require.True(t, loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1"))
 
 	require.Equal(t, workspace.ArtifactRejected, store.reviews[0].Status)
 	require.Contains(t, store.answered[artifactReviewRequestID("art-1-v1-1")], "слишком сыро")
@@ -181,17 +182,34 @@ func TestRouteArtifactReviewReplyRejects(t *testing.T) {
 	require.NotContains(t, notices[0], "MISSING")
 }
 
-func TestRouteArtifactReviewReplyUnknownKeywordAsksHow(t *testing.T) {
+// A non-decision message is NOT a review answer: the router leaves it
+// unconsumed (it re-enters intake as ordinary chat), stays silent and keeps
+// the round open — this is the 2026-11-27 outage fix, before this the
+// message was swallowed with a how-to notice and the agent never answered.
+func TestRouteArtifactReviewReplyUnknownKeywordFallsThrough(t *testing.T) {
 	store, reply := reviewFixture()
 	reply.Message.Text = "а что тут проверять?"
 	var notices []string
 	loop := reviewReplyLoop(store, &notices)
 
-	loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1")
-
+	require.False(t, loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1"))
 	require.Empty(t, store.resolvedIDs) // round stays open
 	require.Empty(t, store.answered)
-	require.Len(t, notices, 1) // usage hint
+	require.Empty(t, notices)           // no how-to spam — intake answers instead
+}
+
+// A decision word when the round is GONE still closes the stale channel row
+// (the inbox must stop counting it) and stays unconsumed: the intake answer
+// explains the review no longer exists instead of a bare "approved" notice.
+func TestRouteArtifactReviewReplyMissingRoundClosesRowAndFallsThrough(t *testing.T) {
+	store, reply := reviewFixture()
+	store.reviews = nil
+	var notices []string
+	loop := reviewReplyLoop(store, &notices)
+
+	require.False(t, loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1"))
+	require.Contains(t, store.cancelled, artifactReviewRequestID("art-1-v1-1"))
+	require.Empty(t, notices)
 }
 
 func TestRouteArtifactReviewReplyNonReviewerRefused(t *testing.T) {
@@ -200,7 +218,7 @@ func TestRouteArtifactReviewReplyNonReviewerRefused(t *testing.T) {
 	var notices []string
 	loop := reviewReplyLoop(store, &notices)
 
-	loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1")
+	require.True(t, loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1"))
 
 	require.Empty(t, store.resolvedIDs)
 	require.Len(t, notices, 1)
@@ -213,7 +231,7 @@ func TestRouteArtifactReviewReplyAlreadyResolvedClosesRow(t *testing.T) {
 	var notices []string
 	loop := reviewReplyLoop(store, &notices)
 
-	loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1")
+	require.True(t, loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1"))
 
 	require.Contains(t, store.cancelled, artifactReviewRequestID("art-1-v1-1"))
 	require.Contains(t, notices[0], "already resolved")
@@ -225,7 +243,7 @@ func TestRouteArtifactReviewReplyCancelKeepsRoundOpen(t *testing.T) {
 	var notices []string
 	loop := reviewReplyLoop(store, &notices)
 
-	loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1")
+	require.True(t, loop.routeArtifactReviewReply(context.Background(), map[string]string{}, reply, "art-1-v1-1"))
 
 	require.Empty(t, store.resolvedIDs) // the round itself is untouched
 	require.Contains(t, store.cancelled, artifactReviewRequestID("art-1-v1-1"))

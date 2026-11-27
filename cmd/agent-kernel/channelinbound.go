@@ -782,9 +782,11 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map
 	}
 	// Orphan-run rows are artifact review rounds (docs/artifact-lifecycle.md
 	// §6 Phase 2): the round resolves through the store, not through a run.
+	// The review router owns consumption: a recognized decision (or an
+	// explicit cancel) closes the round, any other text falls through to
+	// intake as ordinary chat.
 	if reviewID, ok := artifactReviewFromRequestRun(reply.Ask.RunID); ok {
-		l.routeArtifactReviewReply(ctx, channelSettings, reply, reviewID)
-		return true
+		return l.routeArtifactReviewReply(ctx, channelSettings, reply, reviewID)
 	}
 	response := truncateForLog(reply.Message.Text, 4000)
 	if len(reply.Message.Files) > 0 {
