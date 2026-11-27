@@ -626,6 +626,7 @@ func (c *Client) messagesStreamComplete(ctx context.Context, messages []Message,
 		ToolCalls:    calls,
 	}
 	completion.ResponseRef = contentRef([]byte(completion.Content))
+	completion = rescueTextToolCalls(completion)
 	// Same truncation contract as the chat wire: a stream that ends without
 	// an answer, tool calls or finish reason is a provider-side truncation
 	// and must fail, not complete the run with an empty answer.

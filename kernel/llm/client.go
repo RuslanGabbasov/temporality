@@ -739,6 +739,10 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		completion, err := c.once(ctx, payload)
 		c.limiter.release()
 		if err == nil {
+			// Tool-call markup that leaked into the text (providers whose
+			// serving stack skips the tool-call parser) becomes structured
+			// calls here — the answer a user sees must never carry the tags.
+			completion = rescueTextToolCalls(completion)
 			completion.LatencyMs = time.Since(started).Milliseconds()
 			completion.Attempts = attempt
 			completion.Transport = "blocking"
@@ -1028,6 +1032,10 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		})
 	}
 	completion.ResponseRef = contentRef([]byte(completion.Content))
+	// Same rescue as the blocking path: a stream whose text carried raw
+	// tool-call markup must deliver calls, not tags (the streamed deltas may
+	// already have shown the markup, but the recorded answer stays clean).
+	completion = rescueTextToolCalls(completion)
 	// A stream that ends without an answer, tool calls or a finish reason is
 	// a provider-side truncation (the connection closed mid-generation —
 	// reasoning may have streamed, but there is nothing to act on: no answer,
